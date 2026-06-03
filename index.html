@@ -913,6 +913,7 @@ function doLogin(){
   document.getElementById('top-role').textContent=w.role==='manager'?'מנהל':w.role==='supervisor'?'אחראי':'עובד';
   document.getElementById('top-av').textContent=w.name.split(' ').map(n=>n[0]).join('');
   applyPerms(w);
+  setTimeout(loadWaSettings,100);
   const firstPage=(w.permissions&&w.permissions.length)?w.permissions[0]:'dash';
   goPage(w.role==='manager'?'dash':firstPage);
 }
