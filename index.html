@@ -1,0 +1,2237 @@
+<!DOCTYPE html>
+<html lang="he" dir="rtl">
+<head>
+<meta charset="UTF-8"/>
+<meta name="viewport" content="width=device-width,initial-scale=1"/>
+<title>TextileOps — ניהול מפעל בגדים</title>
+<meta name="theme-color" content="#185FA5"/>
+<link rel="manifest" href="data:application/json,{%22name%22:%22TextileOps%22,%22short_name%22:%22TextileOps%22,%22display%22:%22standalone%22,%22background_color%22:%22%23ffffff%22}"/>
+<style>
+*{box-sizing:border-box;margin:0;padding:0}
+:root{
+  --bg:#fff;--bg2:#f5f5f3;--bg3:#efede8;
+  --txt:#1a1a18;--txt2:#6b6b67;--txt3:#a0a09c;
+  --b:rgba(0,0,0,.10);--b2:rgba(0,0,0,.18);
+  --blue:#185FA5;--blue-bg:#e6f1fb;--blue-txt:#185FA5;
+  --green:#0F6E56;--green-bg:#e1f5ee;--green-txt:#0F6E56;
+  --red:#A32D2D;--red-bg:#fcebeb;--red-txt:#A32D2D;
+  --amber:#854F0B;--amber-bg:#faeeda;--amber-txt:#854F0B;
+  --r:8px;--rl:12px;
+}
+@media(prefers-color-scheme:dark){
+:root{
+  --bg:#1c1c1a;--bg2:#252523;--bg3:#2e2e2b;
+  --txt:#f0ede8;--txt2:#a0a09c;--txt3:#6b6b67;
+  --b:rgba(255,255,255,.10);--b2:rgba(255,255,255,.18);
+  --blue-bg:#0c3a63;--blue-txt:#85b7eb;
+  --green-bg:#063328;--green-txt:#5dcaa5;
+  --red-bg:#3d1010;--red-txt:#f09595;
+  --amber-bg:#3d2505;--amber-txt:#ef9f27;
+}}
+body{font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',sans-serif;background:var(--bg3);color:var(--txt);min-height:100vh}
+.hidden{display:none!important}
+/* LAYOUT */
+.topbar{background:var(--bg);border-bottom:0.5px solid var(--b);padding:0 1rem;display:flex;align-items:center;justify-content:space-between;height:52px;position:sticky;top:0;z-index:100}
+.logo{font-size:15px;font-weight:600;color:var(--blue-txt);display:flex;align-items:center;gap:7px}
+.logo svg{width:20px;height:20px}
+.nav{display:flex;gap:2px;overflow-x:auto;-webkit-overflow-scrolling:touch}
+.nav::-webkit-scrollbar{display:none}
+.nb{padding:5px 10px;border-radius:var(--r);border:none;background:transparent;color:var(--txt2);font-size:12px;cursor:pointer;display:flex;align-items:center;gap:4px;white-space:nowrap;transition:all .15s;font-family:inherit}
+.nb:hover{background:var(--bg2);color:var(--txt)}
+.nb.active{background:var(--blue-bg);color:var(--blue-txt);font-weight:500}
+.nb .cnt{background:var(--red-bg);color:var(--red-txt);border-radius:999px;font-size:10px;padding:1px 5px;font-weight:600}
+.page{display:none;padding:1rem;max-width:1100px;margin:0 auto}
+.page.active{display:block}
+.g2{display:grid;grid-template-columns:1fr 1fr;gap:1rem}
+.g3{display:grid;grid-template-columns:repeat(3,1fr);gap:1rem}
+.g4{display:grid;grid-template-columns:repeat(4,minmax(0,1fr));gap:10px;margin-bottom:1rem}
+@media(max-width:600px){.g2,.g3{grid-template-columns:1fr}.g4{grid-template-columns:1fr 1fr}}
+.card{background:var(--bg);border:0.5px solid var(--b);border-radius:var(--rl);padding:1rem 1.25rem}
+.sec{font-size:14px;font-weight:600;color:var(--txt);margin-bottom:.75rem}
+.mlbl{font-size:11px;color:var(--txt2);margin-bottom:3px}
+.mval{font-size:22px;font-weight:600;color:var(--txt)}
+.msub{font-size:11px;color:var(--txt3);margin-top:2px}
+.pbar{height:4px;background:var(--bg3);border-radius:2px;margin-top:6px;overflow:hidden}
+.pfill{height:100%;background:var(--blue-txt);border-radius:2px;transition:width .5s}
+.sep{height:0.5px;background:var(--b);margin:.75rem 0}
+.row{display:flex;align-items:center;gap:10px;padding:9px 0;border-bottom:0.5px solid var(--b)}
+.row:last-child{border-bottom:none}
+/* BADGES */
+.badge{display:inline-flex;align-items:center;gap:3px;padding:3px 9px;border-radius:999px;font-size:11px;font-weight:500}
+.badge.green{background:var(--green-bg);color:var(--green-txt)}
+.badge.red{background:var(--red-bg);color:var(--red-txt)}
+.badge.amber{background:var(--amber-bg);color:var(--amber-txt)}
+.badge.blue{background:var(--blue-bg);color:var(--blue-txt)}
+.badge.gray{background:var(--bg2);color:var(--txt2)}
+/* BUTTONS */
+.btn{padding:8px 14px;border-radius:var(--r);border:0.5px solid var(--b2);background:var(--bg);color:var(--txt);font-size:13px;cursor:pointer;display:inline-flex;align-items:center;gap:6px;transition:all .15s;font-family:inherit}
+.btn:hover{background:var(--bg2)}
+.btn.primary{background:var(--blue-bg);color:var(--blue-txt);border-color:var(--blue-txt)}
+.btn.success{background:var(--green-bg);color:var(--green-txt);border-color:var(--green-txt)}
+.btn.danger{background:var(--red-bg);color:var(--red-txt);border-color:var(--red-txt)}
+.btn.warn{background:var(--amber-bg);color:var(--amber-txt);border-color:var(--amber-txt)}
+.btn.full{width:100%;justify-content:center}
+.btn:disabled{opacity:.5;cursor:not-allowed}
+/* FORMS */
+input,select,textarea{padding:9px 12px;border:0.5px solid var(--b2);border-radius:var(--r);background:var(--bg);color:var(--txt);font-size:13px;font-family:inherit;width:100%}
+input:focus,select:focus{outline:none;border-color:var(--blue-txt)}
+.field{margin-bottom:.875rem}
+.field label{display:block;font-size:12px;color:var(--txt2);margin-bottom:5px}
+/* LOGIN */
+#login-screen{min-height:100vh;display:flex;align-items:center;justify-content:center;flex-direction:column;gap:1.5rem;padding:1rem}
+.login-box{background:var(--bg);border:0.5px solid var(--b);border-radius:var(--rl);padding:2rem;width:100%;max-width:360px}
+.login-title{font-size:20px;font-weight:700;color:var(--txt);margin-bottom:4px;text-align:center}
+.login-sub{font-size:13px;color:var(--txt2);text-align:center;margin-bottom:1.5rem}
+.q-grid{display:grid;grid-template-columns:1fr 1fr;gap:6px;margin-top:.75rem}
+.q-user{padding:8px 10px;border:0.5px solid var(--b);border-radius:var(--r);background:var(--bg2);cursor:pointer;font-size:12px;color:var(--txt2);text-align:center;transition:all .15s}
+.q-user:hover{border-color:var(--blue-txt);color:var(--blue-txt);background:var(--blue-bg)}
+/* AVATAR */
+.av{border-radius:50%;background:var(--blue-bg);color:var(--blue-txt);display:flex;align-items:center;justify-content:center;font-weight:600;flex-shrink:0}
+/* SCAN */
+.scan-zone{border:2px dashed var(--b2);border-radius:var(--rl);padding:1.5rem;text-align:center;cursor:pointer;transition:all .2s;margin-bottom:1rem}
+.scan-zone:hover,.scan-zone.active{border-color:var(--blue-txt);background:var(--blue-bg)}
+.bc-inp{padding:10px 14px;border:0.5px solid var(--b2);border-radius:var(--r);background:var(--bg);color:var(--txt);font-size:16px;letter-spacing:3px;font-family:monospace;width:100%}
+.bc-seg{padding:2px 7px;border-radius:4px;font-size:12px;font-weight:600;font-family:monospace}
+.bc-c{background:var(--blue-bg);color:var(--blue-txt)}
+.bc-p{background:var(--green-bg);color:var(--green-txt)}
+.bc-q{background:var(--amber-bg);color:var(--amber-txt)}
+.bc-col{background:var(--red-bg);color:var(--red-txt)}
+/* TASK CARDS */
+.task-card{background:var(--bg);border:0.5px solid var(--b);border-radius:var(--rl);padding:.875rem;margin-bottom:8px}
+.task-tmr{font-size:18px;font-weight:600;font-variant-numeric:tabular-nums;color:var(--blue-txt);font-family:monospace}
+.task-tmr.over{color:var(--amber-txt)}
+.pulse{display:inline-block;width:7px;height:7px;border-radius:50%;background:#1D9E75;animation:pulse 1.5s infinite}
+@keyframes pulse{0%,100%{opacity:1;transform:scale(1)}50%{opacity:.5;transform:scale(1.4)}}
+/* TABLE */
+.tbl-wrap{overflow-x:auto}
+table{width:100%;border-collapse:collapse;font-size:12px}
+thead th{text-align:right;padding:7px 10px;color:var(--txt2);font-weight:500;border-bottom:0.5px solid var(--b);background:var(--bg2)}
+tbody td{padding:8px 10px;border-bottom:0.5px solid var(--b);color:var(--txt)}
+tbody tr:last-child td{border-bottom:none}
+tbody tr:hover td{background:var(--bg2)}
+/* MODAL */
+.overlay{position:fixed;inset:0;background:rgba(0,0,0,.4);z-index:200;display:flex;align-items:center;justify-content:center;padding:1rem}
+.modal{background:var(--bg);border-radius:var(--rl);padding:1.5rem;width:100%;max-width:400px;border:0.5px solid var(--b);max-height:90vh;overflow-y:auto}
+.modal-title{font-size:15px;font-weight:600;margin-bottom:1rem;color:var(--txt)}
+/* ALERTS */
+.al-item{display:flex;align-items:flex-start;gap:10px;padding:10px;border-radius:var(--r);margin-bottom:6px}
+.al-item.warn{background:var(--amber-bg)}
+.al-item.err{background:var(--red-bg)}
+/* SETUP GUIDE */
+.step{display:flex;gap:12px;padding:12px 0;border-bottom:0.5px solid var(--b)}
+.step:last-child{border-bottom:none}
+.step-num{width:28px;height:28px;border-radius:50%;background:var(--blue-bg);color:var(--blue-txt);display:flex;align-items:center;justify-content:center;font-size:13px;font-weight:700;flex-shrink:0}
+.step-body{flex:1}
+.step-title{font-size:13px;font-weight:600;color:var(--txt);margin-bottom:4px}
+.step-desc{font-size:12px;color:var(--txt2);line-height:1.6}
+code{background:var(--bg2);border:0.5px solid var(--b);border-radius:4px;padding:2px 6px;font-size:11px;font-family:monospace;color:var(--txt);word-break:break-all}
+.copy-btn{padding:4px 8px;font-size:11px;border-radius:4px;border:0.5px solid var(--b2);background:var(--bg);color:var(--txt2);cursor:pointer;font-family:inherit}
+.copy-btn:hover{background:var(--bg2)}
+/* FIREBASE STATUS */
+#fb-status{position:fixed;bottom:12px;left:12px;font-size:11px;padding:5px 10px;border-radius:999px;z-index:300;transition:all .3s}
+#fb-status.ok{background:var(--green-bg);color:var(--green-txt)}
+#fb-status.err{background:var(--red-bg);color:var(--red-txt)}
+#fb-status.loading{background:var(--amber-bg);color:var(--amber-txt)}
+/* LANG SWITCHER */
+.lang-switcher{display:flex;gap:4px;align-items:center}
+.lang-btn{padding:3px 7px;border-radius:999px;border:1px solid var(--b2);background:var(--bg2);cursor:pointer;font-size:15px;line-height:1;transition:all .15s;opacity:.55}
+.lang-btn:hover{opacity:.85}
+.lang-btn.active{opacity:1;border-color:var(--blue-txt);background:var(--blue-bg);box-shadow:0 0 0 2px var(--blue-bg)}
+</style>
+</head>
+<body>
+
+<!-- FIREBASE STATUS -->
+<div id="fb-status" class="loading">⏳ מתחבר...</div>
+
+<!-- LOGIN -->
+<div id="login-screen">
+  <div class="lang-switcher" style="justify-content:center">
+    <button onclick="setLang('he')" class="lang-btn" id="lb-he-login">🇮🇱</button>
+    <button onclick="setLang('ar')" class="lang-btn" id="lb-ar-login">🇸🇦</button>
+    <button onclick="setLang('en')" class="lang-btn" id="lb-en-login">🇺🇸</button>
+  </div>
+  <div style="text-align:center">
+    <div style="font-size:42px;margin-bottom:8px">✂️</div>
+    <div style="font-size:24px;font-weight:700;color:var(--blue-txt)">TextileOps</div>
+    <div style="font-size:13px;color:var(--txt2);margin-top:4px">מערכת ניהול מפעל בגדים</div>
+    <div style="margin-top:12px;display:inline-block;background:#fff;padding:8px;border-radius:8px;border:1px solid var(--b)">
+      <canvas id="login-qr" style="display:block"></canvas>
+      <div style="font-size:11px;color:var(--txt3);margin-top:4px">סרוק לכניסה מהירה</div>
+    </div>
+  </div>
+  <div class="login-box">
+    <div class="login-title" data-i18n="login_title">כניסה למערכת</div>
+    <div class="login-sub" data-i18n="login_sub">הזן פרטי משתמש</div>
+    <div class="field"><label data-i18n="username">שם משתמש</label><input id="l-user" type="text" placeholder="שם משתמש" data-i18n-ph="username" autocomplete="username"/></div>
+    <div class="field"><label data-i18n="password">סיסמה</label><input id="l-pass" type="password" placeholder="סיסמה" data-i18n-ph="password" autocomplete="current-password" onkeydown="if(event.key==='Enter')doLogin()"/></div>
+    <button class="btn primary full" onclick="doLogin()" data-i18n="login_btn">כניסה</button>
+    <div id="l-err" style="color:var(--red-txt);font-size:12px;text-align:center;margin-top:8px;min-height:18px"></div>
+    <div style="margin-top:12px;text-align:center">
+      <button onclick="document.getElementById('emrg-box').classList.toggle('hidden')" style="background:none;border:none;font-size:11px;color:var(--txt3);cursor:pointer;padding:4px">🔑 <span data-i18n="emergency">כניסת חירום למנהל</span></button>
+      <div id="emrg-box" class="hidden" style="margin-top:8px;border-top:0.5px solid var(--b);padding-top:12px">
+        <input id="l-emergency" type="password" placeholder="קוד חירום" style="font-size:13px;margin-bottom:8px;text-align:center"/>
+        <button class="btn warn full" onclick="emergencyLogin()" style="font-size:12px">🔑 <span data-i18n="login_btn">כניסה</span></button>
+      </div>
+    </div>
+
+  </div>
+</div>
+
+<!-- APP -->
+<div id="app-screen" class="hidden">
+  <div class="topbar">
+    <div class="logo">✂️ TextileOps</div>
+    <div class="nav">
+      <button class="nb active" onclick="goPage('dash')" id="nb-dash">📊 <span data-i18n="nav_dash">בקרה</span></button>
+      <button class="nb" onclick="goPage('att')" id="nb-att">🕐 <span data-i18n="nav_att">נוכחות</span></button>
+      <button class="nb hidden" onclick="goPage('attrep')" id="nb-attrep">📋 <span data-i18n="nav_attrep">דוח נוכחות</span></button>
+      <button class="nb" onclick="goPage('scan')" id="nb-scan">📷 <span data-i18n="nav_scan">סריקה</span></button>
+      <button class="nb" onclick="goPage('tasks')" id="nb-tasks">✅ <span data-i18n="nav_tasks">משימות</span></button>
+      <button class="nb" onclick="goPage('reports')" id="nb-reports">📈 <span data-i18n="nav_reports">דוחות</span></button>
+      <button class="nb" onclick="goPage('alerts')" id="nb-alerts">🔔 <span id="al-cnt" class="cnt hidden">0</span><span data-i18n="nav_alerts">התראות</span></button>
+      <button class="nb hidden" onclick="goPage('admin')" id="nb-admin">⚙️ <span data-i18n="nav_admin">ניהול</span></button>
+      <button class="nb hidden" onclick="goPage('mgrtasks')" id="nb-mgrtasks">👔 <span data-i18n="nav_mgrtasks">ניהול משימות</span></button>
+      <button class="nb hidden" onclick="goPage('setup')" id="nb-setup">🔗 <span data-i18n="nav_setup">Firebase</span></button>
+    </div>
+    <div style="display:flex;align-items:center;gap:8px">
+      <div class="lang-switcher">
+        <button onclick="setLang('he')" class="lang-btn" id="lb-he">🇮🇱</button>
+        <button onclick="setLang('ar')" class="lang-btn" id="lb-ar">🇸🇦</button>
+        <button onclick="setLang('en')" class="lang-btn" id="lb-en">🇺🇸</button>
+      </div>
+      <div style="font-size:12px;text-align:left">
+        <div style="font-weight:600;color:var(--txt)" id="top-name"></div>
+        <div style="color:var(--txt3)" id="top-role"></div>
+      </div>
+      <div class="av" style="width:32px;height:32px;font-size:11px" id="top-av"></div>
+      <button class="btn" style="padding:5px 9px;font-size:12px" onclick="doLogout()" data-i18n="logout" title="יציאה">↩</button>
+    </div>
+  </div>
+
+  <!-- DASHBOARD -->
+  <div class="page active" id="page-dash">
+    <div class="g4">
+      <div class="card"><div class="mlbl" data-i18n="dash_active">עובדים פעילים</div><div class="mval" id="d-active">—</div><div class="msub" id="d-total-sub"></div></div>
+      <div class="card"><div class="mlbl" data-i18n="dash_tasks">משימות פעילות</div><div class="mval" id="d-tasks">—</div><div class="msub">בזמן אמת</div></div>
+      <div class="card"><div class="mlbl" data-i18n="dash_done">הושלמו היום</div><div class="mval" id="d-done">—</div><div class="msub">משימות</div></div>
+      <div class="card"><div class="mlbl" data-i18n="dash_goal">יעד יומי</div><div class="mval" id="d-goal">—</div><div class="pbar"><div class="pfill" id="d-goal-bar" style="width:0%"></div></div></div>
+    </div>
+    <div class="g2">
+      <div class="card"><div class="sec" data-i18n="dash_depts">מחלקות</div><div id="d-depts"></div></div>
+      <div class="card"><div class="sec" data-i18n="dash_alerts">התראות</div><div id="d-alerts-prev"></div></div>
+    </div>
+    <div class="card" style="margin-top:1rem"><div class="sec" data-i18n="dash_recent">פעילות אחרונה</div><div id="d-recent"></div></div>
+  </div>
+
+  <!-- ATTENDANCE -->
+  <div class="page" id="page-att">
+    <div class="g2" style="margin-bottom:1rem">
+      <div class="card" style="display:flex;flex-direction:column;align-items:center;justify-content:center;gap:.5rem;padding:1.5rem;text-align:center">
+        <div style="font-size:28px;font-weight:700;font-variant-numeric:tabular-nums;color:var(--txt);font-family:monospace" id="att-clk">00:00:00</div>
+        <div style="font-size:12px;color:var(--txt2)" id="att-dt"></div>
+        <div class="sep" style="width:100%"></div>
+        <div style="font-size:12px;color:var(--txt2);min-height:18px" id="att-msg"></div>
+        <div style="display:flex;gap:8px">
+          <button class="btn success" onclick="punchIn()">✅ <span data-i18n="att_in">כניסה</span></button>
+          <button class="btn danger" onclick="punchOut()">🚪 <span data-i18n="att_out">יציאה</span></button>
+        </div>
+      </div>
+      <div class="card">
+        <div class="sec">סיכום</div>
+        <div class="g2" style="gap:8px;margin-bottom:.75rem">
+          <div style="background:var(--bg2);border-radius:var(--r);padding:10px;text-align:center"><div style="font-size:11px;color:var(--txt2)" data-i18n="att_present">נכחו</div><div style="font-size:20px;font-weight:600;color:var(--green-txt)" id="att-in">0</div></div>
+          <div style="background:var(--bg2);border-radius:var(--r);padding:10px;text-align:center"><div style="font-size:11px;color:var(--txt2)" data-i18n="att_absent">נעדרו</div><div style="font-size:20px;font-weight:600;color:var(--red-txt)" id="att-out">0</div></div>
+        </div>
+        <div style="background:var(--bg2);border-radius:var(--r);padding:10px;text-align:center">
+          <div style="font-size:11px;color:var(--txt2)" data-i18n="att_nethours">סה"כ שעות נטו היום</div>
+          <div style="font-size:18px;font-weight:600;color:var(--blue-txt)" id="att-total-net">—</div>
+        </div>
+      </div>
+    </div>
+    <div class="card">
+      <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:.75rem">
+        <div class="sec" style="margin:0" data-i18n="att_list">רשימת עובדים</div>
+        <div style="display:flex;gap:5px">
+          <button class="btn" style="font-size:11px;padding:4px 9px" onclick="fAtt('all')" data-i18n="att_all">הכל</button>
+          <button class="btn" style="font-size:11px;padding:4px 9px" onclick="fAtt('in')" data-i18n="att_working">בעבודה</button>
+          <button class="btn" style="font-size:11px;padding:4px 9px" onclick="fAtt('out')" data-i18n="att_left">יצאו</button>
+        </div>
+      </div>
+      <div id="att-list"></div>
+    </div>
+  </div>
+
+  <!-- SCAN -->
+  <div class="page" id="page-scan">
+    <div class="g2">
+      <div>
+        <div class="card" style="margin-bottom:1rem">
+          <div class="sec" data-i18n="scan_title">סריקת ברקוד משימה</div>
+          <!-- CAMERA SCAN -->
+          <div id="cam-container" style="display:none;margin-bottom:1rem;position:relative">
+            <video id="cam-video" style="width:100%;border-radius:var(--rl);background:#000;max-height:220px;object-fit:cover" autoplay muted playsinline></video>
+            <div style="position:absolute;inset:0;border:3px solid var(--blue-txt);border-radius:var(--rl);pointer-events:none;opacity:.6"></div>
+            <div style="position:absolute;top:50%;left:50%;transform:translate(-50%,-50%);width:60%;height:2px;background:var(--blue-txt);opacity:.8"></div>
+            <button class="btn danger" onclick="stopCam()" style="position:absolute;top:8px;left:8px;padding:4px 10px;font-size:12px">✕ סגור</button>
+            <div id="cam-status" style="position:absolute;bottom:8px;right:0;left:0;text-align:center;font-size:12px;color:#fff;background:rgba(0,0,0,.5);padding:4px">מכוון מצלמה...</div>
+          </div>
+          <div style="display:flex;gap:8px;margin-bottom:1rem">
+            <button class="btn primary full" onclick="startCam()" id="cam-btn" style="font-size:14px;padding:12px">📷 <span data-i18n="scan_cam">סרוק עם מצלמה</span></button>
+          </div>
+          <div style="text-align:center;font-size:12px;color:var(--txt3);margin-bottom:.75rem">— <span data-i18n="scan_manual">הזן ידנית</span> / סורק USB —</div>
+          <input class="bc-inp" id="bc-inp" maxlength="12" placeholder="הזן 12 ספרות..." oninput="parseBc(this.value)" onkeydown="if(event.key==='Enter')submitBc()"/>
+          <div id="bc-prev" style="margin-top:.75rem;min-height:36px"></div>
+          <div class="field" style="margin-top:.75rem;margin-bottom:0">
+            <label style="font-size:12px;color:var(--txt2);margin-bottom:5px;display:block">סוג משימה</label>
+            <input id="bc-tasktype" type="text" placeholder="לדוגמה: תפירה, חיתוך, גימור..." style="font-size:13px"/>
+          </div>
+          <div style="display:flex;gap:8px;margin-top:.75rem">
+            <button class="btn primary full" onclick="submitBc()">▶ <span data-i18n="scan_start">התחל / עבור למשימה</span></button>
+            <button class="btn" onclick="document.getElementById('bc-inp').value='';parseBc('')">✕</button>
+          </div>
+        </div>
+        <div class="card">
+          <div class="sec">מבנה ברקוד</div>
+          <div style="font-size:12px;color:var(--txt2);line-height:2.3">
+            <div><span class="bc-seg bc-c">XX</span> — מספר לקוח (2 ספרות)</div>
+            <div><span class="bc-seg bc-p">XXXXX</span> — מספר מוצר (5 ספרות)</div>
+            <div><span class="bc-seg bc-q">XXX</span> — כמות (3 ספרות)</div>
+            <div><span class="bc-seg bc-col">XX</span> — קוד צבע (2 ספרות)</div>
+          </div>
+          <div style="margin-top:.75rem;background:var(--bg2);border-radius:var(--r);padding:9px">
+            <div style="font-size:11px;color:var(--txt3);margin-bottom:5px">דוגמה — לחץ לניסיון:</div>
+            <div style="display:flex;gap:5px;flex-wrap:wrap;cursor:pointer" onclick="tryDemo()">
+              <span class="bc-seg bc-c">07</span><span class="bc-seg bc-p">10042</span><span class="bc-seg bc-q">025</span><span class="bc-seg bc-col">03</span>
+              <span style="font-size:11px;color:var(--txt3);align-self:center">= לקוח 07 | מוצר 10042 | 25 יח' | אדום</span>
+            </div>
+          </div>
+        </div>
+      </div>
+      <div class="card">
+        <div class="sec" data-i18n="scan_active">משימות פעילות עכשיו</div>
+        <div id="scan-active"></div>
+      </div>
+    </div>
+  </div>
+
+  <!-- TASKS -->
+  <div class="page" id="page-tasks">
+    <div class="g4" style="margin-bottom:1rem">
+      <div class="card"><div class="mlbl" data-i18n="tasks_active">פעילות</div><div class="mval" id="tk-act">0</div></div>
+      <div class="card"><div class="mlbl" data-i18n="tasks_done">הושלמו</div><div class="mval" id="tk-done">0</div></div>
+      <div class="card"><div class="mlbl" data-i18n="tasks_avg">ממוצע</div><div class="mval" id="tk-avg">—</div></div>
+      <div class="card"><div class="mlbl" data-i18n="tasks_units">יחידות</div><div class="mval" id="tk-units">0</div></div>
+    </div>
+    <div class="g2">
+      <div><div class="sec">משימות פעילות</div><div id="tk-active-list"></div></div>
+      <div class="card"><div class="sec">היסטוריה</div><div id="tk-hist"></div></div>
+    </div>
+  </div>
+
+  <!-- REPORTS -->
+  <div class="page" id="page-reports">
+    <div style="display:flex;gap:8px;flex-wrap:wrap;margin-bottom:1rem;align-items:center">
+      <div style="display:flex;align-items:center;gap:4px">
+        <label style="font-size:11px;color:var(--txt2)">מ-</label>
+        <input type="date" id="rf-from" style="font-size:12px;width:auto" onchange="buildRep()"/>
+      </div>
+      <div style="display:flex;align-items:center;gap:4px">
+        <label style="font-size:11px;color:var(--txt2)">עד</label>
+        <input type="date" id="rf-to" style="font-size:12px;width:auto" onchange="buildRep()"/>
+      </div>
+      <select id="rf-w" style="font-size:12px" onchange="buildRep()"><option value="">כל העובדים</option></select>
+      <select id="rf-c" style="font-size:12px" onchange="buildRep()"><option value="">כל הלקוחות</option></select>
+      <select id="rf-p" style="font-size:12px" onchange="buildRep()"><option value="">כל המוצרים</option></select>
+      <button class="btn success" onclick="exportCSV()">⬇ ייצוא CSV</button>
+      <button class="btn" onclick="buildRep()">🔄</button>
+    </div>
+    <div class="g4" style="margin-bottom:1rem">
+      <div class="card"><div class="mlbl" data-i18n="rep_total">סה"כ משימות</div><div class="mval" id="rp-tot">0</div></div>
+      <div class="card"><div class="mlbl" data-i18n="rep_time">זמן כולל</div><div class="mval" id="rp-time">0</div></div>
+      <div class="card"><div class="mlbl" data-i18n="rep_units">יחידות</div><div class="mval" id="rp-units">0</div></div>
+      <div class="card"><div class="mlbl" data-i18n="rep_eff">יעילות</div><div class="mval" id="rp-eff">—</div></div>
+    </div>
+    <div class="card"><div class="sec">פירוט לפי לקוח ומוצר</div>
+      <div class="tbl-wrap"><table><thead><tr><th>עובד</th><th>מחלקה</th><th>סוג משימה</th><th>לקוח</th><th>מוצר</th><th>כמות</th><th>צבע</th><th>התחלה</th><th>סיום</th><th>משך</th><th>סטטוס</th></tr></thead>
+      <tbody id="rp-body"></tbody></table></div>
+    </div>
+  </div>
+
+  <!-- ALERTS -->
+  <div class="page" id="page-alerts">
+    <div class="g2" style="margin-bottom:1rem">
+      <div class="card">
+        <div class="sec">הגדרות</div>
+        <div class="field"><label data-i18n="al_thresh_label">התראה על משימה ארוכה (דקות)</label><input type="number" id="al-thresh" value="60" min="5" onchange="saveSettings()"/></div>
+        <div class="field"><label data-i18n="al_absent_label">התראה על היעדרות (מספר עובדים)</label><input type="number" id="al-absent" value="5" min="1" onchange="saveSettings()"/></div>
+        <button class="btn primary" onclick="checkAlerts();renderAlerts()">🔄 רענן</button>
+      </div>
+      <div class="card">
+        <div class="sec">סיכום</div>
+        <div class="row"><span style="flex:1;font-size:13px" data-i18n="al_active">התראות פעילות</span><span class="badge red" id="al-sum">0</span></div>
+        <div class="row"><span style="flex:1;font-size:13px" data-i18n="al_long">משימות ארוכות</span><span class="badge amber" id="al-long">0</span></div>
+        <div class="row"><span style="flex:1;font-size:13px" data-i18n="al_over_thresh">נעדרים מעל לסף</span><span class="badge red" id="al-abs">0</span></div>
+      </div>
+    </div>
+    <div class="card" style="margin-top:1rem">
+      <div class="sec">📲 התראות WhatsApp אוטומטיות</div>
+      <div class="g2" style="gap:12px">
+        <div>
+          <div class="field"><label>Telegram Bot Token</label><input id="wa-token" type="text" placeholder="123456:AAG..." oninput="saveSettings()"/></div>
+          <div class="field"><label>Chat ID</label><input id="wa-chatid" type="text" placeholder="1019589316" oninput="saveSettings()"/></div>
+          <div style="font-size:11px;color:var(--txt3);margin-bottom:12px;line-height:1.6">
+            הבוט: <strong>@TextileOpsAlert_bot</strong> — Token ו-Chat ID כבר מוגדרים
+          </div>
+        </div>
+        <div>
+          <div class="field"><label>מינימום דקות בין התראות</label><input type="number" id="wa-interval" value="60" min="5" oninput="saveSettings()"/></div>
+          <div class="field" style="display:flex;gap:12px">
+            <div style="flex:1"><label>שעת התחלה</label><input type="time" id="wa-from" value="07:00" onchange="saveSettings()"/></div>
+            <div style="flex:1"><label>שעת סיום</label><input type="time" id="wa-to" value="18:00" onchange="saveSettings()"/></div>
+          </div>
+          <div style="display:flex;flex-direction:column;gap:8px;margin-bottom:12px">
+            <label style="display:flex;align-items:center;gap:8px;font-size:13px;cursor:pointer"><input type="checkbox" id="wa-long" checked onchange="saveSettings()" style="width:auto"/> שלח על משימה ארוכה ⏰</label>
+            <label style="display:flex;align-items:center;gap:8px;font-size:13px;cursor:pointer"><input type="checkbox" id="wa-absent" checked onchange="saveSettings()" style="width:auto"/> שלח על עובדים נעדרים 👤</label>
+          </div>
+        </div>
+      </div>
+      <div style="display:flex;align-items:center;gap:12px;flex-wrap:wrap">
+        <label style="display:flex;align-items:center;gap:8px;font-size:14px;font-weight:500;cursor:pointer">
+          <input type="checkbox" id="wa-enabled" onchange="saveSettings()" style="width:auto"/>
+          הפעל שליחה אוטומטית
+        </label>
+        <button class="btn primary" onclick="testWhatsApp()">🧪 שלח הודעת בדיקה</button>
+        <span id="wa-status" style="font-size:12px;color:var(--txt3)"></span>
+      </div>
+    </div>
+    <div class="card" style="margin-top:1rem"><div class="sec" data-i18n="nav_alerts">התראות</div><div id="alerts-list"></div></div>
+  </div>
+
+  <!-- ADMIN -->
+  <div class="page" id="page-admin">
+    <div class="g2">
+      <div class="card">
+        <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:.75rem">
+          <div class="sec" style="margin:0" data-i18n="admin_workers">עובדים</div>
+          <button class="btn primary" style="font-size:12px;padding:5px 10px" onclick="openModal('add-worker')">+ <span data-i18n="admin_add">הוסף</span></button>
+        </div>
+        <div id="adm-workers"></div>
+      </div>
+      <div class="card">
+        <div class="sec" data-i18n="admin_depts">מחלקות</div>
+        <div id="adm-depts"></div>
+        <div class="sep"></div>
+        <div style="display:flex;gap:8px">
+          <input id="new-dept" type="text" placeholder="שם מחלקה חדשה" style="flex:1;font-size:12px"/>
+          <button class="btn primary" style="padding:6px 12px" onclick="addDept()">+</button>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <!-- ATTENDANCE REPORT PAGE -->
+  <div class="page" id="page-attrep">
+    <div class="card" style="margin-bottom:1rem">
+      <div class="sec">סינון דוח נוכחות</div>
+      <div style="display:flex;gap:8px;flex-wrap:wrap;align-items:flex-end">
+        <div>
+          <label style="font-size:11px;color:var(--txt2);display:block;margin-bottom:3px">מתאריך</label>
+          <input type="date" id="ar-from" style="font-size:12px"/>
+        </div>
+        <div>
+          <label style="font-size:11px;color:var(--txt2);display:block;margin-bottom:3px">עד תאריך</label>
+          <input type="date" id="ar-to" style="font-size:12px"/>
+        </div>
+        <div>
+          <label style="font-size:11px;color:var(--txt2);display:block;margin-bottom:3px">עובד</label>
+          <select id="ar-worker" style="font-size:12px"><option value="">כל העובדים</option></select>
+        </div>
+        <button class="btn primary" onclick="buildAttRep()">🔍 הצג</button>
+        <button class="btn success" onclick="exportAttCSV()">⬇ ייצוא CSV</button>
+      </div>
+    </div>
+    <div class="g4" style="margin-bottom:1rem">
+      <div class="card"><div class="mlbl">ימי נוכחות</div><div class="mval" id="ar-days">0</div></div>
+      <div class="card"><div class="mlbl">סה"כ שעות נטו</div><div class="mval" id="ar-total">0</div></div>
+      <div class="card"><div class="mlbl">ממוצע יומי</div><div class="mval" id="ar-avg">—</div></div>
+      <div class="card"><div class="mlbl">עובדים בדוח</div><div class="mval" id="ar-workers">0</div></div>
+    </div>
+    <div class="card">
+      <div class="tbl-wrap">
+        <table>
+          <thead><tr><th>עובד</th><th>מחלקה</th><th>תאריך</th><th>יום</th><th>כניסה</th><th>יציאה</th><th>הפסקה</th><th>שעות נטו</th></tr></thead>
+          <tbody id="ar-body"></tbody>
+        </table>
+      </div>
+    </div>
+  </div>
+
+  <!-- MANAGER TASKS PAGE -->
+  <div class="page" id="page-mgrtasks">
+    <!-- נוכחות עובדים -->
+    <div class="card" style="margin-bottom:1rem">
+      <div class="sec">🕐 החתמת נוכחות עובדים</div>
+      <div id="mgr-att-list"></div>
+    </div>
+    <div class="g2" style="margin-bottom:1rem">
+      <div class="card">
+        <div class="sec">▶ התחלת משימה לעובד</div>
+        <div class="field"><label>עובד</label>
+          <select id="mgr-emp-sel" style="font-size:13px"><option value="">בחר עובד...</option></select>
+        </div>
+        <div class="field"><label>ברקוד משימה (12 ספרות)</label>
+          <div id="mgr-cam-container" style="display:none;margin-bottom:.75rem;position:relative">
+            <video id="mgr-cam-video" style="width:100%;border-radius:var(--rl);background:#000;max-height:200px;object-fit:cover" autoplay muted playsinline></video>
+            <div style="position:absolute;inset:0;border:3px solid var(--blue-txt);border-radius:var(--rl);pointer-events:none;opacity:.6"></div>
+            <div style="position:absolute;top:50%;left:50%;transform:translate(-50%,-50%);width:60%;height:2px;background:var(--blue-txt);opacity:.8"></div>
+            <button class="btn danger" onclick="mgrStopCam()" style="position:absolute;top:8px;left:8px;padding:4px 10px;font-size:12px">✕ סגור</button>
+            <div id="mgr-cam-status" style="position:absolute;bottom:8px;right:0;left:0;text-align:center;font-size:12px;color:#fff;background:rgba(0,0,0,.5);padding:4px">מכוון מצלמה...</div>
+          </div>
+          <button class="btn primary full" onclick="mgrStartCam()" id="mgr-cam-btn" style="font-size:13px;padding:10px;margin-bottom:8px">📷 סרוק עם מצלמה</button>
+          <input id="mgr-bc-inp" class="bc-inp" maxlength="12" placeholder="או הזן 12 ספרות ידנית..." oninput="parseMgrBc(this.value)"/>
+        </div><!-- /field barcode -->
+        <div id="mgr-bc-prev" style="margin-bottom:.75rem;min-height:30px"></div>
+        <div class="field">
+          <label>סוג משימה</label>
+          <input id="mgr-tasktype" type="text" placeholder="לדוגמה: תפירה, חיתוך, גימור..." style="font-size:13px"/>
+        </div>
+        <button class="btn success full" onclick="mgrStartTask()">▶ התחל משימה לעובד</button>
+        <div id="mgr-start-msg" style="font-size:12px;margin-top:6px;min-height:16px"></div>
+      </div><!-- /card start-task -->
+      <div class="card">
+        <div class="sec">⏹ סיום משימה לעובד</div>
+        <div id="mgr-active-tasks-list"></div>
+      </div>
+    </div>
+    <div class="card">
+      <div class="sec">☕ הגדרת הפסקות לעובדים</div>
+      <div id="mgr-breaks-list"></div>
+    </div>
+  </div>
+
+  <!-- SETUP PAGE -->
+  <div class="page" id="page-setup">
+    <div class="card" style="max-width:600px;margin:0 auto">
+      <div class="sec">🔧 הגדרת Firebase — שלב אחת ויש לך אפליקציה אמיתית!</div>
+      <p style="font-size:13px;color:var(--txt2);margin-bottom:1rem;line-height:1.7">
+        כרגע הנתונים נשמרים רק בדפדפן שלך. כדי ש<strong>כל העובדים יראו את אותם נתונים בזמן אמת</strong>, צריך לחבר Firebase (חינמי לחלוטין).
+      </p>
+      <div class="step">
+        <div class="step-num">1</div>
+        <div class="step-body">
+          <div class="step-title">פתח Firebase Console</div>
+          <div class="step-desc">כנס לכתובת: <a href="https://console.firebase.google.com" target="_blank" style="color:var(--blue-txt)">console.firebase.google.com</a> עם חשבון Google שלך</div>
+        </div>
+      </div>
+      <div class="step">
+        <div class="step-num">2</div>
+        <div class="step-body">
+          <div class="step-title">צור פרויקט חדש</div>
+          <div class="step-desc">לחץ "Add project" ← שם הפרויקט: <code>textileops</code> ← המשך עד סיום הקמת הפרויקט</div>
+        </div>
+      </div>
+      <div class="step">
+        <div class="step-num">3</div>
+        <div class="step-body">
+          <div class="step-title">הפעל Firestore</div>
+          <div class="step-desc">בתפריט הצד ← Build ← Firestore Database ← Create database ← בחר "Start in test mode" ← בחר אזור ← Done</div>
+        </div>
+      </div>
+      <div class="step">
+        <div class="step-num">4</div>
+        <div class="step-body">
+          <div class="step-title">קבל את פרטי ה-Config</div>
+          <div class="step-desc">הגדרות פרויקט (⚙) ← General ← "Your apps" ← לחץ על כפתור Web (&lt;/&gt;) ← שם: textileops ← Register app ← העתק את האובייקט <code>firebaseConfig</code></div>
+        </div>
+      </div>
+      <div class="step">
+        <div class="step-num">5</div>
+        <div class="step-body">
+          <div class="step-title">הכנס את ה-Config כאן</div>
+          <div class="step-desc" style="margin-bottom:8px">הדבק את הערכים מ-Firebase:</div>
+          <div class="field"><label>apiKey</label><input id="fb-apikey" type="text" placeholder="AIzaSy..."/></div>
+          <div class="field"><label>projectId</label><input id="fb-projid" type="text" placeholder="textileops-xxxxx"/></div>
+          <div class="field"><label>appId</label><input id="fb-appid" type="text" placeholder="1:xxx:web:xxx"/></div>
+          <button class="btn primary full" onclick="connectFirebase()">🔗 התחבר ל-Firebase</button>
+          <div id="fb-result" style="margin-top:8px;font-size:12px;min-height:18px"></div>
+        </div>
+      </div>
+      <div class="step">
+        <div class="step-num">6</div>
+        <div class="step-body">
+          <div class="step-title">פרוס ל-Netlify (30 שניות)</div>
+          <div class="step-desc">
+            כנס ל <a href="https://netlify.com" target="_blank" style="color:var(--blue-txt)">netlify.com</a> ← הירשם עם Google ← גרור את קובץ ה-HTML לאתר ← קבל כתובת URL ← שלח לכל העובדים!
+          </div>
+        </div>
+      </div>
+    </div>
+  </div>
+
+</div><!-- /app -->
+
+<!-- MODAL -->
+<div class="overlay hidden" id="modal-wrap">
+  <div class="modal" id="modal-box">
+    <div class="modal-title" id="modal-title"></div>
+    <div id="modal-body"></div>
+    <div style="display:flex;justify-content:flex-end;gap:8px;margin-top:1rem">
+      <button class="btn" onclick="closeModal()" data-i18n="cancel">ביטול</button>
+      <button class="btn primary" id="modal-ok" onclick="confirmModal()" data-i18n="save">שמור</button>
+    </div>
+  </div>
+</div>
+
+<!-- ZXING BARCODE READER -->
+<script src="https://cdn.jsdelivr.net/npm/jsqr@1.4.0/dist/jsQR.js"></script>
+<!-- QR CODE GENERATOR -->
+<script src="https://cdn.jsdelivr.net/npm/qrcode@1.5.3/build/qrcode.min.js"></script>
+
+<!-- FIREBASE SDK -->
+<script type="module">
+import{initializeApp}from'https://www.gstatic.com/firebasejs/10.12.0/firebase-app.js';
+import{getFirestore,collection,doc,setDoc,onSnapshot,query,orderBy,limit,serverTimestamp,deleteDoc,updateDoc}from'https://www.gstatic.com/firebasejs/10.12.0/firebase-firestore.js';
+window._fb={initializeApp,getFirestore,collection,doc,setDoc,onSnapshot,query,orderBy,limit,serverTimestamp,deleteDoc,updateDoc};
+window._fbReady=true;
+document.dispatchEvent(new Event('fbSDKReady'));
+</script>
+
+<script>
+// ─── CONSTANTS ─────────────────────────────────────────────
+const COLORS={'01':'לבן','02':'שחור','03':'אדום','04':'כחול','05':'ירוק','06':'צהוב','07':'אפור','08':'ורוד','09':'חום','10':'כתום'};
+const WORKER_PAGES=[
+  {id:'dash',label:'לוח בקרה'},
+  {id:'att',label:'נוכחות'},
+  {id:'scan',label:'סריקה'},
+  {id:'tasks',label:'משימות'},
+  {id:'reports',label:'דוחות'},
+  {id:'alerts',label:'התראות'},
+];
+const SUPERVISOR_EXTRA_PAGES=[
+  {id:'mgrtasks',label:'ניהול משימות'},
+  {id:'attrep',label:'דוח נוכחות'},
+];
+const ALL_WORKER_PAGE_IDS=WORKER_PAGES.map(p=>p.id);
+const ALL_SUPERVISOR_PAGE_IDS=[...ALL_WORKER_PAGE_IDS,...SUPERVISOR_EXTRA_PAGES.map(p=>p.id)];
+const pad2=n=>String(n).padStart(2,'0');
+const fmtS=s=>pad2(Math.floor(s/3600))+':'+pad2(Math.floor(s/60)%60)+':'+pad2(s%60);
+const fmtM=s=>Math.round(s/60)+" דק'";
+const todayStr=()=>new Date().toISOString().slice(0,10);
+const esc=s=>String(s??'').replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;');
+
+// ─── STATE ──────────────────────────────────────────────────
+let S={
+  user:null,
+  workers:[
+    {id:'w1',name:'ריבה כהן',dept:'תפירה',role:'worker',user:'riva',pass:'1234',status:'out',checkin:null,checkout:null,breakStart:'13:00',breakEnd:'13:45',breakActive:true},
+    {id:'w2',name:'מוחמד עלי',dept:'חיתוך',role:'worker',user:'moha',pass:'1234',status:'out',checkin:null,checkout:null,breakStart:'13:00',breakEnd:'13:45',breakActive:true},
+    {id:'w3',name:'אסתר לוי',dept:'גימור',role:'worker',user:'ester',pass:'1234',status:'out',checkin:null,checkout:null,breakStart:'13:00',breakEnd:'13:45',breakActive:true},
+    {id:'w4',name:'יוסף אבו',dept:'תפירה',role:'worker',user:'yosef',pass:'1234',status:'out',checkin:null,checkout:null,breakStart:'13:00',breakEnd:'13:45',breakActive:true},
+    {id:'w5',name:'נעמה שפיר',dept:'איכות',role:'manager',user:'naama',pass:'1234',status:'out',checkin:null,checkout:null,breakStart:'13:00',breakEnd:'13:45',breakActive:true},
+    {id:'w6',name:'אחמד חסן',dept:'חיתוך',role:'worker',user:'ahmad',pass:'1234',status:'out',checkin:null,checkout:null,breakStart:'13:00',breakEnd:'13:45',breakActive:true},
+    {id:'w7',name:'שרה ברק',dept:'אריזה',role:'worker',user:'sara',pass:'1234',status:'out',checkin:null,checkout:null,breakStart:'13:00',breakEnd:'13:45',breakActive:true},
+    {id:'w8',name:'דוד פרץ',dept:'תפירה',role:'worker',user:'david',pass:'1234',status:'out',checkin:null,checkout:null,breakStart:'13:00',breakEnd:'13:45',breakActive:true},
+    {id:'w9',name:'ירון מזרחי',dept:'חיתוך',role:'manager',user:'yaron',pass:'admin',status:'out',checkin:null,checkout:null,breakStart:'13:00',breakEnd:'13:45',breakActive:true},
+  ],
+  depts:['חיתוך','תפירה','גימור','איכות','אריזה'],
+  activeTasks:[],
+  histTasks:[],
+  alerts:[],
+  settings:{thresh:60,absent:5,waEnabled:false,waToken:'8951263333:AAG8f4cKR3Y0Cxw_KvKA4HNSeh2vdRR0fMw',waChatId:'1019589316',waInterval:60,waFrom:'07:00',waTo:'18:00',waLong:true,waAbsent:true},
+  waLastSent:0,
+  nextTId:1,
+  fbConnected:false,
+  attFilter:'all',
+  modalAction:null,
+  attHistory:[],  // {workerId, workerName, dept, date, checkin, checkout, breakStart, breakEnd, breakActive}
+};
+
+// ─── LOCAL STORAGE ──────────────────────────────────────────
+function saveLS(){
+  try{
+    const d={workers:S.workers,depts:S.depts,activeTasks:S.activeTasks.map(t=>({...t,startTime:t.startTime instanceof Date?t.startTime.toISOString():t.startTime})),histTasks:S.histTasks.map(t=>({...t,startTime:t.startTime instanceof Date?t.startTime.toISOString():t.startTime,endTime:t.endTime instanceof Date?t.endTime.toISOString():t.endTime})),settings:S.settings,nextTId:S.nextTId,attHistory:S.attHistory};
+    localStorage.setItem('txops_v3',JSON.stringify(d));
+  }catch(e){}
+}
+function loadLS(){
+  try{
+    const raw=localStorage.getItem('txops_v3');
+    if(!raw)return;
+    const d=JSON.parse(raw);
+    if(d.workers)S.workers=d.workers;
+    if(d.depts)S.depts=d.depts;
+    if(d.activeTasks)S.activeTasks=d.activeTasks.map(t=>({...t,startTime:new Date(t.startTime),elapsed:0}));
+    if(d.histTasks)S.histTasks=d.histTasks.map(t=>({...t,startTime:new Date(t.startTime),endTime:t.endTime?new Date(t.endTime):null}));
+    if(d.settings)S.settings=d.settings;
+    if(d.nextTId)S.nextTId=d.nextTId;
+    if(d.attHistory)S.attHistory=d.attHistory;
+  }catch(e){}
+}
+loadLS();
+
+// ─── FIREBASE ───────────────────────────────────────────────
+let db=null;
+let fbConfig={apiKey:"AIzaSyCN9AlUZFX6tODyClzopC9BrRi-Oj7oSv8",projectId:"textileops-aef4a",appId:"1:570030273525:web:ff4a7d125a40066a4826bc",authDomain:"textileops-aef4a.firebaseapp.com",storageBucket:"textileops-aef4a.firebasestorage.app",messagingSenderId:"570030273525",measurementId:"G-1PRH851WYR"};
+
+function loadFbConfig(){
+  try{const c=localStorage.getItem('txops_fb');if(c)fbConfig=JSON.parse(c);}catch(e){}
+}
+loadFbConfig();
+
+function setFbStatus(st,msg){
+  const el=document.getElementById('fb-status');
+  el.className=st;el.textContent=msg;
+  if(st==='ok')setTimeout(()=>el.classList.add('hidden'),3000);
+}
+
+async function connectFirebase(){
+  const apiKey=document.getElementById('fb-apikey').value.trim();
+  const projectId=document.getElementById('fb-projid').value.trim();
+  const appId=document.getElementById('fb-appid').value.trim();
+  if(!apiKey||!projectId||!appId){document.getElementById('fb-result').textContent='נא למלא את כל השדות';return;}
+  fbConfig={apiKey,projectId,appId,authDomain:`${projectId}.firebaseapp.com`,storageBucket:`${projectId}.appspot.com`,messagingSenderId:'000000000000'};
+  localStorage.setItem('txops_fb',JSON.stringify(fbConfig));
+  document.getElementById('fb-result').textContent='⏳ מתחבר...';
+  try{
+    await initFb();
+    document.getElementById('fb-result').textContent='✅ התחברות הצליחה! Firebase פעיל.';
+  }catch(e){
+    document.getElementById('fb-result').textContent='❌ שגיאה: '+e.message;
+  }
+}
+
+async function initFb(){
+  if(!window._fbReady){await new Promise(res=>document.addEventListener('fbSDKReady',res,{once:true}));}
+  if(!fbConfig)throw new Error('אין Firebase Config');
+  const{initializeApp,getFirestore}=window._fb;
+  const app=initializeApp(fbConfig,'txops3');
+  db=getFirestore(app);
+  S.fbConnected=true;
+  setFbStatus('ok','✅ Firebase מחובר');
+  listenFb();
+}
+
+function listenFb(){
+  if(!db)return;
+  const{collection,onSnapshot,query,orderBy}=window._fb;
+  // workers
+  onSnapshot(collection(db,'workers'),snap=>{
+    if(snap.empty)return;
+    S.workers=snap.docs.map(d=>({id:d.id,...d.data()}));
+    renderAll();
+  });
+  // active tasks
+  onSnapshot(collection(db,'activeTasks'),snap=>{
+    S.activeTasks=snap.docs.map(d=>{const dd=d.data();return{...dd,id:d.id,startTime:dd.startTime?.toDate?dd.startTime.toDate():new Date(dd.startTime),elapsed:0};});
+    renderAll();
+  });
+  // hist tasks
+  onSnapshot(query(collection(db,'histTasks'),orderBy('endTime','desc')),snap=>{
+    S.histTasks=snap.docs.map(d=>{const dd=d.data();return{...dd,id:d.id,startTime:dd.startTime?.toDate?dd.startTime.toDate():new Date(dd.startTime),endTime:dd.endTime?.toDate?dd.endTime.toDate():new Date(dd.endTime)};});
+    renderAll();
+  });
+  // attendance history
+  onSnapshot(query(collection(db,'attHistory'),orderBy('date','desc')),snap=>{
+    S.attHistory=snap.docs.map(d=>({...d.data()}));
+    renderAll();
+  });
+}
+
+async function fbSet(col,id,data){
+  if(!db)return;
+  const{doc,setDoc}=window._fb;
+  await setDoc(doc(db,col,id),data);
+}
+async function fbDel(col,id){
+  if(!db)return;
+  const{doc,deleteDoc}=window._fb;
+  await deleteDoc(doc(db,col,id));
+}
+
+// init firebase if config saved
+document.addEventListener('fbSDKReady',()=>{
+  if(fbConfig)initFb().catch(()=>setFbStatus('err','❌ Firebase — שגיאת חיבור'));
+  else setFbStatus('err','⚠ Firebase לא מוגדר — נתונים מקומיים בלבד');
+});
+
+// ─── CLOCK ──────────────────────────────────────────────────
+function updateClock(){
+  const n=new Date();
+  const s=pad2(n.getHours())+':'+pad2(n.getMinutes())+':'+pad2(n.getSeconds());
+  const el=document.getElementById('att-clk');if(el)el.textContent=s;
+  const days=['ראשון','שני','שלישי','רביעי','חמישי','שישי','שבת'];
+  const months=['ינואר','פברואר','מרץ','אפריל','מאי','יוני','יולי','אוגוסט','ספטמבר','אוקטובר','נובמבר','דצמבר'];
+  const el2=document.getElementById('att-dt');
+  if(el2)el2.textContent='יום '+days[n.getDay()]+', '+n.getDate()+' '+months[n.getMonth()]+' '+n.getFullYear();
+}
+setInterval(updateClock,1000);updateClock();
+
+// ─── SHA-256 (pure-JS, עובד גם ב-file://) ───────────────────
+function sha256(str){
+  function rr(x,n){return(x>>>n)|(x<<(32-n));}
+  const K=[0x428a2f98,0x71374491,0xb5c0fbcf,0xe9b5dba5,0x3956c25b,0x59f111f1,0x923f82a4,0xab1c5ed5,
+    0xd807aa98,0x12835b01,0x243185be,0x550c7dc3,0x72be5d74,0x80deb1fe,0x9bdc06a7,0xc19bf174,
+    0xe49b69c1,0xefbe4786,0x0fc19dc6,0x240ca1cc,0x2de92c6f,0x4a7484aa,0x5cb0a9dc,0x76f988da,
+    0x983e5152,0xa831c66d,0xb00327c8,0xbf597fc7,0xc6e00bf3,0xd5a79147,0x06ca6351,0x14292967,
+    0x27b70a85,0x2e1b2138,0x4d2c6dfc,0x53380d13,0x650a7354,0x766a0abb,0x81c2c92e,0x92722c85,
+    0xa2bfe8a1,0xa81a664b,0xc24b8b70,0xc76c51a3,0xd192e819,0xd6990624,0xf40e3585,0x106aa070,
+    0x19a4c116,0x1e376c08,0x2748774c,0x34b0bcb5,0x391c0cb3,0x4ed8aa4a,0x5b9cca4f,0x682e6ff3,
+    0x748f82ee,0x78a5636f,0x84c87814,0x8cc70208,0x90befffa,0xa4506ceb,0xbef9a3f7,0xc67178f2];
+  const enc=new TextEncoder().encode(str);
+  const bits=enc.length*8;
+  const padded=new Uint8Array(Math.ceil((enc.length+9)/64)*64);
+  padded.set(enc);padded[enc.length]=0x80;
+  new DataView(padded.buffer).setUint32(padded.length-4,bits,false);
+  let a=0x6a09e667,b=0xbb67ae85,c=0x3c6ef372,d=0xa54ff53a,
+      e=0x510e527f,f=0x9b05688c,g=0x1f83d9ab,h=0x5be0cd19;
+  const dv=new DataView(padded.buffer);
+  for(let i=0;i<padded.length;i+=64){
+    const w=Array(64);
+    for(let j=0;j<16;j++)w[j]=dv.getUint32(i+j*4,false);
+    for(let j=16;j<64;j++){
+      const s0=rr(w[j-15],7)^rr(w[j-15],18)^(w[j-15]>>>3);
+      const s1=rr(w[j-2],17)^rr(w[j-2],19)^(w[j-2]>>>10);
+      w[j]=(w[j-16]+s0+w[j-7]+s1)|0;
+    }
+    let A=a,B=b,C=c,D=d,E=e,F=f,G=g,H=h;
+    for(let j=0;j<64;j++){
+      const S1=rr(E,6)^rr(E,11)^rr(E,25),ch=(E&F)^(~E&G);
+      const t1=(H+S1+ch+K[j]+w[j])|0;
+      const S0=rr(A,2)^rr(A,13)^rr(A,22),maj=(A&B)^(A&C)^(B&C);
+      const t2=(S0+maj)|0;
+      H=G;G=F;F=E;E=(D+t1)|0;D=C;C=B;B=A;A=(t1+t2)|0;
+    }
+    a=(a+A)|0;b=(b+B)|0;c=(c+C)|0;d=(d+D)|0;
+    e=(e+E)|0;f=(f+F)|0;g=(g+G)|0;h=(h+H)|0;
+  }
+  return[a,b,c,d,e,f,g,h].map(x=>(x>>>0).toString(16).padStart(8,'0')).join('');
+}
+function hashPass(p){return'$h:'+sha256(p);}
+
+// מיגרציה: מצפין סיסמאות קיימות בטקסט רגיל
+function migratePasswords(){
+  let changed=false;
+  S.workers.forEach(w=>{if(w.pass&&!w.pass.startsWith('$h:')){w.pass=hashPass(w.pass);changed=true;}});
+  if(changed)saveLS();
+}
+
+// ─── DAILY RESET ─────────────────────────────────────────────
+function checkDailyReset(){
+  const lastDate=localStorage.getItem('txops3_lastdate');
+  const today=todayStr();
+  if(lastDate&&lastDate!==today){
+    S.workers.forEach(w=>{
+      if(w.status==='in'){
+        const sessions=w.sessions&&w.sessions.length?w.sessions:(w.checkin?[{in:w.checkin,out:null}]:[]);
+        const rec={workerId:w.id,workerName:w.name,dept:w.dept,date:lastDate,
+          sessions,checkin:sessions[0]?.in||w.checkin,checkout:null,
+          breakStart:w.breakStart||'',breakEnd:w.breakEnd||'',breakActive:!!w.breakActive,netMs:calcNetWork(w)};
+        S.attHistory.unshift(rec);
+        if(S.fbConnected)fbSet('attHistory',w.id+'_'+lastDate,rec);
+      }
+      w.status='out';w.checkin=null;w.checkout=null;w.sessions=[];
+    });
+    S.activeTasks.forEach(t=>{
+      S.histTasks.unshift({...t,endTime:new Date(lastDate+'T23:59:59'),
+        duration:Math.round((new Date(lastDate+'T23:59:59')-new Date(t.startTime))/1000)});
+    });
+    S.activeTasks=[];
+    saveLS();
+  }
+  localStorage.setItem('txops3_lastdate',today);
+}
+checkDailyReset();
+migratePasswords();
+migrateToSessions();
+
+// ─── PERMISSIONS ────────────────────────────────────────────
+function applyPerms(w){
+  if(w.role==='manager'){
+    [...ALL_SUPERVISOR_PAGE_IDS,'admin','setup'].forEach(p=>document.getElementById('nb-'+p)?.classList.remove('hidden'));
+  } else {
+    ['admin','setup'].forEach(p=>document.getElementById('nb-'+p)?.classList.add('hidden'));
+    const availPages=w.role==='supervisor'?ALL_SUPERVISOR_PAGE_IDS:ALL_WORKER_PAGE_IDS;
+    const perms=w.permissions||availPages;
+    ALL_SUPERVISOR_PAGE_IDS.forEach(p=>{
+      const btn=document.getElementById('nb-'+p);
+      if(btn){(availPages.includes(p)&&perms.includes(p))?btn.classList.remove('hidden'):btn.classList.add('hidden');}
+    });
+  }
+}
+
+// ─── LOGIN ──────────────────────────────────────────────────
+let loginAttempts=0;let loginLocked=false;let loginLockTimer=null;
+// כניסת חירום — למנהלים בלבד, מוגן ב-hash
+const _EMRG_H='$h:f434da0ecb3e3968e92503d17e29177511eb65394ff0d232f51a5f33a6ce9613';
+function emergencyLogin(){
+  const code=document.getElementById('l-emergency').value.trim();
+  if(hashPass(code)!==_EMRG_H){
+    document.getElementById('l-err').textContent='קוד חירום שגוי';return;
+  }
+  // מחפש את המנהל הראשי ברשימה
+  const mgr=S.workers.find(w=>w.role==='manager')||S.workers[0];
+  if(!mgr){document.getElementById('l-err').textContent='אין מנהלים מוגדרים במערכת';return;}
+  const emergencyUser={...mgr,role:'manager'};
+  S.user=emergencyUser;
+  document.getElementById('login-screen').classList.add('hidden');
+  document.getElementById('app-screen').classList.remove('hidden');
+  document.getElementById('top-name').textContent=mgr.name;
+  document.getElementById('top-role').textContent='מנהל';
+  document.getElementById('top-av').textContent=mgr.name.split(' ').map(n=>n[0]).join('');
+  applyPerms(emergencyUser);
+  document.getElementById('l-err').textContent='';
+  goPage('admin');
+}
+function doLogin(){
+  if(loginLocked){document.getElementById('l-err').textContent='חשבון נעול ל-30 שניות עקב ניסיונות כושלים';return;}
+  const u=document.getElementById('l-user').value.trim();
+  const p=document.getElementById('l-pass').value.trim();
+  if(!u||!p){document.getElementById('l-err').textContent='נא למלא שם משתמש וסיסמה';return;}
+  const ph=hashPass(p);
+  // ניסיון עם hash — אם לא, ניסיון עם טקסט רגיל (מעבר מגרסה ישנה) ושדרוג אוטומטי
+  let w=S.workers.find(x=>x.user===u&&x.pass===ph);
+  if(!w){const wp=S.workers.find(x=>x.user===u&&x.pass===p);if(wp){wp.pass=ph;saveLS();w=wp;}}
+  if(!w){
+    loginAttempts++;
+    if(loginAttempts>=5){
+      loginLocked=true;
+      document.getElementById('l-err').textContent='יותר מדי ניסיונות — חשבון נעול ל-30 שניות';
+      document.getElementById('l-user').disabled=true;
+      document.getElementById('l-pass').disabled=true;
+      loginLockTimer=setTimeout(()=>{loginLocked=false;loginAttempts=0;document.getElementById('l-user').disabled=false;document.getElementById('l-pass').disabled=false;document.getElementById('l-err').textContent='';},30000);
+    } else {
+      document.getElementById('l-err').textContent='שם משתמש או סיסמה שגויים ('+loginAttempts+'/5)';
+    }
+    return;
+  }
+  loginAttempts=0;
+  S.user=w;
+  document.getElementById('login-screen').classList.add('hidden');
+  document.getElementById('app-screen').classList.remove('hidden');
+  document.getElementById('top-name').textContent=w.name;
+  document.getElementById('top-role').textContent=w.role==='manager'?'מנהל':w.role==='supervisor'?'אחראי':'עובד';
+  document.getElementById('top-av').textContent=w.name.split(' ').map(n=>n[0]).join('');
+  applyPerms(w);
+  const firstPage=(w.permissions&&w.permissions.length)?w.permissions[0]:'dash';
+  goPage(w.role==='manager'?'dash':firstPage);
+}
+function doLogout(){
+  S.user=null;
+  [...ALL_WORKER_PAGE_IDS,'admin','mgrtasks','attrep','setup'].forEach(p=>document.getElementById('nb-'+p)?.classList.add('hidden'));
+  document.getElementById('login-screen').classList.remove('hidden');
+  document.getElementById('app-screen').classList.add('hidden');
+  document.getElementById('l-user').value='';
+  document.getElementById('l-pass').value='';
+  document.getElementById('l-err').textContent='';
+}
+
+
+// ─── NAVIGATION ─────────────────────────────────────────────
+function goPage(p){
+  document.querySelectorAll('.page').forEach(el=>el.classList.remove('active'));
+  document.querySelectorAll('.nb').forEach(el=>el.classList.remove('active'));
+  document.getElementById('page-'+p)?.classList.add('active');
+  document.getElementById('nb-'+p)?.classList.add('active');
+  if(p==='dash')renderDash();
+  if(p==='att')renderAtt();
+  if(p==='scan')renderScanActive();
+  if(p==='tasks')renderTasks();
+  if(p==='reports'){
+    const today=todayStr();
+    const monthAgo=new Date();monthAgo.setDate(monthAgo.getDate()-30);
+    const fi=document.getElementById('rf-from');if(fi&&!fi.value)fi.value=monthAgo.toISOString().slice(0,10);
+    const ti=document.getElementById('rf-to');if(ti&&!ti.value)ti.value=today;
+    buildRep();
+  }
+  if(p==='alerts'){checkAlerts();renderAlerts();}
+  if(p==='admin')renderAdmin();
+  if(p==='mgrtasks')renderMgrTasks();
+  if(p==='attrep')initAttRep();
+}
+
+function renderAll(){
+  const pg=document.querySelector('.page.active');
+  if(!pg)return;
+  const id=pg.id.replace('page-','');
+  if(id==='dash')renderDash();
+  if(id==='att')renderAtt();
+  if(id==='scan')renderScanActive();
+  if(id==='tasks')renderTasks();
+  if(id==='reports')buildRep();
+  if(id==='mgrtasks')renderMgrTasks();
+  if(id==='attrep')initAttRep();
+  if(id==='alerts'){checkAlerts();renderAlerts();loadWaSettings();}
+}
+
+// ─── ATTENDANCE REPORT ──────────────────────────────────────
+const DAYS_HE=['ראשון','שני','שלישי','רביעי','חמישי','שישי','שבת'];
+function initAttRep(){
+  const today=todayStr();
+  const monthAgo=new Date();monthAgo.setDate(monthAgo.getDate()-30);
+  const fromStr=monthAgo.toISOString().slice(0,10);
+  const fi=document.getElementById('ar-from');if(fi&&!fi.value)fi.value=fromStr;
+  const ti=document.getElementById('ar-to');if(ti&&!ti.value)ti.value=today;
+  const sel=document.getElementById('ar-worker');
+  if(sel){sel.innerHTML='<option value="">כל העובדים</option>'+S.workers.map(w=>`<option value="${esc(w.id)}">${esc(w.name)}</option>`).join('');}
+  buildAttRep();
+}
+function buildAttRep(){
+  const from=document.getElementById('ar-from')?.value;
+  const to=document.getElementById('ar-to')?.value;
+  const wid=document.getElementById('ar-worker')?.value;
+  // include today's active workers too
+  const todayRecs=S.workers.filter(w=>w.checkin&&w.checkin.slice(0,10)===todayStr()).map(w=>({
+    workerId:w.id,workerName:w.name,dept:w.dept,date:todayStr(),
+    checkin:w.checkin,checkout:w.checkout||null,
+    breakStart:w.breakStart||'',breakEnd:w.breakEnd||'',breakActive:!!w.breakActive,
+    netMs:calcNetWork(w),live:!w.checkout
+  }));
+  const hist=S.attHistory.map(r=>({...r,live:false}));
+  // merge — avoid duplicates for today
+  const allRecs=[...todayRecs,...hist.filter(r=>r.date!==todayStr())];
+  let fl=allRecs;
+  if(from)fl=fl.filter(r=>r.date>=from);
+  if(to)fl=fl.filter(r=>r.date<=to);
+  if(wid)fl=fl.filter(r=>r.workerId===wid);
+  fl.sort((a,b)=>b.date.localeCompare(a.date)||(b.checkin||'').localeCompare(a.checkin||''));
+  const totalMs=fl.reduce((s,r)=>s+r.netMs,0);
+  const uniqueDays=new Set(fl.map(r=>r.date+r.workerId)).size;
+  const uniqueWorkers=new Set(fl.map(r=>r.workerId)).size;
+  document.getElementById('ar-days').textContent=uniqueDays;
+  document.getElementById('ar-total').textContent=fmtNetH(totalMs);
+  document.getElementById('ar-avg').textContent=uniqueDays?fmtNetH(totalMs/uniqueDays):'—';
+  document.getElementById('ar-workers').textContent=uniqueWorkers;
+  const tbody=document.getElementById('ar-body');
+  if(!fl.length){tbody.innerHTML='<tr><td colspan="8" style="text-align:center;color:var(--txt3);padding:1.5rem">אין נתונים לתקופה זו</td></tr>';return;}
+  tbody.innerHTML=fl.map(r=>{
+    const ci=r.checkin?new Date(r.checkin):null;
+    const co=r.checkout?new Date(r.checkout):null;
+    const ciStr=ci?pad2(ci.getHours())+':'+pad2(ci.getMinutes()):'—';
+    const coStr=co?pad2(co.getHours())+':'+pad2(co.getMinutes()):r.live?'<span class="badge green" style="font-size:10px">עדיין בעבודה</span>':'—';
+    const brkStr=r.breakActive&&r.breakStart?`${r.breakStart}–${r.breakEnd}`:'—';
+    const d=new Date(r.date+'T00:00:00');
+    const dayName=DAYS_HE[d.getDay()];
+    const dateHe=pad2(d.getDate())+'/'+pad2(d.getMonth()+1)+'/'+d.getFullYear();
+    return`<tr>
+      <td><strong>${esc(r.workerName)}</strong></td>
+      <td>${esc(r.dept)}</td>
+      <td>${dateHe}</td>
+      <td>${dayName}</td>
+      <td>${ciStr}</td>
+      <td>${coStr}</td>
+      <td style="font-size:11px;color:var(--txt3)">${brkStr}</td>
+      <td><strong style="color:var(--blue-txt)">${fmtNetH(r.netMs)}</strong></td>
+    </tr>`;
+  }).join('');
+}
+function exportAttCSV(){
+  const from=document.getElementById('ar-from')?.value;
+  const to=document.getElementById('ar-to')?.value;
+  const wid=document.getElementById('ar-worker')?.value;
+  const todayRecs=S.workers.filter(w=>w.checkin).map(w=>({workerId:w.id,workerName:w.name,dept:w.dept,date:w.checkin?.slice(0,10)||todayStr(),checkin:w.checkin,checkout:w.checkout||null,breakStart:w.breakStart||'',breakEnd:w.breakEnd||'',breakActive:!!w.breakActive,netMs:calcNetWork(w)}));
+  let fl=[...todayRecs,...S.attHistory.filter(r=>!todayRecs.find(t=>t.date===r.date&&t.workerId===r.workerId))];
+  if(from)fl=fl.filter(r=>r.date>=from);
+  if(to)fl=fl.filter(r=>r.date<=to);
+  if(wid)fl=fl.filter(r=>r.workerId===wid);
+  fl.sort((a,b)=>b.date.localeCompare(a.date));
+  const rows=[['עובד','מחלקה','תאריך','יום','כניסה','יציאה','הפסקה מ','הפסקה עד','שעות נטו']];
+  fl.forEach(r=>{
+    const ci=r.checkin?new Date(r.checkin):null;
+    const co=r.checkout?new Date(r.checkout):null;
+    const d=new Date(r.date+'T00:00:00');
+    rows.push([r.workerName,r.dept,pad2(d.getDate())+'/'+pad2(d.getMonth()+1)+'/'+d.getFullYear(),DAYS_HE[d.getDay()],ci?pad2(ci.getHours())+':'+pad2(ci.getMinutes()):'',co?pad2(co.getHours())+':'+pad2(co.getMinutes()):'',r.breakActive?r.breakStart:'',r.breakActive?r.breakEnd:'',fmtNetH(r.netMs)]);
+  });
+  const csv='\uFEFF'+rows.map(r=>r.join(',')).join('\n');
+  const a=document.createElement('a');a.href='data:text/csv;charset=utf-8,'+encodeURIComponent(csv);
+  a.download='נוכחות_'+new Date().toLocaleDateString('he-IL').replace(/\//g,'-')+'.csv';a.click();
+}
+
+// ─── ATTENDANCE ──────────────────────────────────────────────
+async function punchIn(){
+  if(!S.user)return;
+  const w=S.workers.find(x=>x.id===S.user.id);
+  if(!w)return;
+  if(!w.sessions)w.sessions=[];
+  if(w.sessions.find(s=>!s.out)){document.getElementById('att-msg').textContent='כבר רשום/ת כנוכח/ת';return;}
+  const now=new Date();
+  w.sessions.push({in:now.toISOString(),out:null});
+  w.status='in';
+  w.checkin=w.sessions[0].in;
+  if(S.fbConnected)await fbSet('workers',w.id,w);
+  saveLS();renderAtt();
+  document.getElementById('att-msg').textContent='✅ כניסה '+(w.sessions.length>1?w.sessions.length+': ':'')+pad2(now.getHours())+':'+pad2(now.getMinutes());
+}
+async function punchOut(){
+  if(!S.user)return;
+  const w=S.workers.find(x=>x.id===S.user.id);
+  if(!w)return;
+  if(!w.sessions)w.sessions=[];
+  const openIdx=w.sessions.findIndex(s=>!s.out);
+  if(openIdx===-1){document.getElementById('att-msg').textContent='כבר רשום/ת כיצא/ה';return;}
+  const now=new Date();
+  w.sessions[openIdx].out=now.toISOString();
+  w.status='out';
+  w.checkout=now.toISOString();
+  const myTasks=S.activeTasks.filter(t=>t.workerId===w.id);
+  for(const t of myTasks){
+    const done={...t,endTime:now,duration:Math.round((now-new Date(t.startTime))/1000)};
+    S.histTasks.unshift(done);
+    S.activeTasks=S.activeTasks.filter(x=>x.id!==t.id);
+    if(S.fbConnected){await fbDel('activeTasks',String(t.id));await fbSet('histTasks',String(t.id),{...done,startTime:done.startTime instanceof Date?done.startTime.toISOString():done.startTime,endTime:done.endTime.toISOString()});}
+  }
+  const netMs=calcNetWork(w);
+  const rec={workerId:w.id,workerName:w.name,dept:w.dept,date:todayStr(),sessions:w.sessions,checkin:w.sessions[0]?.in||'',checkout:now.toISOString(),breakStart:w.breakStart||'',breakEnd:w.breakEnd||'',breakActive:!!w.breakActive,netMs};
+  S.attHistory.unshift(rec);
+  if(S.fbConnected){await fbSet('workers',w.id,w);await fbSet('attHistory',w.id+'_'+todayStr(),rec);}
+  saveLS();renderAtt();
+  document.getElementById('att-msg').textContent='🚪 יציאה: '+pad2(now.getHours())+':'+pad2(now.getMinutes())+(myTasks.length?' | '+myTasks.length+' משימות נסגרו':'');
+}
+function calcNetWorkRaw(checkin,checkout,breakActive,breakStart,breakEnd,refDate){
+  if(!checkin)return 0;
+  const ci=new Date(checkin).getTime();
+  const co=checkout?new Date(checkout).getTime():Date.now();
+  let total=co-ci;
+  if(breakActive&&breakStart&&breakEnd){
+    const ref=new Date(refDate||checkin).toDateString();
+    const bs=new Date(ref+' '+breakStart).getTime();
+    const be=new Date(ref+' '+breakEnd).getTime();
+    if(be>bs){const os=Math.max(ci,bs);const oe=Math.min(co,be);if(oe>os)total-=(oe-os);}
+  }
+  return Math.max(0,total);
+}
+function calcNetWork(w){
+  const sessions=w.sessions&&w.sessions.length?w.sessions:
+    (w.checkin?[{in:w.checkin,out:w.checkout||null}]:[]);
+  if(!sessions.length)return 0;
+  let total=0;
+  sessions.forEach(s=>{
+    const ci=new Date(s.in).getTime();
+    const co=s.out?new Date(s.out).getTime():Date.now();
+    let dur=co-ci;
+    if(w.breakActive&&w.breakStart&&w.breakEnd){
+      const ref=new Date(s.in).toDateString();
+      const bs=new Date(ref+' '+w.breakStart).getTime();
+      const be=new Date(ref+' '+w.breakEnd).getTime();
+      if(be>bs){const os=Math.max(ci,bs);const oe=Math.min(co,be);if(oe>os)dur-=(oe-os);}
+    }
+    total+=Math.max(0,dur);
+  });
+  return total;
+}
+// מיגרציה: עובדים ישנים ללא sessions
+function migrateToSessions(){
+  S.workers.forEach(w=>{
+    if(!w.sessions){
+      w.sessions=w.checkin?[{in:w.checkin,out:w.checkout||null}]:[];
+    }
+  });
+}
+function fmtNetH(ms){
+  if(!ms)return '—';
+  const mins=Math.floor(ms/60000);
+  if(mins<60)return mins+"'";
+  return Math.floor(mins/60)+':'+(mins%60).toString().padStart(2,'0');
+}
+function fAtt(f){S.attFilter=f;renderAtt();}
+function renderAtt(){
+  const inW=S.workers.filter(w=>w.status==='in');
+  const outW=S.workers.filter(w=>w.status==='out');
+  document.getElementById('att-in').textContent=inW.length;
+  document.getElementById('att-out').textContent=outW.length;
+  const totalNet=S.workers.filter(w=>w.checkin).reduce((s,w)=>s+calcNetWork(w),0);
+  const tnEl=document.getElementById('att-total-net');
+  if(tnEl)tnEl.textContent=fmtNetH(totalNet)||'—';
+  const list=S.attFilter==='all'?S.workers:S.attFilter==='in'?inW:outW;
+  document.getElementById('att-list').innerHTML=list.map(w=>{
+    const sessions=w.sessions&&w.sessions.length?w.sessions:(w.checkin?[{in:w.checkin,out:w.checkout||null}]:[]);
+    const netMs=calcNetWork(w);
+    const netStr=fmtNetH(netMs);
+    const brkStr=w.breakActive?`${w.breakStart||''}–${w.breakEnd||''}`:null;
+    const roleLabel=w.role==='manager'?'<span class="badge blue" style="font-size:10px">מנהל</span>':w.role==='supervisor'?'<span class="badge amber" style="font-size:10px">אחראי</span>':'';
+    const sessionsHtml=sessions.map((s,i)=>{
+      const ci=new Date(s.in);const co=s.out?new Date(s.out):null;
+      return`<span style="font-size:10px;color:var(--txt3)">${i+1}. ▶${pad2(ci.getHours())}:${pad2(ci.getMinutes())} ${co?'◀'+pad2(co.getHours())+':'+pad2(co.getMinutes()):'<span style="color:var(--green-txt)">בעבודה</span>'}</span>`;
+    }).join('<br/>');
+    return`<div class="row">
+      <div class="av" style="width:30px;height:30px;font-size:10px">${esc(w.name.split(' ').map(n=>n[0]).join(''))}</div>
+      <div style="flex:1">
+        <div style="font-size:13px;font-weight:500;color:var(--txt)">${esc(w.name)} ${roleLabel}</div>
+        <div style="font-size:11px;color:var(--txt3)">${esc(w.dept)}${brkStr?` · הפסקה ${brkStr}`:''}</div>
+        ${sessions.length>1?`<div style="margin-top:3px;line-height:1.8">${sessionsHtml}</div>`:''}
+      </div>
+      <div style="text-align:center;min-width:110px">
+        <span class="badge ${w.status==='in'?'green':'red'}">${w.status==='in'?'<span class="pulse"></span> בעבודה':'יצא/ה'}</span>
+        ${sessions.length===1?`<div style="font-size:11px;color:var(--txt3);margin-top:3px;display:flex;gap:6px;justify-content:center">
+          <span>▶ ${pad2(new Date(sessions[0].in).getHours())}:${pad2(new Date(sessions[0].in).getMinutes())}</span>
+          <span>◀ ${sessions[0].out?pad2(new Date(sessions[0].out).getHours())+':'+pad2(new Date(sessions[0].out).getMinutes()):'—'}</span>
+        </div>`:`<div style="font-size:10px;color:var(--txt2);margin-top:2px">${sessions.length} כניסות</div>`}
+        <div style="font-size:11px;color:var(--blue-txt);font-weight:500;margin-top:2px">⏱ ${netStr}</div>
+      </div></div>`;
+  }).join('');
+}
+
+// ─── BARCODE ────────────────────────────────────────────────
+function parseBc(v){
+  v=(v||'').replace(/\D/g,'');
+  const el=document.getElementById('bc-prev');
+  if(v.length<2){el.innerHTML='';return;}
+  const c=v.slice(0,2),p=v.slice(2,7),q=v.slice(7,10),col=v.slice(10,12);
+  el.innerHTML=`<div style="display:flex;gap:5px;flex-wrap:wrap;align-items:center;padding:8px;background:var(--bg2);border-radius:var(--r)">
+    <span class="bc-seg bc-c">לקוח: ${c||'__'}</span>
+    <span class="bc-seg bc-p">מוצר: ${p.padEnd(5,'_')}</span>
+    <span class="bc-seg bc-q">כמות: ${q.padEnd(3,'_')}</span>
+    <span class="bc-seg bc-col">צבע: ${COLORS[col]||col||'__'}</span>
+  </div>`;
+}
+function tryDemo(){
+  document.getElementById('bc-inp').value='071004202503';
+  parseBc('071004202503');
+  document.getElementById('bc-inp').focus();
+}
+async function submitBc(){
+  const raw=(document.getElementById('bc-inp').value||'').replace(/\D/g,'');
+  if(raw.length!==12){alert('ברקוד חייב להיות 12 ספרות בדיוק');return;}
+  if(!S.user){alert('יש להתחבר תחילה');return;}
+  const cust=raw.slice(0,2),prod=raw.slice(2,7),qty=parseInt(raw.slice(7,10))||0,col=raw.slice(10,12);
+  const taskType=(document.getElementById('bc-tasktype').value||'').trim();
+  const u=S.user;
+  const wu=S.workers.find(x=>x.id===u.id);
+  if(!wu||wu.status!=='in'){alert('לא ניתן להתחיל משימה — יש להירשם כנוכח תחילה (כניסה לעבודה בלשונית נוכחות)');return;}
+  // close existing task for this worker
+  const existIdx=S.activeTasks.findIndex(t=>t.workerId===u.id);
+  if(existIdx>-1){
+    const t=S.activeTasks[existIdx];
+    const endTime=new Date();
+    const done={...t,endTime,duration:Math.round((endTime-new Date(t.startTime))/1000)};
+    S.histTasks.unshift(done);
+    S.activeTasks.splice(existIdx,1);
+    if(S.fbConnected){await fbDel('activeTasks',String(t.id));await fbSet('histTasks',String(t.id),{...done,startTime:done.startTime instanceof Date?done.startTime.toISOString():done.startTime,endTime:done.endTime.toISOString()});}
+  }
+  const newTask={id:String(S.nextTId++),workerId:u.id,workerName:u.name,dept:u.dept,cust,prod,qty,col,taskType,startTime:new Date(),elapsed:0};
+  S.activeTasks.unshift(newTask);
+  if(S.fbConnected)await fbSet('activeTasks',newTask.id,{...newTask,startTime:newTask.startTime.toISOString()});
+  document.getElementById('bc-inp').value='';parseBc('');
+  document.getElementById('bc-tasktype').value='';
+  saveLS();renderScanActive();renderTasks();goPage('tasks');
+}
+function renderScanActive(){
+  const el=document.getElementById('scan-active');if(!el)return;
+  if(!S.activeTasks.length){el.innerHTML='<div style="text-align:center;padding:2rem;color:var(--txt3)">📭 אין משימות פעילות</div>';return;}
+  el.innerHTML=S.activeTasks.slice(0,8).map(t=>`
+    <div class="task-card">
+      <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:6px">
+        <div><div style="font-size:13px;font-weight:500;color:var(--txt)">${esc(t.workerName)}</div><div style="font-size:11px;color:var(--txt3)">${esc(t.dept)}</div></div>
+        <span class="badge green"><span class="pulse"></span> פעיל</span>
+      </div>
+      <div style="display:flex;gap:4px;flex-wrap:wrap">
+        <span class="bc-seg bc-c">${t.cust}</span><span class="bc-seg bc-p">${t.prod}</span><span class="bc-seg bc-q">${t.qty}</span><span class="bc-seg bc-col">${COLORS[t.col]||t.col}</span>
+        ${t.taskType?`<span class="badge gray">📋 ${esc(t.taskType)}</span>`:''}
+      </div>
+    </div>`).join('');
+}
+
+// ─── TASKS ──────────────────────────────────────────────────
+function renderTasks(){
+  document.getElementById('tk-act').textContent=S.activeTasks.length;
+  document.getElementById('tk-done').textContent=S.histTasks.length;
+  document.getElementById('tk-units').textContent=S.histTasks.reduce((s,t)=>s+t.qty,0);
+  if(S.histTasks.length){
+    const avg=Math.round(S.histTasks.reduce((s,t)=>s+(t.duration||0),0)/S.histTasks.length);
+    document.getElementById('tk-avg').textContent=fmtM(avg);
+  }
+  const thresh=S.settings.thresh*60;
+  const al=document.getElementById('tk-active-list');
+  if(!S.activeTasks.length){al.innerHTML='<div style="text-align:center;padding:2rem;color:var(--txt3)">📷 סרוק ברקוד להתחלת משימה</div>';}
+  else{al.innerHTML=S.activeTasks.map(t=>{
+    const over=t.elapsed>thresh;
+    return`<div class="task-card">
+      <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:6px">
+        <div><div style="font-size:13px;font-weight:500;color:var(--txt)">${esc(t.workerName)}</div><div style="font-size:11px;color:var(--txt3)">${esc(t.dept)}</div></div>
+        <div style="display:flex;align-items:center;gap:6px">
+          <div class="task-tmr ${over?'over':''}" id="tmr-${t.id}">${fmtS(t.elapsed||0)}</div>
+          ${(S.user?.role==='manager'||S.user?.role==='supervisor')?`<button class="btn" style="font-size:11px;padding:3px 8px" onclick="openEditTask('${t.id}')" title="עריכת משימה">✏️</button>`:''}
+        </div>
+      </div>
+      <div style="display:flex;gap:4px;flex-wrap:wrap">
+        <span class="bc-seg bc-c">לקוח ${t.cust}</span><span class="bc-seg bc-p">${t.prod}</span><span class="bc-seg bc-q">${t.qty} יח'</span><span class="bc-seg bc-col">${COLORS[t.col]||t.col}</span>
+        ${t.taskType?`<span class="badge gray">📋 ${esc(t.taskType)}</span>`:''}
+        ${over?'<span class="badge amber">⚠ ארוכה</span>':''}
+      </div></div>`;
+  }).join('');}
+  document.getElementById('tk-hist').innerHTML=S.histTasks.slice(0,8).map(t=>{
+    const st=new Date(t.startTime);const et=t.endTime?new Date(t.endTime):null;
+    const stStr=pad2(st.getHours())+':'+pad2(st.getMinutes());
+    const etStr=et?pad2(et.getHours())+':'+pad2(et.getMinutes()):'—';
+    return`<div class="row">
+      <div style="flex:1"><div style="font-size:12px;font-weight:500;color:var(--txt)">${esc(t.workerName)}</div>
+      <div style="font-size:11px;color:var(--txt3)">לקוח ${t.cust} | ${t.prod} | ${t.qty} יח' | ${COLORS[t.col]||t.col}${t.taskType?' | 📋 '+esc(t.taskType):''}</div>
+      <div style="font-size:11px;color:var(--txt3)">▶ ${stStr} → ◀ ${etStr}</div></div>
+      <div style="display:flex;align-items:center;gap:6px">
+        <span class="badge blue">${fmtM(t.duration||0)}</span>
+        ${(S.user?.role==='manager'||S.user?.role==='supervisor')?`<button class="btn" style="font-size:11px;padding:3px 8px" onclick="openEditTask('${t.id}',true)" title="עריכה">✏️</button>`:''}
+      </div>
+    </div>`;
+  }).join('')||'<div style="color:var(--txt3);font-size:12px;padding:.75rem 0;text-align:center">אין היסטוריה עדיין</div>';
+}
+
+// ─── TIMER TICK ─────────────────────────────────────────────
+setInterval(()=>{
+  if(document.hidden)return;
+  S.activeTasks.forEach(t=>{
+    t.elapsed=Math.round((Date.now()-new Date(t.startTime))/1000);
+    const el=document.getElementById('tmr-'+t.id);if(el)el.textContent=fmtS(t.elapsed);
+    const thresh=S.settings.thresh*60;
+    if(el){el.className='task-tmr'+(t.elapsed>thresh?' over':'');}
+  });
+  // live net hours update in attendance
+  const tnEl=document.getElementById('att-total-net');
+  if(tnEl){const totalNet=S.workers.filter(w=>w.checkin).reduce((s,w)=>s+calcNetWork(w),0);tnEl.textContent=fmtNetH(totalNet)||'—';}
+  checkAlerts();
+},1000);
+
+// ─── REPORTS ────────────────────────────────────────────────
+function buildRep(){
+  const wf=document.getElementById('rf-w').value;
+  const cf=document.getElementById('rf-c').value;
+  const pf=document.getElementById('rf-p').value;
+  const fromD=document.getElementById('rf-from')?.value||'';
+  const toD=document.getElementById('rf-to')?.value||'';
+  const all=[...S.activeTasks.map(t=>({...t,done:false})),...S.histTasks.map(t=>({...t,done:true}))];
+  const fl=all.filter(t=>{
+    const d=new Date(t.startTime).toISOString().slice(0,10);
+    return(!wf||t.workerName===wf)&&(!cf||t.cust===cf)&&(!pf||t.prod===pf)&&(!fromD||d>=fromD)&&(!toD||d<=toD);
+  });
+  document.getElementById('rp-tot').textContent=fl.length;
+  const totalS=fl.reduce((s,t)=>s+(t.duration||t.elapsed||0),0);
+  document.getElementById('rp-time').textContent=(totalS/3600).toFixed(1)+" שע'";
+  document.getElementById('rp-units').textContent=fl.reduce((s,t)=>s+t.qty,0);
+  const done=fl.filter(t=>t.done).length;
+  document.getElementById('rp-eff').textContent=fl.length?Math.round(done/fl.length*100)+'%':'—';
+  document.getElementById('rp-body').innerHTML=fl.map(t=>{
+    const st=new Date(t.startTime);
+    const stStr=pad2(st.getHours())+':'+pad2(st.getMinutes());
+    const et=t.endTime?new Date(t.endTime):null;
+    const etStr=et?pad2(et.getHours())+':'+pad2(et.getMinutes()):'—';
+    return`<tr><td>${esc(t.workerName)}</td><td>${esc(t.dept)}</td>
+    <td>${esc(t.taskType||'—')}</td>
+    <td><span class="bc-seg bc-c">${t.cust}</span></td>
+    <td><span class="bc-seg bc-p">${t.prod}</span></td>
+    <td>${t.qty}</td><td>${COLORS[t.col]||t.col}</td>
+    <td>${stStr}</td><td>${etStr}</td>
+    <td>${t.done?fmtM(t.duration||0):'<span class="badge amber">'+fmtS(t.elapsed||0)+'</span>'}</td>
+    <td><span class="badge ${t.done?'green':'blue'}">${t.done?'הושלם':'פעיל'}</span></td></tr>`;
+  }).join('');
+  // update filters
+  const wOpts=[...new Set(all.map(t=>t.workerName))];
+  const cOpts=[...new Set(all.map(t=>t.cust))];
+  const pOpts=[...new Set(all.map(t=>t.prod))];
+  const rfw=document.getElementById('rf-w');const rfc=document.getElementById('rf-c');const rfp=document.getElementById('rf-p');
+  rfw.innerHTML='<option value="">כל העובדים</option>'+wOpts.map(w=>`<option value="${esc(w)}" ${w===wf?'selected':''}>${esc(w)}</option>`).join('');
+  rfc.innerHTML='<option value="">כל הלקוחות</option>'+cOpts.map(c=>`<option value="${c}" ${c===cf?'selected':''}>לקוח ${c}</option>`).join('');
+  rfp.innerHTML='<option value="">כל המוצרים</option>'+pOpts.map(p=>`<option value="${p}" ${p===pf?'selected':''}>מוצר ${p}</option>`).join('');
+}
+function exportCSV(){
+  const fromD=document.getElementById('rf-from')?.value||'';
+  const toD=document.getElementById('rf-to')?.value||'';
+  const wf=document.getElementById('rf-w').value;
+  const cf=document.getElementById('rf-c').value;
+  const pf=document.getElementById('rf-p').value;
+  const allRaw=[...S.activeTasks.map(t=>({...t,done:false})),...S.histTasks.map(t=>({...t,done:true}))];
+  const all=allRaw.filter(t=>{
+    const d=new Date(t.startTime).toISOString().slice(0,10);
+    return(!wf||t.workerName===wf)&&(!cf||t.cust===cf)&&(!pf||t.prod===pf)&&(!fromD||d>=fromD)&&(!toD||d<=toD);
+  });
+  const rows=[['עובד','מחלקה','לקוח','מוצר','כמות','צבע','שעת התחלה','שעת סיום','משך (דק)','סטטוס','תאריך']];
+  all.forEach(t=>{
+    const d=new Date(t.startTime);
+    const et=t.endTime?new Date(t.endTime):null;
+    const stStr=pad2(d.getHours())+':'+pad2(d.getMinutes());
+    const etStr=et?pad2(et.getHours())+':'+pad2(et.getMinutes()):'—';
+    rows.push([t.workerName,t.dept,t.cust,t.prod,t.qty,COLORS[t.col]||t.col,stStr,etStr,t.done?Math.round((t.duration||0)/60):Math.round((t.elapsed||0)/60),t.done?'הושלם':'פעיל',d.toLocaleDateString('he-IL')]);
+  });
+  const csv='\uFEFF'+rows.map(r=>r.join(',')).join('\n');
+  const a=document.createElement('a');a.href='data:text/csv;charset=utf-8,'+encodeURIComponent(csv);
+  a.download='TextileOps_'+new Date().toLocaleDateString('he-IL').replace(/\//g,'-')+'.csv';a.click();
+}
+
+// ─── ALERTS ─────────────────────────────────────────────────
+function checkAlerts(){
+  const thresh=(parseInt(document.getElementById('al-thresh')?.value)||60)*60;
+  const absThresh=parseInt(document.getElementById('al-absent')?.value)||5;
+  S.alerts=[];
+  S.activeTasks.forEach(t=>{
+    if(t.elapsed>thresh)S.alerts.push({type:'long',msg:`${t.workerName} — ${fmtM(t.elapsed)} על לקוח ${t.cust} מוצר ${t.prod}`,sev:'warn'});
+  });
+  const abs=S.workers.filter(w=>w.status==='out').length;
+  if(abs>=absThresh)S.alerts.push({type:'absent',msg:`${abs} עובדים נעדרים היום`,sev:'err'});
+  const cnt=S.alerts.length;
+  const el=document.getElementById('al-cnt');
+  if(el){el.textContent=cnt;cnt>0?el.classList.remove('hidden'):el.classList.add('hidden');}
+  const s=document.getElementById('al-sum');if(s)s.textContent=cnt;
+  const lg=document.getElementById('al-long');if(lg)lg.textContent=S.alerts.filter(a=>a.type==='long').length;
+  const ab=document.getElementById('al-abs');if(ab)ab.textContent=S.alerts.filter(a=>a.type==='absent').length;
+  // שליחת WhatsApp אוטומטית
+  const ws=S.settings;
+  if(ws.waEnabled&&cnt>0&&waInWorkingHours()){
+    const nowMs=Date.now();
+    const intervalMs=(ws.waInterval||60)*60*1000;
+    if(nowMs-S.waLastSent>=intervalMs){
+      const lines=S.alerts
+        .filter(a=>(a.type==='long'&&ws.waLong)||(a.type==='absent'&&ws.waAbsent))
+        .map(a=>(a.type==='long'?'⏰ ':'👤 ')+a.msg);
+      if(lines.length){
+        const msg='TextileOps — התראות:\n'+lines.join('\n');
+        sendTelegram(msg).then(ok=>{
+          if(ok){S.waLastSent=nowMs;const st=document.getElementById('wa-status');if(st){st.textContent='✅ נשלח '+new Date().toLocaleTimeString('he-IL');st.style.color='var(--green-txt)';}}
+        });
+      }
+    }
+  }
+}
+function renderAlerts(){
+  const el=document.getElementById('alerts-list');if(!el)return;
+  if(!S.alerts.length){el.innerHTML='<div style="text-align:center;padding:1.5rem;color:var(--txt3)">✅ אין התראות פעילות</div>';return;}
+  el.innerHTML=S.alerts.map(a=>`<div class="al-item ${a.sev}"><div style="font-size:20px">${a.type==='long'?'⏰':'👤'}</div><div style="font-size:13px;font-weight:500;color:var(--txt)">${esc(a.msg)}</div></div>`).join('');
+}
+function saveSettings(){
+  S.settings.thresh=parseInt(document.getElementById('al-thresh').value)||60;
+  S.settings.absent=parseInt(document.getElementById('al-absent').value)||5;
+  S.settings.waEnabled=document.getElementById('wa-enabled')?.checked||false;
+  S.settings.waToken=document.getElementById('wa-token')?.value||'';
+  S.settings.waChatId=document.getElementById('wa-chatid')?.value||'';
+  S.settings.waInterval=parseInt(document.getElementById('wa-interval')?.value)||60;
+  S.settings.waFrom=document.getElementById('wa-from')?.value||'07:00';
+  S.settings.waTo=document.getElementById('wa-to')?.value||'18:00';
+  S.settings.waLong=document.getElementById('wa-long')?.checked??true;
+  S.settings.waAbsent=document.getElementById('wa-absent')?.checked??true;
+  saveLS();
+}
+function loadWaSettings(){
+  const s=S.settings;
+  const set=(id,v)=>{const el=document.getElementById(id);if(!el)return;if(el.type==='checkbox')el.checked=v;else el.value=v;};
+  set('wa-enabled',s.waEnabled||false);
+  set('wa-token',s.waToken||'8951263333:AAG8f4cKR3Y0Cxw_KvKA4HNSeh2vdRR0fMw');
+  set('wa-chatid',s.waChatId||'1019589316');
+  set('wa-interval',s.waInterval||60);
+  set('wa-from',s.waFrom||'07:00');
+  set('wa-to',s.waTo||'18:00');
+  set('wa-long',s.waLong??true);
+  set('wa-absent',s.waAbsent??true);
+}
+async function sendTelegram(message){
+  const s=S.settings;
+  const token=s.waToken||'8951263333:AAG8f4cKR3Y0Cxw_KvKA4HNSeh2vdRR0fMw';
+  const chatId=s.waChatId||'1019589316';
+  if(!token||!chatId)return false;
+  try{
+    const res=await fetch(`https://api.telegram.org/bot${token}/sendMessage`,{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({chat_id:chatId,text:message})});
+    return res.ok;
+  }catch(e){return false;}
+}
+async function testWhatsApp(){
+  const st=document.getElementById('wa-status');
+  st.textContent='שולח...';st.style.color='var(--amber-txt)';
+  const ok=await sendTelegram('✅ TextileOps — הודעת בדיקה. החיבור עובד!');
+  st.textContent=ok?'✅ נשלח בהצלחה':'❌ שגיאה — בדוק Token ו-Chat ID';
+  st.style.color=ok?'var(--green-txt)':'var(--red-txt)';
+  setTimeout(()=>st.textContent='',5000);
+}
+function waInWorkingHours(){
+  const now=new Date();
+  const cur=pad2(now.getHours())+':'+pad2(now.getMinutes());
+  const from=S.settings.waFrom||'07:00';
+  const to=S.settings.waTo||'18:00';
+  return cur>=from&&cur<=to;
+}
+
+// ─── DASHBOARD ──────────────────────────────────────────────
+function renderDash(){
+  const inW=S.workers.filter(w=>w.status==='in');
+  document.getElementById('d-active').textContent=inW.length;
+  document.getElementById('d-total-sub').textContent='מתוך '+S.workers.length+' עובדים';
+  document.getElementById('d-tasks').textContent=S.activeTasks.length;
+  document.getElementById('d-done').textContent=S.histTasks.length;
+  const total=S.activeTasks.length+S.histTasks.length;
+  const goal=total?Math.min(100,Math.round(S.histTasks.length/total*100)):0;
+  document.getElementById('d-goal').textContent=goal+'%';
+  document.getElementById('d-goal-bar').style.width=goal+'%';
+  const dc={};S.depts.forEach(d=>{dc[d]={in:0,total:0}});
+  S.workers.forEach(w=>{if(dc[w.dept]){dc[w.dept].total++;if(w.status==='in')dc[w.dept].in++;}});
+  document.getElementById('d-depts').innerHTML=S.depts.map(d=>`
+    <div class="row">
+      <span style="width:7px;height:7px;border-radius:50%;background:${dc[d].in>0?'#1D9E75':'#E24B4A'};display:inline-block;flex-shrink:0"></span>
+      <span style="flex:1;font-size:13px">${esc(d)}</span>
+      <span style="font-size:12px;color:var(--txt2)">${dc[d].in}/${dc[d].total}</span>
+      <div class="pbar" style="width:60px;margin:0"><div class="pfill" style="width:${dc[d].total?Math.round(dc[d].in/dc[d].total*100):0}%"></div></div>
+    </div>`).join('');
+  checkAlerts();
+  const dp=document.getElementById('d-alerts-prev');
+  if(!S.alerts.length)dp.innerHTML='<div style="color:var(--green-txt);font-size:13px;padding:.5rem 0">✅ אין התראות</div>';
+  else dp.innerHTML=S.alerts.slice(0,3).map(a=>`<div class="al-item ${a.sev}" style="margin-bottom:4px"><div>${a.type==='long'?'⏰':'👤'}</div><div style="font-size:12px">${esc(a.msg)}</div></div>`).join('');
+  const recent=[...S.histTasks.slice(0,3),...S.activeTasks.slice(0,2)].slice(0,4);
+  document.getElementById('d-recent').innerHTML=recent.map(t=>`
+    <div class="row">
+      <div style="flex:1"><span style="font-size:13px;font-weight:500">${esc(t.workerName)}</span>
+      <span class="badge ${t.endTime?'green':'blue'}" style="margin-right:6px">${t.endTime?'הושלם':'פעיל'}</span>
+      <div style="font-size:11px;color:var(--txt3)">לקוח ${t.cust} · מוצר ${t.prod} · ${t.qty} יח' · ${COLORS[t.col]||t.col}</div></div>
+      <span style="font-size:12px;color:var(--txt2)">${t.endTime?fmtM(t.duration||0):fmtS(t.elapsed||0)}</span>
+    </div>`).join('');
+}
+
+// ─── MANAGER TASKS ──────────────────────────────────────────
+function renderMgrTasks(){
+  if(S.user?.role!=='manager')return;
+  // נוכחות עובדים
+  const al=document.getElementById('mgr-att-list');
+  if(al){
+    al.innerHTML=S.workers.map(w=>{
+      const isIn=w.status==='in';
+      const ci=w.checkin?new Date(w.checkin):null;
+      const co=w.checkout?new Date(w.checkout):null;
+      const ciStr=ci?pad2(ci.getHours())+':'+pad2(ci.getMinutes()):'—';
+      const coStr=co?pad2(co.getHours())+':'+pad2(co.getMinutes()):'—';
+      const netMs=calcNetWork(w);
+      return`<div class="row" style="flex-wrap:wrap;gap:8px">
+        <div class="av" style="width:30px;height:30px;font-size:10px;flex-shrink:0">${esc(w.name.split(' ').map(n=>n[0]).join(''))}</div>
+        <div style="flex:1;min-width:100px">
+          <div style="font-size:13px;font-weight:500">${esc(w.name)}</div>
+          <div style="font-size:11px;color:var(--txt3)">${esc(w.dept)} · ▶${ciStr} ◀${coStr} · <span style="color:var(--blue-txt)">${netMs?fmtNetH(netMs):''}</span></div>
+        </div>
+        <span class="badge ${isIn?'green':'red'}" style="align-self:center">${isIn?'<span class="pulse"></span> בעבודה':'יצא/ה'}</span>
+        ${!isIn&&!w.checkin?`<button class="btn success" style="font-size:11px;padding:5px 12px" onclick="mgrPunchIn('${w.id}')">✅ כניסה</button>`:''}
+        ${isIn?`<button class="btn danger" style="font-size:11px;padding:5px 12px" onclick="mgrPunchOut('${w.id}')">🚪 יציאה</button>`:''}
+        ${w.checkout?`<button class="btn" style="font-size:11px;padding:5px 12px" onclick="mgrPunchIn('${w.id}')">↩ חזר</button>`:''}
+        <button class="btn" style="font-size:11px;padding:5px 10px" onclick="mgrEditAtt('${w.id}')" title="עריכת שעות">✏️</button>
+      </div>`;
+    }).join('');
+  }
+  // populate worker select
+  const sel=document.getElementById('mgr-emp-sel');
+  if(sel){
+    const prev=sel.value;
+    sel.innerHTML='<option value="">בחר עובד...</option>'+S.workers.filter(w=>w.status==='in').map(w=>`<option value="${esc(w.id)}">${esc(w.name)} (${esc(w.dept)})</option>`).join('');
+    if(prev)sel.value=prev;
+  }
+  // active tasks list
+  const el=document.getElementById('mgr-active-tasks-list');
+  if(el){
+    if(!S.activeTasks.length){el.innerHTML='<div style="color:var(--txt3);font-size:12px;padding:1rem 0;text-align:center">אין משימות פעילות</div>';}
+    else{el.innerHTML=S.activeTasks.map(t=>`
+      <div class="row">
+        <div style="flex:1">
+          <div style="font-size:13px;font-weight:500">${esc(t.workerName)}</div>
+          <div style="font-size:11px;color:var(--txt3)">לקוח ${t.cust} | ${t.prod} | ${t.qty} יח'</div>
+          <div style="font-size:11px;color:var(--txt3)">▶ ${(()=>{const d=new Date(t.startTime);return pad2(d.getHours())+':'+pad2(d.getMinutes());})()}</div>
+        </div>
+        <div style="display:flex;gap:4px">
+          <button class="btn" style="font-size:11px;padding:4px 10px" onclick="openEditTask('${t.id}')">✏️ ערוך</button>
+          <button class="btn danger" style="font-size:11px;padding:4px 10px" onclick="mgrEndTask('${t.id}')">⏹ סיים</button>
+        </div>
+      </div>`).join('');}
+  }
+  // breaks list
+  const bl=document.getElementById('mgr-breaks-list');
+  if(bl){
+    bl.innerHTML=S.workers.map(w=>`
+      <div class="row" style="flex-wrap:wrap;gap:6px">
+        <div style="min-width:120px"><div style="font-size:13px;font-weight:500">${esc(w.name)}</div><div style="font-size:11px;color:var(--txt3)">${esc(w.dept)}</div></div>
+        <label style="font-size:11px;color:var(--txt2)">מ-</label>
+        <input type="time" value="${w.breakStart||'13:00'}" style="width:95px;font-size:12px" onchange="mgrUpdateBreak('${w.id}','breakStart',this.value)"/>
+        <label style="font-size:11px;color:var(--txt2)">עד-</label>
+        <input type="time" value="${w.breakEnd||'13:45'}" style="width:95px;font-size:12px" onchange="mgrUpdateBreak('${w.id}','breakEnd',this.value)"/>
+        <button class="btn ${w.breakActive?'warn':''}  " style="font-size:11px;padding:4px 10px" onclick="mgrToggleBreak('${w.id}')">${w.breakActive?'☕ פעיל':'○ כבוי'}</button>
+      </div>`).join('');
+  }
+}
+function parseMgrBc(v){
+  v=(v||'').replace(/\D/g,'');
+  const el=document.getElementById('mgr-bc-prev');if(!el)return;
+  if(v.length<2){el.innerHTML='';return;}
+  const c=v.slice(0,2),p=v.slice(2,7),q=v.slice(7,10),col=v.slice(10,12);
+  el.innerHTML=`<div style="display:flex;gap:5px;flex-wrap:wrap;padding:6px;background:var(--bg2);border-radius:var(--r)">
+    <span class="bc-seg bc-c">לקוח: ${c||'__'}</span><span class="bc-seg bc-p">מוצר: ${p.padEnd(5,'_')}</span>
+    <span class="bc-seg bc-q">כמות: ${q.padEnd(3,'_')}</span><span class="bc-seg bc-col">צבע: ${COLORS[col]||col||'__'}</span></div>`;
+}
+
+let mgrCamStream=null;let mgrCamInterval=null;
+async function mgrStartCam(){
+  const container=document.getElementById('mgr-cam-container');
+  const video=document.getElementById('mgr-cam-video');
+  const status=document.getElementById('mgr-cam-status');
+  const btn=document.getElementById('mgr-cam-btn');
+  try{
+    mgrCamStream=await navigator.mediaDevices.getUserMedia({video:{facingMode:'environment',width:{ideal:1280},height:{ideal:720}}});
+    video.srcObject=mgrCamStream;
+    container.style.display='block';
+    btn.style.display='none';
+    status.textContent='מחפש ברקוד...';
+    await video.play();
+    mgrStartDecoding(video,status);
+  }catch(e){
+    alert('לא ניתן לגשת למצלמה. אנא אפשר גישה למצלמה בהגדרות הדפדפן.');
+  }
+}
+function mgrStartDecoding(video,status){
+  const canvas=document.createElement('canvas');
+  const ctx=canvas.getContext('2d');
+  mgrCamInterval=setInterval(()=>{
+    if(video.readyState!==video.HAVE_ENOUGH_DATA)return;
+    canvas.width=video.videoWidth;canvas.height=video.videoHeight;
+    ctx.drawImage(video,0,0);
+    try{
+      const img=ctx.getImageData(0,0,canvas.width,canvas.height);
+      const code=jsQR(img.data,img.width,img.height,{inversionAttempts:'dontInvert'});
+      if(code){
+        const text=code.data.replace(/\D/g,'');
+        if(text.length>=12){
+          const bc=text.slice(0,12);
+          document.getElementById('mgr-bc-inp').value=bc;
+          parseMgrBc(bc);
+          status.textContent='✅ נסרק: '+bc;
+          clearInterval(mgrCamInterval);
+          setTimeout(()=>mgrStopCam(),600);
+        } else if(text.length>0){
+          status.textContent='⚠ קוד קצר מדי: '+text+' (צריך 12 ספרות)';
+        }
+      }
+    }catch(e){}
+  },200);
+}
+function mgrStopCam(){
+  if(mgrCamStream)mgrCamStream.getTracks().forEach(t=>t.stop());
+  if(mgrCamInterval)clearInterval(mgrCamInterval);
+  mgrCamStream=null;mgrCamInterval=null;
+  const c=document.getElementById('mgr-cam-container');if(c)c.style.display='none';
+  const b=document.getElementById('mgr-cam-btn');if(b)b.style.display='flex';
+}
+async function mgrPunchIn(wId){
+  const w=S.workers.find(x=>x.id===wId);if(!w)return;
+  if(!w.sessions)w.sessions=[];
+  if(w.sessions.find(s=>!s.out)){alert(w.name+' כבר רשום/ת כנוכח/ת');return;}
+  const now=new Date();
+  w.sessions.push({in:now.toISOString(),out:null});
+  w.status='in';w.checkin=w.sessions[0].in;
+  if(S.fbConnected)await fbSet('workers',w.id,w);
+  saveLS();renderMgrTasks();renderAtt();
+}
+async function mgrPunchOut(wId){
+  const w=S.workers.find(x=>x.id===wId);if(!w)return;
+  if(!w.sessions)w.sessions=[];
+  const openIdx=w.sessions.findIndex(s=>!s.out);
+  if(openIdx===-1){alert(w.name+' כבר רשום/ת כיצא/ה');return;}
+  const now=new Date();
+  w.sessions[openIdx].out=now.toISOString();
+  w.status='out';w.checkout=now.toISOString();
+  const myTasks=S.activeTasks.filter(t=>t.workerId===w.id);
+  for(const t of myTasks){
+    const done={...t,endTime:now,duration:Math.round((now-new Date(t.startTime))/1000)};
+    S.histTasks.unshift(done);S.activeTasks=S.activeTasks.filter(x=>x.id!==t.id);
+    if(S.fbConnected){await fbDel('activeTasks',String(t.id));await fbSet('histTasks',String(t.id),{...done,startTime:done.startTime instanceof Date?done.startTime.toISOString():done.startTime,endTime:done.endTime.toISOString()});}
+  }
+  const netMs=calcNetWork(w);
+  const rec={workerId:w.id,workerName:w.name,dept:w.dept,date:todayStr(),sessions:w.sessions,checkin:w.sessions[0]?.in||'',checkout:now.toISOString(),breakStart:w.breakStart||'',breakEnd:w.breakEnd||'',breakActive:!!w.breakActive,netMs};
+  S.attHistory.unshift(rec);
+  if(S.fbConnected){await fbSet('workers',w.id,w);await fbSet('attHistory',w.id+'_'+todayStr(),rec);}
+  saveLS();renderMgrTasks();renderAtt();
+}
+async function mgrStartTask(){
+  const empId=document.getElementById('mgr-emp-sel').value;
+  const raw=(document.getElementById('mgr-bc-inp').value||'').replace(/\D/g,'');
+  const msg=document.getElementById('mgr-start-msg');
+  if(!empId){msg.textContent='⚠ בחר עובד';msg.style.color='var(--red-txt)';return;}
+  if(raw.length!==12){msg.textContent='⚠ ברקוד חייב להיות 12 ספרות';msg.style.color='var(--red-txt)';return;}
+  const w=S.workers.find(x=>x.id===empId);
+  if(!w||w.status!=='in'){msg.textContent='⚠ העובד לא נמצא בעבודה';msg.style.color='var(--red-txt)';return;}
+  const cust=raw.slice(0,2),prod=raw.slice(2,7),qty=parseInt(raw.slice(7,10))||0,col=raw.slice(10,12);
+  const taskType=(document.getElementById('mgr-tasktype').value||'').trim();
+  // close existing
+  const existIdx=S.activeTasks.findIndex(t=>t.workerId===empId);
+  if(existIdx>-1){
+    const t=S.activeTasks[existIdx];
+    const endTime=new Date();
+    const done={...t,endTime,duration:Math.round((endTime-new Date(t.startTime))/1000)};
+    S.histTasks.unshift(done);S.activeTasks.splice(existIdx,1);
+    if(S.fbConnected){await fbDel('activeTasks',String(t.id));await fbSet('histTasks',String(t.id),{...done,startTime:done.startTime instanceof Date?done.startTime.toISOString():done.startTime,endTime:done.endTime.toISOString()});}
+  }
+  const newTask={id:String(S.nextTId++),workerId:empId,workerName:w.name,dept:w.dept,cust,prod,qty,col,taskType,startTime:new Date(),elapsed:0};
+  S.activeTasks.unshift(newTask);
+  if(S.fbConnected)await fbSet('activeTasks',newTask.id,{...newTask,startTime:newTask.startTime.toISOString()});
+  document.getElementById('mgr-bc-inp').value='';parseMgrBc('');
+  document.getElementById('mgr-tasktype').value='';
+  saveLS();renderMgrTasks();
+  msg.textContent=`✅ משימה התחילה עבור ${w.name}`;msg.style.color='var(--green-txt)';
+  setTimeout(()=>msg.textContent='',3000);
+}
+async function mgrEndTask(taskId){
+  const t=S.activeTasks.find(x=>x.id===taskId);if(!t)return;
+  const endTime=new Date();
+  const done={...t,endTime,duration:Math.round((endTime-new Date(t.startTime))/1000)};
+  S.histTasks.unshift(done);S.activeTasks=S.activeTasks.filter(x=>x.id!==taskId);
+  if(S.fbConnected){await fbDel('activeTasks',taskId);await fbSet('histTasks',taskId,{...done,startTime:done.startTime instanceof Date?done.startTime.toISOString():done.startTime,endTime:done.endTime.toISOString()});}
+  saveLS();renderMgrTasks();renderTasks();
+}
+async function mgrUpdateBreak(wId,field,val){
+  const w=S.workers.find(x=>x.id===wId);if(!w)return;
+  w[field]=val;
+  if(S.fbConnected)await fbSet('workers',w.id,w);
+  saveLS();
+}
+async function mgrToggleBreak(wId){
+  const w=S.workers.find(x=>x.id===wId);if(!w)return;
+  w.breakActive=!w.breakActive;
+  if(S.fbConnected)await fbSet('workers',w.id,w);
+  saveLS();renderMgrTasks();
+}
+
+// ─── ADMIN ──────────────────────────────────────────────────
+function renderAdmin(){
+  if(S.user?.role!=='manager')return;
+  document.getElementById('adm-workers').innerHTML=S.workers.map(w=>`
+    <div class="row">
+      <div class="av" style="width:28px;height:28px;font-size:10px">${esc(w.name.split(' ').map(n=>n[0]).join(''))}</div>
+      <div style="flex:1"><div style="font-size:13px;font-weight:500">${esc(w.name)}</div>
+      <div style="font-size:11px;color:var(--txt3)">${esc(w.dept)} · ${w.role==='manager'?'מנהל':w.role==='supervisor'?'אחראי':'עובד'} · @${esc(w.user)}</div></div>
+      <button class="btn" style="font-size:11px;padding:4px 8px" onclick="openModal('edit-worker','${w.id}')">✏</button>
+      <button class="btn warn" style="font-size:11px;padding:4px 8px" onclick="resetPass('${w.id}')">🔑</button>
+      <button class="btn danger" style="font-size:11px;padding:4px 8px" onclick="delWorker('${w.id}')">🗑</button>
+    </div>`).join('');
+  document.getElementById('adm-depts').innerHTML=S.depts.map(d=>`
+    <div class="row"><span style="flex:1;font-size:13px">${esc(d)}</span>
+    <button class="btn danger" style="font-size:11px;padding:4px 8px" onclick="delDept('${esc(d)}')">🗑</button></div>`).join('');
+}
+
+// ─── MODAL HELPERS ──────────────────────────────────────────
+function updatePermBoxes(role){
+  const box=document.getElementById('mf-perms-box');
+  const supBox=document.getElementById('mf-supervisor-perms');
+  if(role==='manager'){box.style.display='none';}
+  else{
+    box.style.display='block';
+    if(supBox)supBox.style.display=role==='supervisor'?'contents':'none';
+  }
+}
+
+// ─── EDIT ATTENDANCE ────────────────────────────────────────
+function mgrEditAtt(wId){
+  const w=S.workers.find(x=>x.id===wId);if(!w)return;
+  S.modalAction='edit-att:'+wId;
+  document.getElementById('modal-wrap').classList.remove('hidden');
+  document.getElementById('modal-title').textContent='עריכת נוכחות — '+w.name;
+  const sessions=w.sessions&&w.sessions.length?w.sessions:(w.checkin?[{in:w.checkin,out:w.checkout||null}]:[]);
+  const dateVal=sessions[0]?new Date(sessions[0].in).toISOString().slice(0,10):todayStr();
+  const sessHtml=sessions.map((s)=>{
+    const ci=new Date(s.in);const co=s.out?new Date(s.out):null;
+    const ciV=pad2(ci.getHours())+':'+pad2(ci.getMinutes());
+    const coV=co?pad2(co.getHours())+':'+pad2(co.getMinutes()):'';
+    return`<div class="sess-row" style="display:flex;gap:8px;align-items:flex-end;margin-bottom:8px;background:var(--bg2);padding:8px;border-radius:var(--r)">
+      <div style="flex:1"><label style="font-size:11px;color:var(--txt3)">כניסה</label><input type="time" class="sess-in" value="${ciV}" style="font-size:13px;width:100%"/></div>
+      <div style="flex:1"><label style="font-size:11px;color:var(--txt3)">יציאה (ריק=בעבודה)</label><input type="time" class="sess-out" value="${coV}" style="font-size:13px;width:100%"/></div>
+      <button onclick="this.closest('.sess-row').remove()" style="background:none;border:none;cursor:pointer;color:var(--red-txt);font-size:18px;padding-bottom:6px">✕</button>
+    </div>`;
+  }).join('');
+  document.getElementById('modal-body').innerHTML=`
+    <div class="field"><label>תאריך</label><input type="date" id="mf-att-date" value="${dateVal}" style="font-size:13px"/></div>
+    <div style="font-size:12px;color:var(--txt2);margin-bottom:8px;font-weight:500">כניסות/יציאות:</div>
+    <div id="sessions-container">${sessHtml}</div>
+    <button onclick="addSessRow()" class="btn primary" style="font-size:12px;width:100%;justify-content:center;margin-top:4px">+ הוסף כניסה/יציאה</button>`;
+}
+function addSessRow(){
+  const container=document.getElementById('sessions-container');if(!container)return;
+  const div=document.createElement('div');
+  div.className='sess-row';
+  div.style.cssText='display:flex;gap:8px;align-items:flex-end;margin-bottom:8px;background:var(--bg2);padding:8px;border-radius:8px';
+  div.innerHTML=`
+    <div style="flex:1"><label style="font-size:11px;color:var(--txt3)">כניסה</label><input type="time" class="sess-in" style="font-size:13px;width:100%"/></div>
+    <div style="flex:1"><label style="font-size:11px;color:var(--txt3)">יציאה (ריק=בעבודה)</label><input type="time" class="sess-out" style="font-size:13px;width:100%"/></div>
+    <button onclick="this.closest('.sess-row').remove()" style="background:none;border:none;cursor:pointer;color:var(--red-txt);font-size:18px;padding-bottom:6px">✕</button>`;
+  container.appendChild(div);
+}
+
+// ─── EDIT TASK ───────────────────────────────────────────────
+function openEditTask(taskId, isHist){
+  const t=isHist?S.histTasks.find(x=>x.id===taskId):S.activeTasks.find(x=>x.id===taskId);
+  if(!t)return;
+  S.modalAction=(isHist?'edit-hist-task:':'edit-task:')+taskId;
+  document.getElementById('modal-wrap').classList.remove('hidden');
+  document.getElementById('modal-title').textContent='עריכת משימה — '+t.workerName;
+  const st=new Date(t.startTime);
+  const stLocal=st.getFullYear()+'-'+pad2(st.getMonth()+1)+'-'+pad2(st.getDate())+'T'+pad2(st.getHours())+':'+pad2(st.getMinutes());
+  const et=t.endTime?new Date(t.endTime):null;
+  const etLocal=et?et.getFullYear()+'-'+pad2(et.getMonth()+1)+'-'+pad2(et.getDate())+'T'+pad2(et.getHours())+':'+pad2(et.getMinutes()):'';
+  const colorOpts=Object.entries(COLORS).map(([k,v])=>`<option value="${k}" ${t.col===k?'selected':''}>${v}</option>`).join('');
+  document.getElementById('modal-body').innerHTML=`
+    <div class="field"><label>לקוח (2 ספרות)</label><input id="mf-t-cust" value="${t.cust}" maxlength="2" style="font-size:13px"/></div>
+    <div class="field"><label>מוצר (5 ספרות)</label><input id="mf-t-prod" value="${t.prod}" maxlength="5" style="font-size:13px"/></div>
+    <div class="field"><label>כמות</label><input type="number" id="mf-t-qty" value="${t.qty}" min="1" style="font-size:13px"/></div>
+    <div class="field"><label>צבע</label><select id="mf-t-col" style="font-size:13px">${colorOpts}</select></div>
+    <div class="field"><label>סוג משימה</label><input id="mf-t-type" value="${esc(t.taskType||'')}" style="font-size:13px"/></div>
+    <div class="field"><label>זמן התחלה</label><input type="datetime-local" id="mf-t-start" value="${stLocal}" style="font-size:13px"/></div>
+    <div class="field"><label>זמן סיום ${isHist?'':'(ריק = עדיין פעיל)'}</label><input type="datetime-local" id="mf-t-end" value="${etLocal}" style="font-size:13px"/></div>`;
+}
+
+// ─── MODAL ──────────────────────────────────────────────────
+function closeModal(){
+  document.getElementById('modal-wrap').classList.add('hidden');
+  S.modalAction=null;
+}
+function openModal(action,id){
+  S.modalAction=action+(id?':'+id:'');
+  const el=document.getElementById('modal-wrap');el.classList.remove('hidden');
+  if(action==='add-worker'||action.startsWith('edit-worker')){
+    const w=id?S.workers.find(x=>x.id===id):null;
+    document.getElementById('modal-title').textContent=w?'עריכת עובד':'הוספת עובד חדש';
+    const dOpts=S.depts.map(d=>`<option value="${esc(d)}" ${w?.dept===d?'selected':''}>${esc(d)}</option>`).join('');
+    const wRole=w?.role||'worker';
+    const wPerms=w?.permissions||(wRole==='supervisor'?ALL_SUPERVISOR_PAGE_IDS:ALL_WORKER_PAGE_IDS);
+    const allPermPages=[...WORKER_PAGES,...SUPERVISOR_EXTRA_PAGES];
+    document.getElementById('modal-body').innerHTML=`
+      <div class="field"><label>שם מלא</label><input id="mf-name" value="${esc(w?.name||'')}"/></div>
+      <div class="field"><label>מחלקה</label><select id="mf-dept">${dOpts}</select></div>
+      <div class="field"><label>תפקיד</label><select id="mf-role" onchange="updatePermBoxes(this.value)">
+        <option value="worker" ${wRole==='worker'?'selected':''}>עובד</option>
+        <option value="supervisor" ${wRole==='supervisor'?'selected':''}>אחראי</option>
+        <option value="manager" ${wRole==='manager'?'selected':''}>מנהל</option>
+      </select></div>
+      <div class="field"><label>שם משתמש</label><input id="mf-user" value="${esc(w?.user||'')}"/></div>
+      <div class="field"><label>סיסמה ${w?'(ריק = ללא שינוי)':''}</label><input id="mf-pass" type="password" placeholder="${w?'...':'סיסמה'}"/></div>
+      <div class="field" id="mf-perms-box" style="display:${wRole==='manager'?'none':'block'}">
+        <label>הרשאות גישה</label>
+        <div style="display:grid;grid-template-columns:1fr 1fr;gap:8px;margin-top:6px">
+          ${WORKER_PAGES.map(p=>`<label style="display:flex;align-items:center;gap:6px;font-size:13px;color:var(--txt);cursor:pointer"><input type="checkbox" id="mf-perm-${p.id}" ${wPerms.includes(p.id)?'checked':''} style="width:auto;cursor:pointer"/> ${p.label}</label>`).join('')}
+          <div id="mf-supervisor-perms" style="display:${wRole==='supervisor'?'contents':'none'}">
+            ${SUPERVISOR_EXTRA_PAGES.map(p=>`<label style="display:flex;align-items:center;gap:6px;font-size:13px;color:var(--txt);cursor:pointer"><input type="checkbox" id="mf-perm-${p.id}" ${wPerms.includes(p.id)?'checked':''} style="width:auto;cursor:pointer"/> ${p.label}</label>`).join('')}
+          </div>
+        </div>
+      </div>`;
+  }
+}
+async function resetPass(id){
+  const w=S.workers.find(x=>x.id===id);if(!w)return;
+  const newPass=prompt(`איפוס סיסמה עבור ${w.name}\nהזן סיסמה חדשה:`);
+  if(!newPass||!newPass.trim()){return;}
+  w.pass=hashPass(newPass.trim()); // מוצפן תמיד
+  if(S.fbConnected)await fbSet('workers',w.id,w);
+  saveLS();
+  alert(`✅ סיסמה עודכנה עבור ${w.name}`);
+}
+async function confirmModal(){
+  // edit-att
+  if(S.modalAction?.startsWith('edit-att:')){
+    const wId=S.modalAction.split(':')[1];
+    const w=S.workers.find(x=>x.id===wId);if(!w){closeModal();return;}
+    const date=document.getElementById('mf-att-date')?.value||todayStr();
+    const rows=document.querySelectorAll('#sessions-container .sess-row');
+    const newSessions=[];
+    rows.forEach(row=>{
+      const inEl=row.querySelector('.sess-in');
+      const outEl=row.querySelector('.sess-out');
+      if(inEl?.value)newSessions.push({in:new Date(date+'T'+inEl.value).toISOString(),out:outEl?.value?new Date(date+'T'+outEl.value).toISOString():null});
+    });
+    w.sessions=newSessions;
+    const openSess=newSessions.find(s=>!s.out);
+    w.status=openSess?'in':'out';
+    w.checkin=newSessions[0]?.in||null;
+    w.checkout=!openSess&&newSessions.length?newSessions[newSessions.length-1].out:null;
+    if(S.fbConnected)await fbSet('workers',w.id,w);
+    saveLS();closeModal();renderAtt();renderMgrTasks();return;
+  }
+  // edit-task (פעיל)
+  if(S.modalAction?.startsWith('edit-task:')){
+    const taskId=S.modalAction.split(':')[1];
+    const t=S.activeTasks.find(x=>x.id===taskId);if(!t){closeModal();return;}
+    t.cust=(document.getElementById('mf-t-cust')?.value||'').padStart(2,'0').slice(0,2);
+    t.prod=(document.getElementById('mf-t-prod')?.value||'').padStart(5,'0').slice(0,5);
+    t.qty=parseInt(document.getElementById('mf-t-qty')?.value)||t.qty;
+    t.col=document.getElementById('mf-t-col')?.value||t.col;
+    t.taskType=document.getElementById('mf-t-type')?.value||'';
+    const stVal=document.getElementById('mf-t-start')?.value;
+    if(stVal)t.startTime=new Date(stVal);
+    const etVal=document.getElementById('mf-t-end')?.value;
+    if(etVal){
+      // יש זמן סיום — העבר להיסטוריה
+      const endTime=new Date(etVal);
+      const done={...t,endTime,duration:Math.round((endTime-new Date(t.startTime))/1000)};
+      S.histTasks.unshift(done);
+      S.activeTasks=S.activeTasks.filter(x=>x.id!==t.id);
+      if(S.fbConnected){await fbDel('activeTasks',t.id);await fbSet('histTasks',t.id,{...done,startTime:done.startTime instanceof Date?done.startTime.toISOString():done.startTime,endTime:endTime.toISOString()});}
+    } else {
+      if(S.fbConnected)await fbSet('activeTasks',t.id,{...t,startTime:t.startTime instanceof Date?t.startTime.toISOString():t.startTime});
+    }
+    saveLS();closeModal();renderTasks();renderMgrTasks();return;
+  }
+  // edit-hist-task (שהסתיים)
+  if(S.modalAction?.startsWith('edit-hist-task:')){
+    const taskId=S.modalAction.split(':')[1];
+    const t=S.histTasks.find(x=>x.id===taskId);if(!t){closeModal();return;}
+    t.cust=(document.getElementById('mf-t-cust')?.value||'').padStart(2,'0').slice(0,2);
+    t.prod=(document.getElementById('mf-t-prod')?.value||'').padStart(5,'0').slice(0,5);
+    t.qty=parseInt(document.getElementById('mf-t-qty')?.value)||t.qty;
+    t.col=document.getElementById('mf-t-col')?.value||t.col;
+    t.taskType=document.getElementById('mf-t-type')?.value||'';
+    const stVal=document.getElementById('mf-t-start')?.value;
+    if(stVal)t.startTime=new Date(stVal);
+    const etVal=document.getElementById('mf-t-end')?.value;
+    if(etVal){t.endTime=new Date(etVal);t.duration=Math.round((t.endTime-new Date(t.startTime))/1000);}
+    if(S.fbConnected)await fbSet('histTasks',t.id,{...t,startTime:t.startTime instanceof Date?t.startTime.toISOString():t.startTime,endTime:t.endTime instanceof Date?t.endTime.toISOString():t.endTime});
+    saveLS();closeModal();renderTasks();renderMgrTasks();buildRep();return;
+  }
+  const name=document.getElementById('mf-name')?.value.trim();
+  const dept=document.getElementById('mf-dept')?.value;
+  const role=document.getElementById('mf-role')?.value;
+  const user=document.getElementById('mf-user')?.value.trim();
+  const pass=document.getElementById('mf-pass')?.value.trim();
+  if(!name||!user){alert('שם ושם משתמש הם שדות חובה');return;}
+  const perms=role==='manager'?ALL_SUPERVISOR_PAGE_IDS:[...ALL_WORKER_PAGE_IDS,...SUPERVISOR_EXTRA_PAGES.map(p=>p.id)].filter(id=>document.getElementById('mf-perm-'+id)?.checked);
+  if(S.modalAction==='add-worker'){
+    if(!pass){alert('סיסמה חובה לעובד חדש');return;}
+    const nw={id:'w'+Date.now(),name,dept,role,user,pass:hashPass(pass),status:'out',checkin:null,permissions:perms};
+    S.workers.push(nw);
+    if(S.fbConnected)await fbSet('workers',nw.id,nw);
+  } else if(S.modalAction?.startsWith('edit-worker:')){
+    const id=S.modalAction.split(':')[1];
+    const w=S.workers.find(x=>x.id===id);
+    if(w){w.name=name;w.dept=dept;w.role=role;w.user=user;w.permissions=perms;
+    if(pass)w.pass=hashPass(pass);
+    if(S.fbConnected)await fbSet('workers',w.id,w);}
+  }
+  saveLS();closeModal();renderAdmin();
+}
+async function delWorker(id){
+  const hasActive=S.activeTasks.some(t=>t.workerId===id);
+  if(hasActive){alert('לא ניתן למחוק עובד עם משימה פעילה — סיים את המשימה תחילה');return;}
+  const w=S.workers.find(x=>x.id===id);
+  if(!confirm(`למחוק את ${w?.name||'העובד'}? פעולה זו אינה הפיכה.`))return;
+  S.workers=S.workers.filter(w=>w.id!==id);
+  if(S.fbConnected)await fbDel('workers',id);
+  saveLS();renderAdmin();
+}
+function addDept(){
+  const v=document.getElementById('new-dept').value.trim();
+  if(!v||S.depts.includes(v)){alert(!v?'הזן שם מחלקה':'מחלקה כבר קיימת');return;}
+  S.depts.push(v);document.getElementById('new-dept').value='';
+  saveLS();renderAdmin();
+}
+function delDept(d){
+  if(S.workers.some(w=>w.dept===d)){alert('לא ניתן למחוק מחלקה שיש בה עובדים');return;}
+  S.depts=S.depts.filter(x=>x!==d);saveLS();renderAdmin();
+}
+
+// ─── REFRESH DASH EVERY 5s ──────────────────────────────────
+setInterval(()=>{
+  if(document.hidden)return; // לא מבזבז משאבים כשהטאב ברקע
+  const pg=document.querySelector('.page.active');
+  if(pg?.id==='page-dash')renderDash();
+},5000);
+
+// עצירת חישובים כשהמשתמש עוזב את הטאב
+document.addEventListener('visibilitychange',()=>{
+  if(!document.hidden&&S.user){
+    checkDailyReset(); // בדיקת איפוס יום כשחוזרים
+    renderAll();
+  }
+});
+
+// ─── CAMERA BARCODE SCANNER ─────────────────────────────────
+let camStream=null;let camInterval=null;
+
+async function startCam(){
+  const container=document.getElementById('cam-container');
+  const video=document.getElementById('cam-video');
+  const status=document.getElementById('cam-status');
+  const btn=document.getElementById('cam-btn');
+  try{
+    camStream=await navigator.mediaDevices.getUserMedia({video:{facingMode:'environment',width:{ideal:1280},height:{ideal:720}}});
+    video.srcObject=camStream;
+    container.style.display='block';
+    btn.style.display='none';
+    status.textContent='מחפש ברקוד...';
+    await video.play();
+    startDecoding(video,status);
+  }catch(e){
+    alert('לא ניתן לגשת למצלמה. אנא אפשר גישה למצלמה בהגדרות הדפדפן.');
+  }
+}
+
+function startDecoding(video,status){
+  const canvas=document.createElement('canvas');
+  const ctx=canvas.getContext('2d');
+  camInterval=setInterval(()=>{
+    if(video.readyState!==video.HAVE_ENOUGH_DATA)return;
+    canvas.width=video.videoWidth;canvas.height=video.videoHeight;
+    ctx.drawImage(video,0,0);
+    try{
+      const img=ctx.getImageData(0,0,canvas.width,canvas.height);
+      const code=jsQR(img.data,img.width,img.height,{inversionAttempts:'dontInvert'});
+      if(code){
+        const text=code.data.replace(/\D/g,'');
+        if(text.length>=12){
+          const bc=text.slice(0,12);
+          document.getElementById('bc-inp').value=bc;
+          parseBc(bc);
+          status.textContent='✅ נסרק: '+bc;
+          clearInterval(camInterval);
+          setTimeout(()=>{stopCam();submitBc();},600);
+        } else if(text.length>0){
+          status.textContent='⚠ קוד קצר מדי: '+text+' (צריך 12 ספרות)';
+        }
+      }
+    }catch(e){}
+  },200);
+}
+
+function stopCam(){
+  if(camStream)camStream.getTracks().forEach(t=>t.stop());
+  if(camInterval)clearInterval(camInterval);
+  camStream=null;camInterval=null;
+  const c=document.getElementById('cam-container');if(c)c.style.display='none';
+  const b=document.getElementById('cam-btn');if(b)b.style.display='flex';
+}
+
+// ─── MULTILINGUAL (i18n) ────────────────────────────────────
+const LANGS={
+  he:{
+    login_title:'כניסה למערכת',
+    login_sub:'הזן פרטי משתמש',
+    username:'שם משתמש',
+    password:'סיסמה',
+    login_btn:'כניסה',
+    emergency:'כניסת חירום למנהל',
+    nav_dash:'בקרה',
+    nav_att:'נוכחות',
+    nav_attrep:'דוח נוכחות',
+    nav_scan:'סריקה',
+    nav_tasks:'משימות',
+    nav_reports:'דוחות',
+    nav_alerts:'התראות',
+    nav_admin:'ניהול',
+    nav_mgrtasks:'ניהול משימות',
+    nav_setup:'Firebase',
+    dash_active:'עובדים פעילים',
+    dash_tasks:'משימות פעילות',
+    dash_done:'הושלמו היום',
+    dash_goal:'יעד יומי',
+    dash_depts:'מחלקות',
+    dash_alerts:'התראות',
+    dash_recent:'פעילות אחרונה',
+    att_in:'כניסה',
+    att_out:'יציאה',
+    att_present:'נכחו',
+    att_absent:'נעדרו',
+    att_nethours:'סה"כ שעות נטו היום',
+    att_list:'רשימת עובדים',
+    att_all:'הכל',
+    att_working:'בעבודה',
+    att_left:'יצאו',
+    logout:'יציאה',
+    worker:'עובד',
+    manager:'מנהל',
+    active:'פעיל',
+    completed:'הושלם',
+    scan_title:'סריקת ברקוד משימה',
+    scan_cam:'סרוק עם מצלמה',
+    scan_manual:'הזן ידנית',
+    scan_start:'התחל / עבור למשימה',
+    scan_active:'משימות פעילות עכשיו',
+    tasks_active:'פעילות',
+    tasks_done:'הושלמו',
+    tasks_avg:'ממוצע',
+    tasks_units:'יחידות',
+    rep_total:'סה"כ משימות',
+    rep_time:'זמן כולל',
+    rep_units:'יחידות',
+    rep_eff:'יעילות',
+    al_thresh_label:'התראה על משימה ארוכה (דקות)',
+    al_absent_label:'התראה על היעדרות (מספר עובדים)',
+    al_active:'התראות פעילות',
+    al_long:'משימות ארוכות',
+    al_over_thresh:'נעדרים מעל לסף',
+    admin_workers:'עובדים',
+    admin_add:'הוסף',
+    admin_depts:'מחלקות',
+    save:'שמור',
+    cancel:'ביטול',
+    delete:'מחק',
+    edit:'ערוך',
+  },
+  ar:{
+    login_title:'تسجيل الدخول',
+    login_sub:'أدخل بيانات المستخدم',
+    username:'اسم المستخدم',
+    password:'كلمة المرور',
+    login_btn:'دخول',
+    emergency:'دخول طارئ للمدير',
+    nav_dash:'لوحة التحكم',
+    nav_att:'الحضور',
+    nav_attrep:'تقرير الحضور',
+    nav_scan:'مسح',
+    nav_tasks:'المهام',
+    nav_reports:'التقارير',
+    nav_alerts:'التنبيهات',
+    nav_admin:'الإدارة',
+    nav_mgrtasks:'إدارة المهام',
+    nav_setup:'Firebase',
+    dash_active:'العمال النشطون',
+    dash_tasks:'المهام النشطة',
+    dash_done:'أُنجز اليوم',
+    dash_goal:'الهدف اليومي',
+    dash_depts:'الأقسام',
+    dash_alerts:'التنبيهات',
+    dash_recent:'النشاط الأخير',
+    att_in:'دخول',
+    att_out:'خروج',
+    att_present:'حضروا',
+    att_absent:'غابوا',
+    att_nethours:'إجمالي ساعات اليوم',
+    att_list:'قائمة العمال',
+    att_all:'الكل',
+    att_working:'في العمل',
+    att_left:'غادروا',
+    logout:'خروج',
+    worker:'عامل',
+    manager:'مدير',
+    active:'نشط',
+    completed:'مكتمل',
+    scan_title:'مسح باركود المهمة',
+    scan_cam:'امسح بالكاميرا',
+    scan_manual:'أدخل يدوياً',
+    scan_start:'ابدأ / المهمة',
+    scan_active:'المهام النشطة الآن',
+    tasks_active:'نشطة',
+    tasks_done:'مكتملة',
+    tasks_avg:'متوسط',
+    tasks_units:'وحدات',
+    rep_total:'إجمالي المهام',
+    rep_time:'الوقت الكلي',
+    rep_units:'وحدات',
+    rep_eff:'الكفاءة',
+    al_thresh_label:'تنبيه للمهمة الطويلة (دقائق)',
+    al_absent_label:'تنبيه للغياب (عدد العمال)',
+    al_active:'التنبيهات النشطة',
+    al_long:'المهام الطويلة',
+    al_over_thresh:'الغائبون فوق الحد',
+    admin_workers:'العمال',
+    admin_add:'إضافة',
+    admin_depts:'الأقسام',
+    save:'حفظ',
+    cancel:'إلغاء',
+    delete:'حذف',
+    edit:'تعديل',
+  },
+  en:{
+    login_title:'Login',
+    login_sub:'Enter credentials',
+    username:'Username',
+    password:'Password',
+    login_btn:'Sign in',
+    emergency:'Emergency Login',
+    nav_dash:'Dashboard',
+    nav_att:'Attendance',
+    nav_attrep:'Attendance Report',
+    nav_scan:'Scan',
+    nav_tasks:'Tasks',
+    nav_reports:'Reports',
+    nav_alerts:'Alerts',
+    nav_admin:'Admin',
+    nav_mgrtasks:'Manage Tasks',
+    nav_setup:'Firebase',
+    dash_active:'Active Workers',
+    dash_tasks:'Active Tasks',
+    dash_done:'Completed Today',
+    dash_goal:'Daily Goal',
+    dash_depts:'Departments',
+    dash_alerts:'Alerts',
+    dash_recent:'Recent Activity',
+    att_in:'Check In',
+    att_out:'Check Out',
+    att_present:'Present',
+    att_absent:'Absent',
+    att_nethours:'Total Net Hours Today',
+    att_list:'Worker List',
+    att_all:'All',
+    att_working:'Working',
+    att_left:'Left',
+    logout:'Logout',
+    worker:'Worker',
+    manager:'Manager',
+    active:'Active',
+    completed:'Completed',
+    scan_title:'Scan Task Barcode',
+    scan_cam:'Scan with Camera',
+    scan_manual:'Enter manually',
+    scan_start:'Start Task',
+    scan_active:'Active Tasks Now',
+    tasks_active:'Active',
+    tasks_done:'Completed',
+    tasks_avg:'Average',
+    tasks_units:'Units',
+    rep_total:'Total Tasks',
+    rep_time:'Total Time',
+    rep_units:'Units',
+    rep_eff:'Efficiency',
+    al_thresh_label:'Long task alert (minutes)',
+    al_absent_label:'Absence alert (workers)',
+    al_active:'Active Alerts',
+    al_long:'Long Tasks',
+    al_over_thresh:'Absent above threshold',
+    admin_workers:'Workers',
+    admin_add:'Add',
+    admin_depts:'Departments',
+    save:'Save',
+    cancel:'Cancel',
+    delete:'Delete',
+    edit:'Edit',
+  }
+};
+
+let currentLang='he';
+
+function setLang(code){
+  if(!LANGS[code])return;
+  currentLang=code;
+  const rtl=code==='he'||code==='ar';
+  document.documentElement.lang=code;
+  document.documentElement.dir=rtl?'rtl':'ltr';
+  localStorage.setItem('txops_lang',code);
+  const dict=LANGS[code];
+  // update text nodes
+  document.querySelectorAll('[data-i18n]').forEach(el=>{
+    const key=el.getAttribute('data-i18n');
+    if(dict[key]!==undefined)el.textContent=dict[key];
+  });
+  // update placeholders
+  document.querySelectorAll('[data-i18n-ph]').forEach(el=>{
+    const key=el.getAttribute('data-i18n-ph');
+    if(dict[key]!==undefined)el.placeholder=dict[key];
+  });
+  // highlight active lang buttons
+  ['he','ar','en'].forEach(lc=>{
+    const b1=document.getElementById('lb-'+lc);
+    const b2=document.getElementById('lb-'+lc+'-login');
+    if(b1)b1.classList.toggle('active',lc===code);
+    if(b2)b2.classList.toggle('active',lc===code);
+  });
+}
+
+// restore on page load
+(function(){
+  const saved=localStorage.getItem('txops_lang')||'he';
+  setLang(saved);
+})();
+
+// ─── QR CODE ────────────────────────────────────────────────
+(function(){
+  const url=location.href.split('?')[0].split('#')[0];
+  const canvas=document.getElementById('login-qr');
+  if(canvas&&window.QRCode){
+    QRCode.toCanvas(canvas,url,{width:120,margin:1,color:{dark:'#1a1a18',light:'#ffffff'}},()=>{});
+  } else if(canvas){
+    // fallback — נסה שוב אחרי טעינת הספרייה
+    window.addEventListener('load',()=>{
+      if(window.QRCode)QRCode.toCanvas(canvas,url,{width:120,margin:1,color:{dark:'#1a1a18',light:'#ffffff'}},()=>{});
+    });
+  }
+})();
+</script>
+</body>
+</html>
