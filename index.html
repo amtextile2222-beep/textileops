@@ -1590,15 +1590,15 @@ function mgrStartDecoding(video,status){
       const code=jsQR(img.data,img.width,img.height,{inversionAttempts:'dontInvert'});
       if(code){
         const text=code.data.replace(/\D/g,'');
-        if(text.length>=12){
-          const bc=text.slice(0,12);
+        if(text.length>=13){
+          const bc=text.slice(0,13);
           document.getElementById('mgr-bc-inp').value=bc;
           parseMgrBc(bc);
           status.textContent='✅ נסרק: '+bc;
           clearInterval(mgrCamInterval);
           setTimeout(()=>mgrStopCam(),600);
         } else if(text.length>0){
-          status.textContent='⚠ קוד קצר מדי: '+text+' (צריך 12 ספרות)';
+          status.textContent='⚠ קוד קצר מדי: '+text+' (צריך 13 ספרות)';
         }
       }
     }catch(e){}
@@ -1971,15 +1971,15 @@ function startDecoding(video,status){
       const code=jsQR(img.data,img.width,img.height,{inversionAttempts:'dontInvert'});
       if(code){
         const text=code.data.replace(/\D/g,'');
-        if(text.length>=12){
-          const bc=text.slice(0,12);
+        if(text.length>=13){
+          const bc=text.slice(0,13);
           document.getElementById('bc-inp').value=bc;
           parseBc(bc);
           status.textContent='✅ נסרק: '+bc;
           clearInterval(camInterval);
           setTimeout(()=>{stopCam();submitBc();},600);
         } else if(text.length>0){
-          status.textContent='⚠ קוד קצר מדי: '+text+' (צריך 12 ספרות)';
+          status.textContent='⚠ קוד קצר מדי: '+text+' (צריך 13 ספרות)';
         }
       }
     }catch(e){}
