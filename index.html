@@ -1571,7 +1571,7 @@ async function mgrStartCam(){
   const status=document.getElementById('mgr-cam-status');
   const btn=document.getElementById('mgr-cam-btn');
   try{
-    mgrCamStream=await navigator.mediaDevices.getUserMedia({video:{facingMode:'environment',width:{ideal:1280},height:{ideal:720}}});
+    mgrCamStream=await navigator.mediaDevices.getUserMedia({video:{facingMode:'environment',width:{ideal:1920},height:{ideal:1080}}});
     video.srcObject=mgrCamStream;
     container.style.display='block';
     btn.style.display='none';
@@ -1591,7 +1591,7 @@ function mgrStartDecoding(video,status){
     ctx.drawImage(video,0,0);
     try{
       const img=ctx.getImageData(0,0,canvas.width,canvas.height);
-      const code=jsQR(img.data,img.width,img.height,{inversionAttempts:'dontInvert'});
+      const code=jsQR(img.data,img.width,img.height,{inversionAttempts:'attemptBoth'});
       if(code){
         const text=code.data.replace(/\D/g,'');
         if(text.length>=13){
@@ -1606,7 +1606,7 @@ function mgrStartDecoding(video,status){
         }
       }
     }catch(e){}
-  },200);
+  },150);
 }
 function mgrStopCam(){
   if(mgrCamStream)mgrCamStream.getTracks().forEach(t=>t.stop());
@@ -1953,7 +1953,7 @@ async function startCam(){
   const status=document.getElementById('cam-status');
   const btn=document.getElementById('cam-btn');
   try{
-    camStream=await navigator.mediaDevices.getUserMedia({video:{facingMode:'environment',width:{ideal:1280},height:{ideal:720}}});
+    camStream=await navigator.mediaDevices.getUserMedia({video:{facingMode:'environment',width:{ideal:1920},height:{ideal:1080}}});
     video.srcObject=camStream;
     container.style.display='block';
     btn.style.display='none';
@@ -1974,7 +1974,7 @@ function startDecoding(video,status){
     ctx.drawImage(video,0,0);
     try{
       const img=ctx.getImageData(0,0,canvas.width,canvas.height);
-      const code=jsQR(img.data,img.width,img.height,{inversionAttempts:'dontInvert'});
+      const code=jsQR(img.data,img.width,img.height,{inversionAttempts:'attemptBoth'});
       if(code){
         const text=code.data.replace(/\D/g,'');
         if(text.length>=13){
@@ -1989,7 +1989,7 @@ function startDecoding(video,status){
         }
       }
     }catch(e){}
-  },200);
+  },150);
 }
 
 function stopCam(){
