@@ -430,6 +430,30 @@ code{background:var(--bg2);border:0.5px solid var(--b);border-radius:4px;padding
         </div>
       </div>
     </div>
+    <div class="g2" style="margin-top:1rem">
+      <!-- ניהול לקוחות -->
+      <div class="card">
+        <div class="sec">👤 שמות לקוחות</div>
+        <div style="font-size:11px;color:var(--txt3);margin-bottom:.75rem">קשר בין קוד לקוח (01,02...) לשם</div>
+        <div style="display:flex;gap:6px;margin-bottom:8px">
+          <input type="text" id="cust-code" placeholder="קוד (01)" maxlength="2" style="width:70px;font-size:13px;text-align:center"/>
+          <input type="text" id="cust-name" placeholder="שם לקוח" style="flex:1;font-size:13px"/>
+          <button class="btn primary" onclick="addCustomerName()" style="padding:6px 12px">+</button>
+        </div>
+        <div id="adm-customers"></div>
+      </div>
+      <!-- ניהול צבעים -->
+      <div class="card">
+        <div class="sec">🎨 ניהול צבעים</div>
+        <div style="font-size:11px;color:var(--txt3);margin-bottom:.75rem">קשר בין קוד צבע (01-99) לשם</div>
+        <div style="display:flex;gap:6px;margin-bottom:8px">
+          <input type="text" id="col-code" placeholder="קוד (21)" maxlength="2" style="width:70px;font-size:13px;text-align:center"/>
+          <input type="text" id="col-name" placeholder="שם צבע" style="flex:1;font-size:13px"/>
+          <button class="btn primary" onclick="addCustomColor()" style="padding:6px 12px">+</button>
+        </div>
+        <div id="adm-colors" style="max-height:220px;overflow-y:auto"></div>
+      </div>
+    </div>
   </div>
 
   <!-- ATTENDANCE REPORT PAGE -->
@@ -602,13 +626,31 @@ code{background:var(--bg2);border:0.5px solid var(--b);border-radius:4px;padding
       </div>
       <!-- הגדרות הוצאות -->
       <div class="card">
-        <div class="sec">⚙️ הוצאות קבועות יומיות</div>
-        <div style="display:flex;gap:8px;align-items:flex-end">
-          <div class="field" style="margin:0;flex:1">
-            <label>סכום יומי (₪)</label>
-            <input type="number" id="cost-fixed" min="0" placeholder="0" style="font-size:14px;font-weight:600"/>
+        <div class="sec">⚙️ הוצאות קבועות</div>
+        <div style="display:grid;grid-template-columns:1fr 1fr;gap:8px;margin-bottom:8px">
+          <div class="field" style="margin:0">
+            <label>יומיות (₪/יום)</label>
+            <input type="number" id="cost-fixed" min="0" placeholder="0" style="font-size:13px"/>
           </div>
-          <button class="btn success" onclick="saveCostSettings()" style="white-space:nowrap">שמור</button>
+          <div class="field" style="margin:0">
+            <label>חודשיות (₪/חודש)</label>
+            <input type="number" id="cost-fixed-monthly" min="0" placeholder="0" style="font-size:13px"/>
+          </div>
+          <div class="field" style="margin:0">
+            <label>ימי עבודה בחודש</label>
+            <input type="number" id="cost-workdays-month" min="1" max="31" placeholder="22" style="font-size:13px"/>
+          </div>
+          <div class="field" style="margin:0">
+            <label>שנתיות (₪/שנה)</label>
+            <input type="number" id="cost-fixed-annual" min="0" placeholder="0" style="font-size:13px"/>
+          </div>
+          <div class="field" style="margin:0">
+            <label>ימי עבודה בשנה</label>
+            <input type="number" id="cost-workdays-year" min="1" max="365" placeholder="250" style="font-size:13px"/>
+          </div>
+          <div style="display:flex;align-items:flex-end">
+            <button class="btn success full" onclick="saveCostSettings()">שמור</button>
+          </div>
         </div>
         <div style="margin-top:.75rem">
           <div class="sec" style="font-size:12px;margin-bottom:6px">הוצאות משתנות</div>
@@ -674,7 +716,7 @@ document.dispatchEvent(new Event('fbSDKReady'));
 
 <script>
 // ─── CONSTANTS ─────────────────────────────────────────────
-const COLORS={'01':'לבן','02':'שחור','03':'אדום','04':'כחול','05':'ירוק','06':'צהוב','07':'אפור','08':'ורוד','09':'חום','10':'כתום'};
+let COLORS={'01':'לבן','02':'שחור','03':'אדום','04':'כחול','05':'ירוק','06':'צהוב','07':'אפור','08':'ורוד','09':'חום','10':'כתום','11':'נייבי','12':'בז\'','13':'טורקיז','14':'בורדו','15':'זית','16':'לילך','17':'קרם','18':'כסוף','19':'זהב','20':'שחור מלנג\''};
 const WORKER_PAGES=[
   {id:'dash',label:'לוח בקרה'},
   {id:'att',label:'נוכחות'},
@@ -720,14 +762,16 @@ let S={
   attFilter:'all',
   modalAction:null,
   attHistory:[],  // {workerId, workerName, dept, date, checkin, checkout, breakStart, breakEnd, breakActive}
-  costs:{workerRates:{}, fixedDaily:0, variableExpenses:[]},
+  costs:{workerRates:{}, fixedDaily:0, fixedMonthly:0, workDaysMonth:22, fixedAnnual:0, workDaysYear:250, variableExpenses:[]},
+  customerNames:{},
+  customColors:{},
   costTab:'prod',
 };
 
 // ─── LOCAL STORAGE ──────────────────────────────────────────
 function saveLS(){
   try{
-    const d={workers:S.workers,depts:S.depts,activeTasks:S.activeTasks.map(t=>({...t,startTime:t.startTime instanceof Date?t.startTime.toISOString():t.startTime})),histTasks:S.histTasks.map(t=>({...t,startTime:t.startTime instanceof Date?t.startTime.toISOString():t.startTime,endTime:t.endTime instanceof Date?t.endTime.toISOString():t.endTime})),settings:S.settings,nextTId:S.nextTId,attHistory:S.attHistory,costs:S.costs};
+    const d={workers:S.workers,depts:S.depts,activeTasks:S.activeTasks.map(t=>({...t,startTime:t.startTime instanceof Date?t.startTime.toISOString():t.startTime})),histTasks:S.histTasks.map(t=>({...t,startTime:t.startTime instanceof Date?t.startTime.toISOString():t.startTime,endTime:t.endTime instanceof Date?t.endTime.toISOString():t.endTime})),settings:S.settings,nextTId:S.nextTId,attHistory:S.attHistory,costs:S.costs,customerNames:S.customerNames,customColors:S.customColors};
     localStorage.setItem('txops_v3',JSON.stringify(d));
   }catch(e){}
 }
@@ -744,6 +788,8 @@ function loadLS(){
     if(d.nextTId)S.nextTId=d.nextTId;
     if(d.attHistory)S.attHistory=d.attHistory;
     if(d.costs)S.costs={...S.costs,...d.costs};
+    if(d.customerNames)S.customerNames=d.customerNames;
+    if(d.customColors){S.customColors=d.customColors;Object.assign(COLORS,d.customColors);}
   }catch(e){}
 }
 loadLS();
@@ -1785,6 +1831,26 @@ function renderAdmin(){
   document.getElementById('adm-depts').innerHTML=S.depts.map(d=>`
     <div class="row"><span style="flex:1;font-size:13px">${esc(d)}</span>
     <button class="btn danger" style="font-size:11px;padding:4px 8px" onclick="delDept('${esc(d)}')">🗑</button></div>`).join('');
+  // לקוחות
+  const custEl=document.getElementById('adm-customers');
+  if(custEl){
+    const entries=Object.entries(S.customerNames);
+    custEl.innerHTML=entries.length?entries.sort((a,b)=>a[0].localeCompare(b[0])).map(([code,name])=>`
+      <div class="row"><span class="bc-seg bc-c" style="flex-shrink:0">${esc(code)}</span>
+      <span style="flex:1;font-size:13px;margin-right:8px">${esc(name)}</span>
+      <button class="btn danger" style="font-size:11px;padding:4px 8px" onclick="delCustomerName('${esc(code)}')">🗑</button></div>`).join('')
+      :'<div style="font-size:12px;color:var(--txt3);text-align:center;padding:8px">אין לקוחות מוגדרים</div>';
+  }
+  // צבעים
+  const colEl=document.getElementById('adm-colors');
+  if(colEl){
+    colEl.innerHTML=Object.entries(COLORS).sort((a,b)=>a[0].localeCompare(b[0])).map(([code,name])=>`
+      <div class="row" style="padding:5px 0">
+        <span class="bc-seg bc-col" style="flex-shrink:0;font-family:monospace">${esc(code)}</span>
+        <span style="flex:1;font-size:13px;margin-right:8px">${esc(name)}</span>
+        <button class="btn danger" style="font-size:11px;padding:3px 7px" onclick="delCustomColor('${esc(code)}')">🗑</button>
+      </div>`).join('');
+  }
 }
 
 // ─── MODAL HELPERS ──────────────────────────────────────────
@@ -2319,18 +2385,56 @@ function setLang(code){
   }
 })();
 
+// ─── CUSTOMERS & COLORS ─────────────────────────────────────
+function addCustomerName(){
+  const code=(document.getElementById('cust-code').value||'').trim().padStart(2,'0');
+  const name=(document.getElementById('cust-name').value||'').trim();
+  if(!code||!name){alert('הזן קוד ושם');return;}
+  S.customerNames[code]=name;
+  document.getElementById('cust-code').value='';
+  document.getElementById('cust-name').value='';
+  saveLS();renderAdmin();
+}
+function delCustomerName(code){
+  delete S.customerNames[code];
+  saveLS();renderAdmin();
+}
+function addCustomColor(){
+  let code=(document.getElementById('col-code').value||'').trim();
+  if(code.length===1)code='0'+code;
+  const name=(document.getElementById('col-name').value||'').trim();
+  if(!code||!name){alert('הזן קוד ושם צבע');return;}
+  COLORS[code]=name;
+  S.customColors[code]=name;
+  document.getElementById('col-code').value='';
+  document.getElementById('col-name').value='';
+  saveLS();renderAdmin();
+}
+function delCustomColor(code){
+  // מחק רק אם זה צבע מותאם (לא מובנה)
+  const builtIn={'01':1,'02':1,'03':1,'04':1,'05':1,'06':1,'07':1,'08':1,'09':1,'10':1,'11':1,'12':1,'13':1,'14':1,'15':1,'16':1,'17':1,'18':1,'19':1,'20':1};
+  if(builtIn[code]){alert('לא ניתן למחוק צבע מובנה');return;}
+  delete COLORS[code];
+  delete S.customColors[code];
+  saveLS();renderAdmin();
+}
+// הצגת שם לקוח — helper
+function custName(code){return S.customerNames[code]?S.customerNames[code]+' ('+code+')':code;}
+
 // ─── COSTS MODULE ────────────────────────────────────────────
 
 function initCostsPage(){
-  // הגדרת טווח ברירת מחדל — חודש אחרון
   const today=todayStr();
   const monthAgo=new Date();monthAgo.setDate(monthAgo.getDate()-30);
   const fi=document.getElementById('cost-from');
   const ti=document.getElementById('cost-to');
   if(fi&&!fi.value)fi.value=monthAgo.toISOString().slice(0,10);
   if(ti&&!ti.value)ti.value=today;
-  // טעינת הגדרות
   document.getElementById('cost-fixed').value=S.costs.fixedDaily||0;
+  document.getElementById('cost-fixed-monthly').value=S.costs.fixedMonthly||0;
+  document.getElementById('cost-workdays-month').value=S.costs.workDaysMonth||22;
+  document.getElementById('cost-fixed-annual').value=S.costs.fixedAnnual||0;
+  document.getElementById('cost-workdays-year').value=S.costs.workDaysYear||250;
   renderWorkerRates();
   renderVarExpList();
   calcCosts();
@@ -2403,6 +2507,10 @@ function delVarExp(i){
 
 function saveCostSettings(){
   S.costs.fixedDaily=parseFloat(document.getElementById('cost-fixed').value)||0;
+  S.costs.fixedMonthly=parseFloat(document.getElementById('cost-fixed-monthly').value)||0;
+  S.costs.workDaysMonth=parseInt(document.getElementById('cost-workdays-month').value)||22;
+  S.costs.fixedAnnual=parseFloat(document.getElementById('cost-fixed-annual').value)||0;
+  S.costs.workDaysYear=parseInt(document.getElementById('cost-workdays-year').value)||250;
   saveLS();
   const btn=event.target;
   btn.textContent='✅ נשמר';btn.classList.add('success');
@@ -2470,8 +2578,10 @@ function calcCosts(){
     const taskHours=(t.duration||0)/3600;
     const wage=hourlyRate*taskHours;
 
-    // הוצאות — קבועות יומיות + משתנות × חלק יחסי
-    const dayFixed=S.costs.fixedDaily||0;
+    // הוצאות — קבועות יומיות + חודשיות÷ימי עבודה + שנתיות÷ימי עבודה + משתנות × חלק יחסי
+    const dayFixed=(S.costs.fixedDaily||0)
+      +(S.costs.fixedMonthly||0)/(S.costs.workDaysMonth||22)
+      +(S.costs.fixedAnnual||0)/(S.costs.workDaysYear||250);
     const dayVar=varByDay[d]||0;
     const overhead=(dayFixed+dayVar)*taskRatio;
 
@@ -2553,7 +2663,7 @@ function renderCostTab(){
         <th style="padding:8px 6px;color:var(--blue-txt)">סה"כ עלות</th>
       </tr></thead>
       <tbody>${rows.map(r=>`<tr style="border-bottom:0.5px solid var(--b)">
-        <td style="padding:7px 6px;font-weight:500"><span class="bc-seg bc-c">${esc(r.cust)}</span></td>
+        <td style="padding:7px 6px;font-weight:500"><span class="bc-seg bc-c">${esc(r.cust)}</span>${S.customerNames[r.cust]?` <span style="font-size:12px;color:var(--txt);margin-right:4px">${esc(S.customerNames[r.cust])}</span>`:''}</td>
         <td style="padding:7px 6px;color:var(--txt2)">${r.prods.size}</td>
         <td style="padding:7px 6px;color:var(--txt2)">${r.qty}</td>
         <td style="padding:7px 6px">₪${Math.round(r.wage).toLocaleString()}</td>
