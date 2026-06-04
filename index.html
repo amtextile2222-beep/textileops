@@ -860,6 +860,16 @@ function listenFb(){
     S.attHistory=snap.docs.map(d=>({...d.data()}));
     renderAll();
   });
+  // app settings (costs, customerNames, customColors)
+  onSnapshot(collection(db,'appSettings'),snap=>{
+    snap.docs.forEach(d=>{
+      const data=d.data();
+      if(d.id==='costs'){S.costs={...S.costs,...data};saveLS();}
+      if(d.id==='customerNames'){S.customerNames=data;saveLS();}
+      if(d.id==='customColors'){S.customColors=data;Object.assign(COLORS,data);saveLS();}
+    });
+    renderAll();
+  });
 }
 
 async function fbSet(col,id,data){
@@ -2393,11 +2403,15 @@ function addCustomerName(){
   S.customerNames[code]=name;
   document.getElementById('cust-code').value='';
   document.getElementById('cust-name').value='';
-  saveLS();renderAdmin();
+  saveLS();
+  if(S.fbConnected)fbSet('appSettings','customerNames',S.customerNames);
+  renderAdmin();
 }
 function delCustomerName(code){
   delete S.customerNames[code];
-  saveLS();renderAdmin();
+  saveLS();
+  if(S.fbConnected)fbSet('appSettings','customerNames',S.customerNames);
+  renderAdmin();
 }
 function addCustomColor(){
   let code=(document.getElementById('col-code').value||'').trim();
@@ -2408,15 +2422,18 @@ function addCustomColor(){
   S.customColors[code]=name;
   document.getElementById('col-code').value='';
   document.getElementById('col-name').value='';
-  saveLS();renderAdmin();
+  saveLS();
+  if(S.fbConnected)fbSet('appSettings','customColors',S.customColors);
+  renderAdmin();
 }
 function delCustomColor(code){
-  // מחק רק אם זה צבע מותאם (לא מובנה)
   const builtIn={'01':1,'02':1,'03':1,'04':1,'05':1,'06':1,'07':1,'08':1,'09':1,'10':1,'11':1,'12':1,'13':1,'14':1,'15':1,'16':1,'17':1,'18':1,'19':1,'20':1};
   if(builtIn[code]){alert('לא ניתן למחוק צבע מובנה');return;}
   delete COLORS[code];
   delete S.customColors[code];
-  saveLS();renderAdmin();
+  saveLS();
+  if(S.fbConnected)fbSet('appSettings','customColors',S.customColors);
+  renderAdmin();
 }
 // הצגת שם לקוח — helper
 function custName(code){return S.customerNames[code]?S.customerNames[code]+' ('+code+')':code;}
@@ -2512,6 +2529,7 @@ function saveCostSettings(){
   S.costs.fixedAnnual=parseFloat(document.getElementById('cost-fixed-annual').value)||0;
   S.costs.workDaysYear=parseInt(document.getElementById('cost-workdays-year').value)||250;
   saveLS();
+  if(S.fbConnected)fbSet('appSettings','costs',S.costs);
   const btn=event.target;
   btn.textContent='✅ נשמר';btn.classList.add('success');
   setTimeout(()=>{btn.textContent='💾 שמור הגדרות';btn.classList.remove('success');},1500);
