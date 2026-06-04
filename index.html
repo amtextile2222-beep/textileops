@@ -497,6 +497,10 @@ code{background:var(--bg2);border:0.5px solid var(--b);border-radius:4px;padding
           <label>סוג משימה</label>
           <input id="mgr-tasktype" type="text" placeholder="לדוגמה: תפירה, חיתוך, גימור..." style="font-size:13px"/>
         </div>
+        <div class="field">
+          <label>מחלקה</label>
+          <input id="mgr-dept" type="text" placeholder="לדוגמה: חיתוך, הרכבה, איכות..." style="font-size:13px"/>
+        </div>
         <button class="btn success full" onclick="mgrStartTask()">▶ התחל משימה לעובד</button>
         <div id="mgr-start-msg" style="font-size:12px;margin-top:6px;min-height:16px"></div>
       </div><!-- /card start-task -->
@@ -1651,6 +1655,7 @@ async function mgrStartTask(){
   if(!w||w.status!=='in'){msg.textContent='⚠ העובד לא נמצא בעבודה';msg.style.color='var(--red-txt)';return;}
   const cust=raw.slice(0,2),prod=raw.slice(2,7),size=raw.slice(7,8),qty=parseInt(raw.slice(8,11))||0,col=raw.slice(11,13);
   const taskType=(document.getElementById('mgr-tasktype').value||'').trim();
+  const taskDept=(document.getElementById('mgr-dept').value||'').trim();
   // close existing
   const existIdx=S.activeTasks.findIndex(t=>t.workerId===empId);
   if(existIdx>-1){
@@ -1660,11 +1665,12 @@ async function mgrStartTask(){
     S.histTasks.unshift(done);S.activeTasks.splice(existIdx,1);
     if(S.fbConnected){await fbDel('activeTasks',String(t.id));await fbSet('histTasks',String(t.id),{...done,startTime:done.startTime instanceof Date?done.startTime.toISOString():done.startTime,endTime:done.endTime.toISOString()});}
   }
-  const newTask={id:String(S.nextTId++),workerId:empId,workerName:w.name,dept:w.dept,cust,prod,size,qty,col,taskType,startTime:new Date(),elapsed:0};
+  const newTask={id:String(S.nextTId++),workerId:empId,workerName:w.name,dept:taskDept||w.dept,cust,prod,size,qty,col,taskType,startTime:new Date(),elapsed:0};
   S.activeTasks.unshift(newTask);
   if(S.fbConnected)await fbSet('activeTasks',newTask.id,{...newTask,startTime:newTask.startTime.toISOString()});
   document.getElementById('mgr-bc-inp').value='';parseMgrBc('');
   document.getElementById('mgr-tasktype').value='';
+  document.getElementById('mgr-dept').value='';
   saveLS();renderMgrTasks();
   msg.textContent=`✅ משימה התחילה עבור ${w.name}`;msg.style.color='var(--green-txt)';
   setTimeout(()=>msg.textContent='',3000);
