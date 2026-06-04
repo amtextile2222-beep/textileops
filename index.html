@@ -155,10 +155,6 @@ code{background:var(--bg2);border:0.5px solid var(--b);border-radius:4px;padding
     <div style="font-size:42px;margin-bottom:8px">✂️</div>
     <div style="font-size:24px;font-weight:700;color:var(--blue-txt)">TextileOps</div>
     <div style="font-size:13px;color:var(--txt2);margin-top:4px">מערכת ניהול מפעל בגדים</div>
-    <div style="margin-top:12px;display:inline-block;background:#fff;padding:8px;border-radius:8px;border:1px solid var(--b)">
-      <canvas id="login-qr" style="display:block"></canvas>
-      <div style="font-size:11px;color:var(--txt3);margin-top:4px">סרוק לכניסה מהירה</div>
-    </div>
   </div>
   <div class="login-box">
     <div class="login-title" data-i18n="login_title">כניסה למערכת</div>
@@ -280,11 +276,15 @@ code{background:var(--bg2);border:0.5px solid var(--b);border-radius:4px;padding
             <button class="btn primary full" onclick="startCam()" id="cam-btn" style="font-size:14px;padding:12px">📷 <span data-i18n="scan_cam">סרוק עם מצלמה</span></button>
           </div>
           <div style="text-align:center;font-size:12px;color:var(--txt3);margin-bottom:.75rem">— <span data-i18n="scan_manual">הזן ידנית</span> / סורק USB —</div>
-          <input class="bc-inp" id="bc-inp" maxlength="12" placeholder="הזן 12 ספרות..." oninput="parseBc(this.value)" onkeydown="if(event.key==='Enter')submitBc()"/>
+          <input class="bc-inp" id="bc-inp" maxlength="13" placeholder="הזן 13 ספרות..." oninput="parseBc(this.value)" onkeydown="if(event.key==='Enter')submitBc()"/>
           <div id="bc-prev" style="margin-top:.75rem;min-height:36px"></div>
           <div class="field" style="margin-top:.75rem;margin-bottom:0">
             <label style="font-size:12px;color:var(--txt2);margin-bottom:5px;display:block">סוג משימה</label>
             <input id="bc-tasktype" type="text" placeholder="לדוגמה: תפירה, חיתוך, גימור..." style="font-size:13px"/>
+          </div>
+          <div class="field" style="margin-top:.75rem;margin-bottom:0">
+            <label style="font-size:12px;color:var(--txt2);margin-bottom:5px;display:block">מחלקה</label>
+            <input id="bc-dept" type="text" placeholder="לדוגמה: חיתוך, הרכבה, איכות..." style="font-size:13px"/>
           </div>
           <div style="display:flex;gap:8px;margin-top:.75rem">
             <button class="btn primary full" onclick="submitBc()">▶ <span data-i18n="scan_start">התחל / עבור למשימה</span></button>
@@ -296,14 +296,15 @@ code{background:var(--bg2);border:0.5px solid var(--b);border-radius:4px;padding
           <div style="font-size:12px;color:var(--txt2);line-height:2.3">
             <div><span class="bc-seg bc-c">XX</span> — מספר לקוח (2 ספרות)</div>
             <div><span class="bc-seg bc-p">XXXXX</span> — מספר מוצר (5 ספרות)</div>
+            <div><span class="bc-seg" style="background:var(--amber-bg);color:var(--amber-txt)">X</span> — מידה (1 ספרה)</div>
             <div><span class="bc-seg bc-q">XXX</span> — כמות (3 ספרות)</div>
             <div><span class="bc-seg bc-col">XX</span> — קוד צבע (2 ספרות)</div>
           </div>
           <div style="margin-top:.75rem;background:var(--bg2);border-radius:var(--r);padding:9px">
             <div style="font-size:11px;color:var(--txt3);margin-bottom:5px">דוגמה — לחץ לניסיון:</div>
             <div style="display:flex;gap:5px;flex-wrap:wrap;cursor:pointer" onclick="tryDemo()">
-              <span class="bc-seg bc-c">07</span><span class="bc-seg bc-p">10042</span><span class="bc-seg bc-q">025</span><span class="bc-seg bc-col">03</span>
-              <span style="font-size:11px;color:var(--txt3);align-self:center">= לקוח 07 | מוצר 10042 | 25 יח' | אדום</span>
+              <span class="bc-seg bc-c">07</span><span class="bc-seg bc-p">10042</span><span class="bc-seg" style="background:var(--amber-bg);color:var(--amber-txt)">3</span><span class="bc-seg bc-q">025</span><span class="bc-seg bc-col">03</span>
+              <span style="font-size:11px;color:var(--txt3);align-self:center">= לקוח 07 | מוצר 10042 | מידה 3 | 25 יח' | אדום</span>
             </div>
           </div>
         </div>
@@ -489,7 +490,7 @@ code{background:var(--bg2);border:0.5px solid var(--b);border-radius:4px;padding
             <div id="mgr-cam-status" style="position:absolute;bottom:8px;right:0;left:0;text-align:center;font-size:12px;color:#fff;background:rgba(0,0,0,.5);padding:4px">מכוון מצלמה...</div>
           </div>
           <button class="btn primary full" onclick="mgrStartCam()" id="mgr-cam-btn" style="font-size:13px;padding:10px;margin-bottom:8px">📷 סרוק עם מצלמה</button>
-          <input id="mgr-bc-inp" class="bc-inp" maxlength="12" placeholder="או הזן 12 ספרות ידנית..." oninput="parseMgrBc(this.value)"/>
+          <input id="mgr-bc-inp" class="bc-inp" maxlength="13" placeholder="או הזן 13 ספרות ידנית..." oninput="parseMgrBc(this.value)"/>
         </div><!-- /field barcode -->
         <div id="mgr-bc-prev" style="margin-bottom:.75rem;min-height:30px"></div>
         <div class="field">
@@ -1177,25 +1178,27 @@ function parseBc(v){
   v=(v||'').replace(/\D/g,'');
   const el=document.getElementById('bc-prev');
   if(v.length<2){el.innerHTML='';return;}
-  const c=v.slice(0,2),p=v.slice(2,7),q=v.slice(7,10),col=v.slice(10,12);
+  const c=v.slice(0,2),p=v.slice(2,7),sz=v.slice(7,8),q=v.slice(8,11),col=v.slice(11,13);
   el.innerHTML=`<div style="display:flex;gap:5px;flex-wrap:wrap;align-items:center;padding:8px;background:var(--bg2);border-radius:var(--r)">
     <span class="bc-seg bc-c">לקוח: ${c||'__'}</span>
     <span class="bc-seg bc-p">מוצר: ${p.padEnd(5,'_')}</span>
+    <span class="bc-seg" style="background:var(--amber-bg);color:var(--amber-txt)">מידה: ${sz||'_'}</span>
     <span class="bc-seg bc-q">כמות: ${q.padEnd(3,'_')}</span>
     <span class="bc-seg bc-col">צבע: ${COLORS[col]||col||'__'}</span>
   </div>`;
 }
 function tryDemo(){
-  document.getElementById('bc-inp').value='071004202503';
-  parseBc('071004202503');
+  document.getElementById('bc-inp').value='0710042302503';
+  parseBc('0710042302503');
   document.getElementById('bc-inp').focus();
 }
 async function submitBc(){
   const raw=(document.getElementById('bc-inp').value||'').replace(/\D/g,'');
-  if(raw.length!==12){alert('ברקוד חייב להיות 12 ספרות בדיוק');return;}
+  if(raw.length!==13){alert('ברקוד חייב להיות 13 ספרות בדיוק');return;}
   if(!S.user){alert('יש להתחבר תחילה');return;}
-  const cust=raw.slice(0,2),prod=raw.slice(2,7),qty=parseInt(raw.slice(7,10))||0,col=raw.slice(10,12);
+  const cust=raw.slice(0,2),prod=raw.slice(2,7),size=raw.slice(7,8),qty=parseInt(raw.slice(8,11))||0,col=raw.slice(11,13);
   const taskType=(document.getElementById('bc-tasktype').value||'').trim();
+  const taskDept=(document.getElementById('bc-dept').value||'').trim();
   const u=S.user;
   const wu=S.workers.find(x=>x.id===u.id);
   if(!wu||wu.status!=='in'){alert('לא ניתן להתחיל משימה — יש להירשם כנוכח תחילה (כניסה לעבודה בלשונית נוכחות)');return;}
@@ -1209,11 +1212,12 @@ async function submitBc(){
     S.activeTasks.splice(existIdx,1);
     if(S.fbConnected){await fbDel('activeTasks',String(t.id));await fbSet('histTasks',String(t.id),{...done,startTime:done.startTime instanceof Date?done.startTime.toISOString():done.startTime,endTime:done.endTime.toISOString()});}
   }
-  const newTask={id:String(S.nextTId++),workerId:u.id,workerName:u.name,dept:u.dept,cust,prod,qty,col,taskType,startTime:new Date(),elapsed:0};
+  const newTask={id:String(S.nextTId++),workerId:u.id,workerName:u.name,dept:taskDept||u.dept,cust,prod,size,qty,col,taskType,startTime:new Date(),elapsed:0};
   S.activeTasks.unshift(newTask);
   if(S.fbConnected)await fbSet('activeTasks',newTask.id,{...newTask,startTime:newTask.startTime.toISOString()});
   document.getElementById('bc-inp').value='';parseBc('');
   document.getElementById('bc-tasktype').value='';
+  document.getElementById('bc-dept').value='';
   saveLS();renderScanActive();renderTasks();goPage('tasks');
 }
 function renderScanActive(){
@@ -1549,9 +1553,10 @@ function parseMgrBc(v){
   v=(v||'').replace(/\D/g,'');
   const el=document.getElementById('mgr-bc-prev');if(!el)return;
   if(v.length<2){el.innerHTML='';return;}
-  const c=v.slice(0,2),p=v.slice(2,7),q=v.slice(7,10),col=v.slice(10,12);
+  const c=v.slice(0,2),p=v.slice(2,7),sz=v.slice(7,8),q=v.slice(8,11),col=v.slice(11,13);
   el.innerHTML=`<div style="display:flex;gap:5px;flex-wrap:wrap;padding:6px;background:var(--bg2);border-radius:var(--r)">
     <span class="bc-seg bc-c">לקוח: ${c||'__'}</span><span class="bc-seg bc-p">מוצר: ${p.padEnd(5,'_')}</span>
+    <span class="bc-seg" style="background:var(--amber-bg);color:var(--amber-txt)">מידה: ${sz||'_'}</span>
     <span class="bc-seg bc-q">כמות: ${q.padEnd(3,'_')}</span><span class="bc-seg bc-col">צבע: ${COLORS[col]||col||'__'}</span></div>`;
 }
 
@@ -1641,10 +1646,10 @@ async function mgrStartTask(){
   const raw=(document.getElementById('mgr-bc-inp').value||'').replace(/\D/g,'');
   const msg=document.getElementById('mgr-start-msg');
   if(!empId){msg.textContent='⚠ בחר עובד';msg.style.color='var(--red-txt)';return;}
-  if(raw.length!==12){msg.textContent='⚠ ברקוד חייב להיות 12 ספרות';msg.style.color='var(--red-txt)';return;}
+  if(raw.length!==13){msg.textContent='⚠ ברקוד חייב להיות 13 ספרות';msg.style.color='var(--red-txt)';return;}
   const w=S.workers.find(x=>x.id===empId);
   if(!w||w.status!=='in'){msg.textContent='⚠ העובד לא נמצא בעבודה';msg.style.color='var(--red-txt)';return;}
-  const cust=raw.slice(0,2),prod=raw.slice(2,7),qty=parseInt(raw.slice(7,10))||0,col=raw.slice(10,12);
+  const cust=raw.slice(0,2),prod=raw.slice(2,7),size=raw.slice(7,8),qty=parseInt(raw.slice(8,11))||0,col=raw.slice(11,13);
   const taskType=(document.getElementById('mgr-tasktype').value||'').trim();
   // close existing
   const existIdx=S.activeTasks.findIndex(t=>t.workerId===empId);
@@ -1655,7 +1660,7 @@ async function mgrStartTask(){
     S.histTasks.unshift(done);S.activeTasks.splice(existIdx,1);
     if(S.fbConnected){await fbDel('activeTasks',String(t.id));await fbSet('histTasks',String(t.id),{...done,startTime:done.startTime instanceof Date?done.startTime.toISOString():done.startTime,endTime:done.endTime.toISOString()});}
   }
-  const newTask={id:String(S.nextTId++),workerId:empId,workerName:w.name,dept:w.dept,cust,prod,qty,col,taskType,startTime:new Date(),elapsed:0};
+  const newTask={id:String(S.nextTId++),workerId:empId,workerName:w.name,dept:w.dept,cust,prod,size,qty,col,taskType,startTime:new Date(),elapsed:0};
   S.activeTasks.unshift(newTask);
   if(S.fbConnected)await fbSet('activeTasks',newTask.id,{...newTask,startTime:newTask.startTime.toISOString()});
   document.getElementById('mgr-bc-inp').value='';parseMgrBc('');
