@@ -985,7 +985,7 @@ function applyPerms(w){
     [...ALL_SUPERVISOR_PAGE_IDS,'admin','setup','costs'].forEach(p=>document.getElementById('nb-'+p)?.classList.remove('hidden'));
   } else {
     ['admin','setup'].forEach(p=>document.getElementById('nb-'+p)?.classList.add('hidden'));
-    const availPages=w.role==='supervisor'?ALL_SUPERVISOR_PAGE_IDS:ALL_WORKER_PAGE_IDS;
+    const availPages=w.role==='supervisor'?ALL_SUPERVISOR_PAGE_IDS:ALL_WORKER_PAGE_IDS; // helper ו-worker מקבלים אותן הרשאות
     const perms=w.permissions||availPages;
     ALL_SUPERVISOR_PAGE_IDS.forEach(p=>{
       const btn=document.getElementById('nb-'+p);
@@ -1044,7 +1044,7 @@ function doLogin(){
   document.getElementById('login-screen').classList.add('hidden');
   document.getElementById('app-screen').classList.remove('hidden');
   document.getElementById('top-name').textContent=w.name;
-  document.getElementById('top-role').textContent=w.role==='manager'?'מנהל':w.role==='supervisor'?'אחראי':'עובד';
+  document.getElementById('top-role').textContent=w.role==='manager'?'מנהל':w.role==='supervisor'?'אחראי':w.role==='helper'?'עוזר':'עובד';
   document.getElementById('top-av').textContent=w.name.split(' ').map(n=>n[0]).join('');
   applyPerms(w);
   setTimeout(loadWaSettings,100);
@@ -1833,7 +1833,7 @@ function renderAdmin(){
     <div class="row">
       <div class="av" style="width:28px;height:28px;font-size:10px">${esc(w.name.split(' ').map(n=>n[0]).join(''))}</div>
       <div style="flex:1"><div style="font-size:13px;font-weight:500">${esc(w.name)}</div>
-      <div style="font-size:11px;color:var(--txt3)">${esc(w.dept)} · ${w.role==='manager'?'מנהל':w.role==='supervisor'?'אחראי':'עובד'} · @${esc(w.user)}</div></div>
+      <div style="font-size:11px;color:var(--txt3)">${esc(w.dept)} · ${w.role==='manager'?'מנהל':w.role==='supervisor'?'אחראי':w.role==='helper'?'עוזר':'עובד'} · @${esc(w.user)}</div></div>
       <button class="btn" style="font-size:11px;padding:4px 8px" onclick="openModal('edit-worker','${w.id}')">✏</button>
       <button class="btn warn" style="font-size:11px;padding:4px 8px" onclick="resetPass('${w.id}')">🔑</button>
       <button class="btn danger" style="font-size:11px;padding:4px 8px" onclick="delWorker('${w.id}')">🗑</button>
@@ -1952,6 +1952,7 @@ function openModal(action,id){
       <div class="field"><label>מחלקה</label><select id="mf-dept">${dOpts}</select></div>
       <div class="field"><label>תפקיד</label><select id="mf-role" onchange="updatePermBoxes(this.value)">
         <option value="worker" ${wRole==='worker'?'selected':''}>עובד</option>
+        <option value="helper" ${wRole==='helper'?'selected':''}>עוזר</option>
         <option value="supervisor" ${wRole==='supervisor'?'selected':''}>אחראי</option>
         <option value="manager" ${wRole==='manager'?'selected':''}>מנהל</option>
       </select></div>
@@ -2567,7 +2568,7 @@ function calcCosts(){
     return;
   }
 
-  // חישוב לפי יום — סה"כ זמן עבודה יומי + הוצאות יומיות
+  // סה"כ זמן משימות לפי יום
   const byDay={};
   tasks.forEach(t=>{
     const d=(t.startTime instanceof Date?t.startTime:new Date(t.startTime)).toISOString().slice(0,10);
@@ -2583,41 +2584,70 @@ function calcCosts(){
     }
   });
 
+  // הוצאות קבועות אחידות ליום
+  const dayFixed=(S.costs.fixedDaily||0)
+    +(S.costs.fixedMonthly||0)/(S.costs.workDaysMonth||22)
+    +(S.costs.fixedAnnual||0)/(S.costs.workDaysYear||250);
+
+  // ─── עובדים ללא משימות (עוזרים / מנהלים / אחראים) ───
+  // מזהים מי היה נוכח אך אין לו משימות — ומחשבים שכר שיתחלק
+  // attHistory: {workerId, date, netMs}
+  // עובדים שיש להם משימה ביום — לא נחשבים
+  const taskWorkersByDay={};
+  tasks.forEach(t=>{
+    const d=(t.startTime instanceof Date?t.startTime:new Date(t.startTime)).toISOString().slice(0,10);
+    if(!taskWorkersByDay[d])taskWorkersByDay[d]=new Set();
+    taskWorkersByDay[d].add(t.workerId);
+  });
+
+  // שכר עוזרים לפי יום שיתחלק על המוצרים
+  const nonTaskWageByDay={};
+  S.attHistory.forEach(rec=>{
+    const d=rec.date;
+    if(d<from||d>to)return;
+    if(taskWorkersByDay[d]?.has(rec.workerId))return; // יש לו משימות — מחושב ישירות
+    const dailyRate=S.costs.workerRates[rec.workerId]||0;
+    if(!dailyRate)return;
+    const hourlyRate=dailyRate/8;
+    const hoursWorked=(rec.netMs||0)/3600000;
+    const wage=hourlyRate*hoursWorked;
+    nonTaskWageByDay[d]=(nonTaskWageByDay[d]||0)+wage;
+  });
+
   // חישוב עלות לכל משימה
-  let totalWages=0, totalOverhead=0;
+  let totalWages=0, totalOverhead=0, totalNonTaskWage=0;
   const enriched=tasks.map(t=>{
     const d=(t.startTime instanceof Date?t.startTime:new Date(t.startTime)).toISOString().slice(0,10);
     const dayTotalSec=byDay[d]?.totalSec||1;
     const taskRatio=(t.duration||0)/dayTotalSec;
 
-    // שכר — תעריף יומי / 8 שעות × שעות עבודה
+    // שכר עובד על המשימה
     const dailyRate=S.costs.workerRates[t.workerId]||0;
     const hourlyRate=dailyRate/8;
     const taskHours=(t.duration||0)/3600;
     const wage=hourlyRate*taskHours;
 
-    // הוצאות — קבועות יומיות + חודשיות÷ימי עבודה + שנתיות÷ימי עבודה + משתנות × חלק יחסי
-    const dayFixed=(S.costs.fixedDaily||0)
-      +(S.costs.fixedMonthly||0)/(S.costs.workDaysMonth||22)
-      +(S.costs.fixedAnnual||0)/(S.costs.workDaysYear||250);
+    // חלק מהוצאות קבועות + משתנות
     const dayVar=varByDay[d]||0;
     const overhead=(dayFixed+dayVar)*taskRatio;
 
-    totalWages+=wage;
-    totalOverhead+=overhead;
+    // חלק משכר עוזרים/מנהלים ללא משימות
+    const nonTaskShare=(nonTaskWageByDay[d]||0)*taskRatio;
 
-    return{...t,wage,overhead,total:wage+overhead,date:d,taskRatio};
+    totalWages+=wage+nonTaskShare;
+    totalOverhead+=overhead;
+    if(nonTaskShare)totalNonTaskWage+=nonTaskShare;
+
+    return{...t,wage,nonTaskShare,overhead,total:wage+nonTaskShare+overhead,date:d,taskRatio};
   });
 
   const grandTotal=totalWages+totalOverhead;
 
-  // עדכון כרטיסי סיכום
   document.getElementById('cost-total').textContent='₪'+Math.round(grandTotal).toLocaleString();
   document.getElementById('cost-wages').textContent='₪'+Math.round(totalWages).toLocaleString();
   document.getElementById('cost-overhead').textContent='₪'+Math.round(totalOverhead).toLocaleString();
   document.getElementById('cost-avg').textContent=enriched.length?'₪'+Math.round(grandTotal/enriched.length).toLocaleString():'—';
 
-  // שמירה זמנית לרינדור
   S._costData=enriched;
   renderCostTab();
 }
@@ -2718,6 +2748,7 @@ function renderCostTab(){
     </table></div>`;
 
   } else if(tab==='worker'){
+    // עובדים עם משימות
     const map={};
     enriched.forEach(t=>{
       const k=t.workerId||'—';
@@ -2725,24 +2756,72 @@ function renderCostTab(){
       map[k].tasks++;map[k].wage+=t.wage;map[k].totalSec+=(t.duration||0);
     });
     const rows=Object.values(map).sort((a,b)=>b.wage-a.wage);
-    el.innerHTML=`<div style="overflow-x:auto"><table style="width:100%;border-collapse:collapse;font-size:13px">
+
+    // עובדים ללא משימות (עוזרים/מנהלים/אחראים) מתוך attHistory
+    const from=document.getElementById('cost-from')?.value||'';
+    const to=document.getElementById('cost-to')?.value||'';
+    const taskWorkerIds=new Set(enriched.map(t=>t.workerId));
+    const nonTaskMap={};
+    S.attHistory.forEach(rec=>{
+      if(rec.date<from||rec.date>to)return;
+      if(taskWorkerIds.has(rec.workerId))return;
+      const dailyRate=S.costs.workerRates[rec.workerId]||0;
+      if(!dailyRate)return;
+      const k=rec.workerId;
+      if(!nonTaskMap[k])nonTaskMap[k]={id:k,name:rec.workerName||k,netMs:0};
+      nonTaskMap[k].netMs+=(rec.netMs||0);
+    });
+    const nonTaskRows=Object.values(nonTaskMap).map(r=>{
+      const dailyRate=S.costs.workerRates[r.id]||0;
+      const wage=(dailyRate/8)*(r.netMs/3600000);
+      return{...r,wage};
+    });
+    const w=S.workers;
+    const roleLabel=id=>{const ww=w.find(x=>x.id===id);return ww?.role==='helper'?'עוזר':ww?.role==='manager'?'מנהל':ww?.role==='supervisor'?'אחראי':'עובד';};
+
+    el.innerHTML=`<div style="overflow-x:auto">
+      <div style="font-size:12px;font-weight:600;color:var(--txt2);margin-bottom:6px">עובדים עם משימות</div>
+      <table style="width:100%;border-collapse:collapse;font-size:13px;margin-bottom:1rem">
       <thead><tr style="border-bottom:1.5px solid var(--b);text-align:right">
         <th style="padding:8px 6px">עובד</th>
+        <th style="padding:8px 6px">תפקיד</th>
         <th style="padding:8px 6px">משימות</th>
-        <th style="padding:8px 6px">שעות עבודה</th>
+        <th style="padding:8px 6px">שעות</th>
         <th style="padding:8px 6px">תעריף יומי</th>
-        <th style="padding:8px 6px;color:var(--green-txt)">שכר לתשלום</th>
+        <th style="padding:8px 6px;color:var(--green-txt)">שכר</th>
       </tr></thead>
       <tbody>${rows.map(r=>{
         const dailyRate=S.costs.workerRates[r.id]||0;
         return`<tr style="border-bottom:0.5px solid var(--b)">
           <td style="padding:7px 6px;font-weight:500">${esc(r.name)}</td>
+          <td style="padding:7px 6px;color:var(--txt2)">${roleLabel(r.id)}</td>
           <td style="padding:7px 6px;color:var(--txt2)">${r.tasks}</td>
-          <td style="padding:7px 6px">${(r.totalSec/3600).toFixed(1)} שעות</td>
-          <td style="padding:7px 6px;color:var(--txt2)">${dailyRate?'₪'+dailyRate.toLocaleString():'לא הוגדר'}</td>
+          <td style="padding:7px 6px">${(r.totalSec/3600).toFixed(1)}</td>
+          <td style="padding:7px 6px;color:var(--txt2)">${dailyRate?'₪'+dailyRate.toLocaleString():'—'}</td>
           <td style="padding:7px 6px;font-weight:600;color:var(--green-txt)">₪${Math.round(r.wage).toLocaleString()}</td>
         </tr>`;}).join('')}</tbody>
-    </table></div>`;
+      </table>
+      ${nonTaskRows.length?`
+      <div style="font-size:12px;font-weight:600;color:var(--txt2);margin-bottom:6px">עוזרים / מנהלים / אחראים (ללא משימות — שכר מחולק על המוצרים)</div>
+      <table style="width:100%;border-collapse:collapse;font-size:13px">
+      <thead><tr style="border-bottom:1.5px solid var(--b);text-align:right">
+        <th style="padding:8px 6px">עובד</th>
+        <th style="padding:8px 6px">תפקיד</th>
+        <th style="padding:8px 6px">שעות נוכחות</th>
+        <th style="padding:8px 6px">תעריף יומי</th>
+        <th style="padding:8px 6px;color:var(--amber-txt)">שכר (מחולק)</th>
+      </tr></thead>
+      <tbody>${nonTaskRows.map(r=>{
+        const dailyRate=S.costs.workerRates[r.id]||0;
+        return`<tr style="border-bottom:0.5px solid var(--b)">
+          <td style="padding:7px 6px;font-weight:500">${esc(r.name)}</td>
+          <td style="padding:7px 6px;color:var(--txt2)">${roleLabel(r.id)}</td>
+          <td style="padding:7px 6px">${(r.netMs/3600000).toFixed(1)}</td>
+          <td style="padding:7px 6px;color:var(--txt2)">${dailyRate?'₪'+dailyRate.toLocaleString():'—'}</td>
+          <td style="padding:7px 6px;font-weight:600;color:var(--amber-txt)">₪${Math.round(r.wage).toLocaleString()}</td>
+        </tr>`;}).join('')}</tbody>
+      </table>`:''}
+    </div>`;
   }
 }
 </script>
