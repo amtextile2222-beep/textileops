@@ -189,6 +189,7 @@ code{background:var(--bg2);border:0.5px solid var(--b);border-radius:4px;padding
       <button class="nb hidden" onclick="goPage('admin')" id="nb-admin">⚙️ <span data-i18n="nav_admin">ניהול</span></button>
       <button class="nb hidden" onclick="goPage('mgrtasks')" id="nb-mgrtasks">👔 <span data-i18n="nav_mgrtasks">ניהול משימות</span></button>
       <button class="nb hidden" onclick="goPage('setup')" id="nb-setup">🔗 <span data-i18n="nav_setup">Firebase</span></button>
+      <button class="nb hidden" onclick="goPage('costs')" id="nb-costs">💰 עלויות</button>
     </div>
     <div style="display:flex;align-items:center;gap:8px">
       <div class="lang-switcher">
@@ -574,6 +575,75 @@ code{background:var(--bg2);border:0.5px solid var(--b);border-radius:4px;padding
     </div>
   </div>
 
+  <!-- COSTS PAGE -->
+  <div class="page" id="page-costs">
+    <!-- כרטיסי סיכום -->
+    <div class="g4" style="margin-bottom:1rem">
+      <div class="card"><div class="mlbl">עלות ייצור כוללת</div><div class="mval" id="cost-total">—</div><div class="msub">בטווח הנבחר</div></div>
+      <div class="card"><div class="mlbl">עלות שכר עובדים</div><div class="mval" id="cost-wages">—</div><div class="msub">בטווח הנבחר</div></div>
+      <div class="card"><div class="mlbl">עלות הוצאות</div><div class="mval" id="cost-overhead">—</div><div class="msub">קבועות + משתנות</div></div>
+      <div class="card"><div class="mlbl">עלות ממוצעת למשימה</div><div class="mval" id="cost-avg">—</div><div class="msub">בטווח הנבחר</div></div>
+    </div>
+
+    <div class="g2" style="margin-bottom:1rem">
+      <!-- פילטר תאריכים -->
+      <div class="card">
+        <div class="sec">📅 טווח תאריכים</div>
+        <div style="display:flex;gap:8px;align-items:center;flex-wrap:wrap">
+          <div class="field" style="margin:0;flex:1"><label>מ-</label><input type="date" id="cost-from" style="font-size:13px"/></div>
+          <div class="field" style="margin:0;flex:1"><label>עד-</label><input type="date" id="cost-to" style="font-size:13px"/></div>
+          <button class="btn primary" onclick="calcCosts()" style="margin-top:18px">חשב</button>
+        </div>
+        <div style="display:flex;gap:6px;margin-top:8px;flex-wrap:wrap">
+          <button class="btn" style="font-size:11px;padding:4px 8px" onclick="setCostRange('today')">היום</button>
+          <button class="btn" style="font-size:11px;padding:4px 8px" onclick="setCostRange('week')">שבוע</button>
+          <button class="btn" style="font-size:11px;padding:4px 8px" onclick="setCostRange('month')">חודש</button>
+        </div>
+      </div>
+      <!-- הגדרות הוצאות -->
+      <div class="card">
+        <div class="sec">⚙️ הוצאות קבועות יומיות</div>
+        <div style="display:flex;gap:8px;align-items:flex-end">
+          <div class="field" style="margin:0;flex:1">
+            <label>סכום יומי (₪)</label>
+            <input type="number" id="cost-fixed" min="0" placeholder="0" style="font-size:14px;font-weight:600"/>
+          </div>
+          <button class="btn success" onclick="saveCostSettings()" style="white-space:nowrap">שמור</button>
+        </div>
+        <div style="margin-top:.75rem">
+          <div class="sec" style="font-size:12px;margin-bottom:6px">הוצאות משתנות</div>
+          <div style="display:flex;gap:6px;margin-bottom:6px;flex-wrap:wrap">
+            <input type="date" id="vexp-date" style="flex:1;font-size:12px"/>
+            <input type="number" id="vexp-amount" placeholder="סכום ₪" min="0" style="flex:1;font-size:12px"/>
+            <input type="text" id="vexp-desc" placeholder="תיאור (אריזה, חומר...)" style="flex:2;font-size:12px"/>
+            <button class="btn primary" onclick="addVarExp()" style="font-size:12px;padding:6px 10px">+ הוסף</button>
+          </div>
+          <div id="vexp-list" style="max-height:120px;overflow-y:auto"></div>
+        </div>
+      </div>
+    </div>
+
+    <!-- טבלאות תוצאות -->
+    <div style="display:flex;gap:8px;margin-bottom:.75rem;flex-wrap:wrap">
+      <button class="btn primary" id="ctab-prod" onclick="showCostTab('prod')">📦 לפי מוצר</button>
+      <button class="btn" id="ctab-cust" onclick="showCostTab('cust')">👤 לפי לקוח</button>
+      <button class="btn" id="ctab-day" onclick="showCostTab('day')">📅 לפי יום</button>
+      <button class="btn" id="ctab-worker" onclick="showCostTab('worker')">👷 שכר עובדים</button>
+    </div>
+
+    <div class="card" id="cost-result-card">
+      <div id="cost-result-content" style="text-align:center;color:var(--txt3);padding:2rem">לחץ "חשב" כדי לראות תוצאות</div>
+    </div>
+
+    <!-- הגדרות שכר עובדים -->
+    <div class="card" style="margin-top:1rem">
+      <div class="sec">👷 תעריף יומי לעובד</div>
+      <div style="font-size:11px;color:var(--txt3);margin-bottom:.75rem">הזן שכר יומי לכל עובד — יחולק אוטומטית ל-8 שעות</div>
+      <div id="cost-worker-rates"></div>
+      <button class="btn success" onclick="saveCostSettings()" style="margin-top:.75rem;width:100%">💾 שמור הגדרות</button>
+    </div>
+  </div>
+
 </div><!-- /app -->
 
 <!-- MODAL -->
@@ -650,12 +720,14 @@ let S={
   attFilter:'all',
   modalAction:null,
   attHistory:[],  // {workerId, workerName, dept, date, checkin, checkout, breakStart, breakEnd, breakActive}
+  costs:{workerRates:{}, fixedDaily:0, variableExpenses:[]},
+  costTab:'prod',
 };
 
 // ─── LOCAL STORAGE ──────────────────────────────────────────
 function saveLS(){
   try{
-    const d={workers:S.workers,depts:S.depts,activeTasks:S.activeTasks.map(t=>({...t,startTime:t.startTime instanceof Date?t.startTime.toISOString():t.startTime})),histTasks:S.histTasks.map(t=>({...t,startTime:t.startTime instanceof Date?t.startTime.toISOString():t.startTime,endTime:t.endTime instanceof Date?t.endTime.toISOString():t.endTime})),settings:S.settings,nextTId:S.nextTId,attHistory:S.attHistory};
+    const d={workers:S.workers,depts:S.depts,activeTasks:S.activeTasks.map(t=>({...t,startTime:t.startTime instanceof Date?t.startTime.toISOString():t.startTime})),histTasks:S.histTasks.map(t=>({...t,startTime:t.startTime instanceof Date?t.startTime.toISOString():t.startTime,endTime:t.endTime instanceof Date?t.endTime.toISOString():t.endTime})),settings:S.settings,nextTId:S.nextTId,attHistory:S.attHistory,costs:S.costs};
     localStorage.setItem('txops_v3',JSON.stringify(d));
   }catch(e){}
 }
@@ -671,6 +743,7 @@ function loadLS(){
     if(d.settings)S.settings=d.settings;
     if(d.nextTId)S.nextTId=d.nextTId;
     if(d.attHistory)S.attHistory=d.attHistory;
+    if(d.costs)S.costs={...S.costs,...d.costs};
   }catch(e){}
 }
 loadLS();
@@ -853,7 +926,7 @@ migrateToSessions();
 // ─── PERMISSIONS ────────────────────────────────────────────
 function applyPerms(w){
   if(w.role==='manager'){
-    [...ALL_SUPERVISOR_PAGE_IDS,'admin','setup'].forEach(p=>document.getElementById('nb-'+p)?.classList.remove('hidden'));
+    [...ALL_SUPERVISOR_PAGE_IDS,'admin','setup','costs'].forEach(p=>document.getElementById('nb-'+p)?.classList.remove('hidden'));
   } else {
     ['admin','setup'].forEach(p=>document.getElementById('nb-'+p)?.classList.add('hidden'));
     const availPages=w.role==='supervisor'?ALL_SUPERVISOR_PAGE_IDS:ALL_WORKER_PAGE_IDS;
@@ -924,7 +997,7 @@ function doLogin(){
 }
 function doLogout(){
   S.user=null;
-  [...ALL_WORKER_PAGE_IDS,'admin','mgrtasks','attrep','setup'].forEach(p=>document.getElementById('nb-'+p)?.classList.add('hidden'));
+  [...ALL_WORKER_PAGE_IDS,'admin','mgrtasks','attrep','setup','costs'].forEach(p=>document.getElementById('nb-'+p)?.classList.add('hidden'));
   document.getElementById('login-screen').classList.remove('hidden');
   document.getElementById('app-screen').classList.add('hidden');
   document.getElementById('l-user').value='';
@@ -954,6 +1027,7 @@ function goPage(p){
   if(p==='admin')renderAdmin();
   if(p==='mgrtasks')renderMgrTasks();
   if(p==='attrep')initAttRep();
+  if(p==='costs')initCostsPage();
 }
 
 function renderAll(){
@@ -2244,6 +2318,305 @@ function setLang(code){
     });
   }
 })();
+
+// ─── COSTS MODULE ────────────────────────────────────────────
+
+function initCostsPage(){
+  // הגדרת טווח ברירת מחדל — חודש אחרון
+  const today=todayStr();
+  const monthAgo=new Date();monthAgo.setDate(monthAgo.getDate()-30);
+  const fi=document.getElementById('cost-from');
+  const ti=document.getElementById('cost-to');
+  if(fi&&!fi.value)fi.value=monthAgo.toISOString().slice(0,10);
+  if(ti&&!ti.value)ti.value=today;
+  // טעינת הגדרות
+  document.getElementById('cost-fixed').value=S.costs.fixedDaily||0;
+  renderWorkerRates();
+  renderVarExpList();
+  calcCosts();
+}
+
+function setCostRange(r){
+  const today=new Date();
+  const fi=document.getElementById('cost-from');
+  const ti=document.getElementById('cost-to');
+  ti.value=todayStr();
+  if(r==='today'){fi.value=todayStr();}
+  else if(r==='week'){const d=new Date();d.setDate(d.getDate()-7);fi.value=d.toISOString().slice(0,10);}
+  else if(r==='month'){const d=new Date();d.setDate(d.getDate()-30);fi.value=d.toISOString().slice(0,10);}
+  calcCosts();
+}
+
+function renderWorkerRates(){
+  const el=document.getElementById('cost-worker-rates');
+  if(!el)return;
+  el.innerHTML=`<div style="display:grid;grid-template-columns:1fr 1fr;gap:8px">
+    ${S.workers.map(w=>`
+      <div style="display:flex;align-items:center;gap:8px;padding:8px;background:var(--bg2);border-radius:var(--r)">
+        <div class="av" style="width:30px;height:30px;font-size:11px;flex-shrink:0">${esc(w.name.split(' ').map(n=>n[0]).join(''))}</div>
+        <div style="flex:1;min-width:0">
+          <div style="font-size:12px;font-weight:500;color:var(--txt);white-space:nowrap;overflow:hidden;text-overflow:ellipsis">${esc(w.name)}</div>
+          <div style="font-size:10px;color:var(--txt3)">${esc(w.dept)}</div>
+        </div>
+        <div style="display:flex;flex-direction:column;align-items:flex-end;gap:2px">
+          <input type="number" min="0" placeholder="0" value="${S.costs.workerRates[w.id]||''}"
+            style="width:80px;font-size:13px;text-align:left;padding:5px 8px"
+            onchange="S.costs.workerRates['${w.id}']=parseFloat(this.value)||0"
+            oninput="S.costs.workerRates['${w.id}']=parseFloat(this.value)||0"/>
+          <div style="font-size:10px;color:var(--txt3)">₪/יום</div>
+        </div>
+      </div>`).join('')}
+  </div>`;
+}
+
+function renderVarExpList(){
+  const el=document.getElementById('vexp-list');
+  if(!el)return;
+  const exps=S.costs.variableExpenses||[];
+  if(!exps.length){el.innerHTML='<div style="font-size:11px;color:var(--txt3);text-align:center;padding:8px">אין הוצאות משתנות</div>';return;}
+  el.innerHTML=exps.slice().reverse().map((e,ri)=>{
+    const i=exps.length-1-ri;
+    return`<div style="display:flex;align-items:center;gap:6px;padding:5px 0;border-bottom:0.5px solid var(--b);font-size:12px">
+      <span style="color:var(--txt3);width:80px;flex-shrink:0">${e.date}</span>
+      <span style="font-weight:600;color:var(--blue-txt);width:60px;flex-shrink:0">₪${Number(e.amount).toLocaleString()}</span>
+      <span style="flex:1;color:var(--txt2)">${esc(e.desc||'')}</span>
+      <button onclick="delVarExp(${i})" style="background:none;border:none;color:var(--red-txt);cursor:pointer;font-size:14px;padding:0 4px">×</button>
+    </div>`;
+  }).join('');
+}
+
+function addVarExp(){
+  const date=document.getElementById('vexp-date').value||todayStr();
+  const amount=parseFloat(document.getElementById('vexp-amount').value)||0;
+  const desc=(document.getElementById('vexp-desc').value||'').trim();
+  if(!amount){alert('הזן סכום');return;}
+  S.costs.variableExpenses.push({date,amount,desc});
+  document.getElementById('vexp-amount').value='';
+  document.getElementById('vexp-desc').value='';
+  saveLS();renderVarExpList();
+}
+
+function delVarExp(i){
+  S.costs.variableExpenses.splice(i,1);
+  saveLS();renderVarExpList();
+}
+
+function saveCostSettings(){
+  S.costs.fixedDaily=parseFloat(document.getElementById('cost-fixed').value)||0;
+  saveLS();
+  const btn=event.target;
+  btn.textContent='✅ נשמר';btn.classList.add('success');
+  setTimeout(()=>{btn.textContent='💾 שמור הגדרות';btn.classList.remove('success');},1500);
+  calcCosts();
+}
+
+function showCostTab(tab){
+  S.costTab=tab;
+  ['prod','cust','day','worker'].forEach(t=>{
+    const b=document.getElementById('ctab-'+t);
+    if(b)b.className=t===tab?'btn primary':'btn';
+  });
+  renderCostTab();
+}
+
+function calcCosts(){
+  const from=document.getElementById('cost-from')?.value;
+  const to=document.getElementById('cost-to')?.value;
+  if(!from||!to)return;
+
+  // סינון משימות בטווח
+  const tasks=S.histTasks.filter(t=>{
+    const d=t.startTime instanceof Date?t.startTime:new Date(t.startTime);
+    const ds=d.toISOString().slice(0,10);
+    return ds>=from&&ds<=to&&t.duration>0;
+  });
+
+  if(!tasks.length){
+    document.getElementById('cost-total').textContent='—';
+    document.getElementById('cost-wages').textContent='—';
+    document.getElementById('cost-overhead').textContent='—';
+    document.getElementById('cost-avg').textContent='—';
+    document.getElementById('cost-result-content').innerHTML=
+      '<div style="text-align:center;padding:2rem;color:var(--txt3)">אין משימות בטווח הנבחר</div>';
+    return;
+  }
+
+  // חישוב לפי יום — סה"כ זמן עבודה יומי + הוצאות יומיות
+  const byDay={};
+  tasks.forEach(t=>{
+    const d=(t.startTime instanceof Date?t.startTime:new Date(t.startTime)).toISOString().slice(0,10);
+    if(!byDay[d])byDay[d]={totalSec:0};
+    byDay[d].totalSec+=(t.duration||0);
+  });
+
+  // הוצאות משתנות לפי יום
+  const varByDay={};
+  (S.costs.variableExpenses||[]).forEach(e=>{
+    if(e.date>=from&&e.date<=to){
+      varByDay[e.date]=(varByDay[e.date]||0)+Number(e.amount);
+    }
+  });
+
+  // חישוב עלות לכל משימה
+  let totalWages=0, totalOverhead=0;
+  const enriched=tasks.map(t=>{
+    const d=(t.startTime instanceof Date?t.startTime:new Date(t.startTime)).toISOString().slice(0,10);
+    const dayTotalSec=byDay[d]?.totalSec||1;
+    const taskRatio=(t.duration||0)/dayTotalSec;
+
+    // שכר — תעריף יומי / 8 שעות × שעות עבודה
+    const dailyRate=S.costs.workerRates[t.workerId]||0;
+    const hourlyRate=dailyRate/8;
+    const taskHours=(t.duration||0)/3600;
+    const wage=hourlyRate*taskHours;
+
+    // הוצאות — קבועות יומיות + משתנות × חלק יחסי
+    const dayFixed=S.costs.fixedDaily||0;
+    const dayVar=varByDay[d]||0;
+    const overhead=(dayFixed+dayVar)*taskRatio;
+
+    totalWages+=wage;
+    totalOverhead+=overhead;
+
+    return{...t,wage,overhead,total:wage+overhead,date:d,taskRatio};
+  });
+
+  const grandTotal=totalWages+totalOverhead;
+
+  // עדכון כרטיסי סיכום
+  document.getElementById('cost-total').textContent='₪'+Math.round(grandTotal).toLocaleString();
+  document.getElementById('cost-wages').textContent='₪'+Math.round(totalWages).toLocaleString();
+  document.getElementById('cost-overhead').textContent='₪'+Math.round(totalOverhead).toLocaleString();
+  document.getElementById('cost-avg').textContent=enriched.length?'₪'+Math.round(grandTotal/enriched.length).toLocaleString():'—';
+
+  // שמירה זמנית לרינדור
+  S._costData=enriched;
+  renderCostTab();
+}
+
+function renderCostTab(){
+  const tab=S.costTab||'prod';
+  const enriched=S._costData||[];
+  const el=document.getElementById('cost-result-content');
+  if(!el)return;
+
+  if(!enriched.length){
+    el.innerHTML='<div style="text-align:center;padding:2rem;color:var(--txt3)">אין נתונים</div>';
+    return;
+  }
+
+  if(tab==='prod'){
+    // קיבוץ לפי מוצר
+    const map={};
+    enriched.forEach(t=>{
+      const k=t.prod||'—';
+      if(!map[k])map[k]={prod:k,tasks:0,wage:0,overhead:0,total:0,qty:0,custs:new Set()};
+      map[k].tasks++;map[k].wage+=t.wage;map[k].overhead+=t.overhead;map[k].total+=t.total;map[k].qty+=t.qty||0;map[k].custs.add(t.cust);
+    });
+    const rows=Object.values(map).sort((a,b)=>b.total-a.total);
+    el.innerHTML=`<div style="overflow-x:auto"><table style="width:100%;border-collapse:collapse;font-size:13px">
+      <thead><tr style="border-bottom:1.5px solid var(--b);text-align:right">
+        <th style="padding:8px 6px">מוצר</th>
+        <th style="padding:8px 6px">יחידות</th>
+        <th style="padding:8px 6px">משימות</th>
+        <th style="padding:8px 6px">שכר</th>
+        <th style="padding:8px 6px">הוצאות</th>
+        <th style="padding:8px 6px;color:var(--blue-txt)">סה"כ עלות</th>
+        <th style="padding:8px 6px;color:var(--green-txt)">לפי יחידה</th>
+      </tr></thead>
+      <tbody>${rows.map(r=>`<tr style="border-bottom:0.5px solid var(--b)">
+        <td style="padding:7px 6px;font-weight:500">${esc(r.prod)}</td>
+        <td style="padding:7px 6px;color:var(--txt2)">${r.qty}</td>
+        <td style="padding:7px 6px;color:var(--txt2)">${r.tasks}</td>
+        <td style="padding:7px 6px">₪${Math.round(r.wage).toLocaleString()}</td>
+        <td style="padding:7px 6px">₪${Math.round(r.overhead).toLocaleString()}</td>
+        <td style="padding:7px 6px;font-weight:600;color:var(--blue-txt)">₪${Math.round(r.total).toLocaleString()}</td>
+        <td style="padding:7px 6px;font-weight:600;color:var(--green-txt)">${r.qty?'₪'+Math.round(r.total/r.qty).toLocaleString():'—'}</td>
+      </tr>`).join('')}</tbody>
+    </table></div>`;
+
+  } else if(tab==='cust'){
+    const map={};
+    enriched.forEach(t=>{
+      const k=t.cust||'—';
+      if(!map[k])map[k]={cust:k,tasks:0,wage:0,overhead:0,total:0,qty:0,prods:new Set()};
+      map[k].tasks++;map[k].wage+=t.wage;map[k].overhead+=t.overhead;map[k].total+=t.total;map[k].qty+=t.qty||0;map[k].prods.add(t.prod);
+    });
+    const rows=Object.values(map).sort((a,b)=>b.total-a.total);
+    el.innerHTML=`<div style="overflow-x:auto"><table style="width:100%;border-collapse:collapse;font-size:13px">
+      <thead><tr style="border-bottom:1.5px solid var(--b);text-align:right">
+        <th style="padding:8px 6px">לקוח</th>
+        <th style="padding:8px 6px">מוצרים</th>
+        <th style="padding:8px 6px">יחידות</th>
+        <th style="padding:8px 6px">שכר</th>
+        <th style="padding:8px 6px">הוצאות</th>
+        <th style="padding:8px 6px;color:var(--blue-txt)">סה"כ עלות</th>
+      </tr></thead>
+      <tbody>${rows.map(r=>`<tr style="border-bottom:0.5px solid var(--b)">
+        <td style="padding:7px 6px;font-weight:500"><span class="bc-seg bc-c">${esc(r.cust)}</span></td>
+        <td style="padding:7px 6px;color:var(--txt2)">${r.prods.size}</td>
+        <td style="padding:7px 6px;color:var(--txt2)">${r.qty}</td>
+        <td style="padding:7px 6px">₪${Math.round(r.wage).toLocaleString()}</td>
+        <td style="padding:7px 6px">₪${Math.round(r.overhead).toLocaleString()}</td>
+        <td style="padding:7px 6px;font-weight:600;color:var(--blue-txt)">₪${Math.round(r.total).toLocaleString()}</td>
+      </tr>`).join('')}</tbody>
+    </table></div>`;
+
+  } else if(tab==='day'){
+    const map={};
+    enriched.forEach(t=>{
+      const k=t.date;
+      if(!map[k])map[k]={date:k,tasks:0,wage:0,overhead:0,total:0,workers:new Set()};
+      map[k].tasks++;map[k].wage+=t.wage;map[k].overhead+=t.overhead;map[k].total+=t.total;map[k].workers.add(t.workerId);
+    });
+    const rows=Object.keys(map).sort((a,b)=>b.localeCompare(a)).map(k=>map[k]);
+    el.innerHTML=`<div style="overflow-x:auto"><table style="width:100%;border-collapse:collapse;font-size:13px">
+      <thead><tr style="border-bottom:1.5px solid var(--b);text-align:right">
+        <th style="padding:8px 6px">תאריך</th>
+        <th style="padding:8px 6px">עובדים</th>
+        <th style="padding:8px 6px">משימות</th>
+        <th style="padding:8px 6px">שכר</th>
+        <th style="padding:8px 6px">הוצאות</th>
+        <th style="padding:8px 6px;color:var(--blue-txt)">סה"כ</th>
+      </tr></thead>
+      <tbody>${rows.map(r=>`<tr style="border-bottom:0.5px solid var(--b)">
+        <td style="padding:7px 6px;font-weight:500">${r.date}</td>
+        <td style="padding:7px 6px;color:var(--txt2)">${r.workers.size}</td>
+        <td style="padding:7px 6px;color:var(--txt2)">${r.tasks}</td>
+        <td style="padding:7px 6px">₪${Math.round(r.wage).toLocaleString()}</td>
+        <td style="padding:7px 6px">₪${Math.round(r.overhead).toLocaleString()}</td>
+        <td style="padding:7px 6px;font-weight:600;color:var(--blue-txt)">₪${Math.round(r.total).toLocaleString()}</td>
+      </tr>`).join('')}</tbody>
+    </table></div>`;
+
+  } else if(tab==='worker'){
+    const map={};
+    enriched.forEach(t=>{
+      const k=t.workerId||'—';
+      if(!map[k])map[k]={id:k,name:t.workerName||k,tasks:0,wage:0,totalSec:0};
+      map[k].tasks++;map[k].wage+=t.wage;map[k].totalSec+=(t.duration||0);
+    });
+    const rows=Object.values(map).sort((a,b)=>b.wage-a.wage);
+    el.innerHTML=`<div style="overflow-x:auto"><table style="width:100%;border-collapse:collapse;font-size:13px">
+      <thead><tr style="border-bottom:1.5px solid var(--b);text-align:right">
+        <th style="padding:8px 6px">עובד</th>
+        <th style="padding:8px 6px">משימות</th>
+        <th style="padding:8px 6px">שעות עבודה</th>
+        <th style="padding:8px 6px">תעריף יומי</th>
+        <th style="padding:8px 6px;color:var(--green-txt)">שכר לתשלום</th>
+      </tr></thead>
+      <tbody>${rows.map(r=>{
+        const dailyRate=S.costs.workerRates[r.id]||0;
+        return`<tr style="border-bottom:0.5px solid var(--b)">
+          <td style="padding:7px 6px;font-weight:500">${esc(r.name)}</td>
+          <td style="padding:7px 6px;color:var(--txt2)">${r.tasks}</td>
+          <td style="padding:7px 6px">${(r.totalSec/3600).toFixed(1)} שעות</td>
+          <td style="padding:7px 6px;color:var(--txt2)">${dailyRate?'₪'+dailyRate.toLocaleString():'לא הוגדר'}</td>
+          <td style="padding:7px 6px;font-weight:600;color:var(--green-txt)">₪${Math.round(r.wage).toLocaleString()}</td>
+        </tr>`;}).join('')}</tbody>
+    </table></div>`;
+  }
+}
 </script>
 </body>
 </html>
