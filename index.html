@@ -2046,6 +2046,14 @@ async function confirmModal(){
         breakStart:brkStart,breakEnd:brkEnd,breakActive:brkActive,netMs};
       if(idx>=0)S.attHistory[idx]=rec;else S.attHistory.unshift(rec);
       if(S.fbConnected)await fbSet('attHistory',w.id+'_'+date,rec);
+      saveLS();renderAtt();renderMgrTasks();
+      // הצג אישור בתוך החלון ואל תסגור — אפשר להמשיך לתאריך אחר
+      const fb=document.createElement('div');
+      fb.style.cssText='color:var(--green-txt);font-size:12px;font-weight:600;margin-top:8px;text-align:center';
+      fb.textContent='✅ נשמר — שנה תאריך לעריכת יום אחר';
+      document.getElementById('modal-body')?.appendChild(fb);
+      setTimeout(()=>fb.remove(),3000);
+      return;
     }
     saveLS();closeModal();renderAtt();renderMgrTasks();return;
   }
