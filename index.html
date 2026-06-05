@@ -2019,18 +2019,30 @@ async function confirmModal(){
       w.checkout=!openSess&&newSessions.length?newSessions[newSessions.length-1].out:null;
       if(S.fbConnected)await fbSet('workers',w.id,w);
     } else {
-      // עדכון רשומה היסטורית
+      // עדכון רשומה היסטורית — שמור נתוני הפסקה מקוריים
+      const idx=S.attHistory.findIndex(r=>r.workerId===wId&&r.date===date);
+      const orig=idx>=0?S.attHistory[idx]:null;
+      const brkActive=orig?.breakActive??w.breakActive??false;
+      const brkStart=orig?.breakStart||w.breakStart||'';
+      const brkEnd=orig?.breakEnd||w.breakEnd||'';
+      // חישוב netMs עם ניכוי הפסקה
       const netMs=newSessions.reduce((sum,s)=>{
         if(!s.in)return sum;
-        const inT=new Date(s.in).getTime();
-        const outT=s.out?new Date(s.out).getTime():inT;
-        return sum+(outT-inT);
+        const ci=new Date(s.in).getTime();
+        const co=s.out?new Date(s.out).getTime():ci;
+        let dur=co-ci;
+        if(brkActive&&brkStart&&brkEnd){
+          const ref=new Date(s.in).toDateString();
+          const bs=new Date(ref+' '+brkStart).getTime();
+          const be=new Date(ref+' '+brkEnd).getTime();
+          if(be>bs){const os=Math.max(ci,bs);const oe=Math.min(co,be);if(oe>os)dur-=(oe-os);}
+        }
+        return sum+Math.max(0,dur);
       },0);
-      const idx=S.attHistory.findIndex(r=>r.workerId===wId&&r.date===date);
       const rec={workerId:w.id,workerName:w.name,dept:w.dept,date,
         sessions:newSessions,checkin:newSessions[0]?.in||null,
         checkout:newSessions[newSessions.length-1]?.out||null,
-        breakStart:'',breakEnd:'',breakActive:false,netMs};
+        breakStart:brkStart,breakEnd:brkEnd,breakActive:brkActive,netMs};
       if(idx>=0)S.attHistory[idx]=rec;else S.attHistory.unshift(rec);
       if(S.fbConnected)await fbSet('attHistory',w.id+'_'+date,rec);
     }
