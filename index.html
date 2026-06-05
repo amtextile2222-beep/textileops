@@ -1900,7 +1900,14 @@ function loadAttSessionsForDate(wId,date){
       (rec?.checkin?[{in:rec.checkin,out:rec.checkout||null}]:[]);
   }
   const container=document.getElementById('sessions-container');
-  if(container)container.innerHTML=_attSessionsHtml(sessions);
+  if(!container)return;
+  if(sessions&&sessions.length){
+    container.innerHTML=_attSessionsHtml(sessions);
+  } else {
+    // אין נתונים — הצג שורה ריקה עם הנחיה
+    container.innerHTML=`<div style="font-size:11px;color:var(--amber-txt);margin-bottom:6px">⚠️ אין רשומה לתאריך זה — הזן שעות כניסה/יציאה</div>`;
+    addSessRow();
+  }
 }
 function mgrEditAtt(wId){
   const w=S.workers.find(x=>x.id===wId);if(!w)return;
@@ -1909,10 +1916,12 @@ function mgrEditAtt(wId){
   document.getElementById('modal-title').textContent='עריכת נוכחות — '+w.name;
   const today=todayStr();
   const sessions=w.sessions&&w.sessions.length?w.sessions:(w.checkin?[{in:w.checkin,out:w.checkout||null}]:[]);
+  const noData=!sessions.length;
   const dateVal=today;
   document.getElementById('modal-body').innerHTML=`
     <div class="field"><label>תאריך</label><input type="date" id="mf-att-date" value="${dateVal}" onchange="loadAttSessionsForDate('${wId}',this.value)" style="font-size:13px"/></div>
     <div style="font-size:12px;color:var(--txt2);margin-bottom:8px;font-weight:500">כניסות/יציאות:</div>
+    ${noData?'<div style="font-size:11px;color:var(--amber-txt);margin-bottom:6px">⚠️ אין רשומה לתאריך זה — הזן שעות כניסה/יציאה</div>':''}
     <div id="sessions-container">${_attSessionsHtml(sessions)}</div>
     <button onclick="addSessRow()" class="btn primary" style="font-size:12px;width:100%;justify-content:center;margin-top:4px">+ הוסף כניסה/יציאה</button>`;
 }
