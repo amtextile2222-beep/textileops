@@ -2589,10 +2589,16 @@ function calcCosts(){
     +(S.costs.fixedMonthly||0)/(S.costs.workDaysMonth||22)
     +(S.costs.fixedAnnual||0)/(S.costs.workDaysYear||250);
 
+  // ─── שעות נוכחות לכל עובד לפי יום ───
+  const attByWorkerDay={}; // key: workerId+'_'+date → netMs
+  S.attHistory.forEach(rec=>{
+    const d=rec.date;
+    if(d<from||d>to)return;
+    const k=rec.workerId+'_'+d;
+    attByWorkerDay[k]=(attByWorkerDay[k]||0)+(rec.netMs||0);
+  });
+
   // ─── עובדים ללא משימות (עוזרים / מנהלים / אחראים) ───
-  // מזהים מי היה נוכח אך אין לו משימות — ומחשבים שכר שיתחלק
-  // attHistory: {workerId, date, netMs}
-  // עובדים שיש להם משימה ביום — לא נחשבים
   const taskWorkersByDay={};
   tasks.forEach(t=>{
     const d=(t.startTime instanceof Date?t.startTime:new Date(t.startTime)).toISOString().slice(0,10);
@@ -2600,17 +2606,24 @@ function calcCosts(){
     taskWorkersByDay[d].add(t.workerId);
   });
 
-  // שכר עוזרים לפי יום שיתחלק על המוצרים
+  // שעות משימות לכל עובד לפי יום (לחלוקה פרופורציונלית)
+  const taskSecByWorkerDay={};
+  tasks.forEach(t=>{
+    const d=(t.startTime instanceof Date?t.startTime:new Date(t.startTime)).toISOString().slice(0,10);
+    const k=t.workerId+'_'+d;
+    taskSecByWorkerDay[k]=(taskSecByWorkerDay[k]||0)+(t.duration||0);
+  });
+
+  // שכר עוזרים/מנהלים/אחראים ללא משימות — יתחלק על המוצרים
   const nonTaskWageByDay={};
   S.attHistory.forEach(rec=>{
     const d=rec.date;
     if(d<from||d>to)return;
-    if(taskWorkersByDay[d]?.has(rec.workerId))return; // יש לו משימות — מחושב ישירות
+    if(taskWorkersByDay[d]?.has(rec.workerId))return;
     const dailyRate=S.costs.workerRates[rec.workerId]||0;
     if(!dailyRate)return;
-    const hourlyRate=dailyRate/8;
     const hoursWorked=(rec.netMs||0)/3600000;
-    const wage=hourlyRate*hoursWorked;
+    const wage=(dailyRate/8)*hoursWorked;
     nonTaskWageByDay[d]=(nonTaskWageByDay[d]||0)+wage;
   });
 
@@ -2621,11 +2634,13 @@ function calcCosts(){
     const dayTotalSec=byDay[d]?.totalSec||1;
     const taskRatio=(t.duration||0)/dayTotalSec;
 
-    // שכר עובד על המשימה
+    // שכר עובד: לפי שעות נוכחות, מחולק פרופורציונלית בין משימותיו באותו יום
     const dailyRate=S.costs.workerRates[t.workerId]||0;
-    const hourlyRate=dailyRate/8;
-    const taskHours=(t.duration||0)/3600;
-    const wage=hourlyRate*taskHours;
+    const attMs=attByWorkerDay[t.workerId+'_'+d]||0;
+    const attHours=attMs/3600000;
+    const workerTotalTaskSec=taskSecByWorkerDay[t.workerId+'_'+d]||1;
+    const taskShare=(t.duration||0)/workerTotalTaskSec;
+    const wage=(dailyRate/8)*attHours*taskShare;
 
     // חלק מהוצאות קבועות + משתנות
     const dayVar=varByDay[d]||0;
@@ -2749,17 +2764,23 @@ function renderCostTab(){
 
   } else if(tab==='worker'){
     // עובדים עם משימות
+    const from=document.getElementById('cost-from')?.value||'';
+    const to=document.getElementById('cost-to')?.value||'';
     const map={};
     enriched.forEach(t=>{
       const k=t.workerId||'—';
-      if(!map[k])map[k]={id:k,name:t.workerName||k,tasks:0,wage:0,totalSec:0};
+      if(!map[k])map[k]={id:k,name:t.workerName||k,tasks:0,wage:0,totalSec:0,attMs:0};
       map[k].tasks++;map[k].wage+=t.wage;map[k].totalSec+=(t.duration||0);
+    });
+    // שעות נוכחות אמיתיות מ-attHistory
+    S.attHistory.forEach(rec=>{
+      if(rec.date<from||rec.date>to)return;
+      if(!map[rec.workerId])return;
+      map[rec.workerId].attMs+=(rec.netMs||0);
     });
     const rows=Object.values(map).sort((a,b)=>b.wage-a.wage);
 
     // עובדים ללא משימות (עוזרים/מנהלים/אחראים) מתוך attHistory
-    const from=document.getElementById('cost-from')?.value||'';
-    const to=document.getElementById('cost-to')?.value||'';
     const taskWorkerIds=new Set(enriched.map(t=>t.workerId));
     const nonTaskMap={};
     S.attHistory.forEach(rec=>{
@@ -2796,7 +2817,7 @@ function renderCostTab(){
           <td style="padding:7px 6px;font-weight:500">${esc(r.name)}</td>
           <td style="padding:7px 6px;color:var(--txt2)">${roleLabel(r.id)}</td>
           <td style="padding:7px 6px;color:var(--txt2)">${r.tasks}</td>
-          <td style="padding:7px 6px">${(r.totalSec/3600).toFixed(1)}</td>
+          <td style="padding:7px 6px">${(r.attMs/3600000).toFixed(1)}</td>
           <td style="padding:7px 6px;color:var(--txt2)">${dailyRate?'₪'+dailyRate.toLocaleString():'—'}</td>
           <td style="padding:7px 6px;font-weight:600;color:var(--green-txt)">₪${Math.round(r.wage).toLocaleString()}</td>
         </tr>`;}).join('')}</tbody>
