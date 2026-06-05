@@ -1875,14 +1875,9 @@ function updatePermBoxes(role){
 }
 
 // ─── EDIT ATTENDANCE ────────────────────────────────────────
-function mgrEditAtt(wId){
-  const w=S.workers.find(x=>x.id===wId);if(!w)return;
-  S.modalAction='edit-att:'+wId;
-  document.getElementById('modal-wrap').classList.remove('hidden');
-  document.getElementById('modal-title').textContent='עריכת נוכחות — '+w.name;
-  const sessions=w.sessions&&w.sessions.length?w.sessions:(w.checkin?[{in:w.checkin,out:w.checkout||null}]:[]);
-  const dateVal=sessions[0]?new Date(sessions[0].in).toISOString().slice(0,10):todayStr();
-  const sessHtml=sessions.map((s)=>{
+function _attSessionsHtml(sessions){
+  if(!sessions||!sessions.length)return'';
+  return sessions.map(s=>{
     const ci=new Date(s.in);const co=s.out?new Date(s.out):null;
     const ciV=pad2(ci.getHours())+':'+pad2(ci.getMinutes());
     const coV=co?pad2(co.getHours())+':'+pad2(co.getMinutes()):'';
@@ -1892,10 +1887,33 @@ function mgrEditAtt(wId){
       <button onclick="this.closest('.sess-row').remove()" style="background:none;border:none;cursor:pointer;color:var(--red-txt);font-size:18px;padding-bottom:6px">✕</button>
     </div>`;
   }).join('');
+}
+function loadAttSessionsForDate(wId,date){
+  const w=S.workers.find(x=>x.id===wId);if(!w)return;
+  const today=todayStr();
+  let sessions;
+  if(date===today){
+    sessions=w.sessions&&w.sessions.length?w.sessions:(w.checkin?[{in:w.checkin,out:w.checkout||null}]:[]);
+  } else {
+    const rec=S.attHistory.find(r=>r.workerId===wId&&r.date===date);
+    sessions=rec?.sessions&&rec.sessions.length?rec.sessions:
+      (rec?.checkin?[{in:rec.checkin,out:rec.checkout||null}]:[]);
+  }
+  const container=document.getElementById('sessions-container');
+  if(container)container.innerHTML=_attSessionsHtml(sessions);
+}
+function mgrEditAtt(wId){
+  const w=S.workers.find(x=>x.id===wId);if(!w)return;
+  S.modalAction='edit-att:'+wId;
+  document.getElementById('modal-wrap').classList.remove('hidden');
+  document.getElementById('modal-title').textContent='עריכת נוכחות — '+w.name;
+  const today=todayStr();
+  const sessions=w.sessions&&w.sessions.length?w.sessions:(w.checkin?[{in:w.checkin,out:w.checkout||null}]:[]);
+  const dateVal=today;
   document.getElementById('modal-body').innerHTML=`
-    <div class="field"><label>תאריך</label><input type="date" id="mf-att-date" value="${dateVal}" style="font-size:13px"/></div>
+    <div class="field"><label>תאריך</label><input type="date" id="mf-att-date" value="${dateVal}" onchange="loadAttSessionsForDate('${wId}',this.value)" style="font-size:13px"/></div>
     <div style="font-size:12px;color:var(--txt2);margin-bottom:8px;font-weight:500">כניסות/יציאות:</div>
-    <div id="sessions-container">${sessHtml}</div>
+    <div id="sessions-container">${_attSessionsHtml(sessions)}</div>
     <button onclick="addSessRow()" class="btn primary" style="font-size:12px;width:100%;justify-content:center;margin-top:4px">+ הוסף כניסה/יציאה</button>`;
 }
 function addSessRow(){
@@ -1991,12 +2009,31 @@ async function confirmModal(){
       const outEl=row.querySelector('.sess-out');
       if(inEl?.value)newSessions.push({in:new Date(date+'T'+inEl.value).toISOString(),out:outEl?.value?new Date(date+'T'+outEl.value).toISOString():null});
     });
-    w.sessions=newSessions;
-    const openSess=newSessions.find(s=>!s.out);
-    w.status=openSess?'in':'out';
-    w.checkin=newSessions[0]?.in||null;
-    w.checkout=!openSess&&newSessions.length?newSessions[newSessions.length-1].out:null;
-    if(S.fbConnected)await fbSet('workers',w.id,w);
+    const today=todayStr();
+    if(date===today){
+      // עדכון נוכחות היום
+      w.sessions=newSessions;
+      const openSess=newSessions.find(s=>!s.out);
+      w.status=openSess?'in':'out';
+      w.checkin=newSessions[0]?.in||null;
+      w.checkout=!openSess&&newSessions.length?newSessions[newSessions.length-1].out:null;
+      if(S.fbConnected)await fbSet('workers',w.id,w);
+    } else {
+      // עדכון רשומה היסטורית
+      const netMs=newSessions.reduce((sum,s)=>{
+        if(!s.in)return sum;
+        const inT=new Date(s.in).getTime();
+        const outT=s.out?new Date(s.out).getTime():inT;
+        return sum+(outT-inT);
+      },0);
+      const idx=S.attHistory.findIndex(r=>r.workerId===wId&&r.date===date);
+      const rec={workerId:w.id,workerName:w.name,dept:w.dept,date,
+        sessions:newSessions,checkin:newSessions[0]?.in||null,
+        checkout:newSessions[newSessions.length-1]?.out||null,
+        breakStart:'',breakEnd:'',breakActive:false,netMs};
+      if(idx>=0)S.attHistory[idx]=rec;else S.attHistory.unshift(rec);
+      if(S.fbConnected)await fbSet('attHistory',w.id+'_'+date,rec);
+    }
     saveLS();closeModal();renderAtt();renderMgrTasks();return;
   }
   // edit-task (פעיל)
