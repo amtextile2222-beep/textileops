@@ -2022,9 +2022,10 @@ async function confirmModal(){
       // עדכון רשומה היסטורית — שמור נתוני הפסקה מקוריים
       const idx=S.attHistory.findIndex(r=>r.workerId===wId&&r.date===date);
       const orig=idx>=0?S.attHistory[idx]:null;
-      const brkActive=orig?.breakActive??w.breakActive??false;
-      const brkStart=orig?.breakStart||w.breakStart||'';
-      const brkEnd=orig?.breakEnd||w.breakEnd||'';
+      // עדיפות להגדרות העובד הנוכחיות
+      const brkActive=w.breakActive??orig?.breakActive??false;
+      const brkStart=w.breakStart||orig?.breakStart||'';
+      const brkEnd=w.breakEnd||orig?.breakEnd||'';
       // חישוב netMs עם ניכוי הפסקה
       const netMs=newSessions.reduce((sum,s)=>{
         if(!s.in)return sum;
