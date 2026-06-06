@@ -1085,6 +1085,12 @@ function doLogin(){
     return;
   }
   loginAttempts=0;
+  if(w.faceAuth && !w.faceDescriptor){
+    // פנים לא רשומים עדיין — בקש רישום ראשוני
+    S._pendingUser=w;
+    _startFaceFirstRegister();
+    return;
+  }
   if(w.faceAuth && w.faceDescriptor){
     S._pendingUser=w;
     startFaceAuth();
@@ -3106,6 +3112,70 @@ function cancelFaceAuth(){
   document.getElementById('face-auth-screen').classList.add('hidden');
   document.getElementById('login-screen').classList.remove('hidden');
   document.getElementById('l-err').textContent='';
+}
+
+// ─── FACE FIRST REGISTER (מרישום מרחוק בכניסה) ──────────────
+async function _startFaceFirstRegister(){
+  document.getElementById('login-screen').classList.add('hidden');
+  _faceRegWorkerId=S._pendingUser.id;
+  document.getElementById('face-reg-title').textContent='רישום פנים — '+esc(S._pendingUser.name);
+  document.getElementById('face-reg-status').textContent='';
+  // שנה טקסט המסך לרישום ראשוני
+  const sub=document.querySelector('#face-reg-screen .login-sub');
+  if(sub)sub.textContent='המנהל הפעיל זיהוי פנים לחשבונך. צלם את פניך כדי להמשיך.';
+  document.getElementById('face-reg-btn').textContent='📸 צלם פנים';
+  document.getElementById('face-reg-btn').disabled=true;
+  document.getElementById('face-reg-screen').classList.remove('hidden');
+  // הסתר כפתור ביטול — חייב לרשום פנים
+  const cancelBtn=document.querySelector('#face-reg-screen .btn:not(.primary)');
+  if(cancelBtn)cancelBtn.style.display='none';
+  const ok=await loadFaceModels();
+  if(!ok){document.getElementById('face-reg-status').textContent='שגיאה בטעינת מודלים';return;}
+  try{
+    _faceRegStream=await navigator.mediaDevices.getUserMedia({video:{facingMode:'user'},audio:false});
+    const video=document.getElementById('face-reg-video');
+    video.srcObject=_faceRegStream;
+    await new Promise(r=>video.onloadedmetadata=r);
+    document.getElementById('face-reg-status').textContent='מצלמה פעילה — לחץ "צלם פנים"';
+    document.getElementById('face-reg-btn').disabled=false;
+    // עקוף captureFaceDescriptor לאחר שמירה → כניסה למערכת
+    document.getElementById('face-reg-btn').onclick=_captureAndLogin;
+  }catch(e){
+    document.getElementById('face-reg-status').textContent='נא לאפשר גישה למצלמה';
+  }
+}
+
+async function _captureAndLogin(){
+  const video=document.getElementById('face-reg-video');
+  document.getElementById('face-reg-status').textContent='מזהה פנים...';
+  document.getElementById('face-reg-btn').disabled=true;
+  const opts=new faceapi.TinyFaceDetectorOptions({inputSize:224,scoreThreshold:0.5});
+  const det=await faceapi.detectSingleFace(video,opts).withFaceLandmarks(true).withFaceDescriptor();
+  if(!det){
+    document.getElementById('face-reg-status').textContent='לא זוהו פנים — נסה שוב, קרב לנייד';
+    document.getElementById('face-reg-btn').disabled=false;
+    return;
+  }
+  const w=S._pendingUser;
+  w.faceDescriptor=Array.from(det.descriptor);
+  if(S.fbConnected)await fbSet('workers',w.id,w);
+  saveLS();
+  if(_faceRegStream){_faceRegStream.getTracks().forEach(t=>t.stop());_faceRegStream=null;}
+  document.getElementById('face-reg-screen').classList.add('hidden');
+  // שחזר כפתורים למצב רגיל לפעם הבאה
+  const cancelBtn=document.querySelector('#face-reg-screen .btn:not(.primary)');
+  if(cancelBtn)cancelBtn.style.display='';
+  document.getElementById('face-reg-btn').onclick=captureFaceDescriptor;
+  // כנס למערכת
+  S.user=w;S._pendingUser=null;
+  document.getElementById('app-screen').classList.remove('hidden');
+  document.getElementById('top-name').textContent=w.name;
+  document.getElementById('top-role').textContent=w.role==='manager'?'מנהל':w.role==='supervisor'?'אחראי':w.role==='helper'?'עוזר':'עובד';
+  document.getElementById('top-av').textContent=w.name.split(' ').map(n=>n[0]).join('');
+  applyPerms(w);
+  setTimeout(loadWaSettings,100);
+  const firstPage=(w.permissions&&w.permissions.length)?w.permissions[0]:'dash';
+  goPage(w.role==='manager'?'dash':firstPage);
 }
 
 // ─── FACE REGISTER ───────────────────────────────────────────
