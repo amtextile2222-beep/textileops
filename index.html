@@ -3044,14 +3044,36 @@ async function _runFaceAuthLoop(){
 }
 
 async function _onFaceAuthFailed(){
+  // צלם תמונה לפני שסוגרים את המצלמה
+  let photoBlob=null;
+  try{
+    const video=document.getElementById('face-auth-video');
+    const c=document.createElement('canvas');
+    c.width=video.videoWidth||320;c.height=video.videoHeight||240;
+    c.getContext('2d').drawImage(video,0,0,c.width,c.height);
+    photoBlob=await new Promise(r=>c.toBlob(r,'image/jpeg',0.8));
+  }catch(e){}
   if(_faceAuthStream){_faceAuthStream.getTracks().forEach(t=>t.stop());_faceAuthStream=null;}
   document.getElementById('face-auth-screen').classList.add('hidden');
   document.getElementById('login-screen').classList.remove('hidden');
   document.getElementById('l-err').textContent='זיהוי פנים נכשל 3 פעמים — נשלחה התראה למנהל';
-  // שלח התראה למנהל בטלגרם
   const name=S._pendingUser?.name||'עובד לא ידוע';
   const now=new Date().toLocaleTimeString('he-IL',{hour:'2-digit',minute:'2-digit'});
-  await sendTelegram('⚠️ TextileOps — זיהוי פנים נכשל\n👤 עובד: '+name+'\n🕐 שעה: '+now+'\nהעובד ניסה להיכנס 3 פעמים ולא זוהה.\nבדוק ואשר כניסה ידנית אם נדרש.');
+  const caption='⚠️ TextileOps — זיהוי פנים נכשל\n👤 עובד: '+name+'\n🕐 שעה: '+now+'\nהעובד ניסה להיכנס 3 פעמים ולא זוהה.\nבדוק ואשר כניסה ידנית אם נדרש.';
+  // שלח תמונה + כיתוב לטלגרם
+  if(photoBlob){
+    try{
+      const token=(document.getElementById('wa-token')?.value||S.settings.waToken||'').trim();
+      const chatId=(document.getElementById('wa-chatid')?.value||S.settings.waChatId||'').trim();
+      if(token&&chatId){
+        const fd=new FormData();
+        fd.append('chat_id',chatId);
+        fd.append('photo',photoBlob,'alert.jpg');
+        fd.append('caption',caption);
+        await fetch(`https://api.telegram.org/bot${token}/sendPhoto`,{method:'POST',body:fd});
+      }else{await sendTelegram(caption);}
+    }catch(e){await sendTelegram(caption);}
+  }else{await sendTelegram(caption);}
   S._pendingUser=null;
 }
 
