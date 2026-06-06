@@ -232,6 +232,7 @@ code{background:var(--bg2);border:0.5px solid var(--b);border-radius:4px;padding
       <button class="nb hidden" onclick="goPage('mgrtasks')" id="nb-mgrtasks">👔 <span data-i18n="nav_mgrtasks">ניהול משימות</span></button>
       <button class="nb hidden" onclick="goPage('setup')" id="nb-setup">🔗 <span data-i18n="nav_setup">Firebase</span></button>
       <button class="nb hidden" onclick="goPage('costs')" id="nb-costs">💰 עלויות</button>
+      <button class="nb hidden" onclick="goPage('products')" id="nb-products">👗 מוצרים</button>
     </div>
     <div style="display:flex;align-items:center;gap:8px">
       <div class="lang-switcher">
@@ -750,6 +751,31 @@ code{background:var(--bg2);border:0.5px solid var(--b);border-radius:4px;padding
     </div>
   </div>
 
+  <!-- עמוד מוצרים -->
+  <div class="page" id="page-products">
+    <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:12px;flex-wrap:wrap;gap:8px">
+      <div style="font-size:16px;font-weight:700">👗 מוצרים ודגמים</div>
+      <button class="btn primary" onclick="openProductModal()">+ הוסף מוצר</button>
+    </div>
+    <!-- חיפוש -->
+    <div style="display:flex;gap:8px;margin-bottom:12px;flex-wrap:wrap">
+      <input id="prod-search" type="text" placeholder="🔍 חיפוש לפי מספר מוצר / לקוח" style="flex:1;min-width:160px;padding:7px 10px;border-radius:8px;border:1px solid var(--brd);background:var(--card);color:var(--txt);font-size:13px" oninput="renderProducts()">
+    </div>
+    <div id="products-list"></div>
+  </div>
+
+  <!-- מודל מוצר -->
+  <div class="overlay hidden" id="prod-modal-wrap" onclick="if(event.target===this)closeProdModal()">
+    <div class="modal" style="max-width:600px;max-height:90vh;overflow-y:auto" id="prod-modal-box">
+      <div class="modal-title" id="prod-modal-title">מוצר</div>
+      <div id="prod-modal-body"></div>
+      <div style="display:flex;justify-content:flex-end;gap:8px;margin-top:1rem">
+        <button class="btn" onclick="closeProdModal()">ביטול</button>
+        <button class="btn primary" onclick="saveProduct()">שמור</button>
+      </div>
+    </div>
+  </div>
+
 </div><!-- /app -->
 
 <!-- MODAL -->
@@ -826,6 +852,7 @@ let S={
   attFilter:'all',
   modalAction:null,
   attHistory:[],  // {workerId, workerName, dept, date, checkin, checkout, breakStart, breakEnd, breakActive}
+  products:[],    // {id, prod, cust, name, images:[], docs:[], quantities:[{size,color,qty}]}
   costs:{workerRates:{}, fixedDaily:0, fixedMonthly:0, workDaysMonth:22, fixedAnnual:0, workDaysYear:250, variableExpenses:[]},
   customerNames:{},
   customColors:{},
@@ -835,7 +862,7 @@ let S={
 // ─── LOCAL STORAGE ──────────────────────────────────────────
 function saveLS(){
   try{
-    const d={workers:S.workers,depts:S.depts,activeTasks:S.activeTasks.map(t=>({...t,startTime:t.startTime instanceof Date?t.startTime.toISOString():t.startTime})),histTasks:S.histTasks.map(t=>({...t,startTime:t.startTime instanceof Date?t.startTime.toISOString():t.startTime,endTime:t.endTime instanceof Date?t.endTime.toISOString():t.endTime})),settings:S.settings,nextTId:S.nextTId,attHistory:S.attHistory,costs:S.costs,customerNames:S.customerNames,customColors:S.customColors};
+    const d={workers:S.workers,depts:S.depts,activeTasks:S.activeTasks.map(t=>({...t,startTime:t.startTime instanceof Date?t.startTime.toISOString():t.startTime})),histTasks:S.histTasks.map(t=>({...t,startTime:t.startTime instanceof Date?t.startTime.toISOString():t.startTime,endTime:t.endTime instanceof Date?t.endTime.toISOString():t.endTime})),settings:S.settings,nextTId:S.nextTId,attHistory:S.attHistory,costs:S.costs,customerNames:S.customerNames,customColors:S.customColors,products:S.products};
     localStorage.setItem('txops_v3',JSON.stringify(d));
   }catch(e){}
 }
@@ -854,6 +881,7 @@ function loadLS(){
     if(d.costs)S.costs={...S.costs,...d.costs};
     if(d.customerNames)S.customerNames=d.customerNames;
     if(d.customColors){S.customColors=d.customColors;Object.assign(COLORS,d.customColors);}
+    if(d.products)S.products=d.products;
   }catch(e){}
 }
 loadLS();
@@ -923,6 +951,11 @@ function listenFb(){
   onSnapshot(query(collection(db,'attHistory'),orderBy('date','desc')),snap=>{
     S.attHistory=snap.docs.map(d=>({...d.data()}));
     renderAll();
+  });
+  // products
+  onSnapshot(collection(db,'products'),snap=>{
+    S.products=snap.docs.map(d=>({id:d.id,...d.data()}));
+    saveLS();renderProducts();
   });
   // app settings (costs, customerNames, customColors)
   onSnapshot(collection(db,'appSettings'),snap=>{
@@ -1052,7 +1085,7 @@ migrateToSessions();
 // ─── PERMISSIONS ────────────────────────────────────────────
 function applyPerms(w){
   if(w.role==='manager'){
-    [...ALL_SUPERVISOR_PAGE_IDS,'admin','setup','costs'].forEach(p=>document.getElementById('nb-'+p)?.classList.remove('hidden'));
+    [...ALL_SUPERVISOR_PAGE_IDS,'admin','setup','costs','products'].forEach(p=>document.getElementById('nb-'+p)?.classList.remove('hidden'));
   } else {
     ['admin','setup'].forEach(p=>document.getElementById('nb-'+p)?.classList.add('hidden'));
     const availPages=w.role==='supervisor'?ALL_SUPERVISOR_PAGE_IDS:ALL_WORKER_PAGE_IDS; // helper ו-worker מקבלים אותן הרשאות
@@ -1174,6 +1207,7 @@ function goPage(p){
   if(p==='mgrtasks')renderMgrTasks();
   if(p==='attrep')initAttRep();
   if(p==='costs')initCostsPage();
+  if(p==='products')renderProducts();
 }
 
 function renderAll(){
@@ -3170,6 +3204,242 @@ function printPayroll(){
     <script>window.onload=()=>{window.print();}<\/script>
   </body></html>`);
   win.document.close();
+}
+
+// ─── PRODUCTS ────────────────────────────────────────────────
+let _editProdId=null;
+
+function renderProducts(){
+  const q=(document.getElementById('prod-search')?.value||'').trim().toLowerCase();
+  const list=S.products.filter(p=>!q||p.prod.includes(q)||p.cust.includes(q)||(p.name||'').toLowerCase().includes(q));
+  const el=document.getElementById('products-list');
+  if(!el)return;
+  if(!list.length){el.innerHTML='<div style="text-align:center;color:var(--txt3);padding:2rem">אין מוצרים. לחץ "+ הוסף מוצר"</div>';return;}
+  el.innerHTML=list.map(p=>{
+    const imgHtml=p.images&&p.images.length
+      ?`<div style="display:flex;gap:6px;flex-wrap:wrap;margin-top:8px">${p.images.slice(0,4).map(img=>`<img src="${img}" style="width:64px;height:64px;object-fit:cover;border-radius:6px;border:1px solid var(--brd)" onclick="viewImg('${p.id}',this.src)">`).join('')}${p.images.length>4?`<div style="width:64px;height:64px;border-radius:6px;background:var(--bg2);display:flex;align-items:center;justify-content:center;font-size:12px;color:var(--txt3)">+${p.images.length-4}</div>`:''}</div>`:'';
+    const qtyRows=p.quantities&&p.quantities.length
+      ?`<div style="margin-top:8px;font-size:11px;color:var(--txt3)">${p.quantities.map(q=>`מידה ${q.size} | ${COLORS[q.color]||q.color}: <b style="color:var(--txt)">${q.qty}</b>`).join(' &nbsp;·&nbsp; ')}</div>`:'';
+    const docHtml=p.docs&&p.docs.length
+      ?`<div style="margin-top:6px;display:flex;gap:6px;flex-wrap:wrap">${p.docs.map((d,i)=>`<a href="${d.data}" download="${d.name}" style="font-size:11px;padding:3px 8px;border-radius:5px;background:var(--bg2);color:var(--blue-txt);text-decoration:none">📄 ${esc(d.name)}</a>`).join('')}</div>`:'';
+    return`<div class="card" style="margin-bottom:10px">
+      <div style="display:flex;align-items:flex-start;justify-content:space-between;gap:8px">
+        <div style="flex:1">
+          <div style="font-size:14px;font-weight:700;color:var(--txt)">מוצר ${esc(p.prod)} &nbsp;·&nbsp; לקוח ${esc(p.cust)}${p.name?` &nbsp;·&nbsp; <span style="color:var(--txt3)">${esc(p.name)}</span>`:''}</div>
+          ${qtyRows}${imgHtml}${docHtml}
+        </div>
+        <div style="display:flex;gap:6px;flex-shrink:0">
+          <button class="btn" style="font-size:11px;padding:4px 10px" onclick="openProductModal('${p.id}')">✏️ עריכה</button>
+          <button class="btn danger" style="font-size:11px;padding:4px 8px;opacity:.7" onclick="deleteProduct('${p.id}')">🗑</button>
+        </div>
+      </div>
+    </div>`;
+  }).join('');
+}
+
+function openProductModal(id){
+  _editProdId=id||null;
+  const p=id?S.products.find(x=>x.id===id):null;
+  document.getElementById('prod-modal-title').textContent=p?`עריכת מוצר ${p.prod}`:'הוספת מוצר';
+  const colorOpts=Object.entries(COLORS).map(([k,v])=>`<option value="${k}">${v}</option>`).join('');
+  const qRows=p&&p.quantities&&p.quantities.length
+    ?p.quantities.map((q,i)=>`<tr>
+      <td><input type="text" value="${esc(q.size)}" maxlength="2" style="width:50px;font-size:12px" data-qi="${i}" data-qf="size"></td>
+      <td><select data-qi="${i}" data-qf="color" style="font-size:12px"><option value="">--</option>${Object.entries(COLORS).map(([k,v])=>`<option value="${k}" ${q.color===k?'selected':''}>${v}</option>`).join('')}</select></td>
+      <td><input type="number" value="${q.qty}" min="0" style="width:70px;font-size:12px" data-qi="${i}" data-qf="qty"></td>
+      <td><button type="button" onclick="this.closest('tr').remove()" style="background:none;border:none;color:var(--red);cursor:pointer;font-size:14px">✕</button></td>
+    </tr>`).join(''):'';
+  const imgPrev=p&&p.images&&p.images.length
+    ?`<div id="prod-img-preview" style="display:flex;gap:6px;flex-wrap:wrap;margin-bottom:8px">${p.images.map((img,i)=>`<div style="position:relative"><img src="${img}" style="width:72px;height:72px;object-fit:cover;border-radius:6px;border:1px solid var(--brd)"><button type="button" onclick="removeProdImg(${i})" style="position:absolute;top:-4px;right:-4px;background:var(--red);color:#fff;border:none;border-radius:50%;width:18px;height:18px;font-size:11px;cursor:pointer;line-height:1">✕</button></div>`).join('')}</div>`
+    :`<div id="prod-img-preview" style="display:flex;gap:6px;flex-wrap:wrap;margin-bottom:8px"></div>`;
+  const docPrev=p&&p.docs&&p.docs.length
+    ?`<div id="prod-doc-preview" style="display:flex;gap:6px;flex-wrap:wrap;margin-bottom:8px">${p.docs.map((d,i)=>`<div style="display:flex;align-items:center;gap:4px;background:var(--bg2);border-radius:5px;padding:3px 8px;font-size:11px">📄 ${esc(d.name)}<button type="button" onclick="removeProdDoc(${i})" style="background:none;border:none;color:var(--red);cursor:pointer;font-size:12px">✕</button></div>`).join('')}</div>`
+    :`<div id="prod-doc-preview" style="display:flex;gap:6px;flex-wrap:wrap;margin-bottom:8px"></div>`;
+  document.getElementById('prod-modal-body').innerHTML=`
+    <div style="display:grid;grid-template-columns:1fr 1fr;gap:8px;margin-bottom:10px">
+      <div class="field"><label>מספר מוצר (5 ספרות)</label><input id="pm-prod" value="${esc(p?.prod||'')}" maxlength="5" placeholder="12345" style="font-size:13px"/></div>
+      <div class="field"><label>לקוח (2 ספרות)</label><input id="pm-cust" value="${esc(p?.cust||'')}" maxlength="2" placeholder="01" style="font-size:13px"/></div>
+    </div>
+    <div class="field" style="margin-bottom:10px"><label>שם / תיאור (אופציונלי)</label><input id="pm-name" value="${esc(p?.name||'')}" placeholder="לדוגמה: חולצה קיץ" style="font-size:13px"/></div>
+
+    <div class="sec" style="margin-bottom:6px">📸 תמונות דגם</div>
+    ${imgPrev}
+    <div style="display:flex;gap:8px;margin-bottom:12px;flex-wrap:wrap">
+      <button type="button" class="btn" onclick="document.getElementById('pm-img-file').click()" style="font-size:12px">📁 העלה תמונה</button>
+      <button type="button" class="btn" onclick="openProdCamera()" style="font-size:12px">📷 צלם</button>
+      <input id="pm-img-file" type="file" accept="image/*" multiple class="hidden" onchange="addProdImages(this)">
+    </div>
+    <div id="pm-camera-wrap" class="hidden" style="margin-bottom:10px">
+      <video id="pm-camera-video" autoplay playsinline style="width:100%;border-radius:8px;max-height:220px;background:#000"></video>
+      <div style="display:flex;gap:8px;margin-top:6px">
+        <button type="button" class="btn primary" onclick="snapProdPhoto()" style="flex:1">📸 צלם תמונה</button>
+        <button type="button" class="btn" onclick="closeProdCamera()">סגור</button>
+      </div>
+      <canvas id="pm-camera-canvas" class="hidden"></canvas>
+    </div>
+
+    <div class="sec" style="margin-bottom:6px">📄 מסמכי עבודה / הוראות</div>
+    ${docPrev}
+    <div style="margin-bottom:12px">
+      <button type="button" class="btn" onclick="document.getElementById('pm-doc-file').click()" style="font-size:12px">📁 העלה מסמך</button>
+      <input id="pm-doc-file" type="file" accept="image/*,.pdf,.doc,.docx" multiple class="hidden" onchange="addProdDocs(this)">
+    </div>
+
+    <div class="sec" style="margin-bottom:6px">📦 כמויות לפי מידה וצבע</div>
+    <table style="width:100%;border-collapse:collapse;font-size:12px;margin-bottom:6px" id="pm-qty-table">
+      <thead><tr style="border-bottom:1px solid var(--brd)">
+        <th style="padding:5px;text-align:right">מידה</th>
+        <th style="padding:5px;text-align:right">צבע</th>
+        <th style="padding:5px;text-align:right">כמות</th>
+        <th></th>
+      </tr></thead>
+      <tbody id="pm-qty-body">${qRows}</tbody>
+    </table>
+    <button type="button" class="btn" onclick="addQtyRow()" style="font-size:12px">+ הוסף שורה</button>`;
+  document.getElementById('prod-modal-wrap').classList.remove('hidden');
+  _prodImgs=p?[...(p.images||[])]:[];
+  _prodDocs=p?[...(p.docs||[])]:[];
+}
+
+let _prodImgs=[], _prodDocs=[], _prodCamStream=null;
+
+function closeProdModal(){
+  document.getElementById('prod-modal-wrap').classList.add('hidden');
+  closeProdCamera();
+  _editProdId=null;_prodImgs=[];_prodDocs=[];
+}
+
+function addQtyRow(){
+  const colorOpts=Object.entries(COLORS).map(([k,v])=>`<option value="${k}">${v}</option>`).join('');
+  const i=Date.now();
+  const tr=document.createElement('tr');
+  tr.innerHTML=`<td><input type="text" maxlength="2" style="width:50px;font-size:12px" data-qi="${i}" data-qf="size" placeholder="1"></td>
+    <td><select data-qi="${i}" data-qf="color" style="font-size:12px"><option value="">--</option>${colorOpts}</select></td>
+    <td><input type="number" value="0" min="0" style="width:70px;font-size:12px" data-qi="${i}" data-qf="qty"></td>
+    <td><button type="button" onclick="this.closest('tr').remove()" style="background:none;border:none;color:var(--red);cursor:pointer;font-size:14px">✕</button></td>`;
+  document.getElementById('pm-qty-body').appendChild(tr);
+}
+
+function compressImage(dataUrl, maxW, maxH, quality){
+  return new Promise(res=>{
+    const img=new Image();
+    img.onload=()=>{
+      let w=img.width,h=img.height;
+      if(w>maxW){h=Math.round(h*maxW/w);w=maxW;}
+      if(h>maxH){w=Math.round(w*maxH/h);h=maxH;}
+      const c=document.createElement('canvas');c.width=w;c.height=h;
+      c.getContext('2d').drawImage(img,0,0,w,h);
+      res(c.toDataURL('image/jpeg',quality||0.7));
+    };
+    img.src=dataUrl;
+  });
+}
+
+async function addProdImages(input){
+  for(const file of input.files){
+    const reader=new FileReader();
+    await new Promise(res=>{reader.onload=async e=>{
+      const compressed=await compressImage(e.target.result,800,800,0.7);
+      _prodImgs.push(compressed);res();
+    };reader.readAsDataURL(file);});
+  }
+  input.value='';
+  refreshImgPreview();
+}
+
+function refreshImgPreview(){
+  const el=document.getElementById('prod-img-preview');
+  if(!el)return;
+  el.innerHTML=_prodImgs.map((img,i)=>`<div style="position:relative"><img src="${img}" style="width:72px;height:72px;object-fit:cover;border-radius:6px;border:1px solid var(--brd)"><button type="button" onclick="removeProdImg(${i})" style="position:absolute;top:-4px;right:-4px;background:var(--red);color:#fff;border:none;border-radius:50%;width:18px;height:18px;font-size:11px;cursor:pointer;line-height:1">✕</button></div>`).join('');
+}
+
+function removeProdImg(i){_prodImgs.splice(i,1);refreshImgPreview();}
+
+async function addProdDocs(input){
+  for(const file of input.files){
+    if(file.size>2*1024*1024){alert(`הקובץ ${file.name} גדול מ-2MB`);continue;}
+    const reader=new FileReader();
+    await new Promise(res=>{reader.onload=e=>{
+      _prodDocs.push({name:file.name,data:e.target.result});res();
+    };reader.readAsDataURL(file);});
+  }
+  input.value='';
+  refreshDocPreview();
+}
+
+function refreshDocPreview(){
+  const el=document.getElementById('prod-doc-preview');
+  if(!el)return;
+  el.innerHTML=_prodDocs.map((d,i)=>`<div style="display:flex;align-items:center;gap:4px;background:var(--bg2);border-radius:5px;padding:3px 8px;font-size:11px">📄 ${esc(d.name)}<button type="button" onclick="removeProdDoc(${i})" style="background:none;border:none;color:var(--red);cursor:pointer;font-size:12px">✕</button></div>`).join('');
+}
+
+function removeProdDoc(i){_prodDocs.splice(i,1);refreshDocPreview();}
+
+async function openProdCamera(){
+  document.getElementById('pm-camera-wrap').classList.remove('hidden');
+  try{
+    _prodCamStream=await navigator.mediaDevices.getUserMedia({video:{facingMode:'environment'}});
+    document.getElementById('pm-camera-video').srcObject=_prodCamStream;
+  }catch(e){alert('לא ניתן לגשת למצלמה');closeProdCamera();}
+}
+
+async function snapProdPhoto(){
+  const video=document.getElementById('pm-camera-video');
+  const canvas=document.getElementById('pm-camera-canvas');
+  canvas.width=video.videoWidth;canvas.height=video.videoHeight;
+  canvas.getContext('2d').drawImage(video,0,0);
+  const compressed=await compressImage(canvas.toDataURL('image/jpeg',0.9),800,800,0.7);
+  _prodImgs.push(compressed);
+  refreshImgPreview();
+}
+
+function closeProdCamera(){
+  if(_prodCamStream){_prodCamStream.getTracks().forEach(t=>t.stop());_prodCamStream=null;}
+  const w=document.getElementById('pm-camera-wrap');if(w)w.classList.add('hidden');
+}
+
+async function saveProduct(){
+  const prod=(document.getElementById('pm-prod')?.value||'').trim().padStart(5,'0').slice(0,5);
+  const cust=(document.getElementById('pm-cust')?.value||'').trim().padStart(2,'0').slice(0,2);
+  const name=(document.getElementById('pm-name')?.value||'').trim();
+  if(!prod||prod==='00000'){alert('יש להזין מספר מוצר');return;}
+  // קמויות
+  const quantities=[];
+  document.querySelectorAll('#pm-qty-body tr').forEach(tr=>{
+    const size=tr.querySelector('[data-qf="size"]')?.value||'';
+    const color=tr.querySelector('[data-qf="color"]')?.value||'';
+    const qty=parseInt(tr.querySelector('[data-qf="qty"]')?.value)||0;
+    if(size||color)quantities.push({size,color,qty});
+  });
+  closeProdCamera();
+  if(_editProdId){
+    const p=S.products.find(x=>x.id===_editProdId);
+    if(p){Object.assign(p,{prod,cust,name,images:_prodImgs,docs:_prodDocs,quantities});}
+  }else{
+    const id='p'+Date.now();
+    S.products.push({id,prod,cust,name,images:_prodImgs,docs:_prodDocs,quantities});
+  }
+  saveLS();
+  if(S.fbConnected){
+    const p=S.products.find(x=>x.id===(_editProdId||S.products[S.products.length-1].id));
+    if(p)await fbSet('products',p.id,{...p,images:p.images,docs:p.docs.map(d=>({name:d.name,data:d.data}))});
+  }
+  closeProdModal();renderProducts();
+}
+
+async function deleteProduct(id){
+  if(!confirm('למחוק את המוצר?'))return;
+  S.products=S.products.filter(x=>x.id!==id);
+  if(S.fbConnected)await fbDel('products',id);
+  saveLS();renderProducts();
+}
+
+function viewImg(prodId,src){
+  const ov=document.createElement('div');
+  ov.style.cssText='position:fixed;inset:0;background:rgba(0,0,0,.85);z-index:9999;display:flex;align-items:center;justify-content:center;cursor:pointer';
+  ov.onclick=()=>document.body.removeChild(ov);
+  ov.innerHTML=`<img src="${src}" style="max-width:95vw;max-height:90vh;border-radius:10px;object-fit:contain">`;
+  document.body.appendChild(ov);
 }
 
 // ─── PRINT ───────────────────────────────────────────────────
