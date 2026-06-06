@@ -6,6 +6,7 @@
 <title>TextileOps — ניהול מפעל בגדים</title>
 <meta name="theme-color" content="#185FA5"/>
 <link rel="manifest" href="data:application/json,{%22name%22:%22TextileOps%22,%22short_name%22:%22TextileOps%22,%22display%22:%22standalone%22,%22background_color%22:%22%23ffffff%22}"/>
+<script src="https://cdn.jsdelivr.net/npm/face-api.js@0.22.2/dist/face-api.min.js"></script>
 <style>
 *{box-sizing:border-box;margin:0;padding:0}
 :root{
@@ -171,6 +172,50 @@ code{background:var(--bg2);border:0.5px solid var(--b);border-radius:4px;padding
       </div>
     </div>
 
+  </div>
+</div>
+
+<!-- FACE AUTH SCREEN -->
+<div id="face-auth-screen" class="hidden" style="min-height:100vh;display:flex;align-items:center;justify-content:center;flex-direction:column;gap:1.5rem;padding:1rem;background:var(--bg3)">
+  <div style="text-align:center">
+    <div style="font-size:42px;margin-bottom:8px">✂️</div>
+    <div style="font-size:24px;font-weight:700;color:var(--blue-txt)">TextileOps</div>
+  </div>
+  <div class="login-box" style="max-width:380px;text-align:center">
+    <div class="login-title">אימות זהות</div>
+    <div class="login-sub" id="face-auth-msg">מרכז את פניך במצלמה</div>
+    <div style="position:relative;margin:16px 0;border-radius:var(--rl);overflow:hidden;background:#000;aspect-ratio:4/3;max-height:280px">
+      <video id="face-auth-video" autoplay playsinline muted style="width:100%;height:100%;object-fit:cover;transform:scaleX(-1)"></video>
+      <canvas id="face-auth-canvas" style="position:absolute;top:0;left:0;width:100%;height:100%;transform:scaleX(-1)"></canvas>
+      <div style="position:absolute;inset:0;display:flex;align-items:center;justify-content:center;pointer-events:none">
+        <div style="width:55%;aspect-ratio:1;border:3px solid rgba(255,255,255,0.6);border-radius:50%"></div>
+      </div>
+    </div>
+    <div id="face-auth-status" style="font-size:13px;min-height:20px;margin-bottom:12px;color:var(--txt2)"></div>
+    <button class="btn danger full" onclick="cancelFaceAuth()">ביטול</button>
+  </div>
+</div>
+
+<!-- FACE REGISTER SCREEN -->
+<div id="face-reg-screen" class="hidden" style="min-height:100vh;display:flex;align-items:center;justify-content:center;flex-direction:column;gap:1.5rem;padding:1rem;background:var(--bg3)">
+  <div style="text-align:center">
+    <div style="font-size:42px;margin-bottom:8px">✂️</div>
+    <div style="font-size:24px;font-weight:700;color:var(--blue-txt)">TextileOps</div>
+  </div>
+  <div class="login-box" style="max-width:380px;text-align:center">
+    <div class="login-title" id="face-reg-title">רישום פנים</div>
+    <div class="login-sub">הבט ישר למצלמה לרישום</div>
+    <div style="position:relative;margin:16px 0;border-radius:var(--rl);overflow:hidden;background:#000;aspect-ratio:4/3;max-height:280px">
+      <video id="face-reg-video" autoplay playsinline muted style="width:100%;height:100%;object-fit:cover;transform:scaleX(-1)"></video>
+      <div style="position:absolute;inset:0;display:flex;align-items:center;justify-content:center;pointer-events:none">
+        <div style="width:55%;aspect-ratio:1;border:3px solid rgba(255,255,255,0.6);border-radius:50%"></div>
+      </div>
+    </div>
+    <div id="face-reg-status" style="font-size:13px;min-height:20px;margin-bottom:12px;color:var(--txt2)"></div>
+    <div style="display:flex;gap:8px">
+      <button class="btn full" onclick="cancelFaceReg()">ביטול</button>
+      <button class="btn primary full" id="face-reg-btn" onclick="captureFaceDescriptor()">📸 צלם פנים</button>
+    </div>
   </div>
 </div>
 
@@ -1040,6 +1085,11 @@ function doLogin(){
     return;
   }
   loginAttempts=0;
+  if(w.faceAuth && w.faceDescriptor){
+    S._pendingUser=w;
+    startFaceAuth();
+    return;
+  }
   S.user=w;
   document.getElementById('login-screen').classList.add('hidden');
   document.getElementById('app-screen').classList.remove('hidden');
@@ -1834,6 +1884,7 @@ function renderAdmin(){
       <div class="av" style="width:28px;height:28px;font-size:10px">${esc(w.name.split(' ').map(n=>n[0]).join(''))}</div>
       <div style="flex:1"><div style="font-size:13px;font-weight:500">${esc(w.name)}</div>
       <div style="font-size:11px;color:var(--txt3)">${esc(w.dept)} · ${w.role==='manager'?'מנהל':w.role==='supervisor'?'אחראי':w.role==='helper'?'עוזר':'עובד'} · @${esc(w.user)}</div></div>
+      ${w.faceAuth?`<span title="${w.faceDescriptor?'זיהוי פנים פעיל':'זיהוי פנים — פנים לא רשומים'}" style="font-size:16px">${w.faceDescriptor?'🟢':'🟡'}</span>`:''}
       <button class="btn" style="font-size:11px;padding:4px 8px" onclick="openModal('edit-worker','${w.id}')">✏</button>
       <button class="btn warn" style="font-size:11px;padding:4px 8px" onclick="resetPass('${w.id}')">🔑</button>
       <button class="btn danger" style="font-size:11px;padding:4px 8px" onclick="delWorker('${w.id}')">🗑</button>
@@ -1985,6 +2036,16 @@ function openModal(action,id){
       </select></div>
       <div class="field"><label>שם משתמש</label><input id="mf-user" value="${esc(w?.user||'')}"/></div>
       <div class="field"><label>סיסמה ${w?'(ריק = ללא שינוי)':''}</label><input id="mf-pass" type="password" placeholder="${w?'...':'סיסמה'}"/></div>
+      <div class="field" style="background:var(--bg2);border-radius:var(--r);padding:10px 12px">
+        <label style="display:flex;align-items:center;gap:10px;cursor:pointer;font-size:13px;color:var(--txt)">
+          <input type="checkbox" id="mf-face-auth" ${w?.faceAuth?'checked':''} style="width:auto;cursor:pointer"/>
+          דרוש זיהוי פנים בכניסה
+        </label>
+        ${w?`<div style="margin-top:8px;display:flex;align-items:center;gap:8px">
+          <span style="font-size:12px;color:var(--txt3)">${w.faceDescriptor?'✅ פנים רשומים':'⚠️ פנים לא רשומים'}</span>
+          <button type="button" class="btn" style="font-size:11px;padding:4px 10px" onclick="closeModal();openFaceRegister('${w.id}')">📸 ${w.faceDescriptor?'עדכן פנים':'רשום פנים'}</button>
+        </div>`:'<div style="font-size:11px;color:var(--txt3);margin-top:6px">שמור עובד תחילה, אחר כך רשום פנים</div>'}
+      </div>
       <div class="field" id="mf-perms-box" style="display:${wRole==='manager'?'none':'block'}">
         <label>הרשאות גישה</label>
         <div style="display:grid;grid-template-columns:1fr 1fr;gap:8px;margin-top:6px">
@@ -2115,13 +2176,14 @@ async function confirmModal(){
   const perms=role==='manager'?ALL_SUPERVISOR_PAGE_IDS:[...ALL_WORKER_PAGE_IDS,...SUPERVISOR_EXTRA_PAGES.map(p=>p.id)].filter(id=>document.getElementById('mf-perm-'+id)?.checked);
   if(S.modalAction==='add-worker'){
     if(!pass){alert('סיסמה חובה לעובד חדש');return;}
-    const nw={id:'w'+Date.now(),name,dept,role,user,pass:hashPass(pass),status:'out',checkin:null,permissions:perms};
+    const nw={id:'w'+Date.now(),name,dept,role,user,pass:hashPass(pass),status:'out',checkin:null,permissions:perms,faceAuth:false};
     S.workers.push(nw);
     if(S.fbConnected)await fbSet('workers',nw.id,nw);
   } else if(S.modalAction?.startsWith('edit-worker:')){
     const id=S.modalAction.split(':')[1];
     const w=S.workers.find(x=>x.id===id);
     if(w){w.name=name;w.dept=dept;w.role=role;w.user=user;w.permissions=perms;
+    w.faceAuth=!!document.getElementById('mf-face-auth')?.checked;
     if(pass)w.pass=hashPass(pass);
     if(S.fbConnected)await fbSet('workers',w.id,w);}
   }
@@ -2911,6 +2973,151 @@ function renderCostTab(){
       </table>`:''}
     </div>`;
   }
+}
+
+// ─── FACE AUTH ───────────────────────────────────────────────
+let _faceModelsLoaded=false;
+let _faceAuthStream=null;
+let _faceAuthLoop=null;
+let _faceRegStream=null;
+let _faceRegWorkerId=null;
+
+async function loadFaceModels(){
+  if(_faceModelsLoaded)return true;
+  const base='https://cdn.jsdelivr.net/gh/justadudewhohacks/face-api.js@master/weights';
+  try{
+    await Promise.all([
+      faceapi.nets.tinyFaceDetector.loadFromUri(base),
+      faceapi.nets.faceLandmark68TinyNet.loadFromUri(base),
+      faceapi.nets.faceRecognitionNet.loadFromUri(base)
+    ]);
+    _faceModelsLoaded=true;
+    return true;
+  }catch(e){return false;}
+}
+
+async function startFaceAuth(){
+  document.getElementById('login-screen').classList.add('hidden');
+  document.getElementById('face-auth-screen').classList.remove('hidden');
+  document.getElementById('face-auth-msg').textContent='מרכז את פניך במצלמה';
+  document.getElementById('face-auth-status').textContent='טוען מודלי זיהוי...';
+  const ok=await loadFaceModels();
+  if(!ok){document.getElementById('face-auth-status').textContent='שגיאה בטעינת מודלים';return;}
+  try{
+    _faceAuthStream=await navigator.mediaDevices.getUserMedia({video:{facingMode:'user'},audio:false});
+    const video=document.getElementById('face-auth-video');
+    video.srcObject=_faceAuthStream;
+    await new Promise(r=>video.onloadedmetadata=r);
+    document.getElementById('face-auth-status').textContent='מזהה פנים...';
+    _runFaceAuthLoop();
+  }catch(e){
+    document.getElementById('face-auth-status').textContent='נא לאפשר גישה למצלמה';
+  }
+}
+
+async function _runFaceAuthLoop(){
+  const video=document.getElementById('face-auth-video');
+  const opts=new faceapi.TinyFaceDetectorOptions({inputSize:224,scoreThreshold:0.5});
+  let attempts=0;
+  _faceAuthLoop=setInterval(async()=>{
+    if(video.readyState<2)return;
+    const det=await faceapi.detectSingleFace(video,opts).withFaceLandmarks(true).withFaceDescriptor();
+    if(!det){attempts=0;document.getElementById('face-auth-status').textContent='לא זוהו פנים — קרב/י למצלמה';return;}
+    const stored=new Float32Array(Object.values(S._pendingUser.faceDescriptor));
+    const dist=faceapi.euclideanDistance(det.descriptor,stored);
+    if(dist<0.5){
+      attempts++;
+      document.getElementById('face-auth-status').textContent='מאמת... ('+attempts+'/3)';
+      if(attempts>=3)_completeFaceAuth(true);
+    }else{
+      attempts=0;
+      document.getElementById('face-auth-status').textContent='לא זוהית — נסה שוב (מרחק: '+dist.toFixed(2)+')';
+    }
+  },600);
+}
+
+function _completeFaceAuth(success){
+  clearInterval(_faceAuthLoop);_faceAuthLoop=null;
+  if(_faceAuthStream){_faceAuthStream.getTracks().forEach(t=>t.stop());_faceAuthStream=null;}
+  document.getElementById('face-auth-screen').classList.add('hidden');
+  if(success){
+    const w=S._pendingUser;S._pendingUser=null;
+    S.user=w;
+    document.getElementById('app-screen').classList.remove('hidden');
+    document.getElementById('top-name').textContent=w.name;
+    document.getElementById('top-role').textContent=w.role==='manager'?'מנהל':w.role==='supervisor'?'אחראי':w.role==='helper'?'עוזר':'עובד';
+    document.getElementById('top-av').textContent=w.name.split(' ').map(n=>n[0]).join('');
+    applyPerms(w);
+    setTimeout(loadWaSettings,100);
+    const firstPage=(w.permissions&&w.permissions.length)?w.permissions[0]:'dash';
+    goPage(w.role==='manager'?'dash':firstPage);
+  }else{
+    S._pendingUser=null;
+    document.getElementById('login-screen').classList.remove('hidden');
+    document.getElementById('l-err').textContent='זיהוי פנים נכשל — נסה שוב';
+  }
+}
+
+function cancelFaceAuth(){
+  clearInterval(_faceAuthLoop);_faceAuthLoop=null;
+  if(_faceAuthStream){_faceAuthStream.getTracks().forEach(t=>t.stop());_faceAuthStream=null;}
+  S._pendingUser=null;
+  document.getElementById('face-auth-screen').classList.add('hidden');
+  document.getElementById('login-screen').classList.remove('hidden');
+  document.getElementById('l-err').textContent='';
+}
+
+// ─── FACE REGISTER ───────────────────────────────────────────
+async function openFaceRegister(id){
+  _faceRegWorkerId=id;
+  const w=S.workers.find(x=>x.id===id);
+  document.getElementById('face-reg-title').textContent='רישום פנים — '+esc(w?.name||'');
+  document.getElementById('face-reg-status').textContent='טוען מודלי זיהוי...';
+  document.getElementById('face-reg-btn').disabled=true;
+  document.getElementById('face-auth-screen').classList.add('hidden');
+  document.getElementById('app-screen').classList.add('hidden');
+  document.getElementById('face-reg-screen').classList.remove('hidden');
+  const ok=await loadFaceModels();
+  if(!ok){document.getElementById('face-reg-status').textContent='שגיאה בטעינת מודלים';return;}
+  try{
+    _faceRegStream=await navigator.mediaDevices.getUserMedia({video:{facingMode:'user'},audio:false});
+    const video=document.getElementById('face-reg-video');
+    video.srcObject=_faceRegStream;
+    await new Promise(r=>video.onloadedmetadata=r);
+    document.getElementById('face-reg-status').textContent='מצלמה פעילה — לחץ "צלם פנים"';
+    document.getElementById('face-reg-btn').disabled=false;
+  }catch(e){
+    document.getElementById('face-reg-status').textContent='נא לאפשר גישה למצלמה';
+  }
+}
+
+async function captureFaceDescriptor(){
+  const video=document.getElementById('face-reg-video');
+  document.getElementById('face-reg-status').textContent='מזהה פנים...';
+  document.getElementById('face-reg-btn').disabled=true;
+  const opts=new faceapi.TinyFaceDetectorOptions({inputSize:224,scoreThreshold:0.5});
+  const det=await faceapi.detectSingleFace(video,opts).withFaceLandmarks(true).withFaceDescriptor();
+  if(!det){
+    document.getElementById('face-reg-status').textContent='לא זוהו פנים — נסה שוב';
+    document.getElementById('face-reg-btn').disabled=false;
+    return;
+  }
+  const w=S.workers.find(x=>x.id===_faceRegWorkerId);
+  if(w){
+    w.faceDescriptor=Array.from(det.descriptor);
+    if(S.fbConnected)await fbSet('workers',w.id,w);
+    saveLS();
+  }
+  cancelFaceReg();
+  alert('✅ פנים נרשמו בהצלחה עבור '+w?.name);
+  renderAdmin();
+}
+
+function cancelFaceReg(){
+  if(_faceRegStream){_faceRegStream.getTracks().forEach(t=>t.stop());_faceRegStream=null;}
+  _faceRegWorkerId=null;
+  document.getElementById('face-reg-screen').classList.add('hidden');
+  document.getElementById('app-screen').classList.remove('hidden');
 }
 </script>
 </body>
