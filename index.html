@@ -152,8 +152,8 @@ code{background:var(--bg2);border:0.5px solid var(--b);border-radius:4px;padding
     <button onclick="setLang('ar')" class="lang-btn" id="lb-ar-login">🇸🇦</button>
     <button onclick="setLang('en')" class="lang-btn" id="lb-en-login">🇺🇸</button>
   </div>
-  <div style="text-align:center">
-    <div style="font-size:42px;margin-bottom:8px">✂️</div>
+  <div style="text-align:center" onclick="handleLogoClick()" style="cursor:default">
+    <div style="font-size:42px;margin-bottom:8px;cursor:pointer" id="login-logo">✂️</div>
     <div style="font-size:24px;font-weight:700;color:var(--blue-txt)">TextileOps</div>
     <div style="font-size:13px;color:var(--txt2);margin-top:4px">מערכת ניהול מפעל בגדים</div>
   </div>
@@ -164,14 +164,11 @@ code{background:var(--bg2);border:0.5px solid var(--b);border-radius:4px;padding
     <div class="field"><label data-i18n="password">סיסמה</label><input id="l-pass" type="password" placeholder="סיסמה" data-i18n-ph="password" autocomplete="current-password" onkeydown="if(event.key==='Enter')doLogin()"/></div>
     <button class="btn primary full" onclick="doLogin()" data-i18n="login_btn">כניסה</button>
     <div id="l-err" style="color:var(--red-txt);font-size:12px;text-align:center;margin-top:8px;min-height:18px"></div>
-    <div style="margin-top:12px;text-align:center">
-      <button onclick="document.getElementById('emrg-box').classList.toggle('hidden')" style="background:none;border:none;font-size:11px;color:var(--txt3);cursor:pointer;padding:4px">🔑 <span data-i18n="emergency">כניסת חירום למנהל</span></button>
-      <div id="emrg-box" class="hidden" style="margin-top:8px;border-top:0.5px solid var(--b);padding-top:12px">
-        <input id="l-emergency" type="password" placeholder="קוד חירום" style="font-size:13px;margin-bottom:8px;text-align:center"/>
-        <button class="btn warn full" onclick="emergencyLogin()" style="font-size:12px">🔑 <span data-i18n="login_btn">כניסה</span></button>
-      </div>
+    <div id="emrg-box" class="hidden" style="margin-top:12px;border-top:0.5px solid var(--b);padding-top:12px;text-align:center">
+      <div style="font-size:12px;color:var(--txt3);margin-bottom:8px">🔑 כניסת חירום</div>
+      <input id="l-emergency" type="password" placeholder="קוד חירום" style="font-size:13px;margin-bottom:8px;text-align:center"/>
+      <button class="btn warn full" onclick="emergencyLogin()" style="font-size:12px">כניסה</button>
     </div>
-
   </div>
 </div>
 
@@ -1051,7 +1048,10 @@ const _EMRG_H='$h:f434da0ecb3e3968e92503d17e29177511eb65394ff0d232f51a5f33a6ce96
 function emergencyLogin(){
   const code=document.getElementById('l-emergency').value.trim();
   if(hashPass(code)!==_EMRG_H){
-    document.getElementById('l-err').textContent='קוד חירום שגוי';return;
+    document.getElementById('l-err').textContent='קוד חירום שגוי';
+    const now=new Date().toLocaleTimeString('he-IL',{hour:'2-digit',minute:'2-digit'});
+    sendTelegram('🚨 TextileOps — קוד חירום שגוי!\n🕐 שעה: '+now+'\nמישהו הזין קוד חירום לא נכון. ייתכן ניסיון פריצה!');
+    return;
   }
   // מחפש את המנהל הראשי ברשימה
   const mgr=S.workers.find(w=>w.role==='manager')||S.workers[0];
@@ -1065,6 +1065,8 @@ function emergencyLogin(){
   document.getElementById('top-av').textContent=mgr.name.split(' ').map(n=>n[0]).join('');
   applyPerms(emergencyUser);
   document.getElementById('l-err').textContent='';
+  const now2=new Date().toLocaleTimeString('he-IL',{hour:'2-digit',minute:'2-digit'});
+  sendTelegram('✅ TextileOps — כניסת חירום בוצעה\n🕐 שעה: '+now2+'\nנכנס דרך קוד חירום כמנהל.');
   goPage('admin');
 }
 function doLogin(){
@@ -2998,6 +3000,23 @@ function renderCostTab(){
         </tr>`;}).join('')}</tbody>
       </table>`:''}
     </div>`;
+  }
+}
+
+// ─── EMERGENCY LOGIN PROTECTION ──────────────────────────────
+let _logoClickCount=0;
+let _logoClickTimer=null;
+function handleLogoClick(){
+  _logoClickCount++;
+  clearTimeout(_logoClickTimer);
+  _logoClickTimer=setTimeout(()=>{_logoClickCount=0;},2000);
+  if(_logoClickCount>=5){
+    _logoClickCount=0;
+    document.getElementById('emrg-box').classList.remove('hidden');
+    document.getElementById('l-emergency').value='';
+    // התראת טלגרם
+    const now=new Date().toLocaleTimeString('he-IL',{hour:'2-digit',minute:'2-digit'});
+    sendTelegram('⚠️ TextileOps — נפתח פאנל כניסת חירום\n🕐 שעה: '+now+'\nמישהו לחץ על הלוגו 5 פעמים ופתח את פאנל החירום.');
   }
 }
 
