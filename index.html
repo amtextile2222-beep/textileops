@@ -1069,7 +1069,7 @@ function emergencyLogin(){
   sendTelegram('✅ TextileOps — כניסת חירום בוצעה\n🕐 שעה: '+now2+'\nנכנס דרך קוד חירום כמנהל.');
   goPage('admin');
 }
-function doLogin(){
+async function doLogin(){
   if(loginLocked){document.getElementById('l-err').textContent='חשבון נעול ל-30 שניות עקב ניסיונות כושלים';return;}
   const u=document.getElementById('l-user').value.trim();
   const p=document.getElementById('l-pass').value.trim();
