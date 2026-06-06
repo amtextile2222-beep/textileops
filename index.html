@@ -374,8 +374,9 @@ code{background:var(--bg2);border:0.5px solid var(--b);border-radius:4px;padding
         <div style="display:flex;gap:6px;flex-wrap:wrap;margin-bottom:8px">
           <input id="tk-f-name" type="text" placeholder="🔍 שם עובד" style="flex:1;min-width:90px;padding:5px 8px;border-radius:7px;border:1px solid var(--brd);background:var(--card);color:var(--txt);font-size:12px" oninput="_tkHistLimit=20;renderTaskHist()">
           <input id="tk-f-prod" type="text" placeholder="🔍 מספר מוצר" style="flex:1;min-width:90px;padding:5px 8px;border-radius:7px;border:1px solid var(--brd);background:var(--card);color:var(--txt);font-size:12px" oninput="_tkHistLimit=20;renderTaskHist()">
+          <input id="tk-f-type" type="text" placeholder="🔍 שם משימה" style="flex:1;min-width:90px;padding:5px 8px;border-radius:7px;border:1px solid var(--brd);background:var(--card);color:var(--txt);font-size:12px" oninput="_tkHistLimit=20;renderTaskHist()">
           <input id="tk-f-date" type="date" style="flex:1;min-width:110px;padding:5px 8px;border-radius:7px;border:1px solid var(--brd);background:var(--card);color:var(--txt);font-size:12px" oninput="_tkHistLimit=20;renderTaskHist()">
-          <button class="btn" style="font-size:11px;padding:4px 10px" onclick="document.getElementById('tk-f-name').value='';document.getElementById('tk-f-prod').value='';document.getElementById('tk-f-date').value='';_tkHistLimit=20;renderTaskHist()">✕ נקה</button>
+          <button class="btn" style="font-size:11px;padding:4px 10px" onclick="['tk-f-name','tk-f-prod','tk-f-type','tk-f-date'].forEach(id=>document.getElementById(id).value='');_tkHistLimit=20;renderTaskHist()">✕ נקה</button>
         </div>
         <div id="tk-hist"></div>
         <div id="tk-hist-more" style="text-align:center;margin-top:8px"></div>
@@ -1495,10 +1496,12 @@ function renderTaskHist(){
   _tkHistLimit=_tkHistLimit||20;
   const fName=(document.getElementById('tk-f-name')?.value||'').trim().toLowerCase();
   const fProd=(document.getElementById('tk-f-prod')?.value||'').trim().toLowerCase();
+  const fType=(document.getElementById('tk-f-type')?.value||'').trim().toLowerCase();
   const fDate=(document.getElementById('tk-f-date')?.value||'').trim();
   const filtered=S.histTasks.filter(t=>{
     if(fName&&!t.workerName?.toLowerCase().includes(fName))return false;
     if(fProd&&!String(t.prod||'').toLowerCase().includes(fProd))return false;
+    if(fType&&!String(t.taskType||'').toLowerCase().includes(fType))return false;
     if(fDate){const d=new Date(t.startTime).toISOString().slice(0,10);if(d!==fDate)return false;}
     return true;
   });
