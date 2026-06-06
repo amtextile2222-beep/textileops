@@ -3018,22 +3018,41 @@ async function startFaceAuth(){
 async function _runFaceAuthLoop(){
   const video=document.getElementById('face-auth-video');
   const opts=new faceapi.TinyFaceDetectorOptions({inputSize:224,scoreThreshold:0.5});
-  let attempts=0;
+  let successStreak=0;
+  let failCount=0;
   _faceAuthLoop=setInterval(async()=>{
     if(video.readyState<2)return;
     const det=await faceapi.detectSingleFace(video,opts).withFaceLandmarks(true).withFaceDescriptor();
-    if(!det){attempts=0;document.getElementById('face-auth-status').textContent='לא זוהו פנים — קרב/י למצלמה';return;}
+    if(!det){successStreak=0;document.getElementById('face-auth-status').textContent='לא זוהו פנים — קרב/י למצלמה';return;}
     const stored=new Float32Array(Object.values(S._pendingUser.faceDescriptor));
     const dist=faceapi.euclideanDistance(det.descriptor,stored);
     if(dist<0.5){
-      attempts++;
-      document.getElementById('face-auth-status').textContent='מאמת... ('+attempts+'/3)';
-      if(attempts>=3)_completeFaceAuth(true);
+      successStreak++;
+      failCount=0;
+      document.getElementById('face-auth-status').textContent='מאמת... ('+successStreak+'/3)';
+      if(successStreak>=3)_completeFaceAuth(true);
     }else{
-      attempts=0;
-      document.getElementById('face-auth-status').textContent='לא זוהית — נסה שוב (מרחק: '+dist.toFixed(2)+')';
+      successStreak=0;
+      failCount++;
+      document.getElementById('face-auth-status').textContent='לא זוהית — ניסיון '+failCount+'/3';
+      if(failCount>=3){
+        clearInterval(_faceAuthLoop);_faceAuthLoop=null;
+        _onFaceAuthFailed();
+      }
     }
   },600);
+}
+
+async function _onFaceAuthFailed(){
+  if(_faceAuthStream){_faceAuthStream.getTracks().forEach(t=>t.stop());_faceAuthStream=null;}
+  document.getElementById('face-auth-screen').classList.add('hidden');
+  document.getElementById('login-screen').classList.remove('hidden');
+  document.getElementById('l-err').textContent='זיהוי פנים נכשל 3 פעמים — נשלחה התראה למנהל';
+  // שלח התראה למנהל בטלגרם
+  const name=S._pendingUser?.name||'עובד לא ידוע';
+  const now=new Date().toLocaleTimeString('he-IL',{hour:'2-digit',minute:'2-digit'});
+  await sendTelegram('⚠️ TextileOps — זיהוי פנים נכשל\n👤 עובד: '+name+'\n🕐 שעה: '+now+'\nהעובד ניסה להיכנס 3 פעמים ולא זוהה.\nבדוק ואשר כניסה ידנית אם נדרש.');
+  S._pendingUser=null;
 }
 
 function _completeFaceAuth(success){
