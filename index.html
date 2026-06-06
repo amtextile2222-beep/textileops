@@ -1771,9 +1771,8 @@ function renderMgrTasks(){
           <div style="font-size:11px;color:var(--txt3)">${esc(w.dept)} · ▶${ciStr} ◀${coStr} · <span style="color:var(--blue-txt)">${netMs?fmtNetH(netMs):''}</span></div>
         </div>
         <span class="badge ${isIn?'green':'red'}" style="align-self:center">${isIn?'<span class="pulse"></span> בעבודה':'יצא/ה'}</span>
-        ${!isIn&&!w.checkin?`<button class="btn success" style="font-size:11px;padding:5px 12px" onclick="mgrPunchIn('${w.id}')">✅ כניסה</button>`:''}
+        ${!isIn?`<button class="btn success" style="font-size:11px;padding:5px 12px" onclick="mgrPunchIn('${w.id}')">✅ כניסה</button>`:''}
         ${isIn?`<button class="btn danger" style="font-size:11px;padding:5px 12px" onclick="mgrPunchOut('${w.id}')">🚪 יציאה</button>`:''}
-        ${w.checkout?`<button class="btn" style="font-size:11px;padding:5px 12px" onclick="mgrPunchIn('${w.id}')">↩ חזר</button>`:''}
         <button class="btn" style="font-size:11px;padding:5px 10px" onclick="mgrEditAtt('${w.id}')" title="עריכת שעות">✏️</button>
       </div>`;
     }).join('');
