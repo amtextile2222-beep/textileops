@@ -327,7 +327,7 @@ code{background:var(--bg2);border:0.5px solid var(--b);border-radius:4px;padding
           </div>
           <div class="field" style="margin-top:.75rem;margin-bottom:0">
             <label style="font-size:12px;color:var(--txt2);margin-bottom:5px;display:block">מחלקה</label>
-            <input id="bc-dept" type="text" placeholder="לדוגמה: חיתוך, הרכבה, איכות..." style="font-size:13px"/>
+            <select id="bc-dept" style="font-size:13px"><option value="">-- בחר מחלקה --</option></select>
           </div>
           <div style="display:flex;gap:8px;margin-top:.75rem">
             <button class="btn primary full" onclick="submitBc()">▶ <span data-i18n="scan_start">התחל / עבור למשימה</span></button>
@@ -584,7 +584,7 @@ code{background:var(--bg2);border:0.5px solid var(--b);border-radius:4px;padding
         </div>
         <div class="field">
           <label>מחלקה</label>
-          <input id="mgr-dept" type="text" placeholder="לדוגמה: חיתוך, הרכבה, איכות..." style="font-size:13px"/>
+          <select id="mgr-dept" style="font-size:13px"><option value="">-- בחר מחלקה --</option></select>
         </div>
         <button class="btn success full" onclick="mgrStartTask()">▶ התחל משימה לעובד</button>
         <div id="mgr-start-msg" style="font-size:12px;margin-top:6px;min-height:16px"></div>
@@ -1444,7 +1444,12 @@ async function submitBc(){
   document.getElementById('bc-dept').value='';
   saveLS();renderScanActive();renderTasks();goPage('tasks');
 }
+function fillDeptSelects(){
+  const opts='<option value="">-- בחר מחלקה --</option>'+S.depts.map(d=>`<option value="${esc(d)}">${esc(d)}</option>`).join('');
+  ['bc-dept','mgr-dept'].forEach(id=>{const s=document.getElementById(id);if(s)s.innerHTML=opts;});
+}
 function renderScanActive(){
+  fillDeptSelects();
   const el=document.getElementById('scan-active');if(!el)return;
   if(!S.activeTasks.length){el.innerHTML='<div style="text-align:center;padding:2rem;color:var(--txt3)">📭 אין משימות פעילות</div>';return;}
   el.innerHTML=S.activeTasks.slice(0,8).map(t=>`
@@ -1748,6 +1753,7 @@ function renderDash(){
 // ─── MANAGER TASKS ──────────────────────────────────────────
 function renderMgrTasks(){
   if(S.user?.role!=='manager')return;
+  fillDeptSelects();
   // נוכחות עובדים
   const al=document.getElementById('mgr-att-list');
   if(al){
