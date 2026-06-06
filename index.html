@@ -369,7 +369,17 @@ code{background:var(--bg2);border:0.5px solid var(--b);border-radius:4px;padding
     </div>
     <div class="g2">
       <div><div class="sec">משימות פעילות</div><div id="tk-active-list"></div></div>
-      <div class="card"><div class="sec">היסטוריה</div><div id="tk-hist"></div></div>
+      <div class="card">
+        <div class="sec">היסטוריה</div>
+        <div style="display:flex;gap:6px;flex-wrap:wrap;margin-bottom:8px">
+          <input id="tk-f-name" type="text" placeholder="🔍 שם עובד" style="flex:1;min-width:90px;padding:5px 8px;border-radius:7px;border:1px solid var(--brd);background:var(--card);color:var(--txt);font-size:12px" oninput="_tkHistLimit=20;renderTaskHist()">
+          <input id="tk-f-prod" type="text" placeholder="🔍 מספר מוצר" style="flex:1;min-width:90px;padding:5px 8px;border-radius:7px;border:1px solid var(--brd);background:var(--card);color:var(--txt);font-size:12px" oninput="_tkHistLimit=20;renderTaskHist()">
+          <input id="tk-f-date" type="date" style="flex:1;min-width:110px;padding:5px 8px;border-radius:7px;border:1px solid var(--brd);background:var(--card);color:var(--txt);font-size:12px" oninput="_tkHistLimit=20;renderTaskHist()">
+          <button class="btn" style="font-size:11px;padding:4px 10px" onclick="document.getElementById('tk-f-name').value='';document.getElementById('tk-f-prod').value='';document.getElementById('tk-f-date').value='';_tkHistLimit=20;renderTaskHist()">✕ נקה</button>
+        </div>
+        <div id="tk-hist"></div>
+        <div id="tk-hist-more" style="text-align:center;margin-top:8px"></div>
+      </div>
     </div>
   </div>
 
@@ -723,6 +733,7 @@ code{background:var(--bg2);border:0.5px solid var(--b);border-radius:4px;padding
       <button class="btn" id="ctab-cust" onclick="showCostTab('cust')">👤 לפי לקוח</button>
       <button class="btn" id="ctab-day" onclick="showCostTab('day')">📅 לפי יום</button>
       <button class="btn" id="ctab-worker" onclick="showCostTab('worker')">👷 שכר עובדים</button>
+      <button class="btn" id="ctab-payroll" onclick="showCostTab('payroll')" style="background:var(--green);color:#fff">💰 תשלום משכורות</button>
     </div>
 
     <div class="card" id="cost-result-card">
@@ -1476,13 +1487,30 @@ function renderTasks(){
         ${over?'<span class="badge amber">⚠ ארוכה</span>':''}
       </div></div>`;
   }).join('');}
-  document.getElementById('tk-hist').innerHTML=S.histTasks.slice(0,8).map(t=>{
+  renderTaskHist();
+}
+
+let _tkHistLimit=20;
+function renderTaskHist(){
+  _tkHistLimit=_tkHistLimit||20;
+  const fName=(document.getElementById('tk-f-name')?.value||'').trim().toLowerCase();
+  const fProd=(document.getElementById('tk-f-prod')?.value||'').trim().toLowerCase();
+  const fDate=(document.getElementById('tk-f-date')?.value||'').trim();
+  const filtered=S.histTasks.filter(t=>{
+    if(fName&&!t.workerName?.toLowerCase().includes(fName))return false;
+    if(fProd&&!String(t.prod||'').toLowerCase().includes(fProd))return false;
+    if(fDate){const d=new Date(t.startTime).toISOString().slice(0,10);if(d!==fDate)return false;}
+    return true;
+  });
+  const shown=filtered.slice(0,_tkHistLimit);
+  document.getElementById('tk-hist').innerHTML=shown.map(t=>{
     const st=new Date(t.startTime);const et=t.endTime?new Date(t.endTime):null;
     const stStr=pad2(st.getHours())+':'+pad2(st.getMinutes());
     const etStr=et?pad2(et.getHours())+':'+pad2(et.getMinutes()):'—';
+    const dateStr=st.toLocaleDateString('he-IL');
     return`<div class="row">
       <div style="flex:1"><div style="font-size:12px;font-weight:500;color:var(--txt)">${esc(t.workerName)}</div>
-      <div style="font-size:11px;color:var(--txt3)">לקוח ${t.cust} | ${t.prod} | ${t.qty} יח' | ${COLORS[t.col]||t.col}${t.taskType?' | 📋 '+esc(t.taskType):''}</div>
+      <div style="font-size:11px;color:var(--txt3)">${dateStr} | לקוח ${t.cust} | ${t.prod} | ${t.qty} יח' | ${COLORS[t.col]||t.col}${t.taskType?' | 📋 '+esc(t.taskType):''}</div>
       <div style="font-size:11px;color:var(--txt3)">▶ ${stStr} → ◀ ${etStr}</div></div>
       <div style="display:flex;align-items:center;gap:6px">
         <span class="badge blue">${fmtM(t.duration||0)}</span>
@@ -1490,6 +1518,14 @@ function renderTasks(){
       </div>
     </div>`;
   }).join('')||'<div style="color:var(--txt3);font-size:12px;padding:.75rem 0;text-align:center">אין היסטוריה עדיין</div>';
+  const more=document.getElementById('tk-hist-more');
+  if(more){
+    if(filtered.length>_tkHistLimit){
+      more.innerHTML=`<button class="btn" onclick="_tkHistLimit+=20;renderTaskHist()">טען עוד (${filtered.length-_tkHistLimit} נוספות)</button>`;
+    }else{
+      more.innerHTML=filtered.length>0&&filtered.length<S.histTasks.length?`<div style="font-size:11px;color:var(--txt3)">מוצגות ${filtered.length} תוצאות</div>`:'';
+    }
+  }
 }
 
 // ─── TIMER TICK ─────────────────────────────────────────────
@@ -2726,9 +2762,11 @@ function saveCostSettings(){
 
 function showCostTab(tab){
   S.costTab=tab;
-  ['prod','cust','day','worker'].forEach(t=>{
+  ['prod','cust','day','worker','payroll'].forEach(t=>{
     const b=document.getElementById('ctab-'+t);
-    if(b)b.className=t===tab?'btn primary':'btn';
+    if(!b)return;
+    if(t==='payroll'){b.style.background=t===tab?'var(--green)':'';b.style.color=t===tab?'#fff':'';}
+    b.className=t===tab?'btn primary':'btn';
   });
   renderCostTab();
 }
@@ -3030,7 +3068,97 @@ function renderCostTab(){
         </tr>`;}).join('')}</tbody>
       </table>`:''}
     </div>`;
+
+  } else if(tab==='payroll'){
+    const from=document.getElementById('cost-from')?.value||'';
+    const to=document.getElementById('cost-to')?.value||'';
+    // קיבוץ לפי עובד מ-attHistory
+    const pMap={};
+    S.attHistory.forEach(rec=>{
+      if(rec.date<from||rec.date>to)return;
+      const k=rec.workerId;
+      if(!pMap[k])pMap[k]={id:k,name:rec.workerName||k,days:0,netMs:0};
+      pMap[k].days++;
+      pMap[k].netMs+=(rec.netMs||0);
+    });
+    // עובדים ללא היסטוריה שקיימים במערכת עם תעריף
+    S.workers.forEach(w=>{
+      if(!pMap[w.id]&&S.costs.workerRates[w.id]){
+        pMap[w.id]={id:w.id,name:w.name,days:0,netMs:0};
+      }
+    });
+    const roleLabel2=id=>{const ww=S.workers.find(x=>x.id===id);return ww?.role==='helper'?'עוזר':ww?.role==='manager'?'מנהל':ww?.role==='supervisor'?'אחראי':'עובד';};
+    const rows=Object.values(pMap).map(r=>{
+      const dailyRate=S.costs.workerRates[r.id]||0;
+      const hours=r.netMs/3600000;
+      const salary=Math.round((dailyRate/8)*hours);
+      return{...r,dailyRate,hours,salary};
+    }).sort((a,b)=>b.salary-a.salary);
+    const totalSalary=rows.reduce((s,r)=>s+r.salary,0);
+    el.innerHTML=`<div>
+      <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:10px;flex-wrap:wrap;gap:8px">
+        <div style="font-size:13px;font-weight:700;color:var(--txt)">💰 תשלום משכורות — ${from||'—'} עד ${to||'—'}</div>
+        <div style="display:flex;gap:8px">
+          <div style="background:var(--green);color:#fff;padding:6px 14px;border-radius:10px;font-size:14px;font-weight:700">סה"כ לתשלום: ₪${totalSalary.toLocaleString()}</div>
+          <button class="btn" onclick="printPayroll()" style="font-size:12px">🖨 הדפס</button>
+        </div>
+      </div>
+      <div style="overflow-x:auto">
+      <table style="width:100%;border-collapse:collapse;font-size:13px" id="payroll-table">
+      <thead><tr style="border-bottom:1.5px solid var(--b);text-align:right;background:var(--bg2)">
+        <th style="padding:9px 8px">עובד</th>
+        <th style="padding:9px 8px">תפקיד</th>
+        <th style="padding:9px 8px">ימי נוכחות</th>
+        <th style="padding:9px 8px">שעות נטו</th>
+        <th style="padding:9px 8px">תעריף יומי</th>
+        <th style="padding:9px 8px;color:var(--green-txt)">לתשלום</th>
+        <th style="padding:9px 8px">אישור תשלום</th>
+      </tr></thead>
+      <tbody>${rows.map(r=>`<tr style="border-bottom:0.5px solid var(--b)">
+        <td style="padding:8px 8px;font-weight:600">${esc(r.name)}</td>
+        <td style="padding:8px 8px;color:var(--txt3)">${roleLabel2(r.id)}</td>
+        <td style="padding:8px 8px;text-align:center">${r.days}</td>
+        <td style="padding:8px 8px;text-align:center">${r.hours.toFixed(1)}</td>
+        <td style="padding:8px 8px;color:var(--txt3)">${r.dailyRate?'₪'+r.dailyRate.toLocaleString():'—'}</td>
+        <td style="padding:8px 8px;font-weight:700;color:var(--green-txt);font-size:15px">₪${r.salary.toLocaleString()}</td>
+        <td style="padding:8px 8px"><label style="display:flex;align-items:center;gap:5px;cursor:pointer"><input type="checkbox" style="width:16px;height:16px"> שולם</label></td>
+      </tr>`).join('')}
+      <tr style="border-top:2px solid var(--b);background:var(--bg2)">
+        <td colspan="5" style="padding:9px 8px;font-weight:700">סה"כ</td>
+        <td style="padding:9px 8px;font-weight:700;color:var(--green-txt);font-size:16px">₪${totalSalary.toLocaleString()}</td>
+        <td></td>
+      </tr></tbody>
+      </table></div>
+      <div style="font-size:11px;color:var(--txt3);margin-top:8px">⚡ חישוב: שעות נוכחות נטו × (תעריף יומי ÷ 8)</div>
+    </div>`;
   }
+}
+
+function printPayroll(){
+  const from=document.getElementById('cost-from')?.value||'';
+  const to=document.getElementById('cost-to')?.value||'';
+  const tbl=document.getElementById('payroll-table')?.outerHTML||'';
+  const now=new Date().toLocaleDateString('he-IL');
+  const win=window.open('','_blank','width=900,height=700');
+  win.document.write(`<!DOCTYPE html><html dir="rtl" lang="he"><head>
+    <meta charset="UTF-8"/><title>תשלום משכורות</title>
+    <style>
+      *{box-sizing:border-box;margin:0;padding:0}
+      body{font-family:Arial,sans-serif;padding:24px;color:#000;background:#fff;font-size:13px}
+      h1{font-size:18px;margin-bottom:4px;color:#185FA5}
+      .sub{font-size:12px;color:#666;margin-bottom:16px}
+      table{width:100%;border-collapse:collapse;font-size:13px}
+      th{background:#f5f5f5;padding:8px;text-align:right;border-bottom:2px solid #ccc;font-weight:700}
+      td{padding:7px 8px;border-bottom:1px solid #eee}
+      @media print{body{padding:10px}}
+    </style>
+  </head><body>
+    <h1>✂️ TextileOps — תשלום משכורות</h1>
+    <div class="sub">תקופה: ${from} עד ${to} | הודפס: ${now}</div>
+    ${tbl}
+    <script>window.onload=()=>{window.print();}<\/script>
+  </body></html>`);
+  win.document.close();
 }
 
 // ─── PRINT ───────────────────────────────────────────────────
