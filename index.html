@@ -1510,7 +1510,7 @@ function renderTaskHist(){
     const st=new Date(t.startTime);const et=t.endTime?new Date(t.endTime):null;
     const stStr=pad2(st.getHours())+':'+pad2(st.getMinutes());
     const etStr=et?pad2(et.getHours())+':'+pad2(et.getMinutes()):'—';
-    const dateStr=st.toLocaleDateString('he-IL');
+    const dateStr=pad2(st.getDate())+'/'+pad2(st.getMonth()+1)+'/'+st.getFullYear();
     return`<div class="row">
       <div style="flex:1"><div style="font-size:12px;font-weight:500;color:var(--txt)">${esc(t.workerName)}</div>
       <div style="font-size:11px;color:var(--txt3)">${dateStr} | לקוח ${t.cust} | ${t.prod} | ${t.qty} יח' | ${COLORS[t.col]||t.col}${t.taskType?' | 📋 '+esc(t.taskType):''}</div>
