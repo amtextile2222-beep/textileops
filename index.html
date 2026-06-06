@@ -427,6 +427,11 @@ code{background:var(--bg2);border:0.5px solid var(--b);border-radius:4px;padding
         <div>
           <div class="field"><label>Telegram Bot Token</label><input id="wa-token" type="text" placeholder="123456:AAG..." oninput="saveSettings()" dir="ltr" style="font-family:monospace;font-size:12px"/></div>
           <div class="field"><label>Chat ID</label><input id="wa-chatid" type="text" placeholder="1019589316" oninput="saveSettings()" dir="ltr" style="font-family:monospace"/></div>
+          <div class="field" style="margin-top:12px;padding-top:12px;border-top:0.5px solid var(--b)">
+            <label>🏭 IP קבוע של המפעל</label>
+            <input id="factory-ip" type="text" placeholder="188.225.231.120" oninput="saveSettings()" dir="ltr" style="font-family:monospace"/>
+            <div style="font-size:11px;color:var(--txt3);margin-top:4px">רק עובדים עם "חייב WiFi מפעל" יבדקו מול כתובת זו</div>
+          </div>
           <div style="font-size:11px;color:var(--txt3);margin-bottom:12px;line-height:1.6">
             הבוט: <strong>@TextileOpsAlert_bot</strong> — Token ו-Chat ID כבר מוגדרים
           </div>
@@ -800,7 +805,7 @@ let S={
   activeTasks:[],
   histTasks:[],
   alerts:[],
-  settings:{thresh:60,absent:5,waEnabled:false,waToken:'',waChatId:'',waInterval:60,waFrom:'07:00',waTo:'18:00',waLong:true,waAbsent:true},
+  settings:{thresh:60,absent:5,waEnabled:false,waToken:'',waChatId:'',waInterval:60,waFrom:'07:00',waTo:'18:00',waLong:true,waAbsent:true,factoryIP:'188.225.231.120'},
   waLastSent:0,
   nextTId:1,
   fbConnected:false,
@@ -1085,6 +1090,10 @@ function doLogin(){
     return;
   }
   loginAttempts=0;
+  if(w.requireFactoryIP){
+    const allowed=await checkFactoryIP(w);
+    if(!allowed)return;
+  }
   if(w.faceAuth && !w.faceDescriptor){
     // פנים לא רשומים עדיין — בקש רישום ראשוני
     S._pendingUser=w;
@@ -1600,6 +1609,7 @@ function saveSettings(){
   S.settings.waTo=document.getElementById('wa-to')?.value||'18:00';
   S.settings.waLong=document.getElementById('wa-long')?.checked??true;
   S.settings.waAbsent=document.getElementById('wa-absent')?.checked??true;
+  S.settings.factoryIP=document.getElementById('factory-ip')?.value||'188.225.231.120';
   saveLS();
 }
 function loadWaSettings(){
@@ -1613,6 +1623,7 @@ function loadWaSettings(){
   set('wa-to',s.waTo||'18:00');
   set('wa-long',s.waLong??true);
   set('wa-absent',s.waAbsent??true);
+  set('factory-ip',s.factoryIP||'188.225.231.120');
 }
 async function sendTelegram(message){
   const token=(document.getElementById('wa-token')?.value||S.settings.waToken||'').trim();
@@ -1890,6 +1901,7 @@ function renderAdmin(){
       <div class="av" style="width:28px;height:28px;font-size:10px">${esc(w.name.split(' ').map(n=>n[0]).join(''))}</div>
       <div style="flex:1"><div style="font-size:13px;font-weight:500">${esc(w.name)}</div>
       <div style="font-size:11px;color:var(--txt3)">${esc(w.dept)} · ${w.role==='manager'?'מנהל':w.role==='supervisor'?'אחראי':w.role==='helper'?'עוזר':'עובד'} · @${esc(w.user)}</div></div>
+      ${w.requireFactoryIP?`<span title="חייב WiFi מפעל" style="font-size:16px">🏭</span>`:''}
       ${w.faceAuth?`<span title="${w.faceDescriptor?'זיהוי פנים פעיל':'זיהוי פנים — פנים לא רשומים'}" style="font-size:16px">${w.faceDescriptor?'🟢':'🟡'}</span>`:''}
       <button class="btn" style="font-size:11px;padding:4px 8px" onclick="openModal('edit-worker','${w.id}')">✏</button>
       <button class="btn warn" style="font-size:11px;padding:4px 8px" onclick="resetPass('${w.id}')">🔑</button>
@@ -2042,6 +2054,13 @@ function openModal(action,id){
       </select></div>
       <div class="field"><label>שם משתמש</label><input id="mf-user" value="${esc(w?.user||'')}"/></div>
       <div class="field"><label>סיסמה ${w?'(ריק = ללא שינוי)':''}</label><input id="mf-pass" type="password" placeholder="${w?'...':'סיסמה'}"/></div>
+      <div class="field" style="background:var(--bg2);border-radius:var(--r);padding:10px 12px;margin-bottom:8px">
+        <label style="display:flex;align-items:center;gap:10px;cursor:pointer;font-size:13px;color:var(--txt)">
+          <input type="checkbox" id="mf-require-ip" ${w?.requireFactoryIP?'checked':''} style="width:auto;cursor:pointer"/>
+          🏭 חייב WiFi מפעל בכניסה
+        </label>
+        <div style="font-size:11px;color:var(--txt3);margin-top:4px">IP מפעל: ${S.settings.factoryIP||'188.225.231.120'}</div>
+      </div>
       <div class="field" style="background:var(--bg2);border-radius:var(--r);padding:10px 12px">
         <label style="display:flex;align-items:center;gap:10px;cursor:pointer;font-size:13px;color:var(--txt)">
           <input type="checkbox" id="mf-face-auth" ${w?.faceAuth?'checked':''} style="width:auto;cursor:pointer"/>
@@ -2189,6 +2208,7 @@ async function confirmModal(){
     const id=S.modalAction.split(':')[1];
     const w=S.workers.find(x=>x.id===id);
     if(w){w.name=name;w.dept=dept;w.role=role;w.user=user;w.permissions=perms;
+    w.requireFactoryIP=!!document.getElementById('mf-require-ip')?.checked;
     w.faceAuth=!!document.getElementById('mf-face-auth')?.checked;
     if(pass)w.pass=hashPass(pass);
     if(S.fbConnected)await fbSet('workers',w.id,w);}
@@ -2978,6 +2998,30 @@ function renderCostTab(){
         </tr>`;}).join('')}</tbody>
       </table>`:''}
     </div>`;
+  }
+}
+
+// ─── FACTORY IP CHECK ────────────────────────────────────────
+async function checkFactoryIP(w){
+  const factoryIP=(S.settings.factoryIP||'188.225.231.120').trim();
+  document.getElementById('l-err').textContent='בודק מיקום...';
+  try{
+    const res=await fetch('https://api.ipify.org?format=json');
+    const data=await res.json();
+    const userIP=data.ip||'';
+    if(userIP===factoryIP){
+      document.getElementById('l-err').textContent='';
+      return true;
+    }else{
+      document.getElementById('l-err').textContent='⛔ כניסה נחסמה — חייב להיות מחובר ל-WiFi המפעל';
+      const now=new Date().toLocaleTimeString('he-IL',{hour:'2-digit',minute:'2-digit'});
+      await sendTelegram('⛔ TextileOps — ניסיון כניסה מחוץ למפעל\n👤 עובד: '+w.name+'\n🌐 IP: '+userIP+'\n🕐 שעה: '+now+'\nהעובד ניסה להיכנס מרשת שאינה רשת המפעל.');
+      return false;
+    }
+  }catch(e){
+    // אם לא הצלחנו לבדוק — מאפשר כניסה (לא לחסום בגלל תקלת רשת)
+    document.getElementById('l-err').textContent='';
+    return true;
   }
 }
 
