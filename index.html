@@ -914,6 +914,12 @@ function listenFb(){
       if(d.id==='costs'){S.costs={...S.costs,...data};saveLS();}
       if(d.id==='customerNames'){S.customerNames=data;saveLS();}
       if(d.id==='customColors'){S.customColors=data;Object.assign(COLORS,data);saveLS();}
+      if(d.id==='telegramSettings'){
+        S.settings.waToken=data.waToken||S.settings.waToken;
+        S.settings.waChatId=data.waChatId||S.settings.waChatId;
+        S.settings.factoryIP=data.factoryIP||S.settings.factoryIP;
+        saveLS();loadWaSettings();
+      }
     });
     renderAll();
   });
@@ -1613,6 +1619,14 @@ function saveSettings(){
   S.settings.waAbsent=document.getElementById('wa-absent')?.checked??true;
   S.settings.factoryIP=document.getElementById('factory-ip')?.value||'188.225.231.120';
   saveLS();
+  // שמור הגדרות טלגרם + IP ב-Firebase כדי שכל מכשיר יקבל אותם
+  if(S.fbConnected){
+    fbSet('appSettings','telegramSettings',{
+      waToken:S.settings.waToken,
+      waChatId:S.settings.waChatId,
+      factoryIP:S.settings.factoryIP
+    });
+  }
 }
 function loadWaSettings(){
   const s=S.settings;
@@ -1628,8 +1642,8 @@ function loadWaSettings(){
   set('factory-ip',s.factoryIP||'188.225.231.120');
 }
 async function sendTelegram(message){
-  const token=(document.getElementById('wa-token')?.value||S.settings.waToken||'').trim();
-  const chatId=(document.getElementById('wa-chatid')?.value||S.settings.waChatId||'1019589316').trim();
+  const token=(S.settings.waToken||document.getElementById('wa-token')?.value||'').trim();
+  const chatId=(S.settings.waChatId||document.getElementById('wa-chatid')?.value||'1019589316').trim();
   if(!token||!chatId)return false;
   try{
     const res=await fetch(`https://api.telegram.org/bot${token}/sendMessage`,{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({chat_id:chatId,text:message})});
