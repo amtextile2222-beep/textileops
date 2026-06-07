@@ -237,6 +237,7 @@ code{background:var(--bg2);border:0.5px solid var(--b);border-radius:4px;padding
       <button class="nb" onclick="goPage('alerts')" id="nb-alerts">🔔 <span id="al-cnt" class="cnt hidden">0</span><span data-i18n="nav_alerts">התראות</span></button>
       <button class="nb hidden" onclick="goPage('admin')" id="nb-admin">⚙️ <span data-i18n="nav_admin">ניהול</span></button>
       <button class="nb hidden" onclick="goPage('mgrtasks')" id="nb-mgrtasks">👔 <span data-i18n="nav_mgrtasks">ניהול משימות</span></button>
+      <button class="nb hidden" onclick="goPage('taskscan')" id="nb-taskscan">📷 סורק משימות</button>
       <button class="nb hidden" onclick="goPage('setup')" id="nb-setup">🔗 <span data-i18n="nav_setup">Firebase</span></button>
       <button class="nb hidden" onclick="goPage('costs')" id="nb-costs">💰 עלויות</button>
       <button class="nb hidden" onclick="goPage('products')" id="nb-products">👗 מוצרים</button>
@@ -626,6 +627,38 @@ code{background:var(--bg2);border:0.5px solid var(--b);border-radius:4px;padding
     </div>
   </div>
 
+  <!-- TASK SCAN PAGE (limited access) -->
+  <div class="page" id="page-taskscan">
+    <div class="card" style="max-width:500px;margin:0 auto">
+      <div class="sec">▶ התחלת משימה לעובד</div>
+      <div class="field"><label>עובד</label>
+        <select id="ts-emp-sel" style="font-size:13px"><option value="">בחר עובד...</option></select>
+      </div>
+      <div class="field"><label>ברקוד משימה (13 ספרות)</label>
+        <div id="ts-cam-container" style="display:none;margin-bottom:.75rem;position:relative">
+          <video id="ts-cam-video" style="width:100%;border-radius:var(--rl);background:#000;max-height:220px;object-fit:cover" autoplay muted playsinline></video>
+          <div style="position:absolute;inset:0;border:3px solid var(--blue-txt);border-radius:var(--rl);pointer-events:none;opacity:.6"></div>
+          <div style="position:absolute;top:50%;left:50%;transform:translate(-50%,-50%);width:60%;height:2px;background:var(--blue-txt);opacity:.8"></div>
+          <button class="btn danger" onclick="tsStopCam()" style="position:absolute;top:8px;left:8px;padding:4px 10px;font-size:12px">✕ סגור</button>
+          <div id="ts-cam-status" style="position:absolute;bottom:8px;right:0;left:0;text-align:center;font-size:12px;color:#fff;background:rgba(0,0,0,.5);padding:4px">מכוון מצלמה...</div>
+        </div>
+        <button class="btn primary full" onclick="tsStartCam()" id="ts-cam-btn" style="font-size:13px;padding:10px;margin-bottom:8px">📷 סרוק עם מצלמה</button>
+        <input id="ts-bc-inp" class="bc-inp" maxlength="13" placeholder="או הזן 13 ספרות ידנית..." oninput="tsParseBc(this.value)"/>
+      </div>
+      <div id="ts-bc-prev" style="margin-bottom:.75rem;min-height:30px"></div>
+      <div class="field">
+        <label>סוג משימה</label>
+        <input id="ts-tasktype" type="text" placeholder="לדוגמה: תפירה, חיתוך, גימור..." style="font-size:13px"/>
+      </div>
+      <div class="field">
+        <label>מחלקה</label>
+        <select id="ts-dept" style="font-size:13px"><option value="">-- בחר מחלקה --</option></select>
+      </div>
+      <button class="btn success full" onclick="tsStartTask()">▶ התחל משימה לעובד</button>
+      <div id="ts-start-msg" style="font-size:12px;margin-top:6px;min-height:16px"></div>
+    </div>
+  </div>
+
   <!-- SETUP PAGE -->
   <div class="page" id="page-setup">
     <div class="card" style="max-width:600px;margin:0 auto">
@@ -839,6 +872,7 @@ const WORKER_PAGES=[
   {id:'tasks',label:'משימות'},
   {id:'reports',label:'דוחות'},
   {id:'alerts',label:'התראות'},
+  {id:'taskscan',label:'סורק משימות'},
 ];
 const SUPERVISOR_EXTRA_PAGES=[
   {id:'mgrtasks',label:'ניהול משימות'},
@@ -1233,6 +1267,7 @@ function goPage(p){
   if(p==='alerts'){checkAlerts();renderAlerts();}
   if(p==='admin')renderAdmin();
   if(p==='mgrtasks')renderMgrTasks();
+  if(p==='taskscan')renderTsScan();
   if(p==='attrep')initAttRep();
   if(p==='costs')initCostsPage();
   if(p==='products')renderProducts();
@@ -1248,6 +1283,7 @@ function renderAll(){
   if(id==='tasks')renderTasks();
   if(id==='reports')buildRep();
   if(id==='mgrtasks')renderMgrTasks();
+  if(id==='taskscan')renderTsScan();
   if(id==='attrep')initAttRep();
   if(id==='alerts'){checkAlerts();renderAlerts();loadWaSettings();}
 }
@@ -1986,6 +2022,80 @@ function mgrStartDecoding(video,status){
     }catch(e){}
   },150);
 }
+// ─── TASK SCAN PAGE ──────────────────────────────────────────
+let tsCamStream=null;let tsCamInterval=null;
+function tsParseBc(v){
+  v=(v||'').replace(/\D/g,'');
+  const el=document.getElementById('ts-bc-prev');if(!el)return;
+  if(v.length<2){el.innerHTML='';return;}
+  const c=v.slice(0,2),p=v.slice(2,7),sz=v.slice(7,8),q=v.slice(8,11),col=v.slice(11,13);
+  el.innerHTML=`<div style="display:flex;gap:5px;flex-wrap:wrap;padding:6px;background:var(--bg2);border-radius:var(--r)">
+    <span class="bc-seg bc-c">לקוח: ${c||'__'}</span><span class="bc-seg bc-p">מוצר: ${p.padEnd(5,'_')}</span>
+    <span class="bc-seg" style="background:var(--amber-bg);color:var(--amber-txt)">מידה: ${sz||'_'}</span>
+    <span class="bc-seg bc-q">כמות: ${q.padEnd(3,'_')}</span><span class="bc-seg bc-col">צבע: ${COLORS[col]||col||'__'}</span></div>`;
+}
+async function tsStartCam(){
+  const container=document.getElementById('ts-cam-container');
+  const video=document.getElementById('ts-cam-video');
+  const status=document.getElementById('ts-cam-status');
+  const btn=document.getElementById('ts-cam-btn');
+  try{
+    tsCamStream=await navigator.mediaDevices.getUserMedia({video:{facingMode:'environment',width:{ideal:1920},height:{ideal:1080}}});
+    video.srcObject=tsCamStream;container.style.display='block';btn.style.display='none';
+    status.textContent='מחפש ברקוד...';await video.play();
+    const canvas=document.createElement('canvas');const ctx=canvas.getContext('2d');
+    tsCamInterval=setInterval(async()=>{
+      if(!tsCamStream||video.readyState<2)return;
+      canvas.width=video.videoWidth;canvas.height=video.videoHeight;
+      ctx.drawImage(video,0,0);
+      try{
+        const imageData=ctx.getImageData(0,0,canvas.width,canvas.height);
+        const result=jsQR(imageData.data,imageData.width,imageData.height);
+        const text=result?.data||'';
+        if(/^\d{13}$/.test(text)){
+          document.getElementById('ts-bc-inp').value=text;tsParseBc(text);
+          status.textContent='✅ נסרק: '+text;
+          clearInterval(tsCamInterval);setTimeout(()=>tsStopCam(),600);
+        }
+      }catch(e){}
+    },150);
+  }catch(e){alert('לא ניתן לגשת למצלמה.');}
+}
+function tsStopCam(){
+  if(tsCamStream)tsCamStream.getTracks().forEach(t=>t.stop());
+  if(tsCamInterval)clearInterval(tsCamInterval);
+  tsCamStream=null;tsCamInterval=null;
+  const c=document.getElementById('ts-cam-container');if(c)c.style.display='none';
+  const b=document.getElementById('ts-cam-btn');if(b)b.style.display='flex';
+}
+async function tsStartTask(){
+  const empId=document.getElementById('ts-emp-sel').value;
+  const raw=(document.getElementById('ts-bc-inp').value||'').replace(/\D/g,'');
+  const msg=document.getElementById('ts-start-msg');
+  if(!empId){msg.textContent='⚠ בחר עובד';msg.style.color='var(--red-txt)';return;}
+  if(raw.length!==13){msg.textContent='⚠ ברקוד חייב להיות 13 ספרות';msg.style.color='var(--red-txt)';return;}
+  const w=S.workers.find(x=>x.id===empId);
+  if(!w||w.status!=='in'){msg.textContent='⚠ העובד לא נמצא בעבודה';msg.style.color='var(--red-txt)';return;}
+  const cust=raw.slice(0,2),prod=raw.slice(2,7),size=raw.slice(7,8),qty=parseInt(raw.slice(8,11))||0,col=raw.slice(11,13);
+  const taskType=(document.getElementById('ts-tasktype').value||'').trim();
+  const taskDept=(document.getElementById('ts-dept').value||'').trim();
+  const task={id:S.nextTId++,workerId:w.id,workerName:w.name,dept:taskDept||w.dept,cust,prod,size,qty,col,taskType,startTime:new Date(),elapsed:0};
+  S.activeTasks.push(task);
+  if(S.fbConnected)await fbSet('activeTasks',String(task.id),{...task,startTime:task.startTime.toISOString()});
+  saveLS();renderMgrTasks();
+  msg.style.color='var(--green-txt)';msg.textContent='✅ משימה הותחלה עבור '+w.name;
+  document.getElementById('ts-bc-inp').value='';document.getElementById('ts-bc-prev').innerHTML='';
+  document.getElementById('ts-tasktype').value='';
+  setTimeout(()=>msg.textContent='',3000);
+}
+function renderTsScan(){
+  const sel=document.getElementById('ts-emp-sel');if(!sel)return;
+  const cur=sel.value;
+  sel.innerHTML='<option value="">בחר עובד...</option>'+S.workers.filter(w=>w.status==='in').map(w=>`<option value="${w.id}" ${w.id===cur?'selected':''}>${esc(w.name)}</option>`).join('');
+  const ds=document.getElementById('ts-dept');if(!ds)return;
+  ds.innerHTML='<option value="">-- בחר מחלקה --</option>'+S.depts.map(d=>`<option value="${esc(d)}">${esc(d)}</option>`).join('');
+}
+
 function mgrStopCam(){
   if(mgrCamStream)mgrCamStream.getTracks().forEach(t=>t.stop());
   if(mgrCamInterval)clearInterval(mgrCamInterval);
