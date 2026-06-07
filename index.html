@@ -286,7 +286,15 @@ code{background:var(--bg2);border:0.5px solid var(--b);border-radius:4px;padding
         <div class="sep" style="width:100%"></div>
         <button class="btn" style="width:100%;justify-content:center;font-size:13px" onclick="openMsgToMgr()">📩 שלח הודעה למנהל</button>
         <div id="msg-to-mgr-box" class="hidden" style="width:100%;display:flex;flex-direction:column;gap:6px">
-          <textarea id="msg-to-mgr-txt" placeholder="כתוב הודעה למנהל..." rows="3" style="width:100%;border-radius:var(--r);border:1px solid var(--b2);background:var(--bg2);color:var(--txt);font-size:13px;padding:8px;resize:none;font-family:inherit;box-sizing:border-box"></textarea>
+          <textarea id="msg-to-mgr-txt" placeholder="כתוב הודעה למנהל... (אופציונלי אם שולח תמונה)" rows="3" style="width:100%;border-radius:var(--r);border:1px solid var(--b2);background:var(--bg2);color:var(--txt);font-size:13px;padding:8px;resize:none;font-family:inherit;box-sizing:border-box"></textarea>
+          <label style="display:flex;align-items:center;gap:8px;cursor:pointer;background:var(--bg2);border:1px dashed var(--b2);border-radius:var(--r);padding:8px 10px;font-size:13px;color:var(--txt2)">
+            📎 צרף תמונה / סריקה
+            <input type="file" id="msg-to-mgr-img" accept="image/*" capture="environment" style="display:none" onchange="previewMgrImg(this)"/>
+          </label>
+          <div id="msg-to-mgr-preview" style="display:none;position:relative">
+            <img id="msg-to-mgr-preview-img" style="max-width:100%;border-radius:var(--r);max-height:160px;object-fit:cover"/>
+            <button onclick="clearMgrImg()" style="position:absolute;top:4px;left:4px;background:rgba(0,0,0,.5);color:#fff;border:none;border-radius:999px;width:22px;height:22px;cursor:pointer;font-size:13px;line-height:1">✕</button>
+          </div>
           <div style="display:flex;gap:6px">
             <button class="btn success" style="flex:1;justify-content:center" onclick="sendMsgToMgr()">📤 שלח</button>
             <button class="btn" style="flex:1;justify-content:center" onclick="closeMsgToMgr()">ביטול</button>
@@ -1336,16 +1344,45 @@ function closeMsgToMgr(){
   document.getElementById('msg-to-mgr-box').classList.add('hidden');
   document.getElementById('msg-to-mgr-txt').value='';
   document.getElementById('msg-to-mgr-status').textContent='';
+  clearMgrImg();
+}
+function previewMgrImg(input){
+  const file=input.files[0];if(!file)return;
+  const prev=document.getElementById('msg-to-mgr-preview');
+  const img=document.getElementById('msg-to-mgr-preview-img');
+  img.src=URL.createObjectURL(file);
+  prev.style.display='block';
+}
+function clearMgrImg(){
+  document.getElementById('msg-to-mgr-img').value='';
+  document.getElementById('msg-to-mgr-preview').style.display='none';
+  document.getElementById('msg-to-mgr-preview-img').src='';
 }
 async function sendMsgToMgr(){
   const txt=document.getElementById('msg-to-mgr-txt').value.trim();
+  const imgFile=document.getElementById('msg-to-mgr-img').files[0];
   const st=document.getElementById('msg-to-mgr-status');
-  if(!txt){st.style.color='var(--red-txt)';st.textContent='כתוב הודעה לפני שליחה';return;}
+  if(!txt&&!imgFile){st.style.color='var(--red-txt)';st.textContent='כתוב הודעה או צרף תמונה';return;}
   const w=S.user;
   const now=new Date().toLocaleTimeString('he-IL',{hour:'2-digit',minute:'2-digit'});
-  const msg='💬 הודעה מעובד\n👤 '+w.name+' ('+w.dept+')\n🕐 שעה: '+now+'\n\n'+txt;
+  const caption='💬 הודעה מעובד\n👤 '+w.name+' ('+w.dept+')\n🕐 שעה: '+now+(txt?'\n\n'+txt:'');
+  const token=(S.settings.waToken||'').trim();
+  const chatId=(S.settings.waChatId||'').trim();
+  if(!token||!chatId){st.style.color='var(--red-txt)';st.textContent='שגיאה — הגדרות טלגרם חסרות';return;}
   st.style.color='var(--txt2)';st.textContent='שולח...';
-  const ok=await sendTelegram(msg);
+  let ok=false;
+  try{
+    if(imgFile){
+      const fd=new FormData();
+      fd.append('chat_id',chatId);
+      fd.append('photo',imgFile,'image.jpg');
+      fd.append('caption',caption);
+      const res=await fetch('https://api.telegram.org/bot'+token+'/sendPhoto',{method:'POST',body:fd});
+      ok=(await res.json()).ok;
+    } else {
+      ok=await sendTelegram(caption);
+    }
+  }catch(e){ok=false;}
   if(ok){st.style.color='var(--green-txt)';st.textContent='✅ ההודעה נשלחה למנהל';
     setTimeout(closeMsgToMgr,2000);
   }else{st.style.color='var(--red-txt)';st.textContent='שגיאה בשליחה — בדוק הגדרות טלגרם';}
