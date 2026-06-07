@@ -2144,8 +2144,8 @@ function openEditTask(taskId, isHist){
     <div class="field"><label>כמות</label><input type="number" inputmode="numeric" id="mf-t-qty" value="${t.qty}" min="1" style="font-size:13px"/></div>
     <div class="field"><label>צבע</label><select id="mf-t-col" style="font-size:13px">${colorOpts}</select></div>
     <div class="field"><label>סוג משימה</label><input id="mf-t-type" value="${esc(t.taskType||'')}" style="font-size:13px"/></div>
-    <div class="field"><label>זמן התחלה</label><input type="datetime-local" id="mf-t-start" value="${stLocal}" style="font-size:13px"/></div>
-    <div class="field"><label>זמן סיום ${isHist?'':'(ריק = עדיין פעיל)'}</label><input type="datetime-local" id="mf-t-end" value="${etLocal}" style="font-size:13px"/></div>`;
+    <div class="field"><label>זמן התחלה</label><input type="datetime-local" lang="he" id="mf-t-start" value="${stLocal}" style="font-size:13px"/></div>
+    <div class="field"><label>זמן סיום ${isHist?'':'(ריק = עדיין פעיל)'}</label><input type="datetime-local" lang="he" id="mf-t-end" value="${etLocal}" style="font-size:13px"/></div>`;
 }
 
 // ─── MODAL ──────────────────────────────────────────────────
