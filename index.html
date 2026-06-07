@@ -1069,6 +1069,7 @@ function checkDailyReset(){
         if(S.fbConnected)fbSet('attHistory',w.id+'_'+lastDate,rec);
       }
       w.status='out';w.checkin=null;w.checkout=null;w.sessions=[];
+      if(S.fbConnected)fbSet('workers',w.id,w);
     });
     S.activeTasks.forEach(t=>{
       S.histTasks.unshift({...t,endTime:new Date(lastDate+'T23:59:59'),
