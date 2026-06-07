@@ -2304,6 +2304,16 @@ async function confirmModal(){
       w.status=openSess?'in':'out';
       w.checkin=newSessions[0]?.in||null;
       w.checkout=!openSess&&newSessions.length?newSessions[newSessions.length-1].out:null;
+      // סגור משימות פעילות אם העובד יצא
+      if(!openSess){
+        const checkoutTime=w.checkout?new Date(w.checkout):new Date();
+        const myTasks=S.activeTasks.filter(t=>t.workerId===w.id);
+        for(const t of myTasks){
+          const done={...t,endTime:checkoutTime,duration:Math.round((checkoutTime-new Date(t.startTime))/1000)};
+          S.histTasks.unshift(done);S.activeTasks=S.activeTasks.filter(x=>x.id!==t.id);
+          if(S.fbConnected){await fbDel('activeTasks',String(t.id));await fbSet('histTasks',String(t.id),{...done,startTime:done.startTime instanceof Date?done.startTime.toISOString():done.startTime,endTime:done.endTime.toISOString()});}
+        }
+      }
       if(S.fbConnected)await fbSet('workers',w.id,w);
     } else {
       // עדכון רשומה היסטורית — שמור נתוני הפסקה מקוריים
