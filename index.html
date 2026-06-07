@@ -283,6 +283,16 @@ code{background:var(--bg2);border:0.5px solid var(--b);border-radius:4px;padding
           <button class="btn success" onclick="punchIn()">✅ <span data-i18n="att_in">כניסה</span></button>
           <button class="btn danger" onclick="punchOut()">🚪 <span data-i18n="att_out">יציאה</span></button>
         </div>
+        <div class="sep" style="width:100%"></div>
+        <button class="btn" style="width:100%;justify-content:center;font-size:13px" onclick="openMsgToMgr()">📩 שלח הודעה למנהל</button>
+        <div id="msg-to-mgr-box" class="hidden" style="width:100%;display:flex;flex-direction:column;gap:6px">
+          <textarea id="msg-to-mgr-txt" placeholder="כתוב הודעה למנהל..." rows="3" style="width:100%;border-radius:var(--r);border:1px solid var(--b2);background:var(--bg2);color:var(--txt);font-size:13px;padding:8px;resize:none;font-family:inherit;box-sizing:border-box"></textarea>
+          <div style="display:flex;gap:6px">
+            <button class="btn success" style="flex:1;justify-content:center" onclick="sendMsgToMgr()">📤 שלח</button>
+            <button class="btn" style="flex:1;justify-content:center" onclick="closeMsgToMgr()">ביטול</button>
+          </div>
+          <div id="msg-to-mgr-status" style="font-size:11px;min-height:14px;text-align:center"></div>
+        </div>
       </div>
       <div class="card">
         <div class="sec">סיכום</div>
@@ -1315,6 +1325,30 @@ function exportAttCSV(){
   const csv='\uFEFF'+rows.map(r=>r.join(',')).join('\n');
   const a=document.createElement('a');a.href='data:text/csv;charset=utf-8,'+encodeURIComponent(csv);
   a.download='נוכחות_'+new Date().toLocaleDateString('he-IL').replace(/\//g,'-')+'.csv';a.click();
+}
+
+// ─── MSG TO MANAGER ──────────────────────────────────────────
+function openMsgToMgr(){
+  document.getElementById('msg-to-mgr-box').classList.remove('hidden');
+  document.getElementById('msg-to-mgr-txt').focus();
+}
+function closeMsgToMgr(){
+  document.getElementById('msg-to-mgr-box').classList.add('hidden');
+  document.getElementById('msg-to-mgr-txt').value='';
+  document.getElementById('msg-to-mgr-status').textContent='';
+}
+async function sendMsgToMgr(){
+  const txt=document.getElementById('msg-to-mgr-txt').value.trim();
+  const st=document.getElementById('msg-to-mgr-status');
+  if(!txt){st.style.color='var(--red-txt)';st.textContent='כתוב הודעה לפני שליחה';return;}
+  const w=S.user;
+  const now=new Date().toLocaleTimeString('he-IL',{hour:'2-digit',minute:'2-digit'});
+  const msg='💬 הודעה מעובד\n👤 '+w.name+' ('+w.dept+')\n🕐 שעה: '+now+'\n\n'+txt;
+  st.style.color='var(--txt2)';st.textContent='שולח...';
+  const ok=await sendTelegram(msg);
+  if(ok){st.style.color='var(--green-txt)';st.textContent='✅ ההודעה נשלחה למנהל';
+    setTimeout(closeMsgToMgr,2000);
+  }else{st.style.color='var(--red-txt)';st.textContent='שגיאה בשליחה — בדוק הגדרות טלגרם';}
 }
 
 // ─── ATTENDANCE ──────────────────────────────────────────────
