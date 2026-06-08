@@ -2423,6 +2423,7 @@ function openEditTask(taskId, isHist){
     <div class="field"><label>כמות</label><input type="number" inputmode="numeric" id="mf-t-qty" value="${t.qty}" min="1" style="font-size:13px"/></div>
     <div class="field"><label>צבע</label><select id="mf-t-col" style="font-size:13px">${colorOpts}</select></div>
     <div class="field"><label>סוג משימה</label><input id="mf-t-type" value="${esc(t.taskType||'')}" style="font-size:13px"/></div>
+    <div class="field"><label>מחלקה</label><select id="mf-t-dept" style="font-size:13px">${S.depts.map(d=>`<option value="${esc(d)}" ${(t.dept||'')=== d?'selected':''}>${esc(d)}</option>`).join('')}</select></div>
     <div class="field"><label>זמן התחלה</label><input type="datetime-local" lang="he" id="mf-t-start" value="${stLocal}" style="font-size:13px"/></div>
     <div class="field"><label>זמן סיום ${isHist?'':'(ריק = עדיין פעיל)'}</label><input type="datetime-local" lang="he" id="mf-t-end" value="${etLocal}" style="font-size:13px"/></div>`;
 }
@@ -2571,6 +2572,7 @@ async function confirmModal(){
     t.qty=parseInt(document.getElementById('mf-t-qty')?.value)||t.qty;
     t.col=document.getElementById('mf-t-col')?.value||t.col;
     t.taskType=document.getElementById('mf-t-type')?.value||'';
+    t.dept=document.getElementById('mf-t-dept')?.value||t.dept||'';
     const stVal=document.getElementById('mf-t-start')?.value;
     if(stVal)t.startTime=new Date(stVal);
     const etVal=document.getElementById('mf-t-end')?.value;
@@ -2596,6 +2598,7 @@ async function confirmModal(){
     t.qty=parseInt(document.getElementById('mf-t-qty')?.value)||t.qty;
     t.col=document.getElementById('mf-t-col')?.value||t.col;
     t.taskType=document.getElementById('mf-t-type')?.value||'';
+    t.dept=document.getElementById('mf-t-dept')?.value||t.dept||'';
     const stVal=document.getElementById('mf-t-start')?.value;
     if(stVal)t.startTime=new Date(stVal);
     const etVal=document.getElementById('mf-t-end')?.value;
