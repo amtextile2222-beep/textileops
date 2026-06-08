@@ -996,6 +996,30 @@ function listenFb(){
   onSnapshot(collection(db,'workers'),snap=>{
     if(snap.empty)return;
     S.workers=snap.docs.map(d=>({id:d.id,...d.data()}));
+    migrateBreaks();
+    // נקה sessions ישנות שלא אופסו כי Firebase נטען אחרי checkDailyReset
+    const today=todayStr();
+    S.workers.forEach(w=>{
+      if(!w.sessions||!w.sessions.length)return;
+      const firstIn=w.sessions[0]?.in;
+      if(!firstIn)return;
+      const sessionDate=firstIn.slice(0,10);
+      if(sessionDate<today){
+        // session מיום קודם — שמור להיסטוריה אם עוד לא קיים
+        const histKey=w.id+'_'+sessionDate;
+        const alreadySaved=S.attHistory.find(r=>r.workerId===w.id&&r.date===sessionDate);
+        if(!alreadySaved){
+          const rec={workerId:w.id,workerName:w.name,dept:w.dept,date:sessionDate,
+            sessions:w.sessions,checkin:w.sessions[0]?.in||'',checkout:null,
+            breakStart:w.breakStart||'',breakEnd:w.breakEnd||'',breakActive:!!w.breakActive,
+            netMs:calcNetWorkRaw(w.sessions[0]?.in,null,w.breakActive,w.breakStart,w.breakEnd,sessionDate)};
+          S.attHistory.unshift(rec);
+          fbSet('attHistory',histKey,rec);
+        }
+        w.status='out';w.checkin=null;w.checkout=null;w.sessions=[];
+        fbSet('workers',w.id,w);
+      }
+    });
     renderAll();
   });
   // active tasks
@@ -1143,6 +1167,7 @@ function checkDailyReset(){
 checkDailyReset();
 migratePasswords();
 migrateToSessions();
+migrateBreaks();
 
 // ─── PERMISSIONS ────────────────────────────────────────────
 function applyPerms(w){
@@ -1503,6 +1528,20 @@ function migrateToSessions(){
       w.sessions=w.checkin?[{in:w.checkin,out:w.checkout||null}]:[];
     }
   });
+}
+function migrateBreaks(){
+  let changed=false;
+  S.workers.forEach(w=>{
+    if(!w.breakStart){w.breakStart='13:00';changed=true;}
+    if(!w.breakEnd){w.breakEnd='13:45';changed=true;}
+    if(w.breakActive===undefined||w.breakActive===null){w.breakActive=true;changed=true;}
+  });
+  if(changed&&S.fbConnected){
+    S.workers.forEach(w=>{
+      if(!w.breakStart||!w.breakEnd||w.breakActive===undefined||w.breakActive===null)return;
+      fbSet('workers',w.id,w);
+    });
+  }
 }
 function fmtNetH(ms){
   if(!ms)return '—';
@@ -2515,7 +2554,7 @@ async function confirmModal(){
   const perms=role==='manager'?ALL_SUPERVISOR_PAGE_IDS:[...ALL_WORKER_PAGE_IDS,...SUPERVISOR_EXTRA_PAGES.map(p=>p.id)].filter(id=>document.getElementById('mf-perm-'+id)?.checked);
   if(S.modalAction==='add-worker'){
     if(!pass){alert('סיסמה חובה לעובד חדש');return;}
-    const nw={id:'w'+Date.now(),name,dept,role,user,pass:hashPass(pass),status:'out',checkin:null,permissions:perms,faceAuth:false};
+    const nw={id:'w'+Date.now(),name,dept,role,user,pass:hashPass(pass),status:'out',checkin:null,permissions:perms,faceAuth:false,breakStart:'13:00',breakEnd:'13:45',breakActive:true};
     S.workers.push(nw);
     if(S.fbConnected)await fbSet('workers',nw.id,nw);
   } else if(S.modalAction?.startsWith('edit-worker:')){
