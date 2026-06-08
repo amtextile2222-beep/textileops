@@ -3571,45 +3571,53 @@ function bcGenerate(){
   // בניית HTML עם canvas לכל ברקוד
   out.innerHTML=`
     <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:12px">
-      <div style="font-size:14px;font-weight:600">${items.length} ברקודים נוצרו — לקוח ${cust} · מוצר ${prod}</div>
+      <div style="font-size:14px;font-weight:600">${items.length} קודים נוצרו — לקוח ${cust} · מוצר ${prod}</div>
       <button class="btn" onclick="bcPrint()" style="font-size:13px">🖨️ הדפס הכל</button>
     </div>
-    <div id="bc-print-area" style="display:grid;grid-template-columns:repeat(auto-fill,minmax(200px,1fr));gap:12px">
+    <div id="bc-print-area" style="display:grid;grid-template-columns:repeat(auto-fill,minmax(160px,1fr));gap:12px">
       ${items.map((it,i)=>{
         const code=cust+prod+it.size+it.qty+it.col;
         const colName=COLORS[it.col]||it.col;
-        return`<div class="bc-card" style="background:var(--bg);border:1px solid var(--b);border-radius:8px;padding:12px;text-align:center">
-          <svg id="bc-svg-${i}"></svg>
-          <div style="font-size:11px;font-weight:600;margin-top:6px;letter-spacing:1px">${code}</div>
-          <div style="font-size:10px;color:var(--txt3);margin-top:2px">מידה ${it.size} · כמות ${parseInt(it.qty)} · ${colName}</div>
+        return`<div class="bc-card" style="background:#fff;border:1px solid #ccc;border-radius:8px;padding:10px;text-align:center">
+          <canvas id="bc-qr-${i}" style="max-width:140px;width:100%"></canvas>
+          <div style="font-size:10px;font-weight:600;margin-top:5px;letter-spacing:1px;color:#000">${code}</div>
+          <div style="font-size:9px;color:#555;margin-top:2px">מידה ${it.size} · כמות ${parseInt(it.qty)} · ${colName}</div>
         </div>`;
       }).join('')}
     </div>`;
-  // צייר ברקודים אחרי render
+  // צייר QR codes אחרי render
   requestAnimationFrame(()=>{
     items.forEach((it,i)=>{
       const code=cust+prod+it.size+it.qty+it.col;
       try{
-        JsBarcode('#bc-svg-'+i, code, {
-          format:'CODE128',width:1.8,height:60,displayValue:false,margin:2
-        });
-      }catch(e){console.warn('barcode error',e);}
+        QRCode.toCanvas(document.getElementById('bc-qr-'+i), code,
+          {width:140,margin:1,color:{dark:'#000000',light:'#ffffff'}});
+      }catch(e){console.warn('qr error',e);}
     });
   });
 }
 function bcPrint(){
   const area=document.getElementById('bc-print-area');
   if(!area)return;
+  // המר canvas ל-img לפני הדפסה
+  const cards=[...area.querySelectorAll('.bc-card')];
+  const htmlCards=cards.map(card=>{
+    const canvas=card.querySelector('canvas');
+    const imgSrc=canvas?canvas.toDataURL('image/png'):'';
+    const lbl=card.querySelector('div:nth-child(2)')?.textContent||'';
+    const sub=card.querySelector('div:nth-child(3)')?.textContent||'';
+    return`<div class="bc-card"><img src="${imgSrc}" width="120" height="120"/><div class="lbl">${lbl}</div><div class="sub">${sub}</div></div>`;
+  }).join('');
   const win=window.open('','_blank');
-  win.document.write(`<html dir="rtl"><head><title>ברקודים</title>
-    <style>body{margin:0;font-family:Arial,sans-serif}
-    .grid{display:grid;grid-template-columns:repeat(4,1fr);gap:12px;padding:12px}
-    .bc-card{border:1px solid #ccc;border-radius:6px;padding:10px;text-align:center;break-inside:avoid}
-    svg{max-width:100%}
-    .lbl{font-size:11px;font-weight:600;letter-spacing:1px;margin-top:4px}
-    .sub{font-size:9px;color:#666;margin-top:2px}
-    @media print{@page{margin:8mm}}</style></head><body>
-    <div class="grid">${area.innerHTML}</div>
+  win.document.write(`<html dir="rtl"><head><title>QR קודים למשימות</title>
+    <style>body{margin:0;font-family:Arial,sans-serif;background:#fff}
+    .grid{display:grid;grid-template-columns:repeat(4,1fr);gap:8px;padding:10px}
+    .bc-card{border:1px solid #ccc;border-radius:6px;padding:8px;text-align:center;break-inside:avoid}
+    img{display:block;margin:0 auto}
+    .lbl{font-size:10px;font-weight:700;letter-spacing:1px;margin-top:4px;color:#000}
+    .sub{font-size:8px;color:#555;margin-top:2px}
+    @media print{@page{margin:6mm}.grid{grid-template-columns:repeat(4,1fr)}}</style></head><body>
+    <div class="grid">${htmlCards}</div>
     <script>window.onload=()=>window.print()<\/script></body></html>`);
   win.document.close();
 }
