@@ -3662,11 +3662,15 @@ function bcGenerate(){
   }));
   const out=document.getElementById('bc-gen-output');
   if(!out)return;
+  window._bcLastGen={cust,prod,items};
   // בניית HTML עם canvas לכל ברקוד
   out.innerHTML=`
-    <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:12px">
+    <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:12px;flex-wrap:wrap;gap:8px">
       <div style="font-size:14px;font-weight:600">${items.length} קודים נוצרו — לקוח ${cust} · מוצר ${prod}</div>
-      <button class="btn" onclick="bcPrint()" style="font-size:13px">🖨️ הדפס הכל</button>
+      <div style="display:flex;gap:8px;flex-wrap:wrap">
+        <button class="btn success" onclick="bcExportNiimbot()" style="font-size:13px">📥 ייצא ל-NIIMBOT</button>
+        <button class="btn" onclick="bcPrint()" style="font-size:13px">🖨️ הדפס הכל</button>
+      </div>
     </div>
     <div id="bc-print-area" style="display:grid;grid-template-columns:repeat(auto-fill,minmax(160px,1fr));gap:12px">
     </div>`;
@@ -3707,6 +3711,26 @@ function bcPrint(){
     <div class="grid">${htmlCards}</div>
     <script>window.onload=()=>window.print()<\/script></body></html>`);
   win.document.close();
+}
+function bcExportNiimbot(){
+  const g=window._bcLastGen;
+  if(!g){alert('צור ברקודים תחילה');return;}
+  const {cust,prod,items}=g;
+  const BOM='﻿';
+  const header='ברקוד,לקוח,מוצר,מידה,כמות,קוד_צבע,שם_צבע\r\n';
+  const rows=items.map(it=>{
+    const code=cust+prod+it.size+it.qty+it.col;
+    const colName=(COLORS[it.col]||it.col).replace(/,/g,' ');
+    return `${code},${cust},${prod},${it.size},${parseInt(it.qty)},${it.col},${colName}`;
+  }).join('\r\n');
+  const csv=BOM+header+rows;
+  const blob=new Blob([csv],{type:'text/csv;charset=utf-8;'});
+  const url=URL.createObjectURL(blob);
+  const a=document.createElement('a');
+  a.href=url;
+  a.download=`niimbot_${prod}_${new Date().toISOString().slice(0,10)}.csv`;
+  document.body.appendChild(a);a.click();document.body.removeChild(a);
+  URL.revokeObjectURL(url);
 }
 function renderProducts(){
   const q=(document.getElementById('prod-search')?.value||'').trim().toLowerCase();
