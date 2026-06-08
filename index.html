@@ -837,6 +837,15 @@ code{background:var(--bg2);border:0.5px solid var(--b);border-radius:4px;padding
   <!-- דף מחולל ברקודים -->
   <div class="page" id="page-barcodes">
     <div style="font-size:16px;font-weight:700;margin-bottom:14px">🏷️ מחולל ברקודים למשימות</div>
+    <!-- PDF UPLOAD -->
+    <div class="card" style="margin-bottom:1rem">
+      <div class="sec">📂 טעינת תעודת משלוח PDF</div>
+      <div style="display:flex;gap:8px;align-items:center;flex-wrap:wrap">
+        <button class="btn primary" onclick="bcOpenPDF()" style="font-size:13px">📂 בחר PDF</button>
+        <input type="file" id="bc-pdf-input" accept=".pdf" style="display:none" onchange="bcHandlePDF(this)"/>
+        <div id="bc-pdf-msg" style="font-size:12px;color:var(--txt3);flex:1">תעודות רונן חן ורעומה מזוהות אוטומטית</div>
+      </div>
+    </div>
     <div class="card" style="margin-bottom:1rem">
       <div class="sec">פרטי המוצר</div>
       <div style="display:grid;grid-template-columns:1fr 1fr;gap:10px;margin-bottom:10px">
@@ -880,6 +889,8 @@ code{background:var(--bg2);border:0.5px solid var(--b);border-radius:4px;padding
   </div>
 </div>
 
+<!-- PDF.JS -->
+<script src="https://cdn.jsdelivr.net/npm/pdfjs-dist@3.11.174/build/pdf.min.js"></script>
 <!-- ZXING BARCODE READER -->
 <script src="https://cdn.jsdelivr.net/npm/jsqr@1.4.0/dist/jsQR.js"></script>
 <!-- QR CODE GENERATOR -->
@@ -3712,6 +3723,105 @@ function bcPrint(){
     <script>window.onload=()=>window.print()<\/script></body></html>`);
   win.document.close();
 }
+// ─── PDF IMPORT ──────────────────────────────────────────────
+function bcOpenPDF(){document.getElementById('bc-pdf-input')?.click();}
+
+async function bcHandlePDF(input){
+  const file=input.files[0];if(!file)return;
+  input.value='';
+  const msg=document.getElementById('bc-pdf-msg');
+  const setMsg=(t,ok)=>{if(msg){msg.textContent=t;msg.style.color=ok?'var(--green-txt)':ok===false?'var(--red-txt)':'var(--txt3)';}};
+  setMsg('⏳ מעבד קובץ...',null);
+  try{
+    if(!window.pdfjsLib){setMsg('⚠ PDF.js לא נטען, נסה שוב',false);return;}
+    window.pdfjsLib.GlobalWorkerOptions.workerSrc='https://cdn.jsdelivr.net/npm/pdfjs-dist@3.11.174/build/pdf.worker.min.js';
+    const ab=await file.arrayBuffer();
+    const pdf=await pdfjsLib.getDocument({data:ab}).promise;
+    const page=await pdf.getPage(1);
+    const tc=await page.getTextContent();
+    const items=tc.items.map(it=>({str:it.str.trim(),x:Math.round(it.transform[4]),y:Math.round(it.transform[5])})).filter(it=>it.str);
+    const fullText=items.map(it=>it.str).join(' ');
+    let result=null;
+    if(fullText.includes('רונן חן')||fullText.includes('RONEN CHEN')){
+      result=_parseRonenChen(items);result.custCode='01';result.supplier='רונן חן';
+    } else if(fullText.includes('רעומה')||fullText.includes('Rauma')||fullText.includes('RAUMA')){
+      result=_parseRauma(items);result.custCode='02';result.supplier='רעומה';
+    }
+    if(result&&result.product&&result.colors.length){
+      _applyPDFResult(result);
+      setMsg(`✅ ${result.supplier} | מוצר ${result.product} | ${result.colors.length} צבעים`,true);
+    } else {
+      setMsg('⚠ לא זוהה פורמט — מלא ידנית',false);
+    }
+  }catch(e){console.error(e);setMsg('⚠ שגיאה: '+e.message,false);}
+}
+
+function _parseRonenChen(items){
+  const prodItem=items.find(it=>Math.abs(it.x-399)<30&&Math.abs(it.y-410)<15&&/^\d{4,5}$/.test(it.str));
+  const product=prodItem?prodItem.str.padStart(5,'0'):null;
+  const headerRow=items.filter(it=>/^[0-7]$/.test(it.str)&&it.x>300&&it.x<680);
+  const headerY=headerRow.length?headerRow[0].y:306;
+  const colorItems=items.filter(it=>it.y<headerY-5&&it.x>750&&/[א-ת]/.test(it.str));
+  const colorYs=[...new Set(colorItems.map(it=>it.y))];
+  const colors=colorYs.map(y=>{
+    const namePieces=items.filter(it=>Math.abs(it.y-y)<3&&it.x>700);
+    const name=namePieces.sort((a,b)=>b.x-a.x).map(it=>it.str).join('').replace(/\d+$/,'').trim();
+    const totalItem=items.find(it=>Math.abs(it.y-y)<5&&it.x>260&&it.x<310&&/^\d+$/.test(it.str));
+    const total=totalItem?parseInt(totalItem.str):0;
+    return{name,total};
+  }).filter(c=>c.total>1&&c.name.length>1&&!c.name.includes('סה')&&!c.name.includes('דגם')&&!c.name.includes('מקורי'));
+  return{product,colors};
+}
+
+function _parseRauma(items){
+  // מוצר: מספר 8 ספרות → הסר 2 ראשונות → 4 ספרות → הוסף 0
+  const modelItem=items.find(it=>/^\d{7,8}$/.test(it.str));
+  let product=null;
+  if(modelItem){const raw=modelItem.str.slice(2);product=('0'+raw.slice(0,4)).padStart(5,'0');}
+  // שורות צבע: Hebrew text על הצד עם כמות
+  const colorItems=items.filter(it=>/[א-ת]/.test(it.str)&&it.x>600);
+  const colorYs=[...new Set(colorItems.map(it=>it.y))].slice(0,10);
+  const colors=colorYs.map(y=>{
+    const namePieces=items.filter(it=>Math.abs(it.y-y)<3&&it.x>500);
+    const name=namePieces.sort((a,b)=>b.x-a.x).map(it=>it.str).join('').trim();
+    const totalItem=items.find(it=>Math.abs(it.y-y)<5&&it.x<200&&/^\d+$/.test(it.str)&&parseInt(it.str)>1);
+    const total=totalItem?parseInt(totalItem.str):0;
+    return{name,total};
+  }).filter(c=>c.total>1&&c.name.length>1&&!c.name.includes('סה')&&!c.name.includes('עובד')&&!c.name.includes('לקוח'));
+  return{product,colors};
+}
+
+function _guessColor(name){
+  for(const[code,heb]of Object.entries(COLORS)){
+    if(name.includes(heb.split('/')[0].trim()))return code;
+  }
+  return Object.keys(COLORS)[0]||'01';
+}
+
+function _applyPDFResult(result){
+  if(result.custCode){const el=document.getElementById('bc-gen-cust');if(el)el.value=result.custCode;}
+  if(result.product){const el=document.getElementById('bc-gen-prod');if(el)el.value=result.product;}
+  const container=document.getElementById('bc-gen-rows');
+  if(!container)return;
+  container.innerHTML='';
+  result.colors.forEach(c=>{
+    const colorOpts=Object.entries(COLORS).map(([k,v])=>`<option value="${esc(k)}" ${k===_guessColor(c.name)?'selected':''}>${esc(v)}</option>`).join('');
+    const div=document.createElement('div');
+    div.className='bc-row';
+    div.style.cssText='display:grid;grid-template-columns:80px 80px 1fr 36px;gap:8px;align-items:end;margin-bottom:8px;background:var(--bg2);padding:8px;border-radius:8px';
+    div.innerHTML=`
+      <div><label style="font-size:11px;color:var(--txt3)">מידה</label>
+        <input type="text" class="bc-size" maxlength="1" value="0" style="font-size:14px;font-weight:600;text-align:center"/></div>
+      <div><label style="font-size:11px;color:var(--txt3)">כמות</label>
+        <input type="number" class="bc-qty" min="1" max="999" value="${Math.min(999,c.total)}" style="font-size:14px;font-weight:600;text-align:center"/></div>
+      <div><label style="font-size:11px;color:var(--txt3)">${esc(c.name)}</label>
+        <select class="bc-col" style="font-size:13px">${colorOpts}</select></div>
+      <button onclick="this.closest('.bc-row').remove()" style="background:none;border:none;cursor:pointer;color:var(--red-txt);font-size:20px;padding-bottom:2px">✕</button>`;
+    container.appendChild(div);
+  });
+}
+// ─────────────────────────────────────────────────────────────
+
 function bcExportNiimbot(){
   const g=window._bcLastGen;
   if(!g){alert('צור ברקודים תחילה');return;}
