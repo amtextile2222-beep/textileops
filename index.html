@@ -3578,9 +3578,10 @@ function bcGenerate(){
       ${items.map((it,i)=>{
         const code=cust+prod+it.size+it.qty+it.col;
         const colName=COLORS[it.col]||it.col;
+        const qrUrl=`https://chart.googleapis.com/chart?chs=150x150&cht=qr&chl=${code}&choe=UTF-8`;
         return`<div class="bc-card" style="background:#fff;border:2px solid #333;border-radius:6px;padding:10px;display:flex;align-items:center;gap:12px">
-          <canvas id="bc-qr-${i}" style="flex-shrink:0"></canvas>
-          <div style="text-align:right;line-height:1.8">
+          <img src="${qrUrl}" width="150" height="150" style="flex-shrink:0"/>
+          <div style="text-align:right;line-height:1.9">
             <div style="font-size:13px;font-weight:700;color:#000">${cust}</div>
             <div style="font-size:13px;font-weight:700;color:#000">${prod}</div>
             <div style="font-size:13px;font-weight:700;color:#000">${it.size}</div>
@@ -3590,25 +3591,11 @@ function bcGenerate(){
         </div>`;
       }).join('')}
     </div>`;
-  // canvas כבר ב-DOM — צייר QR אחרי שה-DOM מתייצב
-  setTimeout(()=>{
-    items.forEach((it,i)=>{
-      const code=cust+prod+it.size+it.qty+it.col;
-      const canvas=document.getElementById('bc-qr-'+i);
-      if(!canvas){console.warn('canvas not found',i);return;}
-      QRCode.toCanvas(canvas,code,{width:150,margin:1,color:{dark:'#000000',light:'#ffffff'}},e=>{if(e)console.warn('qr err',code,e);});
-    });
-  },100);
 }
 function bcPrint(){
   const area=document.getElementById('bc-print-area');
   if(!area)return;
-  const htmlCards=[...area.querySelectorAll('.bc-card')].map(card=>{
-    const canvas=card.querySelector('canvas');
-    const imgSrc=canvas?canvas.toDataURL('image/png'):'';
-    const info=card.querySelector('div:last-child')?.innerHTML||'';
-    return`<div class="bc-card"><img src="${imgSrc}" width="120" height="120"/><div class="info">${info}</div></div>`;
-  }).join('');
+  const htmlCards=[...area.querySelectorAll('.bc-card')].map(card=>card.outerHTML).join('');
   const win=window.open('','_blank');
   win.document.write(`<html dir="rtl"><head><title>QR קודים למשימות</title>
     <style>body{margin:0;font-family:Arial,sans-serif;background:#fff}
