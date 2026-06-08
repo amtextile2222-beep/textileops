@@ -249,6 +249,7 @@ code{background:var(--bg2);border:0.5px solid var(--b);border-radius:4px;padding
       <button class="nb hidden" onclick="goPage('setup')" id="nb-setup">🔗 <span data-i18n="nav_setup">Firebase</span></button>
       <button class="nb hidden" onclick="goPage('costs')" id="nb-costs">💰 עלויות</button>
       <button class="nb hidden" onclick="goPage('products')" id="nb-products">👗 מוצרים</button>
+      <button class="nb hidden" onclick="goPage('barcodes')" id="nb-barcodes">🏷️ ברקודים</button>
     </div>
     <div style="display:flex;align-items:center;gap:8px">
       <div class="lang-switcher">
@@ -833,6 +834,26 @@ code{background:var(--bg2);border:0.5px solid var(--b);border-radius:4px;padding
     <div id="products-list"></div>
   </div>
 
+  <!-- דף מחולל ברקודים -->
+  <div class="page" id="page-barcodes">
+    <div style="font-size:16px;font-weight:700;margin-bottom:14px">🏷️ מחולל ברקודים למשימות</div>
+    <div class="card" style="margin-bottom:1rem">
+      <div class="sec">פרטי המוצר</div>
+      <div style="display:grid;grid-template-columns:1fr 1fr;gap:10px;margin-bottom:10px">
+        <div class="field" style="margin:0"><label>לקוח (2 ספרות)</label>
+          <input id="bc-gen-cust" maxlength="2" inputmode="numeric" placeholder="01" style="font-size:14px"/></div>
+        <div class="field" style="margin:0"><label>מוצר/דגם (5 ספרות)</label>
+          <input id="bc-gen-prod" maxlength="5" inputmode="numeric" placeholder="14415" style="font-size:14px"/></div>
+      </div>
+      <div class="sec" style="margin-top:12px">מידות וכמויות</div>
+      <div style="font-size:11px;color:var(--txt3);margin-bottom:8px">כל שורה = ברקוד נפרד. מידה = ספרה אחת (1,2,3...). כמות = עד 999.</div>
+      <div id="bc-gen-rows"></div>
+      <button class="btn" style="width:100%;justify-content:center;margin-top:8px;font-size:13px" onclick="bcAddRow()">+ הוסף מידה/צבע</button>
+    </div>
+    <button class="btn primary" style="width:100%;justify-content:center;font-size:14px;padding:10px" onclick="bcGenerate()">🏷️ צור ברקודים</button>
+    <div id="bc-gen-output" style="margin-top:1rem"></div>
+  </div>
+
   <!-- מודל מוצר -->
   <div class="overlay hidden" id="prod-modal-wrap" onclick="if(event.target===this)closeProdModal()">
     <div class="modal" style="max-width:600px;max-height:90vh;overflow-y:auto" id="prod-modal-box">
@@ -863,6 +884,7 @@ code{background:var(--bg2);border:0.5px solid var(--b);border-radius:4px;padding
 <script src="https://cdn.jsdelivr.net/npm/jsqr@1.4.0/dist/jsQR.js"></script>
 <!-- QR CODE GENERATOR -->
 <script src="https://cdn.jsdelivr.net/npm/qrcode@1.5.3/build/qrcode.min.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/jsbarcode@3.11.6/dist/JsBarcode.all.min.js"></script>
 
 <!-- FIREBASE SDK -->
 <script type="module">
@@ -889,6 +911,7 @@ const SUPERVISOR_EXTRA_PAGES=[
   {id:'mgrtasks',label:'ניהול משימות'},
   {id:'attrep',label:'דוח נוכחות'},
   {id:'products',label:'מוצרים'},
+  {id:'barcodes',label:'מחולל ברקודים'},
 ];
 const ALL_WORKER_PAGE_IDS=WORKER_PAGES.map(p=>p.id);
 const ALL_SUPERVISOR_PAGE_IDS=[...ALL_WORKER_PAGE_IDS,...SUPERVISOR_EXTRA_PAGES.map(p=>p.id)];
@@ -1304,6 +1327,10 @@ function goPage(p){
   if(p==='admin')renderAdmin();
   if(p==='mgrtasks')renderMgrTasks();
   if(p==='taskscan')renderTsScan();
+  if(p==='barcodes'){
+    const rows=document.getElementById('bc-gen-rows');
+    if(rows&&!rows.children.length)bcAddRow();
+  }
   if(p==='attrep')initAttRep();
   if(p==='costs')initCostsPage();
   if(p==='products')renderProducts();
@@ -3510,6 +3537,82 @@ function printPayroll(){
 // ─── PRODUCTS ────────────────────────────────────────────────
 let _editProdId=null;
 
+// ─── BARCODE GENERATOR ───────────────────────────────────────
+function bcAddRow(){
+  const container=document.getElementById('bc-gen-rows');
+  if(!container)return;
+  const colorOpts=Object.entries(COLORS).map(([k,v])=>`<option value="${k}">${v}</option>`).join('');
+  const div=document.createElement('div');
+  div.className='bc-row';
+  div.style.cssText='display:grid;grid-template-columns:80px 80px 1fr 36px;gap:8px;align-items:end;margin-bottom:8px;background:var(--bg2);padding:8px;border-radius:8px';
+  div.innerHTML=`
+    <div><label style="font-size:11px;color:var(--txt3)">מידה</label>
+      <input type="text" class="bc-size" maxlength="1" inputmode="numeric" placeholder="1" style="font-size:14px;font-weight:600;text-align:center"/></div>
+    <div><label style="font-size:11px;color:var(--txt3)">כמות</label>
+      <input type="number" class="bc-qty" min="1" max="999" value="1" style="font-size:14px;font-weight:600;text-align:center"/></div>
+    <div><label style="font-size:11px;color:var(--txt3)">צבע</label>
+      <select class="bc-col" style="font-size:13px">${colorOpts}</select></div>
+    <button onclick="this.closest('.bc-row').remove()" style="background:none;border:none;cursor:pointer;color:var(--red-txt);font-size:20px;padding-bottom:2px">✕</button>`;
+  container.appendChild(div);
+}
+function bcGenerate(){
+  const cust=(document.getElementById('bc-gen-cust')?.value||'').replace(/\D/g,'').padStart(2,'0').slice(0,2);
+  const prod=(document.getElementById('bc-gen-prod')?.value||'').replace(/\D/g,'').padStart(5,'0').slice(0,5);
+  if(cust==='00'||prod==='00000'){alert('הזן מספר לקוח ומספר מוצר');return;}
+  const rows=[...document.querySelectorAll('.bc-row')];
+  if(!rows.length){alert('הוסף לפחות שורה אחת');return;}
+  const items=rows.map(r=>({
+    size:(r.querySelector('.bc-size')?.value||'0').replace(/\D/g,'').slice(0,1)||'0',
+    qty:String(Math.min(999,Math.max(1,parseInt(r.querySelector('.bc-qty')?.value)||1))).padStart(3,'0'),
+    col:r.querySelector('.bc-col')?.value||'00'
+  }));
+  const out=document.getElementById('bc-gen-output');
+  if(!out)return;
+  // בניית HTML עם canvas לכל ברקוד
+  out.innerHTML=`
+    <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:12px">
+      <div style="font-size:14px;font-weight:600">${items.length} ברקודים נוצרו — לקוח ${cust} · מוצר ${prod}</div>
+      <button class="btn" onclick="bcPrint()" style="font-size:13px">🖨️ הדפס הכל</button>
+    </div>
+    <div id="bc-print-area" style="display:grid;grid-template-columns:repeat(auto-fill,minmax(200px,1fr));gap:12px">
+      ${items.map((it,i)=>{
+        const code=cust+prod+it.size+it.qty+it.col;
+        const colName=COLORS[it.col]||it.col;
+        return`<div class="bc-card" style="background:var(--bg);border:1px solid var(--b);border-radius:8px;padding:12px;text-align:center">
+          <svg id="bc-svg-${i}"></svg>
+          <div style="font-size:11px;font-weight:600;margin-top:6px;letter-spacing:1px">${code}</div>
+          <div style="font-size:10px;color:var(--txt3);margin-top:2px">מידה ${it.size} · כמות ${parseInt(it.qty)} · ${colName}</div>
+        </div>`;
+      }).join('')}
+    </div>`;
+  // צייר ברקודים אחרי render
+  requestAnimationFrame(()=>{
+    items.forEach((it,i)=>{
+      const code=cust+prod+it.size+it.qty+it.col;
+      try{
+        JsBarcode('#bc-svg-'+i, code, {
+          format:'CODE128',width:1.8,height:60,displayValue:false,margin:2
+        });
+      }catch(e){console.warn('barcode error',e);}
+    });
+  });
+}
+function bcPrint(){
+  const area=document.getElementById('bc-print-area');
+  if(!area)return;
+  const win=window.open('','_blank');
+  win.document.write(`<html dir="rtl"><head><title>ברקודים</title>
+    <style>body{margin:0;font-family:Arial,sans-serif}
+    .grid{display:grid;grid-template-columns:repeat(4,1fr);gap:12px;padding:12px}
+    .bc-card{border:1px solid #ccc;border-radius:6px;padding:10px;text-align:center;break-inside:avoid}
+    svg{max-width:100%}
+    .lbl{font-size:11px;font-weight:600;letter-spacing:1px;margin-top:4px}
+    .sub{font-size:9px;color:#666;margin-top:2px}
+    @media print{@page{margin:8mm}}</style></head><body>
+    <div class="grid">${area.innerHTML}</div>
+    <script>window.onload=()=>window.print()<\/script></body></html>`);
+  win.document.close();
+}
 function renderProducts(){
   const q=(document.getElementById('prod-search')?.value||'').trim().toLowerCase();
   const list=S.products.filter(p=>!q||p.prod.includes(q)||p.cust.includes(q)||(p.name||'').toLowerCase().includes(q));
