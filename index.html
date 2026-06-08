@@ -3574,40 +3574,29 @@ function bcGenerate(){
       <div style="font-size:14px;font-weight:600">${items.length} קודים נוצרו — לקוח ${cust} · מוצר ${prod}</div>
       <button class="btn" onclick="bcPrint()" style="font-size:13px">🖨️ הדפס הכל</button>
     </div>
-    <div id="bc-print-area" style="display:grid;grid-template-columns:repeat(auto-fill,minmax(160px,1fr));gap:12px">
-      ${items.map((it,i)=>{
-        const code=cust+prod+it.size+it.qty+it.col;
-        const colName=COLORS[it.col]||it.col;
-        return`<div class="bc-card" style="background:#fff;border:1px solid #ccc;border-radius:8px;padding:10px;text-align:center">
-          <canvas id="bc-qr-${i}" style="max-width:140px;width:100%"></canvas>
+    <div id="bc-print-area" style="display:grid;grid-template-columns:repeat(auto-fill,minmax(160px,1fr));gap:12px"></div>`;
+  // צור QR codes עם toDataURL
+  const printArea=document.getElementById('bc-print-area');
+  const promises=items.map(it=>{
+    const code=cust+prod+it.size+it.qty+it.col;
+    const colName=COLORS[it.col]||it.col;
+    return QRCode.toDataURL(code,{width:150,margin:1,color:{dark:'#000000',light:'#ffffff'}})
+      .then(url=>{
+        const div=document.createElement('div');
+        div.className='bc-card';
+        div.style.cssText='background:#fff;border:1px solid #ccc;border-radius:8px;padding:10px;text-align:center';
+        div.innerHTML=`<img src="${url}" style="width:140px;height:140px;display:block;margin:0 auto"/>
           <div style="font-size:10px;font-weight:600;margin-top:5px;letter-spacing:1px;color:#000">${code}</div>
-          <div style="font-size:9px;color:#555;margin-top:2px">מידה ${it.size} · כמות ${parseInt(it.qty)} · ${colName}</div>
-        </div>`;
-      }).join('')}
-    </div>`;
-  // צייר QR codes אחרי render
-  requestAnimationFrame(()=>{
-    items.forEach((it,i)=>{
-      const code=cust+prod+it.size+it.qty+it.col;
-      try{
-        QRCode.toCanvas(document.getElementById('bc-qr-'+i), code,
-          {width:140,margin:1,color:{dark:'#000000',light:'#ffffff'}});
-      }catch(e){console.warn('qr error',e);}
-    });
+          <div style="font-size:9px;color:#555;margin-top:2px">מידה ${it.size} · כמות ${parseInt(it.qty)} · ${colName}</div>`;
+        printArea.appendChild(div);
+      }).catch(e=>console.warn('qr error',code,e));
   });
+  Promise.all(promises);
 }
 function bcPrint(){
   const area=document.getElementById('bc-print-area');
   if(!area)return;
-  // המר canvas ל-img לפני הדפסה
-  const cards=[...area.querySelectorAll('.bc-card')];
-  const htmlCards=cards.map(card=>{
-    const canvas=card.querySelector('canvas');
-    const imgSrc=canvas?canvas.toDataURL('image/png'):'';
-    const lbl=card.querySelector('div:nth-child(2)')?.textContent||'';
-    const sub=card.querySelector('div:nth-child(3)')?.textContent||'';
-    return`<div class="bc-card"><img src="${imgSrc}" width="120" height="120"/><div class="lbl">${lbl}</div><div class="sub">${sub}</div></div>`;
-  }).join('');
+  const htmlCards=[...area.querySelectorAll('.bc-card')].map(card=>card.outerHTML).join('');
   const win=window.open('','_blank');
   win.document.write(`<html dir="rtl"><head><title>QR קודים למשימות</title>
     <style>body{margin:0;font-family:Arial,sans-serif;background:#fff}
