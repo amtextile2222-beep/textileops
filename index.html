@@ -3575,23 +3575,27 @@ function bcGenerate(){
       <button class="btn" onclick="bcPrint()" style="font-size:13px">🖨️ הדפס הכל</button>
     </div>
     <div id="bc-print-area" style="display:grid;grid-template-columns:repeat(auto-fill,minmax(160px,1fr));gap:12px"></div>`;
-  // צור QR codes עם toDataURL
+  // צור QR codes עם toCanvas → toDataURL
   const printArea=document.getElementById('bc-print-area');
-  const promises=items.map(it=>{
+  items.forEach(it=>{
     const code=cust+prod+it.size+it.qty+it.col;
     const colName=COLORS[it.col]||it.col;
-    return QRCode.toDataURL(code,{width:150,margin:1,color:{dark:'#000000',light:'#ffffff'}})
-      .then(url=>{
-        const div=document.createElement('div');
-        div.className='bc-card';
-        div.style.cssText='background:#fff;border:1px solid #ccc;border-radius:8px;padding:10px;text-align:center';
+    const tmpCanvas=document.createElement('canvas');
+    QRCode.toCanvas(tmpCanvas,code,{width:150,margin:1,color:{dark:'#000000',light:'#ffffff'}},err=>{
+      const div=document.createElement('div');
+      div.className='bc-card';
+      div.style.cssText='background:#fff;border:1px solid #ccc;border-radius:8px;padding:10px;text-align:center';
+      if(err){
+        div.innerHTML=`<div style="color:red;font-size:11px">שגיאה</div>`;
+      } else {
+        const url=tmpCanvas.toDataURL('image/png');
         div.innerHTML=`<img src="${url}" style="width:140px;height:140px;display:block;margin:0 auto"/>
           <div style="font-size:10px;font-weight:600;margin-top:5px;letter-spacing:1px;color:#000">${code}</div>
           <div style="font-size:9px;color:#555;margin-top:2px">מידה ${it.size} · כמות ${parseInt(it.qty)} · ${colName}</div>`;
-        printArea.appendChild(div);
-      }).catch(e=>console.warn('qr error',code,e));
+      }
+      printArea.appendChild(div);
+    });
   });
-  Promise.all(promises);
 }
 function bcPrint(){
   const area=document.getElementById('bc-print-area');
