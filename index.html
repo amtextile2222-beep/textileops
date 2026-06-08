@@ -358,11 +358,11 @@ code{background:var(--bg2);border:0.5px solid var(--b);border-radius:4px;padding
           <input class="bc-inp" id="bc-inp" maxlength="13" placeholder="הזן 13 ספרות..." oninput="parseBc(this.value)" onkeydown="if(event.key==='Enter')submitBc()"/>
           <div id="bc-prev" style="margin-top:.75rem;min-height:36px"></div>
           <div class="field" style="margin-top:.75rem;margin-bottom:0">
-            <label style="font-size:12px;color:var(--txt2);margin-bottom:5px;display:block">סוג משימה</label>
-            <input id="bc-tasktype" type="text" placeholder="לדוגמה: תפירה, חיתוך, גימור..." style="font-size:13px"/>
+            <label style="font-size:12px;color:var(--txt2);margin-bottom:5px;display:block" data-i18n="lbl_task_type">סוג משימה</label>
+            <input id="bc-tasktype" type="text" placeholder="לדוגמה: תפירה, חיתוך, גימור..." data-i18n-ph="ph_task_type" style="font-size:13px"/>
           </div>
           <div class="field" style="margin-top:.75rem;margin-bottom:0">
-            <label style="font-size:12px;color:var(--txt2);margin-bottom:5px;display:block">מחלקה</label>
+            <label style="font-size:12px;color:var(--txt2);margin-bottom:5px;display:block" data-i18n="lbl_dept">מחלקה</label>
             <select id="bc-dept" style="font-size:13px"><option value="">-- בחר מחלקה --</option></select>
           </div>
           <div style="display:flex;gap:8px;margin-top:.75rem">
@@ -371,16 +371,16 @@ code{background:var(--bg2);border:0.5px solid var(--b);border-radius:4px;padding
           </div>
         </div>
         <div class="card">
-          <div class="sec">מבנה ברקוד</div>
+          <div class="sec" data-i18n="bc_struct">מבנה ברקוד</div>
           <div style="font-size:12px;color:var(--txt2);line-height:2.3">
-            <div><span class="bc-seg bc-c">XX</span> — מספר לקוח (2 ספרות)</div>
-            <div><span class="bc-seg bc-p">XXXXX</span> — מספר מוצר (5 ספרות)</div>
-            <div><span class="bc-seg" style="background:var(--amber-bg);color:var(--amber-txt)">X</span> — מידה (1 ספרה)</div>
-            <div><span class="bc-seg bc-q">XXX</span> — כמות (3 ספרות)</div>
-            <div><span class="bc-seg bc-col">XX</span> — קוד צבע (2 ספרות)</div>
+            <div><span class="bc-seg bc-c">XX</span> — <span data-i18n="bc_cust">מספר לקוח (2 ספרות)</span></div>
+            <div><span class="bc-seg bc-p">XXXXX</span> — <span data-i18n="bc_prod">מספר מוצר (5 ספרות)</span></div>
+            <div><span class="bc-seg" style="background:var(--amber-bg);color:var(--amber-txt)">X</span> — <span data-i18n="bc_size">מידה (1 ספרה)</span></div>
+            <div><span class="bc-seg bc-q">XXX</span> — <span data-i18n="bc_qty_lbl">כמות (3 ספרות)</span></div>
+            <div><span class="bc-seg bc-col">XX</span> — <span data-i18n="bc_color_code">קוד צבע (2 ספרות)</span></div>
           </div>
           <div style="margin-top:.75rem;background:var(--bg2);border-radius:var(--r);padding:9px">
-            <div style="font-size:11px;color:var(--txt3);margin-bottom:5px">דוגמה — לחץ לניסיון:</div>
+            <div style="font-size:11px;color:var(--txt3);margin-bottom:5px" data-i18n="bc_example_lbl">דוגמה — לחץ לניסיון:</div>
             <div style="display:flex;gap:5px;flex-wrap:wrap;cursor:pointer" onclick="tryDemo()">
               <span class="bc-seg bc-c">07</span><span class="bc-seg bc-p">10042</span><span class="bc-seg" style="background:var(--amber-bg);color:var(--amber-txt)">3</span><span class="bc-seg bc-q">025</span><span class="bc-seg bc-col">03</span>
               <span style="font-size:11px;color:var(--txt3);align-self:center">= לקוח 07 | מוצר 10042 | מידה 3 | 25 יח' | אדום</span>
@@ -444,8 +444,8 @@ code{background:var(--bg2);border:0.5px solid var(--b);border-radius:4px;padding
       <div class="card"><div class="mlbl" data-i18n="rep_units">יחידות</div><div class="mval" id="rp-units">0</div></div>
       <div class="card"><div class="mlbl" data-i18n="rep_eff">יעילות</div><div class="mval" id="rp-eff">—</div></div>
     </div>
-    <div class="card"><div class="sec">פירוט לפי לקוח ומוצר</div>
-      <div class="tbl-wrap"><table><thead><tr><th>עובד</th><th>מחלקה</th><th>סוג משימה</th><th>לקוח</th><th>מוצר</th><th>כמות</th><th>צבע</th><th>התחלה</th><th>סיום</th><th>משך</th><th>סטטוס</th></tr></thead>
+    <div class="card"><div class="sec" data-i18n="rep_detail">פירוט לפי לקוח ומוצר</div>
+      <div class="tbl-wrap"><table><thead><tr><th data-i18n="th_worker">עובד</th><th data-i18n="th_dept">מחלקה</th><th data-i18n="th_task_type">סוג משימה</th><th data-i18n="th_customer">לקוח</th><th data-i18n="th_product">מוצר</th><th data-i18n="th_qty">כמות</th><th data-i18n="th_color">צבע</th><th data-i18n="th_start_time">התחלה</th><th data-i18n="th_end_time">סיום</th><th data-i18n="th_duration">משך</th><th data-i18n="th_status">סטטוס</th></tr></thead>
       <tbody id="rp-body"></tbody></table></div>
     </div>
   </div>
@@ -601,11 +601,11 @@ code{background:var(--bg2);border:0.5px solid var(--b);border-radius:4px;padding
     </div>
     <div class="g2" style="margin-bottom:1rem">
       <div class="card">
-        <div class="sec">▶ התחלת משימה לעובד</div>
-        <div class="field"><label>עובד</label>
+        <div class="sec" data-i18n="task_start_sec">▶ התחלת משימה לעובד</div>
+        <div class="field"><label data-i18n="th_worker">עובד</label>
           <select id="mgr-emp-sel" style="font-size:13px"><option value="">בחר עובד...</option></select>
         </div>
-        <div class="field"><label>ברקוד משימה (12 ספרות)</label>
+        <div class="field"><label data-i18n="lbl_task_barcode12">ברקוד משימה (12 ספרות)</label>
           <div id="mgr-cam-container" style="display:none;margin-bottom:.75rem;position:relative">
             <video id="mgr-cam-video" style="width:100%;border-radius:var(--rl);background:#000;max-height:200px;object-fit:cover" autoplay muted playsinline></video>
             <div style="position:absolute;inset:0;border:3px solid var(--blue-txt);border-radius:var(--rl);pointer-events:none;opacity:.6"></div>
@@ -618,14 +618,14 @@ code{background:var(--bg2);border:0.5px solid var(--b);border-radius:4px;padding
         </div><!-- /field barcode -->
         <div id="mgr-bc-prev" style="margin-bottom:.75rem;min-height:30px"></div>
         <div class="field">
-          <label>סוג משימה</label>
-          <input id="mgr-tasktype" type="text" placeholder="לדוגמה: תפירה, חיתוך, גימור..." style="font-size:13px"/>
+          <label data-i18n="lbl_task_type">סוג משימה</label>
+          <input id="mgr-tasktype" type="text" placeholder="לדוגמה: תפירה, חיתוך, גימור..." data-i18n-ph="ph_task_type" style="font-size:13px"/>
         </div>
         <div class="field">
-          <label>מחלקה</label>
+          <label data-i18n="lbl_dept">מחלקה</label>
           <select id="mgr-dept" style="font-size:13px"><option value="">-- בחר מחלקה --</option></select>
         </div>
-        <button class="btn success full" onclick="mgrStartTask()">▶ התחל משימה לעובד</button>
+        <button class="btn success full" onclick="mgrStartTask()" data-i18n="btn_start_task">▶ התחל משימה לעובד</button>
         <div id="mgr-start-msg" style="font-size:12px;margin-top:6px;min-height:16px"></div>
       </div><!-- /card start-task -->
       <div class="card">
@@ -642,11 +642,11 @@ code{background:var(--bg2);border:0.5px solid var(--b);border-radius:4px;padding
   <!-- TASK SCAN PAGE (limited access) -->
   <div class="page" id="page-taskscan">
     <div class="card" style="max-width:500px;margin:0 auto">
-      <div class="sec">▶ התחלת משימה לעובד</div>
-      <div class="field"><label>עובד</label>
+      <div class="sec" data-i18n="task_start_sec">▶ התחלת משימה לעובד</div>
+      <div class="field"><label data-i18n="th_worker">עובד</label>
         <select id="ts-emp-sel" style="font-size:13px"><option value="">בחר עובד...</option></select>
       </div>
-      <div class="field"><label>ברקוד משימה (13 ספרות)</label>
+      <div class="field"><label data-i18n="lbl_task_barcode13">ברקוד משימה (13 ספרות)</label>
         <div id="ts-cam-container" style="display:none;margin-bottom:.75rem;position:relative">
           <video id="ts-cam-video" style="width:100%;border-radius:var(--rl);background:#000;max-height:220px;object-fit:cover" autoplay muted playsinline></video>
           <div style="position:absolute;inset:0;border:3px solid var(--blue-txt);border-radius:var(--rl);pointer-events:none;opacity:.6"></div>
@@ -659,14 +659,14 @@ code{background:var(--bg2);border:0.5px solid var(--b);border-radius:4px;padding
       </div>
       <div id="ts-bc-prev" style="margin-bottom:.75rem;min-height:30px"></div>
       <div class="field">
-        <label>סוג משימה</label>
-        <input id="ts-tasktype" type="text" placeholder="לדוגמה: תפירה, חיתוך, גימור..." style="font-size:13px"/>
+        <label data-i18n="lbl_task_type">סוג משימה</label>
+        <input id="ts-tasktype" type="text" placeholder="לדוגמה: תפירה, חיתוך, גימור..." data-i18n-ph="ph_task_type" style="font-size:13px"/>
       </div>
       <div class="field">
-        <label>מחלקה</label>
+        <label data-i18n="lbl_dept">מחלקה</label>
         <select id="ts-dept" style="font-size:13px"><option value="">-- בחר מחלקה --</option></select>
       </div>
-      <button class="btn success full" onclick="tsStartTask()">▶ התחל משימה לעובד</button>
+      <button class="btn success full" onclick="tsStartTask()" data-i18n="btn_start_task">▶ התחל משימה לעובד</button>
       <div id="ts-start-msg" style="font-size:12px;margin-top:6px;min-height:16px"></div>
     </div>
   </div>
@@ -1673,8 +1673,9 @@ async function submitBc(){
   saveLS();renderScanActive();renderTasks();goPage('tasks');
 }
 function fillDeptSelects(){
-  const opts='<option value="">-- בחר מחלקה --</option>'+S.depts.map(d=>`<option value="${esc(d)}">${esc(d)}</option>`).join('');
-  ['bc-dept','mgr-dept'].forEach(id=>{const s=document.getElementById(id);if(s)s.innerHTML=opts;});
+  const selDept=LANGS[currentLang].sel_dept||'-- בחר מחלקה --';
+  const opts=`<option value="">${selDept}</option>`+S.depts.map(d=>`<option value="${esc(d)}">${esc(d)}</option>`).join('');
+  ['bc-dept','mgr-dept','ts-dept'].forEach(id=>{const s=document.getElementById(id);if(s)s.innerHTML=opts;});
 }
 function renderScanActive(){
   fillDeptSelects();
@@ -2012,7 +2013,8 @@ function renderMgrTasks(){
   const sel=document.getElementById('mgr-emp-sel');
   if(sel){
     const prev=sel.value;
-    sel.innerHTML='<option value="">בחר עובד...</option>'+S.workers.filter(w=>w.status==='in').map(w=>`<option value="${esc(w.id)}">${esc(w.name)} (${esc(w.dept)})</option>`).join('');
+    const selW=LANGS[currentLang].sel_worker||'בחר עובד...';
+    sel.innerHTML=`<option value="">${selW}</option>`+S.workers.filter(w=>w.status==='in').map(w=>`<option value="${esc(w.id)}">${esc(w.name)} (${esc(w.dept)})</option>`).join('');
     if(prev)sel.value=prev;
   }
   // active tasks list
@@ -2152,8 +2154,9 @@ async function tsStartTask(){
   const empId=document.getElementById('ts-emp-sel').value;
   const raw=(document.getElementById('ts-bc-inp').value||'').replace(/\D/g,'');
   const msg=document.getElementById('ts-start-msg');
-  if(!empId){msg.textContent='⚠ בחר עובד';msg.style.color='var(--red-txt)';return;}
-  if(raw.length!==13){msg.textContent='⚠ ברקוד חייב להיות 13 ספרות';msg.style.color='var(--red-txt)';return;}
+  const T=LANGS[currentLang];
+  if(!empId){msg.textContent=T.err_sel_worker||'⚠ בחר עובד';msg.style.color='var(--red-txt)';return;}
+  if(raw.length!==13){msg.textContent=T.err_barcode_13||'⚠ ברקוד חייב להיות 13 ספרות';msg.style.color='var(--red-txt)';return;}
   const w=S.workers.find(x=>x.id===empId);
   if(!w||w.status!=='in'){msg.textContent='⚠ העובד לא נמצא בעבודה';msg.style.color='var(--red-txt)';return;}
   const cust=raw.slice(0,2),prod=raw.slice(2,7),size=raw.slice(7,8),qty=parseInt(raw.slice(8,11))||0,col=raw.slice(11,13);
@@ -2171,9 +2174,9 @@ async function tsStartTask(){
 function renderTsScan(){
   const sel=document.getElementById('ts-emp-sel');if(!sel)return;
   const cur=sel.value;
-  sel.innerHTML='<option value="">בחר עובד...</option>'+S.workers.filter(w=>w.status==='in').map(w=>`<option value="${w.id}" ${w.id===cur?'selected':''}>${esc(w.name)}</option>`).join('');
-  const ds=document.getElementById('ts-dept');if(!ds)return;
-  ds.innerHTML='<option value="">-- בחר מחלקה --</option>'+S.depts.map(d=>`<option value="${esc(d)}">${esc(d)}</option>`).join('');
+  const selW=LANGS[currentLang].sel_worker||'בחר עובד...';
+  sel.innerHTML=`<option value="">${selW}</option>`+S.workers.filter(w=>w.status==='in').map(w=>`<option value="${w.id}" ${w.id===cur?'selected':''}>${esc(w.name)}</option>`).join('');
+  fillDeptSelects();
 }
 
 function mgrStopCam(){
@@ -2261,8 +2264,9 @@ async function mgrStartTask(){
   const empId=document.getElementById('mgr-emp-sel').value;
   const raw=(document.getElementById('mgr-bc-inp').value||'').replace(/\D/g,'');
   const msg=document.getElementById('mgr-start-msg');
-  if(!empId){msg.textContent='⚠ בחר עובד';msg.style.color='var(--red-txt)';return;}
-  if(raw.length!==13){msg.textContent='⚠ ברקוד חייב להיות 13 ספרות';msg.style.color='var(--red-txt)';return;}
+  const T=LANGS[currentLang];
+  if(!empId){msg.textContent=T.err_sel_worker||'⚠ בחר עובד';msg.style.color='var(--red-txt)';return;}
+  if(raw.length!==13){msg.textContent=T.err_barcode_13||'⚠ ברקוד חייב להיות 13 ספרות';msg.style.color='var(--red-txt)';return;}
   const w=S.workers.find(x=>x.id===empId);
   if(!w||w.status!=='in'){msg.textContent='⚠ העובד לא נמצא בעבודה';msg.style.color='var(--red-txt)';return;}
   const cust=raw.slice(0,2),prod=raw.slice(2,7),size=raw.slice(7,8),qty=parseInt(raw.slice(8,11))||0,col=raw.slice(11,13);
@@ -2812,6 +2816,36 @@ const LANGS={
     cancel:'ביטול',
     delete:'מחק',
     edit:'ערוך',
+    task_start_sec:'▶ התחלת משימה לעובד',
+    lbl_task_barcode13:'ברקוד משימה (13 ספרות)',
+    lbl_task_barcode12:'ברקוד משימה (12 ספרות)',
+    lbl_task_type:'סוג משימה',
+    lbl_dept:'מחלקה',
+    sel_dept:'-- בחר מחלקה --',
+    sel_worker:'בחר עובד...',
+    btn_start_task:'▶ התחל משימה לעובד',
+    bc_struct:'מבנה ברקוד',
+    bc_cust:'מספר לקוח (2 ספרות)',
+    bc_prod:'מספר מוצר (5 ספרות)',
+    bc_size:'מידה (1 ספרה)',
+    bc_qty_lbl:'כמות (3 ספרות)',
+    bc_color_code:'קוד צבע (2 ספרות)',
+    bc_example_lbl:'דוגמה — לחץ לניסיון:',
+    ph_task_type:'לדוגמה: תפירה, חיתוך, גימור...',
+    err_sel_worker:'⚠ בחר עובד',
+    err_barcode_13:'⚠ ברקוד חייב להיות 13 ספרות',
+    rep_detail:'פירוט לפי לקוח ומוצר',
+    th_worker:'עובד',
+    th_dept:'מחלקה',
+    th_task_type:'סוג משימה',
+    th_customer:'לקוח',
+    th_product:'מוצר',
+    th_qty:'כמות',
+    th_color:'צבע',
+    th_start_time:'התחלה',
+    th_end_time:'סיום',
+    th_duration:'משך',
+    th_status:'סטטוס',
   },
   ar:{
     login_title:'تسجيل الدخول',
@@ -2876,6 +2910,36 @@ const LANGS={
     cancel:'إلغاء',
     delete:'حذف',
     edit:'تعديل',
+    task_start_sec:'▶ بدء مهمة للعامل',
+    lbl_task_barcode13:'باركود المهمة (13 رقماً)',
+    lbl_task_barcode12:'باركود المهمة (12 رقماً)',
+    lbl_task_type:'نوع المهمة',
+    lbl_dept:'القسم',
+    sel_dept:'-- اختر قسماً --',
+    sel_worker:'اختر عاملاً...',
+    btn_start_task:'▶ ابدأ المهمة للعامل',
+    bc_struct:'هيكل الباركود',
+    bc_cust:'رقم العميل (2 أرقام)',
+    bc_prod:'رقم المنتج (5 أرقام)',
+    bc_size:'المقاس (1 رقم)',
+    bc_qty_lbl:'الكمية (3 أرقام)',
+    bc_color_code:'كود اللون (2 رقمين)',
+    bc_example_lbl:'مثال — انقر للتجربة:',
+    ph_task_type:'مثال: خياطة، قص، تشطيب...',
+    err_sel_worker:'⚠ اختر عاملاً',
+    err_barcode_13:'⚠ الباركود يجب أن يكون 13 رقماً',
+    rep_detail:'تفاصيل حسب العميل والمنتج',
+    th_worker:'العامل',
+    th_dept:'القسم',
+    th_task_type:'نوع المهمة',
+    th_customer:'العميل',
+    th_product:'المنتج',
+    th_qty:'الكمية',
+    th_color:'اللون',
+    th_start_time:'البداية',
+    th_end_time:'النهاية',
+    th_duration:'المدة',
+    th_status:'الحالة',
   },
   en:{
     login_title:'Login',
@@ -2940,6 +3004,36 @@ const LANGS={
     cancel:'Cancel',
     delete:'Delete',
     edit:'Edit',
+    task_start_sec:'▶ Start Task for Worker',
+    lbl_task_barcode13:'Task Barcode (13 digits)',
+    lbl_task_barcode12:'Task Barcode (12 digits)',
+    lbl_task_type:'Task Type',
+    lbl_dept:'Department',
+    sel_dept:'-- Select Dept --',
+    sel_worker:'Select worker...',
+    btn_start_task:'▶ Start Task for Worker',
+    bc_struct:'Barcode Structure',
+    bc_cust:'Customer no. (2 digits)',
+    bc_prod:'Product no. (5 digits)',
+    bc_size:'Size (1 digit)',
+    bc_qty_lbl:'Qty (3 digits)',
+    bc_color_code:'Color code (2 digits)',
+    bc_example_lbl:'Example — click to try:',
+    ph_task_type:'e.g. sewing, cutting, finishing...',
+    err_sel_worker:'⚠ Select a worker',
+    err_barcode_13:'⚠ Barcode must be 13 digits',
+    rep_detail:'Detail by Customer & Product',
+    th_worker:'Worker',
+    th_dept:'Dept',
+    th_task_type:'Task Type',
+    th_customer:'Customer',
+    th_product:'Product',
+    th_qty:'Qty',
+    th_color:'Color',
+    th_start_time:'Start',
+    th_end_time:'End',
+    th_duration:'Duration',
+    th_status:'Status',
   }
 };
 
