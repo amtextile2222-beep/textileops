@@ -585,6 +585,15 @@ code{background:var(--bg2);border:0.5px solid var(--b);border-radius:4px;padding
     <!-- נוכחות עובדים -->
     <div class="card" style="margin-bottom:1rem">
       <div class="sec">🕐 החתמת נוכחות עובדים</div>
+      <div id="mgr-bulk-bar" style="display:none;align-items:center;gap:8px;flex-wrap:wrap;margin-bottom:10px;padding:8px 10px;background:var(--bg2);border-radius:var(--rl)">
+        <span style="font-size:13px;font-weight:500">שעת כניסה:</span>
+        <input type="time" id="mgr-bulk-time" style="font-size:13px;padding:4px 8px;border:1px solid var(--b);border-radius:6px;background:var(--bg);color:var(--txt)"/>
+        <button class="btn success" style="font-size:12px;padding:5px 14px" onclick="mgrBulkPunchIn()">✅ החתם נבחרים</button>
+        <button class="btn" style="font-size:12px;padding:5px 10px" onclick="mgrBulkCancel()">ביטול</button>
+      </div>
+      <div style="margin-bottom:8px;display:flex;gap:8px;align-items:center">
+        <button class="btn" id="mgr-bulk-toggle" style="font-size:12px;padding:4px 12px" onclick="mgrBulkToggle()">☑ כניסה קבוצתית</button>
+      </div>
       <div id="mgr-att-list"></div>
     </div>
     <div class="g2" style="margin-bottom:1rem">
@@ -1947,6 +1956,7 @@ function renderMgrTasks(){
   // נוכחות עובדים
   const al=document.getElementById('mgr-att-list');
   if(al){
+    const bulk=window._mgrBulkMode||false;
     al.innerHTML=S.workers.map(w=>{
       const isIn=w.status==='in';
       const ci=w.checkin?new Date(w.checkin):null;
@@ -1954,15 +1964,17 @@ function renderMgrTasks(){
       const ciStr=ci?pad2(ci.getHours())+':'+pad2(ci.getMinutes()):'—';
       const coStr=co?pad2(co.getHours())+':'+pad2(co.getMinutes()):'—';
       const netMs=calcNetWork(w);
-      return`<div class="row" style="flex-wrap:wrap;gap:8px">
+      const chk=bulk&&!isIn?`<input type="checkbox" id="bchk-${esc(w.id)}" style="width:18px;height:18px;flex-shrink:0;accent-color:var(--green-txt)">`:'';
+      return`<div class="row" style="flex-wrap:wrap;gap:8px;${bulk&&isIn?'opacity:.45':''}">
+        ${chk}
         <div class="av" style="width:30px;height:30px;font-size:10px;flex-shrink:0">${esc(w.name.split(' ').map(n=>n[0]).join(''))}</div>
         <div style="flex:1;min-width:100px">
           <div style="font-size:13px;font-weight:500">${esc(w.name)}</div>
           <div style="font-size:11px;color:var(--txt3)">${esc(w.dept)} · ▶${ciStr} ◀${coStr} · <span style="color:var(--blue-txt)">${netMs?fmtNetH(netMs):''}</span></div>
         </div>
-        <span class="badge ${isIn?'green':'red'}" style="align-self:center">${isIn?'<span class="pulse"></span> בעבודה':'יצא/ה'}</span>
-        ${!isIn?`<button class="btn success" style="font-size:11px;padding:5px 12px" onclick="mgrPunchIn('${w.id}')">✅ כניסה</button>`:''}
-        ${isIn?`<button class="btn danger" style="font-size:11px;padding:5px 12px" onclick="mgrPunchOut('${w.id}')">🚪 יציאה</button>`:''}
+        ${!bulk?`<span class="badge ${isIn?'green':'red'}" style="align-self:center">${isIn?'<span class="pulse"></span> בעבודה':'יצא/ה'}</span>`:''}
+        ${!bulk&&!isIn?`<button class="btn success" style="font-size:11px;padding:5px 12px" onclick="mgrPunchIn('${w.id}')">✅ כניסה</button>`:''}
+        ${!bulk&&isIn?`<button class="btn danger" style="font-size:11px;padding:5px 12px" onclick="mgrPunchOut('${w.id}')">🚪 יציאה</button>`:''}
         <button class="btn" style="font-size:11px;padding:5px 10px" onclick="mgrEditAtt('${w.id}')" title="עריכת שעות">✏️</button>
       </div>`;
     }).join('');
@@ -2141,6 +2153,45 @@ function mgrStopCam(){
   mgrCamStream=null;mgrCamInterval=null;
   const c=document.getElementById('mgr-cam-container');if(c)c.style.display='none';
   const b=document.getElementById('mgr-cam-btn');if(b)b.style.display='flex';
+}
+function mgrBulkToggle(){
+  window._mgrBulkMode=!window._mgrBulkMode;
+  const bar=document.getElementById('mgr-bulk-bar');
+  if(bar)bar.style.display=window._mgrBulkMode?'flex':'none';
+  // ברירת מחדל: השעה הנוכחית
+  if(window._mgrBulkMode){
+    const now=new Date();
+    const ti=document.getElementById('mgr-bulk-time');
+    if(ti)ti.value=pad2(now.getHours())+':'+pad2(now.getMinutes());
+  }
+  renderMgrTasks();
+}
+function mgrBulkCancel(){
+  window._mgrBulkMode=false;
+  const bar=document.getElementById('mgr-bulk-bar');
+  if(bar)bar.style.display='none';
+  renderMgrTasks();
+}
+async function mgrBulkPunchIn(){
+  const timeVal=document.getElementById('mgr-bulk-time')?.value;
+  if(!timeVal){alert('בחר שעת כניסה');return;}
+  const [hh,mm]=timeVal.split(':').map(Number);
+  const selected=S.workers.filter(w=>{
+    const chk=document.getElementById('bchk-'+w.id);
+    return chk&&chk.checked&&w.status!=='in';
+  });
+  if(!selected.length){alert('לא נבחרו עובדים');return;}
+  const today=todayStr();
+  for(const w of selected){
+    if(!w.sessions)w.sessions=[];
+    const dt=new Date(today+'T'+pad2(hh)+':'+pad2(mm)+':00');
+    w.sessions.push({in:dt.toISOString(),out:null});
+    w.status='in';w.checkin=w.sessions[0].in;
+    if(S.fbConnected)await fbSet('workers',w.id,w);
+  }
+  saveLS();
+  mgrBulkCancel();
+  renderMgrTasks();renderAtt();
 }
 async function mgrPunchIn(wId){
   const w=S.workers.find(x=>x.id===wId);if(!w)return;
