@@ -151,6 +151,14 @@ code{background:var(--bg2);border:0.5px solid var(--b);border-radius:4px;padding
 
 <!-- FIREBASE STATUS -->
 <div id="fb-status" class="loading">⏳ מתחבר...</div>
+<div id="mgr-bulk-bar" style="display:none;position:fixed;bottom:0;right:0;left:0;z-index:400;background:var(--bg);border-top:2px solid var(--green-txt);padding:10px 16px;align-items:center;gap:10px;flex-wrap:wrap;box-shadow:0 -2px 12px rgba(0,0,0,.15)">
+  <span style="font-size:13px;font-weight:600;color:var(--green-txt)">✅ כניסה קבוצתית</span>
+  <span style="font-size:12px;color:var(--txt2)">שעת כניסה:</span>
+  <input type="time" id="mgr-bulk-time" style="font-size:14px;padding:5px 10px;border:1px solid var(--b);border-radius:6px;background:var(--bg2);color:var(--txt);font-weight:600"/>
+  <button class="btn success" style="font-size:13px;padding:6px 18px;font-weight:600" onclick="mgrBulkPunchIn()">החתם נבחרים</button>
+  <button class="btn" style="font-size:12px;padding:6px 12px" onclick="mgrBulkCancel()">ביטול</button>
+  <span id="mgr-bulk-count" style="font-size:12px;color:var(--txt3)"></span>
+</div>
 
 <!-- LOGIN -->
 <div id="login-screen">
@@ -585,12 +593,6 @@ code{background:var(--bg2);border:0.5px solid var(--b);border-radius:4px;padding
     <!-- נוכחות עובדים -->
     <div class="card" style="margin-bottom:1rem">
       <div class="sec">🕐 החתמת נוכחות עובדים</div>
-      <div id="mgr-bulk-bar" style="display:none;align-items:center;gap:8px;flex-wrap:wrap;margin-bottom:10px;padding:8px 10px;background:var(--bg2);border-radius:var(--rl)">
-        <span style="font-size:13px;font-weight:500">שעת כניסה:</span>
-        <input type="time" id="mgr-bulk-time" style="font-size:13px;padding:4px 8px;border:1px solid var(--b);border-radius:6px;background:var(--bg);color:var(--txt)"/>
-        <button class="btn success" style="font-size:12px;padding:5px 14px" onclick="mgrBulkPunchIn()">✅ החתם נבחרים</button>
-        <button class="btn" style="font-size:12px;padding:5px 10px" onclick="mgrBulkCancel()">ביטול</button>
-      </div>
       <div style="margin-bottom:8px;display:flex;gap:8px;align-items:center">
         <button class="btn" id="mgr-bulk-toggle" style="font-size:12px;padding:4px 12px" onclick="mgrBulkToggle()">☑ כניסה קבוצתית</button>
       </div>
@@ -1964,7 +1966,7 @@ function renderMgrTasks(){
       const ciStr=ci?pad2(ci.getHours())+':'+pad2(ci.getMinutes()):'—';
       const coStr=co?pad2(co.getHours())+':'+pad2(co.getMinutes()):'—';
       const netMs=calcNetWork(w);
-      const chk=bulk&&!isIn?`<input type="checkbox" id="bchk-${esc(w.id)}" style="width:18px;height:18px;flex-shrink:0;accent-color:var(--green-txt)">`:'';
+      const chk=bulk&&!isIn?`<input type="checkbox" id="bchk-${esc(w.id)}" style="width:18px;height:18px;flex-shrink:0;accent-color:var(--green-txt)" onchange="mgrBulkCount()">`:'';
       return`<div class="row" style="flex-wrap:wrap;gap:8px;${bulk&&isIn?'opacity:.45':''}">
         ${chk}
         <div class="av" style="width:30px;height:30px;font-size:10px;flex-shrink:0">${esc(w.name.split(' ').map(n=>n[0]).join(''))}</div>
@@ -2158,19 +2160,24 @@ function mgrBulkToggle(){
   window._mgrBulkMode=!window._mgrBulkMode;
   const bar=document.getElementById('mgr-bulk-bar');
   if(bar)bar.style.display=window._mgrBulkMode?'flex':'none';
-  // ברירת מחדל: השעה הנוכחית
   if(window._mgrBulkMode){
     const now=new Date();
     const ti=document.getElementById('mgr-bulk-time');
     if(ti)ti.value=pad2(now.getHours())+':'+pad2(now.getMinutes());
   }
   renderMgrTasks();
+  mgrBulkCount();
 }
 function mgrBulkCancel(){
   window._mgrBulkMode=false;
   const bar=document.getElementById('mgr-bulk-bar');
   if(bar)bar.style.display='none';
   renderMgrTasks();
+}
+function mgrBulkCount(){
+  const cnt=S.workers.filter(w=>{const c=document.getElementById('bchk-'+w.id);return c&&c.checked;}).length;
+  const el=document.getElementById('mgr-bulk-count');
+  if(el)el.textContent=cnt?cnt+' עובדים נבחרו':'';
 }
 async function mgrBulkPunchIn(){
   const timeVal=document.getElementById('mgr-bulk-time')?.value;
