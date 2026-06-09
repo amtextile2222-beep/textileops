@@ -175,8 +175,9 @@ code{background:var(--bg2);border:0.5px solid var(--b);border-radius:4px;padding
   <div class="login-box">
     <div class="login-title" data-i18n="login_title">כניסה למערכת</div>
     <div class="login-sub" data-i18n="login_sub">הזן פרטי משתמש</div>
-    <div class="field"><label data-i18n="username">שם משתמש</label><input id="l-user" type="text" placeholder="שם משתמש" data-i18n-ph="username" autocomplete="username"/></div>
-    <div class="field"><label data-i18n="password">סיסמה</label><input id="l-pass" type="password" placeholder="סיסמה" data-i18n-ph="password" autocomplete="current-password" onkeydown="if(event.key==='Enter')doLogin()"/></div>
+    <div class="field"><label data-i18n="username">שם משתמש</label><input id="l-user" type="text" placeholder="שם משתמש" data-i18n-ph="username" autocomplete="username" oninput="onUserInput(this.value)"/></div>
+    <div class="field" id="l-pass-wrap"><label data-i18n="password">סיסמה</label><input id="l-pass" type="password" placeholder="סיסמה" data-i18n-ph="password" autocomplete="current-password" onkeydown="if(event.key==='Enter')doLogin()"/></div>
+    <div id="l-face-hint" style="display:none;text-align:center;font-size:13px;color:var(--green-txt);margin-bottom:8px">📷 זיהוי פנים — לחץ כניסה</div>
     <button class="btn primary full" onclick="doLogin()" data-i18n="login_btn">כניסה</button>
     <div id="l-err" style="color:var(--red-txt);font-size:12px;text-align:center;margin-top:8px;min-height:18px"></div>
     <div id="emrg-box" class="hidden" style="margin-top:12px;border-top:0.5px solid var(--b);padding-top:12px;text-align:center">
@@ -1264,10 +1265,23 @@ function emergencyLogin(){
   sendTelegram('✅ TextileOps — כניסת חירום בוצעה\n🕐 שעה: '+now2+'\nנכנס דרך קוד חירום כמנהל.');
   goPage('admin');
 }
+function onUserInput(u){
+  const w=S.workers.find(x=>x.user===u.trim()&&x.faceAuth&&x.faceDescriptor);
+  document.getElementById('l-pass-wrap').style.display=w?'none':'';
+  document.getElementById('l-face-hint').style.display=w?'block':'none';
+}
 async function doLogin(){
   if(loginLocked){document.getElementById('l-err').textContent='חשבון נעול ל-30 שניות עקב ניסיונות כושלים';return;}
   const u=document.getElementById('l-user').value.trim();
   const p=document.getElementById('l-pass').value.trim();
+  // אם יש עובד עם זיהוי פנים מוגדר — מדלג על סיסמה
+  const wFace=S.workers.find(x=>x.user===u&&x.faceAuth&&x.faceDescriptor);
+  if(wFace){
+    if(wFace.requireFactoryIP){const allowed=await checkFactoryIP(wFace);if(!allowed)return;}
+    S._pendingUser=wFace;
+    startFaceAuth();
+    return;
+  }
   if(!u||!p){document.getElementById('l-err').textContent='נא למלא שם משתמש וסיסמה';return;}
   const ph=hashPass(p);
   // ניסיון עם hash — אם לא, ניסיון עם טקסט רגיל (מעבר מגרסה ישנה) ושדרוג אוטומטי
