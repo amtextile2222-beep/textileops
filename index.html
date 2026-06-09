@@ -3683,7 +3683,7 @@ function bcGenerate(){
         <button class="btn" onclick="bcPrint()" style="font-size:13px">🖨️ הדפס הכל</button>
       </div>
     </div>
-    <div id="bc-print-area" style="display:flex;flex-wrap:wrap;gap:10px;justify-content:flex-start">
+    <div id="bc-print-area" style="display:grid;grid-template-columns:repeat(auto-fill,minmax(300px,1fr));gap:12px">
     </div>`;
   // צור QR canvas לכל פריט
   const printArea=document.getElementById('bc-print-area');
@@ -3692,20 +3692,22 @@ function bcGenerate(){
     const colName=COLORS[it.col]||it.col;
     const div=document.createElement('div');
     div.className='bc-card';
-    div.style.cssText='background:#fff;border:2px solid #333;border-radius:6px;padding:8px;display:flex;flex-direction:column;align-items:center;gap:6px;break-inside:avoid;width:160px';
+    div.style.cssText='background:#fff;border:2px solid #333;border-radius:6px;padding:10px;display:flex;align-items:center;gap:12px;break-inside:avoid';
     const qrWrap=document.createElement('div');
-    qrWrap.style.cssText='width:120px;height:120px;overflow:hidden;flex-shrink:0';
+    qrWrap.style.cssText='flex-shrink:0;width:150px;height:150px;overflow:hidden';
     const infoDiv=document.createElement('div');
-    infoDiv.style.cssText='text-align:center;line-height:1.6;width:100%';
+    infoDiv.style.cssText='text-align:right;line-height:2;flex:1';
     infoDiv.innerHTML=`
-      <div style="font-size:11px;font-weight:700;color:#000">${cust} · ${prod}</div>
-      <div style="font-size:11px;font-weight:700;color:#000">מידה: ${it.size} | כמות: ${parseInt(it.qty)}</div>
-      <div style="font-size:11px;font-weight:700;color:#000">${colName}</div>
-      <div style="font-size:9px;color:#555;margin-top:2px">${code}</div>`;
+      <div style="font-size:13px;font-weight:700;color:#000">לקוח: ${cust}</div>
+      <div style="font-size:13px;font-weight:700;color:#000">מוצר: ${prod}</div>
+      <div style="font-size:13px;font-weight:700;color:#000">מידה: ${it.size}</div>
+      <div style="font-size:13px;font-weight:700;color:#000">כמות: ${parseInt(it.qty)}</div>
+      <div style="font-size:13px;font-weight:700;color:#000">צבע: ${it.col} · ${colName}</div>
+      <div style="font-size:11px;color:#555;margin-top:4px">${code}</div>`;
     div.appendChild(qrWrap);
     div.appendChild(infoDiv);
     printArea.appendChild(div);
-    new QRCode(qrWrap,{text:code,width:120,height:120,colorDark:'#000000',colorLight:'#ffffff',correctLevel:QRCode.CorrectLevel.M});
+    new QRCode(qrWrap,{text:code,width:150,height:150,colorDark:'#000000',colorLight:'#ffffff',correctLevel:QRCode.CorrectLevel.M});
     setTimeout(()=>{const im=qrWrap.querySelector('img');if(im)im.style.display='none';},50);
   });
 }
@@ -3727,9 +3729,9 @@ function bcPrint(){
   const win=window.open('','_blank');
   win.document.write(`<html dir="rtl"><head><title>QR קודים למשימות</title>
     <style>body{margin:0;font-family:Arial,sans-serif;background:#fff}
-    .grid{display:flex;flex-wrap:wrap;gap:8px;padding:10px;justify-content:flex-start}
-    .bc-card{border:2px solid #333;border-radius:6px;padding:8px;display:flex;flex-direction:column;align-items:center;gap:6px;break-inside:avoid;width:160px}
-    @media print{@page{margin:6mm}}</style></head><body>
+    .grid{display:grid;grid-template-columns:repeat(2,1fr);gap:10px;padding:10px}
+    .bc-card{border:2px solid #333;border-radius:6px;padding:10px;display:flex;align-items:center;gap:12px;break-inside:avoid}
+    @media print{@page{size:A4 portrait;margin:8mm}}</style></head><body>
     <div class="grid">${htmlCards}</div>
     <script>window.onload=()=>window.print()<\/script></body></html>`);
   win.document.close();
