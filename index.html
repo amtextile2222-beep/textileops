@@ -3704,30 +3704,21 @@ function bcGenerate(){
       <div style="font-size:13px;font-weight:700;color:#000">כמות: ${parseInt(it.qty)}</div>
       <div style="font-size:13px;font-weight:700;color:#000">צבע: ${it.col} · ${colName}</div>
       <div style="font-size:11px;color:#555;margin-top:4px">${code}</div>`;
-    div.appendChild(canvas);
+    const imgEl=document.createElement('img');
+    imgEl.style.cssText='flex-shrink:0;width:150px;height:150px';
+    div.appendChild(imgEl);
     div.appendChild(infoDiv);
     printArea.appendChild(div);
-    QRCode.toCanvas(canvas,code,{width:150,margin:1,color:{dark:'#000000',light:'#ffffff'}},function(err){
-      if(err)canvas.replaceWith(Object.assign(document.createElement('div'),{textContent:'שגיאה',style:'color:red;width:150px'}));
+    QRCode.toDataURL(code,{width:150,margin:1,color:{dark:'#000000',light:'#ffffff'}},function(err,url){
+      if(err)imgEl.replaceWith(Object.assign(document.createElement('div'),{textContent:'שגיאה',style:'color:red;width:150px'}));
+      else imgEl.src=url;
     });
   });
 }
 function bcPrint(){
   const area=document.getElementById('bc-print-area');
   if(!area)return;
-  // המר canvas ל-dataURL לפני הדפסה
-  const htmlCards=[...area.querySelectorAll('.bc-card')].map(card=>{
-    const clone=card.cloneNode(true);
-    const origCanvas=card.querySelector('canvas');
-    const cloneCanvas=clone.querySelector('canvas');
-    if(origCanvas&&cloneCanvas){
-      const img=document.createElement('img');
-      img.src=origCanvas.toDataURL();
-      img.style.cssText=origCanvas.style.cssText;
-      cloneCanvas.replaceWith(img);
-    }
-    return clone.outerHTML;
-  }).join('');
+  const htmlCards=[...area.querySelectorAll('.bc-card')].map(card=>card.outerHTML).join('');
   const win=window.open('','_blank');
   win.document.write(`<html dir="rtl"><head><title>QR קודים למשימות</title>
     <style>body{margin:0;font-family:Arial,sans-serif;background:#fff}
