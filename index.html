@@ -3685,39 +3685,54 @@ function bcGenerate(){
     </div>
     <div id="bc-print-area" style="display:grid;grid-template-columns:repeat(auto-fill,minmax(160px,1fr));gap:12px">
     </div>`;
-  // צור QR SVG לכל פריט
+  // צור QR canvas לכל פריט
   const printArea=document.getElementById('bc-print-area');
-  let pending=items.length;
   items.forEach(it=>{
     const code=cust+prod+it.size+it.qty+it.col;
     const colName=COLORS[it.col]||it.col;
-    QRCode.toString(code,{type:'svg',width:150,margin:1,color:{dark:'#000000',light:'#ffffff'}},function(err,svgStr){
-      const div=document.createElement('div');
-      div.className='bc-card';
-      div.style.cssText='background:#fff;border:2px solid #333;border-radius:6px;padding:10px;display:flex;align-items:center;gap:12px;break-inside:avoid';
-      const svgWrapped=err?'<div style="color:red">שגיאה</div>':`<div style="flex-shrink:0;width:150px;height:150px">${svgStr}</div>`;
-      div.innerHTML=`${svgWrapped}
-        <div style="text-align:right;line-height:2">
-          <div style="font-size:13px;font-weight:700;color:#000">${cust}</div>
-          <div style="font-size:13px;font-weight:700;color:#000">${prod}</div>
-          <div style="font-size:13px;font-weight:700;color:#000">${it.size}</div>
-          <div style="font-size:13px;font-weight:700;color:#000">${parseInt(it.qty)}</div>
-          <div style="font-size:13px;font-weight:700;color:#000">${it.col} · ${colName}</div>
-        </div>`;
-      printArea.appendChild(div);
+    const div=document.createElement('div');
+    div.className='bc-card';
+    div.style.cssText='background:#fff;border:2px solid #333;border-radius:6px;padding:10px;display:flex;align-items:center;gap:12px;break-inside:avoid';
+    const canvas=document.createElement('canvas');
+    canvas.style.cssText='flex-shrink:0;width:150px;height:150px';
+    const infoDiv=document.createElement('div');
+    infoDiv.style.cssText='text-align:right;line-height:2';
+    infoDiv.innerHTML=`
+      <div style="font-size:13px;font-weight:700;color:#000">לקוח: ${cust}</div>
+      <div style="font-size:13px;font-weight:700;color:#000">מוצר: ${prod}</div>
+      <div style="font-size:13px;font-weight:700;color:#000">מידה: ${it.size}</div>
+      <div style="font-size:13px;font-weight:700;color:#000">כמות: ${parseInt(it.qty)}</div>
+      <div style="font-size:13px;font-weight:700;color:#000">צבע: ${it.col} · ${colName}</div>
+      <div style="font-size:11px;color:#555;margin-top:4px">${code}</div>`;
+    div.appendChild(canvas);
+    div.appendChild(infoDiv);
+    printArea.appendChild(div);
+    QRCode.toCanvas(canvas,code,{width:150,margin:1,color:{dark:'#000000',light:'#ffffff'}},function(err){
+      if(err)canvas.replaceWith(Object.assign(document.createElement('div'),{textContent:'שגיאה',style:'color:red;width:150px'}));
     });
   });
 }
 function bcPrint(){
   const area=document.getElementById('bc-print-area');
   if(!area)return;
-  const htmlCards=[...area.querySelectorAll('.bc-card')].map(card=>card.outerHTML).join('');
+  // המר canvas ל-dataURL לפני הדפסה
+  const htmlCards=[...area.querySelectorAll('.bc-card')].map(card=>{
+    const clone=card.cloneNode(true);
+    const origCanvas=card.querySelector('canvas');
+    const cloneCanvas=clone.querySelector('canvas');
+    if(origCanvas&&cloneCanvas){
+      const img=document.createElement('img');
+      img.src=origCanvas.toDataURL();
+      img.style.cssText=origCanvas.style.cssText;
+      cloneCanvas.replaceWith(img);
+    }
+    return clone.outerHTML;
+  }).join('');
   const win=window.open('','_blank');
   win.document.write(`<html dir="rtl"><head><title>QR קודים למשימות</title>
     <style>body{margin:0;font-family:Arial,sans-serif;background:#fff}
     .grid{display:grid;grid-template-columns:repeat(4,1fr);gap:8px;padding:10px}
     .bc-card{border:2px solid #333;border-radius:6px;padding:8px;display:flex;align-items:center;gap:10px;break-inside:avoid}
-    .info{text-align:right;line-height:2;font-size:13px;font-weight:700;color:#000}
     @media print{@page{margin:6mm}.grid{grid-template-columns:repeat(3,1fr)}}</style></head><body>
     <div class="grid">${htmlCards}</div>
     <script>window.onload=()=>window.print()<\/script></body></html>`);
