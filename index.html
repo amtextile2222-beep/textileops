@@ -3705,11 +3705,13 @@ function bcGenerate(){
       <div style="font-size:13px;font-weight:700;color:#000">צבע: ${it.col} · ${colName}</div>
       <div style="font-size:11px;color:#555;margin-top:4px">${code}</div>`;
     const qrWrap=document.createElement('div');
-    qrWrap.style.cssText='flex-shrink:0;width:150px;height:150px';
+    qrWrap.style.cssText='flex-shrink:0;width:150px;height:150px;overflow:hidden';
     div.appendChild(qrWrap);
     div.appendChild(infoDiv);
     printArea.appendChild(div);
     new QRCode(qrWrap,{text:code,width:150,height:150,colorDark:'#000000',colorLight:'#ffffff',correctLevel:QRCode.CorrectLevel.M});
+    // qrcodejs יוצר canvas+img — הסתר את ה-img הכפול
+    setTimeout(()=>{const im=qrWrap.querySelector('img');if(im)im.style.display='none';},50);
   });
 }
 function bcPrint(){
