@@ -894,7 +894,7 @@ code{background:var(--bg2);border:0.5px solid var(--b);border-radius:4px;padding
 <!-- ZXING BARCODE READER -->
 <script src="https://cdn.jsdelivr.net/npm/jsqr@1.4.0/dist/jsQR.js"></script>
 <!-- QR CODE GENERATOR -->
-<script src="https://cdn.jsdelivr.net/npm/qrcode@1.5.3/build/qrcode.min.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/qrcodejs@1.0.0/qrcode.min.js"></script>
 <script src="https://cdn.jsdelivr.net/npm/jsbarcode@3.11.6/dist/JsBarcode.all.min.js"></script>
 
 <!-- FIREBASE SDK -->
@@ -3704,21 +3704,29 @@ function bcGenerate(){
       <div style="font-size:13px;font-weight:700;color:#000">כמות: ${parseInt(it.qty)}</div>
       <div style="font-size:13px;font-weight:700;color:#000">צבע: ${it.col} · ${colName}</div>
       <div style="font-size:11px;color:#555;margin-top:4px">${code}</div>`;
-    const imgEl=document.createElement('img');
-    imgEl.style.cssText='flex-shrink:0;width:150px;height:150px';
-    div.appendChild(imgEl);
+    const qrWrap=document.createElement('div');
+    qrWrap.style.cssText='flex-shrink:0;width:150px;height:150px';
+    div.appendChild(qrWrap);
     div.appendChild(infoDiv);
     printArea.appendChild(div);
-    QRCode.toDataURL(code,{width:150,margin:1,color:{dark:'#000000',light:'#ffffff'}},function(err,url){
-      if(err)imgEl.replaceWith(Object.assign(document.createElement('div'),{textContent:'שגיאה',style:'color:red;width:150px'}));
-      else imgEl.src=url;
-    });
+    new QRCode(qrWrap,{text:code,width:150,height:150,colorDark:'#000000',colorLight:'#ffffff',correctLevel:QRCode.CorrectLevel.M});
   });
 }
 function bcPrint(){
   const area=document.getElementById('bc-print-area');
   if(!area)return;
-  const htmlCards=[...area.querySelectorAll('.bc-card')].map(card=>card.outerHTML).join('');
+  const htmlCards=[...area.querySelectorAll('.bc-card')].map(card=>{
+    const clone=card.cloneNode(true);
+    const origCanvas=card.querySelector('canvas');
+    const cloneCanvas=clone.querySelector('canvas');
+    if(origCanvas&&cloneCanvas){
+      const img=document.createElement('img');
+      img.src=origCanvas.toDataURL('image/png');
+      img.style.cssText='width:150px;height:150px';
+      cloneCanvas.replaceWith(img);
+    }
+    return clone.outerHTML;
+  }).join('');
   const win=window.open('','_blank');
   win.document.write(`<html dir="rtl"><head><title>QR קודים למשימות</title>
     <style>body{margin:0;font-family:Arial,sans-serif;background:#fff}
