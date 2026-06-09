@@ -4341,7 +4341,9 @@ async function _startFaceFirstRegister(){
     // עקוף captureFaceDescriptor לאחר שמירה → כניסה למערכת
     document.getElementById('face-reg-btn').onclick=_captureAndLogin;
   }catch(e){
-    document.getElementById('face-reg-status').textContent='נא לאפשר גישה למצלמה';
+    document.getElementById('face-reg-status').innerHTML=
+      '⛔ הגישה למצלמה נחסמה.<br>לחץ על 🔒 בשורת הכתובת ← מצלמה ← אפשר, ואז:<br>'+
+      '<button class="btn" style="margin-top:8px;font-size:13px" onclick="_startFaceFirstRegister()">🔄 נסה שוב</button>';
   }
 }
 
@@ -4417,7 +4419,9 @@ async function openFaceRegister(id){
     document.getElementById('face-reg-status').textContent='מצלמה פעילה — לחץ "צלם פנים"';
     document.getElementById('face-reg-btn').disabled=false;
   }catch(e){
-    document.getElementById('face-reg-status').textContent='נא לאפשר גישה למצלמה';
+    document.getElementById('face-reg-status').innerHTML=
+      '⛔ הגישה למצלמה נחסמה.<br>לחץ על 🔒 בשורת הכתובת ← מצלמה ← אפשר, ואז:<br>'+
+      '<button class="btn" style="margin-top:8px;font-size:13px" onclick="openFaceRegister(\''+_faceRegWorkerId+'\')">🔄 נסה שוב</button>';
   }
 }
 
