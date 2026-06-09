@@ -3925,11 +3925,24 @@ function renderProducts(){
       ?`<div style="margin-top:8px;font-size:11px;color:var(--txt3)">${p.quantities.map(q=>`מידה ${q.size} | ${COLORS[q.color]||q.color}: <b style="color:var(--txt)">${q.qty}</b>`).join(' &nbsp;·&nbsp; ')}</div>`:'';
     const docHtml=p.docs&&p.docs.length
       ?`<div style="margin-top:6px;display:flex;gap:6px;flex-wrap:wrap">${p.docs.map((d,i)=>`<a href="${d.data}" download="${d.name}" style="font-size:11px;padding:3px 8px;border-radius:5px;background:var(--bg2);color:var(--blue-txt);text-decoration:none">📄 ${esc(d.name)}</a>`).join('')}</div>`:'';
+    // שלב נוכחי
+    const log=p.stageLog||[];
+    const skipped=p.stageSkipped||[];
+    const activeStages=PROD_STAGES.filter(s=>!skipped.includes(s.id));
+    const lastDone=activeStages.filter(s=>log.find(e=>e.id===s.id)).pop();
+    const nextStage=activeStages.find(s=>!log.find(e=>e.id===s.id));
+    const isDone=lastDone?.id==='shipped';
+    const stageHtml=lastDone
+      ?`<div style="margin-top:6px;font-size:11px">
+          <span style="background:${isDone?'var(--green-bg)':'var(--amber-bg)'};color:${isDone?'var(--green-txt)':'var(--amber-txt)'};padding:2px 8px;border-radius:10px;font-weight:600">📍 ${lastDone.label}</span>
+          ${nextStage&&!isDone?`<span style="color:var(--txt3);margin-right:6px">← הבא: ${nextStage.label}</span>`:''}
+        </div>`
+      :'';
     return`<div class="card" style="margin-bottom:10px">
       <div style="display:flex;align-items:flex-start;justify-content:space-between;gap:8px">
         <div style="flex:1">
           <div style="font-size:14px;font-weight:700;color:var(--txt)">מוצר ${esc(p.prod)} &nbsp;·&nbsp; לקוח ${esc(p.cust)}${p.name?` &nbsp;·&nbsp; <span style="color:var(--txt3)">${esc(p.name)}</span>`:''}</div>
-          ${qtyRows}${imgHtml}${docHtml}
+          ${stageHtml}${qtyRows}${imgHtml}${docHtml}
         </div>
         <div style="display:flex;gap:6px;flex-shrink:0">
           <button class="btn" style="font-size:11px;padding:4px 10px" onclick="openProductModal('${p.id}')">✏️ עריכה</button>
@@ -4014,7 +4027,8 @@ function openProductModal(id){
           <input id="pm-bulk-to" type="number" min="0" max="9" value="6" style="width:50px;font-size:12px;padding:4px;border-radius:6px;border:1px solid var(--brd);background:var(--card);color:var(--txt)"></div>
         <button type="button" class="btn primary" onclick="addQtyBulk()" style="font-size:12px;padding:5px 12px">+ הוסף הכל</button>
       </div>
-    </div>`;
+    </div>
+    ${renderStagesHtml(p)}`;
   document.getElementById('prod-modal-wrap').classList.remove('hidden');
   _prodImgs=p?[...(p.images||[])]:[];
   _prodDocs=p?[...(p.docs||[])]:[];
@@ -4135,6 +4149,108 @@ function closeProdCamera(){
   const w=document.getElementById('pm-camera-wrap');if(w)w.classList.add('hidden');
 }
 
+// ─── PRODUCTION STAGES ───────────────────────────────────────
+const PROD_STAGES=[
+  {id:'receive',   label:'📦 קבלת סחורה',          optional:false},
+  {id:'cut',       label:'✂️ גזירה',                optional:true},
+  {id:'count',     label:'🔢 ספירה',                optional:false},
+  {id:'sample',    label:'👕 דגם לאישור לקוח',      optional:false},
+  {id:'sewing',    label:'🧵 תפירה',                optional:false},
+  {id:'buttons',   label:'🔘 פיניש — כפתורים',      optional:true},
+  {id:'clean',     label:'🧹 פיניש — ניקוי + ביקורת',optional:false},
+  {id:'iron',      label:'♨️ פיניש — גיהוץ',        optional:false},
+  {id:'pack',      label:'📫 אריזה + ביקורת',       optional:false},
+  {id:'shipped',   label:'🚚 יצא ללקוח',            optional:false},
+];
+function renderStagesHtml(p){
+  const log=p?.stageLog||[];
+  const skipped=p?.stageSkipped||[];
+  const rows=PROD_STAGES.map((s,i)=>{
+    const entry=log.find(e=>e.id===s.id);
+    const isSkipped=skipped.includes(s.id);
+    const bg=entry?'var(--green-bg)':isSkipped?'var(--bg2)':'var(--card)';
+    const txt=entry?'var(--green-txt)':isSkipped?'var(--txt3)':'var(--txt)';
+    const dateVal=entry?.date||'';
+    const timeVal=entry?.time||'';
+    const noteVal=entry?.note||'';
+    return `<tr style="border-bottom:1px solid var(--brd)">
+      <td style="padding:6px 4px;font-size:12px;color:${txt};background:${bg};border-radius:4px;min-width:140px">${s.label}${s.optional?'<span style="font-size:10px;color:var(--txt3)"> (אופ׳)</span>':''}</td>
+      <td style="padding:4px">
+        <input type="date" value="${dateVal}" data-sid="${s.id}" data-sf="date" style="font-size:11px;padding:2px 4px;border-radius:5px;border:1px solid var(--brd);background:var(--card);color:var(--txt);width:120px">
+      </td>
+      <td style="padding:4px">
+        <input type="time" value="${timeVal}" data-sid="${s.id}" data-sf="time" style="font-size:11px;padding:2px 4px;border-radius:5px;border:1px solid var(--brd);background:var(--card);color:var(--txt);width:80px">
+      </td>
+      <td style="padding:4px">
+        <input type="text" value="${esc(noteVal)}" data-sid="${s.id}" data-sf="note" placeholder="הערה" style="font-size:11px;padding:2px 4px;border-radius:5px;border:1px solid var(--brd);background:var(--card);color:var(--txt);width:90px">
+      </td>
+      <td style="padding:4px;white-space:nowrap">
+        <button type="button" class="btn" style="font-size:11px;padding:3px 8px" onclick="stageSetNow('${s.id}')">⏱ עכשיו</button>
+        ${s.optional?`<button type="button" class="btn" style="font-size:11px;padding:3px 6px;margin-right:2px;opacity:${isSkipped?1:0.5}" onclick="stageToggleSkip('${s.id}')" title="לא רלוונטי">${isSkipped?'↩':'✕'}</button>`:''}
+        ${entry?`<button type="button" class="btn warn" style="font-size:11px;padding:3px 6px;margin-right:2px" onclick="stageClear('${s.id}')" title="נקה">🗑</button>`:''}
+      </td>
+    </tr>`;
+  }).join('');
+  return `<div class="sec" style="margin-top:14px;margin-bottom:8px">📍 שלב ייצור נוכחי</div>
+  <div style="overflow-x:auto">
+  <table style="width:100%;border-collapse:collapse;font-size:12px" id="pm-stages-table">
+    <thead><tr style="border-bottom:2px solid var(--brd)">
+      <th style="padding:5px;text-align:right">שלב</th>
+      <th style="padding:5px;text-align:right">תאריך</th>
+      <th style="padding:5px;text-align:right">שעה</th>
+      <th style="padding:5px;text-align:right">הערה</th>
+      <th></th>
+    </tr></thead>
+    <tbody>${rows}</tbody>
+  </table></div>`;
+}
+function stageSetNow(sid){
+  const now=new Date();
+  const date=now.getFullYear()+'-'+pad2(now.getMonth()+1)+'-'+pad2(now.getDate());
+  const time=pad2(now.getHours())+':'+pad2(now.getMinutes());
+  const tbl=document.getElementById('pm-stages-table');
+  if(!tbl)return;
+  tbl.querySelector(`[data-sid="${sid}"][data-sf="date"]`).value=date;
+  tbl.querySelector(`[data-sid="${sid}"][data-sf="time"]`).value=time;
+}
+function stageToggleSkip(sid){
+  // toggle ויזואלי — נשמר ב-saveProduct
+  const tbl=document.getElementById('pm-stages-table');
+  if(!tbl)return;
+  const row=tbl.querySelector(`[data-sid="${sid}"][data-sf="date"]`)?.closest('tr');
+  if(!row)return;
+  const btn=row.querySelector('button[title="לא רלוונטי"]');
+  if(!btn)return;
+  const isNowSkipped=btn.textContent.trim()==='↩';
+  btn.textContent=isNowSkipped?'✕':'↩';
+  btn.style.opacity=isNowSkipped?'0.5':'1';
+  row.cells[0].style.opacity=isNowSkipped?'1':'0.4';
+}
+function stageClear(sid){
+  const tbl=document.getElementById('pm-stages-table');
+  if(!tbl)return;
+  tbl.querySelector(`[data-sid="${sid}"][data-sf="date"]`).value='';
+  tbl.querySelector(`[data-sid="${sid}"][data-sf="time"]`).value='';
+  tbl.querySelector(`[data-sid="${sid}"][data-sf="note"]`).value='';
+}
+function readStagesFromModal(){
+  const tbl=document.getElementById('pm-stages-table');
+  if(!tbl)return{stageLog:[],stageSkipped:[]};
+  const stageLog=[];
+  const stageSkipped=[];
+  PROD_STAGES.forEach(s=>{
+    const date=tbl.querySelector(`[data-sid="${s.id}"][data-sf="date"]`)?.value||'';
+    const time=tbl.querySelector(`[data-sid="${s.id}"][data-sf="time"]`)?.value||'';
+    const note=tbl.querySelector(`[data-sid="${s.id}"][data-sf="note"]`)?.value||'';
+    if(date||time)stageLog.push({id:s.id,date,time,note});
+    if(s.optional){
+      const btn=tbl.querySelector(`button[onclick="stageToggleSkip('${s.id}')"]`);
+      if(btn&&btn.textContent.trim()==='↩')stageSkipped.push(s.id);
+    }
+  });
+  // השלב האחרון עם תאריך = השלב הנוכחי
+  return{stageLog,stageSkipped};
+}
 async function saveProduct(){
   const prod=(document.getElementById('pm-prod')?.value||'').trim().padStart(5,'0').slice(0,5);
   const cust=(document.getElementById('pm-cust')?.value||'').trim().padStart(2,'0').slice(0,2);
@@ -4149,12 +4265,13 @@ async function saveProduct(){
     if(size||color)quantities.push({size,color,qty});
   });
   closeProdCamera();
+  const {stageLog,stageSkipped}=readStagesFromModal();
   if(_editProdId){
     const p=S.products.find(x=>x.id===_editProdId);
-    if(p){Object.assign(p,{prod,cust,name,images:_prodImgs,docs:_prodDocs,quantities});}
+    if(p){Object.assign(p,{prod,cust,name,images:_prodImgs,docs:_prodDocs,quantities,stageLog,stageSkipped});}
   }else{
     const id='p'+Date.now();
-    S.products.push({id,prod,cust,name,images:_prodImgs,docs:_prodDocs,quantities});
+    S.products.push({id,prod,cust,name,images:_prodImgs,docs:_prodDocs,quantities,stageLog,stageSkipped});
   }
   saveLS();
   if(S.fbConnected){
