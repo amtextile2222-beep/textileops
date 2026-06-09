@@ -848,6 +848,13 @@ code{background:var(--bg2);border:0.5px solid var(--b);border-radius:4px;padding
     </div>
     <div class="card" style="margin-bottom:1rem">
       <div class="sec">פרטי המוצר</div>
+      <!-- טעינה ממוצר קיים -->
+      <div style="margin-bottom:10px;display:flex;gap:8px;align-items:center;flex-wrap:wrap">
+        <select id="bc-prod-select" style="flex:1;min-width:180px;padding:7px 10px;border-radius:8px;border:1px solid var(--brd);background:var(--card);color:var(--txt);font-size:13px">
+          <option value="">📦 טען ממוצר קיים...</option>
+        </select>
+        <button class="btn" style="font-size:13px;padding:7px 14px" onclick="bcLoadFromProduct()">טען ▶</button>
+      </div>
       <div style="display:grid;grid-template-columns:1fr 1fr;gap:10px;margin-bottom:10px">
         <div class="field" style="margin:0"><label>לקוח (2 ספרות)</label>
           <input id="bc-gen-cust" maxlength="2" inputmode="numeric" placeholder="01" style="font-size:14px"/></div>
@@ -1341,6 +1348,7 @@ function goPage(p){
   if(p==='barcodes'){
     const rows=document.getElementById('bc-gen-rows');
     if(rows&&!rows.children.length)bcAddRow();
+    bcFillProductSelect();
   }
   if(p==='attrep')initAttRep();
   if(p==='costs')initCostsPage();
@@ -3643,6 +3651,55 @@ function printPayroll(){
 let _editProdId=null;
 
 // ─── BARCODE GENERATOR ───────────────────────────────────────
+function bcFillProductSelect(){
+  const sel=document.getElementById('bc-prod-select');
+  if(!sel)return;
+  const cur=sel.value;
+  sel.innerHTML='<option value="">📦 טען ממוצר קיים...</option>';
+  S.products.forEach(p=>{
+    const custName=S.customerNames?.[p.cust]||'';
+    const label=`${p.prod} · ${p.cust}${custName?' ('+custName+')':''}${p.name?' — '+p.name:''}`;
+    const opt=document.createElement('option');
+    opt.value=p.id;opt.textContent=label;
+    sel.appendChild(opt);
+  });
+  if(cur)sel.value=cur;
+}
+function bcLoadFromProduct(){
+  const sel=document.getElementById('bc-prod-select');
+  if(!sel||!sel.value){alert('בחר מוצר תחילה');return;}
+  const p=S.products.find(x=>x.id===sel.value);
+  if(!p){alert('מוצר לא נמצא');return;}
+  document.getElementById('bc-gen-cust').value=p.cust||'';
+  document.getElementById('bc-gen-prod').value=p.prod||'';
+  const container=document.getElementById('bc-gen-rows');
+  if(!container)return;
+  container.innerHTML='';
+  const qty=p.quantities||[];
+  if(qty.length){
+    qty.forEach(q=>{
+      bcAddRow();
+      const rows=container.querySelectorAll('.bc-row');
+      const row=rows[rows.length-1];
+      if(row){
+        const sizeEl=row.querySelector('.bc-size');
+        const qtyEl=row.querySelector('.bc-qty');
+        const colEl=row.querySelector('.bc-col');
+        if(sizeEl)sizeEl.value=q.size||'0';
+        if(qtyEl)qtyEl.value=q.qty||1;
+        // מצא קוד צבע לפי שם
+        if(colEl){
+          const colorCode=Object.entries(COLORS).find(([k,v])=>v===q.color||k===q.color)?.[0]||'00';
+          colEl.value=colorCode;
+          colEl.style.color=colorCode==='00'?'var(--txt3)':'var(--txt)';
+        }
+      }
+    });
+  } else {
+    bcAddRow();
+  }
+  alert(`✅ נטען: מוצר ${p.prod} · לקוח ${p.cust}${qty.length?' · '+qty.length+' שורות':''}`);
+}
 function bcAddRow(){
   const container=document.getElementById('bc-gen-rows');
   if(!container)return;
