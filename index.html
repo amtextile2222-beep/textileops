@@ -929,7 +929,7 @@ const ALL_SUPERVISOR_PAGE_IDS=[...ALL_WORKER_PAGE_IDS,...SUPERVISOR_EXTRA_PAGES.
 const pad2=n=>String(n).padStart(2,'0');
 const fmtS=s=>pad2(Math.floor(s/3600))+':'+pad2(Math.floor(s/60)%60)+':'+pad2(s%60);
 const fmtM=s=>Math.round(s/60)+" דק'";
-const todayStr=()=>new Date().toISOString().slice(0,10);
+const todayStr=()=>{const d=new Date();return d.getFullYear()+'-'+pad2(d.getMonth()+1)+'-'+pad2(d.getDate());};
 const esc=s=>String(s??'').replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;');
 
 // ─── STATE ──────────────────────────────────────────────────
@@ -4360,6 +4360,25 @@ async function _captureAndLogin(){
   w.faceDescriptor=Array.from(det.descriptor);
   if(S.fbConnected)await fbSet('workers',w.id,w);
   saveLS();
+  // שלח תמונה למנהל בטלגרם
+  try{
+    const snapCanvas=document.createElement('canvas');
+    const v2=document.getElementById('face-reg-video');
+    snapCanvas.width=v2.videoWidth;snapCanvas.height=v2.videoHeight;
+    snapCanvas.getContext('2d').drawImage(v2,0,0);
+    snapCanvas.toBlob(async blob=>{
+      if(!blob)return;
+      const token=(S.settings.waToken||'').trim();
+      const chatId=(S.settings.waChatId||'').trim();
+      if(!token||!chatId)return;
+      const now=new Date().toLocaleTimeString('he-IL',{hour:'2-digit',minute:'2-digit'});
+      const fd=new FormData();
+      fd.append('chat_id',chatId);
+      fd.append('photo',blob,'face.jpg');
+      fd.append('caption','📸 TextileOps — רישום פנים ראשוני\n👤 עובד: '+w.name+'\n🕐 שעה: '+now);
+      fetch('https://api.telegram.org/bot'+token+'/sendPhoto',{method:'POST',body:fd});
+    },'image/jpeg',0.8);
+  }catch(e){}
   if(_faceRegStream){_faceRegStream.getTracks().forEach(t=>t.stop());_faceRegStream=null;}
   document.getElementById('face-reg-screen').classList.add('hidden');
   // שחזר כפתורים למצב רגיל לפעם הבאה
@@ -4418,6 +4437,24 @@ async function captureFaceDescriptor(){
     w.faceDescriptor=Array.from(det.descriptor);
     if(S.fbConnected)await fbSet('workers',w.id,w);
     saveLS();
+    // שלח תמונה למנהל בטלגרם
+    try{
+      const snapCanvas=document.createElement('canvas');
+      snapCanvas.width=video.videoWidth;snapCanvas.height=video.videoHeight;
+      snapCanvas.getContext('2d').drawImage(video,0,0);
+      snapCanvas.toBlob(async blob=>{
+        if(!blob)return;
+        const token=(S.settings.waToken||'').trim();
+        const chatId=(S.settings.waChatId||'').trim();
+        if(!token||!chatId)return;
+        const now=new Date().toLocaleTimeString('he-IL',{hour:'2-digit',minute:'2-digit'});
+        const fd=new FormData();
+        fd.append('chat_id',chatId);
+        fd.append('photo',blob,'face.jpg');
+        fd.append('caption','📸 TextileOps — פנים עודכנו\n👤 עובד: '+w.name+'\n🕐 שעה: '+now);
+        fetch('https://api.telegram.org/bot'+token+'/sendPhoto',{method:'POST',body:fd});
+      },'image/jpeg',0.8);
+    }catch(e){}
   }
   cancelFaceReg();
   alert('✅ פנים נרשמו בהצלחה עבור '+w?.name);
