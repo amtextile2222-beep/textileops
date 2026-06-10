@@ -2974,7 +2974,7 @@ setInterval(()=>{
 // עצירת חישובים כשהמשתמש עוזב את הטאב
 document.addEventListener('visibilitychange',()=>{
   if(!document.hidden&&S.user){
-    checkDailyReset(); // בדיקת איפוס יום כשחוזרים
+    runDailyReset(); // בדיקת איפוס יום כשחוזרים
     renderAll();
   }
 });
@@ -4190,9 +4190,9 @@ function renderProducts(){
       ?`<div style="margin-top:8px;font-size:11px;color:var(--txt3)">${p.quantities.map(q=>`מידה ${q.size} | ${COLORS[q.color]||q.color}: <b style="color:var(--txt)">${q.qty}</b>`).join(' &nbsp;·&nbsp; ')}</div>`:'';
     const docHtml=p.docs&&p.docs.length
       ?`<div style="margin-top:6px;display:flex;gap:6px;flex-wrap:wrap">${p.docs.map((d,i)=>`<a href="${d.data}" download="${d.name}" style="font-size:11px;padding:3px 8px;border-radius:5px;background:var(--bg2);color:var(--blue-txt);text-decoration:none">📄 ${esc(d.name)}</a>`).join('')}</div>`:'';
-    // שלב נוכחי
-    const log=p.stageLog||[];
-    const skipped=p.stageSkipped||[];
+    // שלב נוכחי — Array.isArray מגן מנתונים ישנים שנשמרו כאובייקט
+    const log=Array.isArray(p.stageLog)?p.stageLog:[];
+    const skipped=Array.isArray(p.stageSkipped)?p.stageSkipped:[];
     const activeStages=PROD_STAGES.filter(s=>!skipped.includes(s.id));
     const lastDone=activeStages.filter(s=>log.find(e=>e.id===s.id)).pop();
     const nextStage=activeStages.find(s=>!log.find(e=>e.id===s.id));
@@ -4428,8 +4428,8 @@ const PROD_STAGES=[
   {id:'shipped',   label:'🚚 יצא ללקוח',            optional:false},
 ];
 function renderStagesHtml(p){
-  const log=p?.stageLog||[];
-  const skipped=p?.stageSkipped||[];
+  const log=Array.isArray(p?.stageLog)?p.stageLog:[];
+  const skipped=Array.isArray(p?.stageSkipped)?p.stageSkipped:[];
   const rows=PROD_STAGES.map((s,i)=>{
     const entry=log.find(e=>e.id===s.id);
     const isSkipped=skipped.includes(s.id);
@@ -5054,7 +5054,7 @@ async function raumaConfirm(){
     if(size||color)quantities.push({size,color,qty});
   });
   const id='p'+Date.now();
-  const newProd={id,prod,cust,name,images:[],docs:[],quantities,stageLog:{},stageSkipped:{}};
+  const newProd={id,prod,cust,name,images:[],docs:[],quantities,stageLog:[],stageSkipped:[]};
   S.products.push(newProd);
   saveLS();
   if(S.fbConnected)await fbSet('products',id,{...newProd});
