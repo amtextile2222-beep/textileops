@@ -1093,28 +1093,40 @@ function listenFb(){
     if(snap.metadata.fromCache){renderAll();return;}
     // נקה sessions ישנות שלא אופסו כי Firebase נטען אחרי checkDailyReset
     const today=todayStr();
-    S.workers.forEach(w=>{
+    const {getDoc,doc:fsDoc}=window._fb;
+    const cleanupPromises=S.workers.map(async w=>{
       if(!w.sessions||!w.sessions.length)return;
       const firstIn=w.sessions[0]?.in;
       if(!firstIn)return;
       const sessionDate=firstIn.slice(0,10);
       if(sessionDate<today){
-        // session מיום קודם — שמור להיסטוריה אם עוד לא קיים
         const histKey=w.id+'_'+sessionDate;
-        const alreadySaved=S.attHistory.find(r=>r.workerId===w.id&&r.date===sessionDate);
-        if(!alreadySaved){
-          const rec={workerId:w.id,workerName:w.name,dept:w.dept,date:sessionDate,
-            sessions:w.sessions,checkin:w.sessions[0]?.in||'',checkout:null,
-            breakStart:w.breakStart||'',breakEnd:w.breakEnd||'',breakActive:!!w.breakActive,
-            netMs:calcNetWorkRaw(w.sessions[0]?.in,null,w.breakActive,w.breakStart,w.breakEnd,sessionDate)};
-          S.attHistory.unshift(rec);
-          fbSet('attHistory',histKey,rec);
-        }
+        try{
+          // בדוק ישירות ב-Firebase — S.attHistory עלול להיות ריק עדיין (race condition)
+          const existing=await getDoc(fsDoc(db,'attHistory',histKey));
+          if(!existing.exists()||!existing.data().checkout){
+            // אין רשומה או אין checkout — שמור רק אם באמת חסר
+            const existingData=existing.exists()?existing.data():null;
+            const rec={
+              workerId:w.id,workerName:w.name,dept:w.dept,date:sessionDate,
+              sessions:existingData?.sessions||w.sessions,
+              checkin:existingData?.checkin||w.sessions[0]?.in||'',
+              checkout:existingData?.checkout||null,
+              breakStart:w.breakStart||'',breakEnd:w.breakEnd||'',
+              breakActive:!!w.breakActive,
+              netMs:existingData?.netMs||calcNetWorkRaw(w.sessions[0]?.in,null,w.breakActive,w.breakStart,w.breakEnd,sessionDate)
+            };
+            if(!existing.exists()){
+              S.attHistory.unshift(rec);
+              fbSet('attHistory',histKey,rec);
+            }
+          }
+        }catch(e){}
         w.status='out';w.checkin=null;w.checkout=null;w.sessions=[];
         fbSet('workers',w.id,w);
       }
     });
-    renderAll();
+    Promise.all(cleanupPromises).then(()=>renderAll());
   });
   // active tasks
   onSnapshot(collection(db,'activeTasks'),snap=>{
