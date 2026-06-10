@@ -1116,7 +1116,7 @@ function listenFb(){
 async function fbSet(col,id,data){
   if(!db)return;
   const{doc,setDoc}=window._fb;
-  await setDoc(doc(db,col,id),data);
+  await setDoc(doc(db,col,id),data,{merge:true});
 }
 async function fbDel(col,id){
   if(!db)return;
@@ -4609,7 +4609,6 @@ async function _captureAndLogin(){
   // 5 דגימות הושלמו — שמור וכנס
   const w=S._pendingUser;
   w.faceDescriptors=_faceRegSamples.slice();
-  delete w.faceDescriptor;
   _faceRegSamples=[];
   if(S.fbConnected)await fbSet('workers',w.id,w);
   saveLS();
@@ -4704,7 +4703,6 @@ async function captureFaceDescriptor(){
   const w=S.workers.find(x=>x.id===_faceRegWorkerId);
   if(w){
     w.faceDescriptors=_faceRegSamples.slice();
-    delete w.faceDescriptor;
     if(S.fbConnected)await fbSet('workers',w.id,w);
     saveLS();
     try{
