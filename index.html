@@ -829,7 +829,10 @@ code{background:var(--bg2);border:0.5px solid var(--b);border-radius:4px;padding
   <div class="page" id="page-products">
     <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:12px;flex-wrap:wrap;gap:8px">
       <div style="font-size:16px;font-weight:700">👗 מוצרים ודגמים</div>
-      <button class="btn primary" onclick="openProductModal()">+ הוסף מוצר</button>
+      <div style="display:flex;gap:8px;flex-wrap:wrap">
+        <button class="btn" onclick="openRaumaOCR()" style="font-size:12px">📄 ייבא מרעומה</button>
+        <button class="btn primary" onclick="openProductModal()">+ הוסף מוצר</button>
+      </div>
     </div>
     <!-- חיפוש -->
     <div style="display:flex;gap:8px;margin-bottom:12px;flex-wrap:wrap">
@@ -882,6 +885,40 @@ code{background:var(--bg2);border:0.5px solid var(--b);border-radius:4px;padding
       <div style="display:flex;justify-content:flex-end;gap:8px;margin-top:1rem">
         <button class="btn" onclick="closeProdModal()">ביטול</button>
         <button class="btn primary" onclick="saveProduct()">שמור</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- מודל OCR רעומה -->
+  <div class="overlay hidden" id="rauma-ocr-wrap" onclick="if(event.target===this)closeRaumaOCR()">
+    <div class="modal" style="max-width:520px;max-height:92vh;overflow-y:auto">
+      <div class="modal-title">📄 ייבוא תעודת רעומה</div>
+      <div id="rauma-step1">
+        <div style="font-size:13px;color:var(--txt2);margin-bottom:10px">צלם או העלה תמונה של תעודת המשלוח מרעומה</div>
+        <div style="display:flex;gap:8px;flex-wrap:wrap">
+          <button class="btn primary" onclick="document.getElementById('rauma-img-input').click()">📁 בחר תמונה</button>
+          <button class="btn" onclick="document.getElementById('rauma-cam-input').click()">📷 צלם</button>
+        </div>
+        <input id="rauma-img-input" type="file" accept="image/*" class="hidden" onchange="raumaHandleImage(this)">
+        <input id="rauma-cam-input" type="file" accept="image/*" capture="environment" class="hidden" onchange="raumaHandleImage(this)">
+        <div id="rauma-img-preview" style="margin-top:10px"></div>
+      </div>
+      <div id="rauma-step2" class="hidden" style="margin-top:10px">
+        <div id="rauma-status" style="font-size:13px;color:var(--txt2);margin-bottom:10px;padding:8px;background:var(--bg2);border-radius:8px"></div>
+        <div id="rauma-results" class="hidden">
+          <div style="display:grid;grid-template-columns:1fr 1fr;gap:8px;margin-bottom:8px">
+            <div class="field" style="margin:0"><label>מספר מוצר (5 ספרות)</label><input id="rauma-prod" maxlength="5" style="font-size:13px"/></div>
+            <div class="field" style="margin:0"><label>לקוח</label><input id="rauma-cust" value="02" maxlength="2" style="font-size:13px"/></div>
+          </div>
+          <div class="field" style="margin-bottom:10px"><label>שם / דגם מלא</label><input id="rauma-name" style="font-size:13px"/></div>
+          <div class="sec" style="margin-bottom:6px">כמויות לפי מידה וצבע</div>
+          <div id="rauma-qty-rows"></div>
+          <button class="btn" onclick="raumaAddQtyRow()" style="margin-top:6px;font-size:12px;width:100%;justify-content:center">+ הוסף שורה</button>
+        </div>
+      </div>
+      <div style="display:flex;justify-content:flex-end;gap:8px;margin-top:1rem">
+        <button class="btn" onclick="closeRaumaOCR()">ביטול</button>
+        <button class="btn primary hidden" id="rauma-confirm-btn" onclick="raumaConfirm()">✅ צור מוצר</button>
       </div>
     </div>
   </div>
@@ -4806,6 +4843,138 @@ async function _captureAndLogin(){
   }finally{
     if(_faceRegStream){_faceRegStream.getTracks().forEach(t=>t.stop());_faceRegStream=null;}
   }
+}
+
+// ─── RAUMA OCR ───────────────────────────────────────────────
+function openRaumaOCR(){
+  document.getElementById('rauma-ocr-wrap').classList.remove('hidden');
+  document.getElementById('rauma-step1').classList.remove('hidden');
+  document.getElementById('rauma-step2').classList.add('hidden');
+  document.getElementById('rauma-img-preview').innerHTML='';
+  document.getElementById('rauma-results').classList.add('hidden');
+  document.getElementById('rauma-confirm-btn').classList.add('hidden');
+  document.getElementById('rauma-img-input').value='';
+  document.getElementById('rauma-cam-input').value='';
+}
+function closeRaumaOCR(){
+  document.getElementById('rauma-ocr-wrap').classList.add('hidden');
+}
+async function raumaHandleImage(input){
+  if(!input.files||!input.files[0])return;
+  const file=input.files[0];
+  const url=URL.createObjectURL(file);
+  document.getElementById('rauma-img-preview').innerHTML=`<img src="${url}" style="max-width:100%;border-radius:8px;max-height:180px;object-fit:contain;margin-top:8px">`;
+  document.getElementById('rauma-step2').classList.remove('hidden');
+  document.getElementById('rauma-status').textContent='טוען מנוע קריאה...';
+  try{
+    if(!window.Tesseract){
+      await new Promise((res,rej)=>{
+        const s=document.createElement('script');
+        s.src='https://cdn.jsdelivr.net/npm/tesseract.js@4/dist/tesseract.min.js';
+        s.onload=res;s.onerror=rej;
+        document.head.appendChild(s);
+      });
+    }
+    document.getElementById('rauma-status').textContent='קורא תעודה... 0%';
+    const result=await Tesseract.recognize(file,'heb+eng',{
+      logger:m=>{
+        if(m.status==='recognizing text'){
+          document.getElementById('rauma-status').textContent='קורא תעודה... '+Math.round(m.progress*100)+'%';
+        }
+      }
+    });
+    raumaParseText(result.data.text);
+  }catch(e){
+    document.getElementById('rauma-status').textContent='שגיאה בקריאה: '+e.message;
+  }
+}
+function raumaParseText(text){
+  const lines=text.split('\n').map(l=>l.trim()).filter(Boolean);
+  // חיפוש מספר דגם — pattern כמו 012779B33 או 8 ספרות רצופות
+  let modelFull='';
+  let modelCode='';
+  for(const line of lines){
+    const m=line.match(/0\d{4,7}[A-Z]\d+/)||line.match(/\b0\d{7,8}\b/);
+    if(m){
+      modelFull=m[0];
+      const digits=modelFull.replace(/[^0-9]/g,'');
+      if(digits.length>=6) modelCode='0'+digits.slice(2,6);
+      break;
+    }
+  }
+  // חיפוש שורות צבע עם כמויות
+  const qtyRows=[];
+  const colorNames=Object.values(COLORS);
+  const colorKeys=Object.keys(COLORS);
+  for(const line of lines){
+    let foundKey='';
+    for(let i=0;i<colorNames.length;i++){
+      if(line.includes(colorNames[i])){foundKey=colorKeys[i];break;}
+    }
+    if(!foundKey)continue;
+    const nums=(line.match(/\b\d{1,3}\b/g)||[]).map(Number).filter(n=>n>0&&n<500);
+    if(nums.length>0){
+      nums.forEach((qty,si)=>{
+        qtyRows.push({size:String(si+1),color:foundKey,qty});
+      });
+    }
+  }
+  // מלא טופס
+  document.getElementById('rauma-prod').value=modelCode.slice(0,5)||'';
+  document.getElementById('rauma-name').value=modelFull||'';
+  document.getElementById('rauma-cust').value='02';
+  // שורות כמויות
+  const container=document.getElementById('rauma-qty-rows');
+  container.innerHTML=qtyRows.map(q=>`
+    <div style="display:flex;gap:6px;margin-bottom:4px;align-items:center">
+      <input type="text" value="${q.size}" maxlength="2" placeholder="מידה" style="width:45px;font-size:12px;padding:4px 6px;border-radius:6px;border:1px solid var(--brd);background:var(--card);color:var(--txt)">
+      <select style="flex:1;font-size:12px;padding:4px 6px;border-radius:6px;border:1px solid var(--brd);background:var(--card);color:var(--txt)">
+        <option value="">--</option>${Object.entries(COLORS).map(([k,v])=>`<option value="${k}" ${q.color===k?'selected':''}>${v}</option>`).join('')}
+      </select>
+      <input type="number" value="${q.qty}" min="0" style="width:65px;font-size:12px;padding:4px 6px;border-radius:6px;border:1px solid var(--brd);background:var(--card);color:var(--txt)">
+      <button onclick="this.parentElement.remove()" style="background:none;border:none;color:var(--red);font-size:16px;cursor:pointer;padding:0 4px">✕</button>
+    </div>`).join('');
+  document.getElementById('rauma-results').classList.remove('hidden');
+  document.getElementById('rauma-confirm-btn').classList.remove('hidden');
+  const msg=qtyRows.length>0
+    ?`✅ זוהו ${qtyRows.length} שורות — בדוק ותקן לפי הצורך`
+    :'⚠️ לא זוהו כמויות — הכנס ידנית';
+  document.getElementById('rauma-status').textContent=msg;
+}
+function raumaAddQtyRow(){
+  const div=document.createElement('div');
+  div.style.cssText='display:flex;gap:6px;margin-bottom:4px;align-items:center';
+  div.innerHTML=`
+    <input type="text" maxlength="2" placeholder="מידה" style="width:45px;font-size:12px;padding:4px 6px;border-radius:6px;border:1px solid var(--brd);background:var(--card);color:var(--txt)">
+    <select style="flex:1;font-size:12px;padding:4px 6px;border-radius:6px;border:1px solid var(--brd);background:var(--card);color:var(--txt)">
+      <option value="">--</option>${Object.entries(COLORS).map(([k,v])=>`<option value="${k}">${v}</option>`).join('')}
+    </select>
+    <input type="number" min="0" value="0" style="width:65px;font-size:12px;padding:4px 6px;border-radius:6px;border:1px solid var(--brd);background:var(--card);color:var(--txt)">
+    <button onclick="this.parentElement.remove()" style="background:none;border:none;color:var(--red);font-size:16px;cursor:pointer;padding:0 4px">✕</button>`;
+  document.getElementById('rauma-qty-rows').appendChild(div);
+}
+async function raumaConfirm(){
+  const prod=(document.getElementById('rauma-prod').value||'').trim().padStart(5,'0').slice(0,5);
+  const cust=(document.getElementById('rauma-cust').value||'02').trim();
+  const name=(document.getElementById('rauma-name').value||'').trim();
+  if(!prod||prod==='00000'){alert('יש להזין מספר מוצר');return;}
+  const quantities=[];
+  document.querySelectorAll('#rauma-qty-rows > div').forEach(row=>{
+    const inputs=row.querySelectorAll('input');
+    const sel=row.querySelector('select');
+    const size=inputs[0]?.value||'';
+    const color=sel?.value||'';
+    const qty=parseInt(inputs[1]?.value)||0;
+    if(size||color)quantities.push({size,color,qty});
+  });
+  const id='p'+Date.now();
+  const newProd={id,prod,cust,name,images:[],docs:[],quantities,stageLog:{},stageSkipped:{}};
+  S.products.push(newProd);
+  saveLS();
+  if(S.fbConnected)await fbSet('products',id,{...newProd});
+  closeRaumaOCR();
+  renderProducts();
+  alert(`✅ מוצר ${prod} נוצר בהצלחה עם ${quantities.length} שורות`);
 }
 
 // ─── FACE REGISTER ───────────────────────────────────────────
