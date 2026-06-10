@@ -946,8 +946,8 @@ code{background:var(--bg2);border:0.5px solid var(--b);border-radius:4px;padding
 <!-- FIREBASE SDK -->
 <script type="module">
 import{initializeApp}from'https://www.gstatic.com/firebasejs/10.12.0/firebase-app.js';
-import{getFirestore,collection,doc,setDoc,onSnapshot,query,orderBy,limit,serverTimestamp,deleteDoc,updateDoc}from'https://www.gstatic.com/firebasejs/10.12.0/firebase-firestore.js';
-window._fb={initializeApp,getFirestore,collection,doc,setDoc,onSnapshot,query,orderBy,limit,serverTimestamp,deleteDoc,updateDoc};
+import{getFirestore,collection,doc,getDoc,setDoc,onSnapshot,query,orderBy,limit,serverTimestamp,deleteDoc,updateDoc}from'https://www.gstatic.com/firebasejs/10.12.0/firebase-firestore.js';
+window._fb={initializeApp,getFirestore,collection,doc,getDoc,setDoc,onSnapshot,query,orderBy,limit,serverTimestamp,deleteDoc,updateDoc};
 window._fbReady=true;
 document.dispatchEvent(new Event('fbSDKReady'));
 </script>
@@ -1131,6 +1131,21 @@ function listenFb(){
   // active tasks
   onSnapshot(collection(db,'activeTasks'),snap=>{
     S.activeTasks=snap.docs.map(d=>{const dd=d.data();return{...dd,id:d.id,startTime:dd.startTime?.toDate?dd.startTime.toDate():new Date(dd.startTime),elapsed:0};});
+    // סגור משימות שנשארו פתוחות מימים קודמים — רק מנתוני שרת, לא cache
+    if(!snap.metadata.fromCache){
+      const today=todayStr();
+      const localDate=t=>{const d=t.startTime instanceof Date?t.startTime:new Date(t.startTime);return d.getFullYear()+'-'+pad2(d.getMonth()+1)+'-'+pad2(d.getDate());};
+      const stale=S.activeTasks.filter(t=>localDate(t)<today);
+      stale.forEach(t=>{
+        const d=t.startTime instanceof Date?t.startTime:new Date(t.startTime);
+        const endTime=new Date(d.getFullYear(),d.getMonth(),d.getDate(),23,59,59);
+        const done={...t,endTime,duration:Math.round((endTime-d)/1000)};
+        S.histTasks.unshift(done);
+        fbDel('activeTasks',String(t.id));
+        fbSet('histTasks',String(t.id),{...done,startTime:d.toISOString(),endTime:endTime.toISOString()});
+      });
+      if(stale.length){S.activeTasks=S.activeTasks.filter(t=>!stale.includes(t));saveLS();}
+    }
     renderAll();
   });
   // hist tasks
@@ -1262,8 +1277,13 @@ function runDailyReset(){
       if(S.fbConnected)fbSet('workers',w.id,w);
     });
     S.activeTasks.forEach(t=>{
-      S.histTasks.unshift({...t,endTime:new Date(lastDate+'T23:59:59'),
-        duration:Math.round((new Date(lastDate+'T23:59:59')-new Date(t.startTime))/1000)});
+      const endTime=new Date(lastDate+'T23:59:59');
+      const done={...t,endTime,duration:Math.round((endTime-new Date(t.startTime))/1000)};
+      S.histTasks.unshift(done);
+      if(S.fbConnected){
+        fbDel('activeTasks',String(t.id));
+        fbSet('histTasks',String(t.id),{...done,startTime:done.startTime instanceof Date?done.startTime.toISOString():done.startTime,endTime:endTime.toISOString()});
+      }
     });
     S.activeTasks=[];
     saveLS();
@@ -1339,22 +1359,32 @@ async function sendDailyAttReport(){
     fetch('https://api.telegram.org/bot'+token+'/sendDocument',{method:'POST',body:fd});
   }catch(e){}
 }
+// נעילה כפולה: localStorage (מקומי) + Firebase (בין מכשירים) — מונע דוח כפול
+async function _claimDailyReport(){
+  const today=todayStr();
+  if(localStorage.getItem('txops_daily_report_sent')===today)return false;
+  localStorage.setItem('txops_daily_report_sent',today);
+  if(S.fbConnected&&db){
+    try{
+      const{getDoc,doc}=window._fb;
+      const snap=await getDoc(doc(db,'appSettings','dailyReport'));
+      if(snap.exists()&&snap.data().date===today)return false; // מכשיר אחר כבר שלח
+      await fbSet('appSettings','dailyReport',{date:today});
+    }catch(e){}
+  }
+  return true;
+}
 function scheduleDailyReport(){
   const now=new Date();
-  const today=todayStr();
-  const lastSent=localStorage.getItem('txops_daily_report_sent');
   const target=new Date(now.getFullYear(),now.getMonth(),now.getDate(),15,15,0);
-  // אם עברנו 15:15 ועדיין לא נשלח היום — שלח מיד
-  if(now>=target && lastSent!==today){
-    localStorage.setItem('txops_daily_report_sent',today);
-    setTimeout(async()=>{await sendDailyAttReport();},3000); // המתן 3 שניות לטעינת נתונים
+  // אם עברנו 15:15 ועדיין לא נשלח היום — שלח מיד (אחרי 3 שניות לטעינת נתונים + Firebase)
+  if(now>=target){
+    setTimeout(async()=>{if(await _claimDailyReport())await sendDailyAttReport();},3000);
+    target.setDate(target.getDate()+1);
   }
-  // קבע טיימר ל-15:15 הבא
-  if(now>=target)target.setDate(target.getDate()+1);
   const msUntil=target-now;
   setTimeout(async()=>{
-    localStorage.setItem('txops_daily_report_sent',todayStr());
-    await sendDailyAttReport();
+    if(await _claimDailyReport())await sendDailyAttReport();
     scheduleDailyReport();
   },msUntil);
 }
@@ -1557,7 +1587,7 @@ function buildAttRep(){
   if(to)fl=fl.filter(r=>r.date<=to);
   if(wid)fl=fl.filter(r=>r.workerId===wid);
   fl.sort((a,b)=>b.date.localeCompare(a.date)||(b.checkin||'').localeCompare(a.checkin||''));
-  const totalMs=fl.reduce((s,r)=>s+r.netMs,0);
+  const totalMs=fl.reduce((s,r)=>s+(r.netMs||0),0);
   const uniqueDays=new Set(fl.map(r=>r.date+r.workerId)).size;
   const uniqueWorkers=new Set(fl.map(r=>r.workerId)).size;
   document.getElementById('ar-days').textContent=uniqueDays;
@@ -2360,7 +2390,7 @@ async function tsStartTask(){
   const cust=raw.slice(0,2),prod=raw.slice(2,7),size=raw.slice(7,8),qty=parseInt(raw.slice(8,11))||0,col=raw.slice(11,13);
   const taskType=(document.getElementById('ts-tasktype').value||'').trim();
   const taskDept=(document.getElementById('ts-dept').value||'').trim();
-  const task={id:S.nextTId++,workerId:w.id,workerName:w.name,dept:taskDept||w.dept,cust,prod,size,qty,col,taskType,startTime:new Date(),elapsed:0};
+  const task={id:String(S.nextTId++),workerId:w.id,workerName:w.name,dept:taskDept||w.dept,cust,prod,size,qty,col,taskType,startTime:new Date(),elapsed:0};
   S.activeTasks.push(task);
   if(S.fbConnected)await fbSet('activeTasks',String(task.id),{...task,startTime:task.startTime.toISOString()});
   saveLS();renderMgrTasks();
