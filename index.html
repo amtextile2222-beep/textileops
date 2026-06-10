@@ -1050,6 +1050,9 @@ function listenFb(){
     if(snap.empty)return;
     S.workers=snap.docs.map(d=>({id:d.id,...d.data()}));
     migrateBreaks();
+    // אם הנתונים מגיעים מה-cache המקומי — לא לאפס, רק לרנדר
+    // (cache עלול להכיל sessions מאתמול ולגרום לאיפוס שגוי)
+    if(snap.metadata.fromCache){renderAll();return;}
     // נקה sessions ישנות שלא אופסו כי Firebase נטען אחרי checkDailyReset
     const today=todayStr();
     S.workers.forEach(w=>{
