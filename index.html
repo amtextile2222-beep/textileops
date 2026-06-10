@@ -1284,6 +1284,46 @@ function scheduleMidnightReset(){
   },msUntil);
 }
 scheduleMidnightReset();
+
+// ─── דוח נוכחות יומי ב-15:15 ──────────────────────────────
+async function sendDailyAttReport(){
+  const today=todayStr();
+  const dayNames=['ראשון','שני','שלישי','רביעי','חמישי','שישי','שבת'];
+  const dayName=dayNames[new Date().getDay()];
+  const present=S.workers.filter(w=>w.checkin&&w.checkin.slice(0,10)===today);
+  const absent=S.workers.filter(w=>w.role!=='manager'&&(!w.checkin||w.checkin.slice(0,10)!==today));
+  const fmtTime=iso=>{if(!iso)return '--:--';const d=new Date(iso);return(d.getHours()+'').padStart(2,'0')+':'+(d.getMinutes()+'').padStart(2,'0');};
+  const fmtNet=ms=>{if(!ms||ms<=0)return '';const h=Math.floor(ms/3600000);const m=Math.floor((ms%3600000)/60000);return ' ('+h+'ש '+m+'ד)'};
+  let msg='📋 דוח נוכחות — '+today+' יום '+dayName+'\n';
+  msg+='─────────────────\n';
+  msg+='✅ נכחו ('+present.length+'):\n';
+  present.forEach(w=>{
+    const ci=fmtTime(w.checkin);
+    const co=w.checkout?fmtTime(w.checkout):'בתוך';
+    const net=fmtNet(calcNetWork(w));
+    msg+='• '+w.name+' — '+w.dept+'\n  כניסה '+ci+' יציאה '+co+net+'\n';
+  });
+  if(absent.length>0){
+    msg+='─────────────────\n';
+    msg+='❌ נעדרו ('+absent.length+'):\n';
+    absent.forEach(w=>msg+='• '+w.name+' — '+w.dept+'\n');
+  }
+  msg+='─────────────────\n';
+  msg+='סה"כ: '+present.length+'/'+(present.length+absent.length)+' עובדים';
+  await sendTelegram(msg);
+}
+function scheduleDailyReport(){
+  const now=new Date();
+  const target=new Date(now.getFullYear(),now.getMonth(),now.getDate(),15,15,0);
+  if(target<=now)target.setDate(target.getDate()+1); // אם עברנו 15:15 — קבע למחר
+  const msUntil=target-now;
+  setTimeout(async()=>{
+    await sendDailyAttReport();
+    scheduleDailyReport(); // קבע שוב ל-24 שעות הבאות
+  },msUntil);
+}
+scheduleDailyReport();
+
 migratePasswords();
 migrateToSessions();
 migrateBreaks();
