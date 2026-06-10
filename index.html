@@ -4732,46 +4732,59 @@ async function _captureAndLogin(){
     return;
   }
   // 5 דגימות הושלמו — שמור וכנס
-  const w=S._pendingUser;
-  w.faceDescriptors=_faceRegSamples.slice();
-  _faceRegSamples=[];
-  if(S.fbConnected)await fbSet('workers',w.id,w);
-  saveLS();
-  // שלח תמונה למנהל בטלגרם
   try{
-    const snapCanvas=document.createElement('canvas');
-    const v2=document.getElementById('face-reg-video');
-    snapCanvas.width=v2.videoWidth;snapCanvas.height=v2.videoHeight;
-    snapCanvas.getContext('2d').drawImage(v2,0,0);
-    snapCanvas.toBlob(async blob=>{
-      if(!blob)return;
-      const token=(S.settings.waToken||'').trim();
-      const chatId=(S.settings.waChatId||'').trim();
-      if(!token||!chatId)return;
-      const now=new Date().toLocaleTimeString('he-IL',{hour:'2-digit',minute:'2-digit'});
-      const fd=new FormData();
-      fd.append('chat_id',chatId);
-      fd.append('photo',blob,'face.jpg');
-      fd.append('caption','📸 TextileOps — רישום פנים ראשוני\n👤 עובד: '+w.name+'\n🕐 שעה: '+now);
-      fetch('https://api.telegram.org/bot'+token+'/sendPhoto',{method:'POST',body:fd});
-    },'image/jpeg',0.8);
-  }catch(e){}
-  if(_faceRegStream){_faceRegStream.getTracks().forEach(t=>t.stop());_faceRegStream=null;}
-  document.getElementById('face-reg-screen').classList.add('hidden');
-  // שחזר כפתורים למצב רגיל לפעם הבאה
-  const cancelBtn=document.querySelector('#face-reg-screen .btn:not(.primary)');
-  if(cancelBtn)cancelBtn.style.display='';
-  document.getElementById('face-reg-btn').onclick=captureFaceDescriptor;
-  // כנס למערכת
-  S.user=w;S._pendingUser=null;
-  document.getElementById('app-screen').classList.remove('hidden');
-  document.getElementById('top-name').textContent=w.name;
-  document.getElementById('top-role').textContent=w.role==='manager'?'מנהל':w.role==='supervisor'?'אחראי':w.role==='helper'?'עוזר':'עובד';
-  document.getElementById('top-av').textContent=w.name.split(' ').map(n=>n[0]).join('');
-  applyPerms(w);
-  setTimeout(loadWaSettings,100);
-  const firstPage=(w.permissions&&w.permissions.length)?w.permissions[0]:'dash';
-  goPage(w.role==='manager'?'dash':firstPage);
+    const w=S._pendingUser;
+    if(!w){
+      document.getElementById('face-reg-status').textContent='שגיאה: נסה שוב';
+      document.getElementById('face-reg-btn').textContent='📸 צלם דגימה 1/5';
+      document.getElementById('face-reg-btn').disabled=false;
+      _faceRegSamples=[];
+      return;
+    }
+    w.faceDescriptors=_faceRegSamples.slice();
+    w.faceUpdateAllowed=false;
+    _faceRegSamples=[];
+    if(S.fbConnected)await fbSet('workers',w.id,w);
+    saveLS();
+    // שלח תמונה למנהל בטלגרם (לא חוסם)
+    try{
+      const snapCanvas=document.createElement('canvas');
+      const v2=document.getElementById('face-reg-video');
+      snapCanvas.width=v2.videoWidth;snapCanvas.height=v2.videoHeight;
+      snapCanvas.getContext('2d').drawImage(v2,0,0);
+      snapCanvas.toBlob(async blob=>{
+        if(!blob)return;
+        const token=(S.settings.waToken||'').trim();
+        const chatId=(S.settings.waChatId||'').trim();
+        if(!token||!chatId)return;
+        const now=new Date().toLocaleTimeString('he-IL',{hour:'2-digit',minute:'2-digit'});
+        const fd=new FormData();
+        fd.append('chat_id',chatId);fd.append('photo',blob,'face.jpg');
+        fd.append('caption','📸 TextileOps — רישום פנים ראשוני\n👤 עובד: '+w.name+'\n🕐 שעה: '+now);
+        fetch('https://api.telegram.org/bot'+token+'/sendPhoto',{method:'POST',body:fd});
+      },'image/jpeg',0.8);
+    }catch(e){}
+    if(_faceRegStream){_faceRegStream.getTracks().forEach(t=>t.stop());_faceRegStream=null;}
+    document.getElementById('face-reg-screen').classList.add('hidden');
+    const cancelBtn=document.querySelector('#face-reg-screen .btn:not(.primary)');
+    if(cancelBtn)cancelBtn.style.display='';
+    document.getElementById('face-reg-btn').textContent='📸 צלם דגימה 1/5';
+    document.getElementById('face-reg-btn').onclick=captureFaceDescriptor;
+    S.user=w;S._pendingUser=null;
+    document.getElementById('app-screen').classList.remove('hidden');
+    document.getElementById('top-name').textContent=w.name;
+    document.getElementById('top-role').textContent=w.role==='manager'?'מנהל':w.role==='supervisor'?'אחראי':w.role==='helper'?'עוזר':'עובד';
+    document.getElementById('top-av').textContent=w.name.split(' ').map(n=>n[0]||'').join('');
+    applyPerms(w);
+    setTimeout(loadWaSettings,100);
+    const firstPage=(w.permissions&&w.permissions.length)?w.permissions[0]:'dash';
+    goPage(w.role==='manager'?'dash':firstPage);
+  }catch(err){
+    document.getElementById('face-reg-status').textContent='שגיאה: '+err.message+' — נסה שוב';
+    document.getElementById('face-reg-btn').textContent='📸 צלם דגימה 1/5';
+    document.getElementById('face-reg-btn').disabled=false;
+    _faceRegSamples=[];
+  }
 }
 
 // ─── FACE REGISTER ───────────────────────────────────────────
