@@ -1266,7 +1266,7 @@ function emergencyLogin(){
   goPage('admin');
 }
 function onUserInput(u){
-  const w=S.workers.find(x=>x.user===u.trim()&&x.faceAuth&&x.faceDescriptor);
+  const w=S.workers.find(x=>x.user===u.trim()&&x.faceAuth&&(x.faceDescriptor||x.faceDescriptors?.length));
   document.getElementById('l-pass-wrap').style.display=w?'none':'';
   document.getElementById('l-face-hint').style.display=w?'block':'none';
 }
@@ -1275,7 +1275,7 @@ async function doLogin(){
   const u=document.getElementById('l-user').value.trim();
   const p=document.getElementById('l-pass').value.trim();
   // אם יש עובד עם זיהוי פנים מוגדר — מדלג על סיסמה
-  const wFace=S.workers.find(x=>x.user===u&&x.faceAuth&&x.faceDescriptor);
+  const wFace=S.workers.find(x=>x.user===u&&x.faceAuth&&(x.faceDescriptor||x.faceDescriptors?.length));
   if(wFace){
     if(wFace.requireFactoryIP){const allowed=await checkFactoryIP(wFace);if(!allowed)return;}
     S._pendingUser=wFace;
@@ -1305,13 +1305,13 @@ async function doLogin(){
     const allowed=await checkFactoryIP(w);
     if(!allowed)return;
   }
-  if(w.faceAuth && !w.faceDescriptor){
+  if(w.faceAuth && !(w.faceDescriptor||w.faceDescriptors?.length)){
     // פנים לא רשומים עדיין — בקש רישום ראשוני
     S._pendingUser=w;
     _startFaceFirstRegister();
     return;
   }
-  if(w.faceAuth && w.faceDescriptor){
+  if(w.faceAuth && (w.faceDescriptor||w.faceDescriptors?.length)){
     S._pendingUser=w;
     startFaceAuth();
     return;
@@ -2364,7 +2364,7 @@ function renderAdmin(){
       <div style="flex:1"><div style="font-size:13px;font-weight:500">${esc(w.name)}</div>
       <div style="font-size:11px;color:var(--txt3)">${esc(w.dept)} · ${w.role==='manager'?'מנהל':w.role==='supervisor'?'אחראי':w.role==='helper'?'עוזר':'עובד'} · @${esc(w.user)}</div></div>
       ${w.requireFactoryIP?`<span title="חייב WiFi מפעל" style="font-size:16px">🏭</span>`:''}
-      ${w.faceAuth?`<span title="${w.faceDescriptor?'זיהוי פנים פעיל':'זיהוי פנים — פנים לא רשומים'}" style="font-size:16px">${w.faceDescriptor?'🟢':'🟡'}</span>`:''}
+      ${w.faceAuth?`<span title="${(w.faceDescriptor||w.faceDescriptors?.length)?'זיהוי פנים פעיל':'זיהוי פנים — פנים לא רשומים'}" style="font-size:16px">${(w.faceDescriptor||w.faceDescriptors?.length)?'🟢':'🟡'}</span>`:''}
       <button class="btn" style="font-size:11px;padding:4px 8px" onclick="openModal('edit-worker','${w.id}')">✏</button>
       <button class="btn warn" style="font-size:11px;padding:4px 8px" onclick="resetPass('${w.id}')">🔑</button>
       <button class="btn danger" style="font-size:11px;padding:4px 8px" onclick="delWorker('${w.id}')">🗑</button>
@@ -2531,8 +2531,8 @@ function openModal(action,id){
           דרוש זיהוי פנים בכניסה
         </label>
         ${w?`<div style="margin-top:8px;display:flex;align-items:center;gap:8px">
-          <span style="font-size:12px;color:var(--txt3)">${w.faceDescriptor?'✅ פנים רשומים':'⚠️ פנים לא רשומים'}</span>
-          <button type="button" class="btn" style="font-size:11px;padding:4px 10px" onclick="closeModal();openFaceRegister('${w.id}')">📸 ${w.faceDescriptor?'עדכן פנים':'רשום פנים'}</button>
+          <span style="font-size:12px;color:var(--txt3)">${(w.faceDescriptor||w.faceDescriptors?.length)?'✅ פנים רשומים':'⚠️ פנים לא רשומים'}</span>
+          <button type="button" class="btn" style="font-size:11px;padding:4px 10px" onclick="closeModal();openFaceRegister('${w.id}')">📸 ${(w.faceDescriptor||w.faceDescriptors?.length)?'עדכן פנים':'רשום פנים'}</button>
         </div>`:'<div style="font-size:11px;color:var(--txt3);margin-top:6px">שמור עובד תחילה, אחר כך רשום פנים</div>'}
       </div>
       <div class="field" id="mf-perms-box" style="display:${wRole==='manager'?'none':'block'}">
@@ -4422,6 +4422,7 @@ let _faceAuthStream=null;
 let _faceAuthLoop=null;
 let _faceRegStream=null;
 let _faceRegWorkerId=null;
+let _faceRegSamples=[];
 
 async function loadFaceModels(){
   if(_faceModelsLoaded)return true;
@@ -4465,9 +4466,10 @@ async function _runFaceAuthLoop(){
     if(video.readyState<2)return;
     const det=await faceapi.detectSingleFace(video,opts).withFaceLandmarks(true).withFaceDescriptor();
     if(!det){successStreak=0;document.getElementById('face-auth-status').textContent='לא זוהו פנים — קרב/י למצלמה';return;}
-    const stored=new Float32Array(Object.values(S._pendingUser.faceDescriptor));
-    const dist=faceapi.euclideanDistance(det.descriptor,stored);
-    if(dist<0.5){
+    const rawList=S._pendingUser.faceDescriptors||[S._pendingUser.faceDescriptor];
+    const storedList=rawList.filter(Boolean).map(d=>new Float32Array(Object.values(d)));
+    const dist=Math.min(...storedList.map(s=>faceapi.euclideanDistance(det.descriptor,s)));
+    if(dist<0.55){
       successStreak++;
       failCount=0;
       document.getElementById('face-auth-status').textContent='מאמת... ('+successStreak+'/3)';
@@ -4571,9 +4573,10 @@ async function _startFaceFirstRegister(){
     const video=document.getElementById('face-reg-video');
     video.srcObject=_faceRegStream;
     await new Promise(r=>video.onloadedmetadata=r);
-    document.getElementById('face-reg-status').textContent='מצלמה פעילה — לחץ "צלם פנים"';
+    _faceRegSamples=[];
+    document.getElementById('face-reg-status').textContent='מצלמה פעילה — לחץ "צלם דגימה 1/5"';
+    document.getElementById('face-reg-btn').textContent='📸 צלם דגימה 1/5';
     document.getElementById('face-reg-btn').disabled=false;
-    // עקוף captureFaceDescriptor לאחר שמירה → כניסה למערכת
     document.getElementById('face-reg-btn').onclick=_captureAndLogin;
   }catch(e){
     document.getElementById('face-reg-status').innerHTML=
@@ -4584,17 +4587,30 @@ async function _startFaceFirstRegister(){
 
 async function _captureAndLogin(){
   const video=document.getElementById('face-reg-video');
-  document.getElementById('face-reg-status').textContent='מזהה פנים...';
-  document.getElementById('face-reg-btn').disabled=true;
+  const statusEl=document.getElementById('face-reg-status');
+  const btnEl=document.getElementById('face-reg-btn');
+  statusEl.textContent='מזהה פנים...';
+  btnEl.disabled=true;
   const opts=new faceapi.TinyFaceDetectorOptions({inputSize:224,scoreThreshold:0.5});
   const det=await faceapi.detectSingleFace(video,opts).withFaceLandmarks(true).withFaceDescriptor();
   if(!det){
-    document.getElementById('face-reg-status').textContent='לא זוהו פנים — נסה שוב, קרב לנייד';
-    document.getElementById('face-reg-btn').disabled=false;
+    statusEl.textContent='לא זוהו פנים — נסה שוב, קרב לנייד';
+    btnEl.disabled=false;
     return;
   }
+  _faceRegSamples.push(Array.from(det.descriptor));
+  const n=_faceRegSamples.length;
+  if(n<5){
+    statusEl.textContent='✅ דגימה '+n+'/5 — זוז קצת והמשך';
+    btnEl.textContent='📸 צלם דגימה '+(n+1)+'/5';
+    btnEl.disabled=false;
+    return;
+  }
+  // 5 דגימות הושלמו — שמור וכנס
   const w=S._pendingUser;
-  w.faceDescriptor=Array.from(det.descriptor);
+  w.faceDescriptors=_faceRegSamples.slice();
+  delete w.faceDescriptor;
+  _faceRegSamples=[];
   if(S.fbConnected)await fbSet('workers',w.id,w);
   saveLS();
   // שלח תמונה למנהל בטלגרם
@@ -4637,6 +4653,9 @@ async function _captureAndLogin(){
 // ─── FACE REGISTER ───────────────────────────────────────────
 async function openFaceRegister(id){
   _faceRegWorkerId=id;
+  _faceRegSamples=[];
+  document.getElementById('face-reg-btn').textContent='📸 צלם דגימה 1/5';
+  document.getElementById('face-reg-btn').onclick=captureFaceDescriptor;
   const w=S.workers.find(x=>x.id===id);
   document.getElementById('face-reg-title').textContent='רישום פנים — '+esc(w?.name||'');
   document.getElementById('face-reg-status').textContent='טוען מודלי זיהוי...';
@@ -4662,21 +4681,32 @@ async function openFaceRegister(id){
 
 async function captureFaceDescriptor(){
   const video=document.getElementById('face-reg-video');
-  document.getElementById('face-reg-status').textContent='מזהה פנים...';
-  document.getElementById('face-reg-btn').disabled=true;
+  const statusEl=document.getElementById('face-reg-status');
+  const btnEl=document.getElementById('face-reg-btn');
+  statusEl.textContent='מזהה פנים...';
+  btnEl.disabled=true;
   const opts=new faceapi.TinyFaceDetectorOptions({inputSize:224,scoreThreshold:0.5});
   const det=await faceapi.detectSingleFace(video,opts).withFaceLandmarks(true).withFaceDescriptor();
   if(!det){
-    document.getElementById('face-reg-status').textContent='לא זוהו פנים — נסה שוב';
-    document.getElementById('face-reg-btn').disabled=false;
+    statusEl.textContent='לא זוהו פנים — נסה שוב';
+    btnEl.disabled=false;
     return;
   }
+  _faceRegSamples.push(Array.from(det.descriptor));
+  const n=_faceRegSamples.length;
+  if(n<5){
+    statusEl.textContent='✅ דגימה '+n+'/5 — זוז קצת והמשך';
+    btnEl.textContent='📸 צלם דגימה '+(n+1)+'/5';
+    btnEl.disabled=false;
+    return;
+  }
+  // 5 דגימות הושלמו
   const w=S.workers.find(x=>x.id===_faceRegWorkerId);
   if(w){
-    w.faceDescriptor=Array.from(det.descriptor);
+    w.faceDescriptors=_faceRegSamples.slice();
+    delete w.faceDescriptor;
     if(S.fbConnected)await fbSet('workers',w.id,w);
     saveLS();
-    // שלח תמונה למנהל בטלגרם
     try{
       const snapCanvas=document.createElement('canvas');
       snapCanvas.width=video.videoWidth;snapCanvas.height=video.videoHeight;
@@ -4690,11 +4720,12 @@ async function captureFaceDescriptor(){
         const fd=new FormData();
         fd.append('chat_id',chatId);
         fd.append('photo',blob,'face.jpg');
-        fd.append('caption','📸 TextileOps — פנים עודכנו\n👤 עובד: '+w.name+'\n🕐 שעה: '+now);
+        fd.append('caption','📸 TextileOps — פנים עודכנו (5 דגימות)\n👤 עובד: '+w.name+'\n🕐 שעה: '+now);
         fetch('https://api.telegram.org/bot'+token+'/sendPhoto',{method:'POST',body:fd});
       },'image/jpeg',0.8);
     }catch(e){}
   }
+  _faceRegSamples=[];
   cancelFaceReg();
   alert('✅ פנים נרשמו בהצלחה עבור '+w?.name);
   renderAdmin();
@@ -4703,6 +4734,10 @@ async function captureFaceDescriptor(){
 function cancelFaceReg(){
   if(_faceRegStream){_faceRegStream.getTracks().forEach(t=>t.stop());_faceRegStream=null;}
   _faceRegWorkerId=null;
+  _faceRegSamples=[];
+  const btn=document.getElementById('face-reg-btn');
+  btn.textContent='📸 צלם דגימה 1/5';
+  btn.onclick=captureFaceDescriptor;
   document.getElementById('face-reg-screen').classList.add('hidden');
   document.getElementById('app-screen').classList.remove('hidden');
 }
