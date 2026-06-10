@@ -4613,13 +4613,16 @@ async function _onFaceAuthFailed(){
   const failedWorker=S._pendingUser;
   const name=failedWorker?.name||'עובד לא ידוע';
   const now=new Date().toLocaleTimeString('he-IL',{hour:'2-digit',minute:'2-digit'});
+  // אם יש אישור עדכון — שמור את העובד ב-_pendingUser לכפתור
   if(failedWorker?.faceUpdateAllowed){
-    document.getElementById('l-err').innerHTML='זיהוי פנים נכשל 3 פעמים<br><button class="btn warn" style="margin-top:8px;font-size:13px;width:100%" onclick="_startFaceUpdateAfterFail(\''+failedWorker.id+'\')">📸 עדכן פנים — מנהל אישר</button>';
+    // לא מנקים S._pendingUser — הכפתור ישתמש בו
+    document.getElementById('l-err').innerHTML='זיהוי פנים נכשל 3 פעמים<br><button class="btn warn" style="margin-top:8px;font-size:13px;width:100%" onclick="_startFaceUpdateAfterFail()">📸 עדכן פנים — מנהל אישר</button>';
   }else{
+    S._pendingUser=null;
     document.getElementById('l-err').textContent='זיהוי פנים נכשל 3 פעמים — נשלחה התראה למנהל';
   }
   const caption='⚠️ TextileOps — זיהוי פנים נכשל\n👤 עובד: '+name+'\n🕐 שעה: '+now+'\nהעובד ניסה להיכנס 3 פעמים ולא זוהה.\nבדוק ואשר כניסה ידנית אם נדרש.';
-  // שלח תמונה + כיתוב לטלגרם
+  // שלח תמונה + כיתוב לטלגרם (async — לא חוסם את הכפתור)
   if(photoBlob){
     try{
       const token=(document.getElementById('wa-token')?.value||S.settings.waToken||'').trim();
@@ -4629,18 +4632,16 @@ async function _onFaceAuthFailed(){
         fd.append('chat_id',chatId);
         fd.append('photo',photoBlob,'alert.jpg');
         fd.append('caption',caption);
-        await fetch(`https://api.telegram.org/bot${token}/sendPhoto`,{method:'POST',body:fd});
-      }else{await sendTelegram(caption);}
-    }catch(e){await sendTelegram(caption);}
-  }else{await sendTelegram(caption);}
-  S._pendingUser=null;
+        fetch(`https://api.telegram.org/bot${token}/sendPhoto`,{method:'POST',body:fd});
+      }else{sendTelegram(caption);}
+    }catch(e){sendTelegram(caption);}
+  }else{sendTelegram(caption);}
 }
 
-function _startFaceUpdateAfterFail(id){
-  const w=S.workers.find(x=>x.id===id);
+function _startFaceUpdateAfterFail(){
+  const w=S._pendingUser;
   if(!w||!w.faceUpdateAllowed)return;
   document.getElementById('l-err').textContent='';
-  S._pendingUser=w;
   _startFaceFirstRegister();
 }
 
