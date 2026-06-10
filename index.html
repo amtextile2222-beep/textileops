@@ -1550,10 +1550,10 @@ async function autoPunchIn(){
   w.sessions.push({in:now.toISOString(),out:null});
   w.status='in';
   w.checkin=w.sessions[0].in;
-  if(S.fbConnected)await fbSet('workers',w.id,w);
-  saveLS();
-  // עדכן תצוגת מנהל אם פתוחה
-  try{renderAdminWorkers();}catch(e){}
+  saveLS(); // שמור מקומי תחילה — לא תלוי ב-Firebase
+  try{if(S.fbConnected)await fbSet('workers',w.id,w);}catch(e){}
+  try{renderAdmin();}catch(e){}
+  try{renderAtt();}catch(e){}
 }
 
 // ─── ATTENDANCE ──────────────────────────────────────────────
@@ -4783,7 +4783,6 @@ async function _captureAndLogin(){
         fetch('https://api.telegram.org/bot'+token+'/sendPhoto',{method:'POST',body:fd});
       },'image/jpeg',0.8);
     }catch(e){}
-    if(_faceRegStream){_faceRegStream.getTracks().forEach(t=>t.stop());_faceRegStream=null;}
     document.getElementById('face-reg-screen').classList.add('hidden');
     const cancelBtn=document.querySelector('#face-reg-screen .btn:not(.primary)');
     if(cancelBtn)cancelBtn.style.display='';
@@ -4804,6 +4803,8 @@ async function _captureAndLogin(){
     document.getElementById('face-reg-btn').textContent='📸 צלם דגימה 1/5';
     document.getElementById('face-reg-btn').disabled=false;
     _faceRegSamples=[];
+  }finally{
+    if(_faceRegStream){_faceRegStream.getTracks().forEach(t=>t.stop());_faceRegStream=null;}
   }
 }
 
@@ -4860,7 +4861,7 @@ async function captureFaceDescriptor(){
   // 5 דגימות הושלמו
   const w=S.workers.find(x=>x.id===_faceRegWorkerId);
   if(w){
-    w.faceDescriptors=_faceRegSamples.slice();
+    w.faceDescriptors=Object.fromEntries(_faceRegSamples.map((s,i)=>[i,s]));
     if(S.fbConnected)await fbSet('workers',w.id,w);
     saveLS();
     try{
