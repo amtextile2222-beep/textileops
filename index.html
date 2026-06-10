@@ -947,7 +947,8 @@ code{background:var(--bg2);border:0.5px solid var(--b);border-radius:4px;padding
 <script type="module">
 import{initializeApp}from'https://www.gstatic.com/firebasejs/10.12.0/firebase-app.js';
 import{getFirestore,collection,doc,getDoc,setDoc,onSnapshot,query,orderBy,limit,serverTimestamp,deleteDoc,updateDoc}from'https://www.gstatic.com/firebasejs/10.12.0/firebase-firestore.js';
-window._fb={initializeApp,getFirestore,collection,doc,getDoc,setDoc,onSnapshot,query,orderBy,limit,serverTimestamp,deleteDoc,updateDoc};
+import{getAuth,signInAnonymously}from'https://www.gstatic.com/firebasejs/10.12.0/firebase-auth.js';
+window._fb={initializeApp,getFirestore,collection,doc,getDoc,setDoc,onSnapshot,query,orderBy,limit,serverTimestamp,deleteDoc,updateDoc,getAuth,signInAnonymously};
 window._fbReady=true;
 document.dispatchEvent(new Event('fbSDKReady'));
 </script>
@@ -1072,8 +1073,10 @@ async function connectFirebase(){
 async function initFb(){
   if(!window._fbReady){await new Promise(res=>document.addEventListener('fbSDKReady',res,{once:true}));}
   if(!fbConfig)throw new Error('אין Firebase Config');
-  const{initializeApp,getFirestore}=window._fb;
+  const{initializeApp,getFirestore,getAuth,signInAnonymously}=window._fb;
   const app=initializeApp(fbConfig,'txops3');
+  // התחברות אנונימית — נדרשת ע"י Firestore Security Rules (request.auth != null)
+  try{await signInAnonymously(getAuth(app));}catch(e){console.error('Anonymous auth failed:',e);}
   db=getFirestore(app);
   S.fbConnected=true;
   setFbStatus('ok','✅ Firebase מחובר');
