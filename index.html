@@ -1285,7 +1285,7 @@ function emergencyLogin(){
   goPage('admin');
 }
 function onUserInput(u){
-  const w=S.workers.find(x=>x.user===u.trim()&&x.faceAuth&&(x.faceDescriptor||x.faceDescriptors&&Object.keys(faceDescriptors).length));
+  const w=S.workers.find(x=>x.user===u.trim()&&x.faceAuth&&(x.faceDescriptor||x.faceDescriptors&&Object.keys(x.faceDescriptors).length));
   document.getElementById('l-pass-wrap').style.display=w?'none':'';
   document.getElementById('l-face-hint').style.display=w?'block':'none';
 }
@@ -1294,7 +1294,7 @@ async function doLogin(){
   const u=document.getElementById('l-user').value.trim();
   const p=document.getElementById('l-pass').value.trim();
   // אם יש עובד עם זיהוי פנים מוגדר — מדלג על סיסמה
-  const wFace=S.workers.find(x=>x.user===u&&x.faceAuth&&(x.faceDescriptor||x.faceDescriptors&&Object.keys(faceDescriptors).length));
+  const wFace=S.workers.find(x=>x.user===u&&x.faceAuth&&(x.faceDescriptor||x.faceDescriptors&&Object.keys(x.faceDescriptors).length));
   if(wFace){
     if(wFace.requireFactoryIP){const allowed=await checkFactoryIP(wFace);if(!allowed)return;}
     S._pendingUser=wFace;
@@ -1324,13 +1324,13 @@ async function doLogin(){
     const allowed=await checkFactoryIP(w);
     if(!allowed)return;
   }
-  if(w.faceAuth && !(w.faceDescriptor||w.faceDescriptors&&Object.keys(faceDescriptors).length)){
+  if(w.faceAuth && !(w.faceDescriptor||w.faceDescriptors&&Object.keys(w.faceDescriptors).length)){
     // פנים לא רשומים עדיין — בקש רישום ראשוני
     S._pendingUser=w;
     _startFaceFirstRegister();
     return;
   }
-  if(w.faceAuth && (w.faceDescriptor||w.faceDescriptors&&Object.keys(faceDescriptors).length)){
+  if(w.faceAuth && (w.faceDescriptor||w.faceDescriptors&&Object.keys(w.faceDescriptors).length)){
     S._pendingUser=w;
     startFaceAuth();
     return;
@@ -2406,7 +2406,7 @@ function renderAdmin(){
       <div style="flex:1"><div style="font-size:13px;font-weight:500">${esc(w.name)}</div>
       <div style="font-size:11px;color:var(--txt3)">${esc(w.dept)} · ${w.role==='manager'?'מנהל':w.role==='supervisor'?'אחראי':w.role==='helper'?'עוזר':'עובד'} · @${esc(w.user)}</div></div>
       ${w.requireFactoryIP?`<span title="חייב WiFi מפעל" style="font-size:16px">🏭</span>`:''}
-      ${w.faceAuth?`<span title="${(w.faceDescriptor||w.faceDescriptors&&Object.keys(faceDescriptors).length)?'זיהוי פנים פעיל':'זיהוי פנים — פנים לא רשומים'}" style="font-size:16px">${(w.faceDescriptor||w.faceDescriptors&&Object.keys(faceDescriptors).length)?'🟢':'🟡'}</span>`:''}
+      ${w.faceAuth?`<span title="${(w.faceDescriptor||w.faceDescriptors&&Object.keys(w.faceDescriptors).length)?'זיהוי פנים פעיל':'זיהוי פנים — פנים לא רשומים'}" style="font-size:16px">${(w.faceDescriptor||w.faceDescriptors&&Object.keys(w.faceDescriptors).length)?'🟢':'🟡'}</span>`:''}
       ${w.faceAuth?`<button class="btn ${w.faceUpdateAllowed?'success':''}\" style="font-size:11px;padding:4px 8px" title="${w.faceUpdateAllowed?'עדכון פנים מאושר — לחץ לביטול':'אפשר לעובד לעדכן פנים מהטלפון'}" onclick="toggleFaceUpdate('${w.id}')">${w.faceUpdateAllowed?'📸✅':'📸'}</button>`:''}
       <button class="btn" style="font-size:11px;padding:4px 8px" onclick="openModal('edit-worker','${w.id}')">✏</button>
       <button class="btn warn" style="font-size:11px;padding:4px 8px" onclick="resetPass('${w.id}')">🔑</button>
@@ -2574,8 +2574,8 @@ function openModal(action,id){
           דרוש זיהוי פנים בכניסה
         </label>
         ${w?`<div style="margin-top:8px;display:flex;align-items:center;gap:8px">
-          <span style="font-size:12px;color:var(--txt3)">${(w.faceDescriptor||w.faceDescriptors&&Object.keys(faceDescriptors).length)?'✅ פנים רשומים':'⚠️ פנים לא רשומים'}</span>
-          <button type="button" class="btn" style="font-size:11px;padding:4px 10px" onclick="closeModal();openFaceRegister('${w.id}')">📸 ${(w.faceDescriptor||w.faceDescriptors&&Object.keys(faceDescriptors).length)?'עדכן פנים':'רשום פנים'}</button>
+          <span style="font-size:12px;color:var(--txt3)">${(w.faceDescriptor||w.faceDescriptors&&Object.keys(w.faceDescriptors).length)?'✅ פנים רשומים':'⚠️ פנים לא רשומים'}</span>
+          <button type="button" class="btn" style="font-size:11px;padding:4px 10px" onclick="closeModal();openFaceRegister('${w.id}')">📸 ${(w.faceDescriptor||w.faceDescriptors&&Object.keys(w.faceDescriptors).length)?'עדכן פנים':'רשום פנים'}</button>
         </div>`:'<div style="font-size:11px;color:var(--txt3);margin-top:6px">שמור עובד תחילה, אחר כך רשום פנים</div>'}
       </div>
       <div class="field" id="mf-perms-box" style="display:${wRole==='manager'?'none':'block'}">
