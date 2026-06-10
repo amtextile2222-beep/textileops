@@ -1539,6 +1539,23 @@ async function sendMsgToMgr(){
   }else{st.style.color='var(--red-txt)';st.textContent='שגיאה בשליחה — בדוק הגדרות טלגרם';}
 }
 
+// כניסה אוטומטית אחרי זיהוי פנים (ללא תלות ב-DOM של דף נוכחות)
+async function autoPunchIn(){
+  if(!S.user)return;
+  const w=S.workers.find(x=>x.id===S.user.id);
+  if(!w)return;
+  if(!w.sessions)w.sessions=[];
+  if(w.sessions.find(s=>!s.out))return; // כבר נכנס
+  const now=new Date();
+  w.sessions.push({in:now.toISOString(),out:null});
+  w.status='in';
+  w.checkin=w.sessions[0].in;
+  if(S.fbConnected)await fbSet('workers',w.id,w);
+  saveLS();
+  // עדכן תצוגת מנהל אם פתוחה
+  try{renderAdminWorkers();}catch(e){}
+}
+
 // ─── ATTENDANCE ──────────────────────────────────────────────
 async function punchIn(){
   if(!S.user)return;
@@ -4661,6 +4678,7 @@ function _completeFaceAuth(success){
     setTimeout(loadWaSettings,100);
     const firstPage=(w.permissions&&w.permissions.length)?w.permissions[0]:'dash';
     goPage(w.role==='manager'?'dash':firstPage);
+    setTimeout(autoPunchIn,300);
   }else{
     S._pendingUser=null;
     document.getElementById('login-screen').classList.remove('hidden');
@@ -4780,6 +4798,7 @@ async function _captureAndLogin(){
     setTimeout(loadWaSettings,100);
     const firstPage=(w.permissions&&w.permissions.length)?w.permissions[0]:'dash';
     goPage(w.role==='manager'?'dash':firstPage);
+    setTimeout(autoPunchIn,300);
   }catch(err){
     document.getElementById('face-reg-status').textContent='שגיאה: '+err.message+' — נסה שוב';
     document.getElementById('face-reg-btn').textContent='📸 צלם דגימה 1/5';
