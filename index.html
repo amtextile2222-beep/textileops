@@ -1195,7 +1195,7 @@ function migratePasswords(){
 }
 
 // ─── DAILY RESET ─────────────────────────────────────────────
-function checkDailyReset(){
+function runDailyReset(){
   const lastDate=localStorage.getItem('txops3_lastdate');
   const today=todayStr();
   if(lastDate&&lastDate!==today){
@@ -1217,10 +1217,23 @@ function checkDailyReset(){
     });
     S.activeTasks=[];
     saveLS();
+    renderAll();
   }
   localStorage.setItem('txops3_lastdate',today);
 }
-checkDailyReset();
+// רץ בטעינת הדף (מקרה שהאפליקציה נפתחה אחרי חצות)
+runDailyReset();
+// ─── טיימר לאיפוס יומי ב-00:01 בלילה ────────────────────────
+function scheduleMidnightReset(){
+  const now=new Date();
+  const nextMidnight=new Date(now.getFullYear(),now.getMonth(),now.getDate()+1,0,1,0);
+  const msUntil=nextMidnight-now;
+  setTimeout(()=>{
+    runDailyReset();
+    scheduleMidnightReset(); // קבע שוב ל-24 שעות הבאות
+  },msUntil);
+}
+scheduleMidnightReset();
 migratePasswords();
 migrateToSessions();
 migrateBreaks();
