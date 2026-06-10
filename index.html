@@ -1293,7 +1293,8 @@ async function sendDailyAttReport(){
   const present=S.workers.filter(w=>w.checkin&&w.checkin.slice(0,10)===today);
   const absent=S.workers.filter(w=>w.role!=='manager'&&(!w.checkin||w.checkin.slice(0,10)!==today));
   const fmtTime=iso=>{if(!iso)return '--:--';const d=new Date(iso);return(d.getHours()+'').padStart(2,'0')+':'+(d.getMinutes()+'').padStart(2,'0');};
-  const fmtNet=ms=>{if(!ms||ms<=0)return '';const h=Math.floor(ms/3600000);const m=Math.floor((ms%3600000)/60000);return ' ('+h+'ש '+m+'ד)'};
+  const fmtNet=ms=>{if(!ms||ms<=0)return '';const h=Math.floor(ms/3600000);const m=Math.floor((ms%3600000)/60000);return h+'ש '+m+'ד';};
+  // הודעת טקסט
   let msg='📋 דוח נוכחות — '+today+' יום '+dayName+'\n';
   msg+='─────────────────\n';
   msg+='✅ נכחו ('+present.length+'):\n';
@@ -1301,7 +1302,7 @@ async function sendDailyAttReport(){
     const ci=fmtTime(w.checkin);
     const co=w.checkout?fmtTime(w.checkout):'בתוך';
     const net=fmtNet(calcNetWork(w));
-    msg+='• '+w.name+' — '+w.dept+'\n  כניסה '+ci+' יציאה '+co+net+'\n';
+    msg+='• '+w.name+' — '+w.dept+'\n  כניסה '+ci+' יציאה '+co+(net?' ('+net+')':'')+'\n';
   });
   if(absent.length>0){
     msg+='─────────────────\n';
@@ -1311,6 +1312,32 @@ async function sendDailyAttReport(){
   msg+='─────────────────\n';
   msg+='סה"כ: '+present.length+'/'+(present.length+absent.length)+' עובדים';
   await sendTelegram(msg);
+  // שלח קובץ CSV להדפסה
+  try{
+    const token=(S.settings.waToken||'').trim();
+    const chatId=(S.settings.waChatId||'').trim();
+    if(!token||!chatId)return;
+    // בניית CSV
+    const BOM='﻿'; // תמיכה בעברית ב-Excel
+    let csv=BOM+'שם,מחלקה,תפקיד,כניסה,יציאה,שעות נטו,סטטוס\n';
+    present.forEach(w=>{
+      const ci=fmtTime(w.checkin);
+      const co=w.checkout?fmtTime(w.checkout):'בתוך';
+      const net=fmtNet(calcNetWork(w));
+      const role=w.role==='manager'?'מנהל':w.role==='supervisor'?'אחראי':w.role==='helper'?'עוזר':'עובד';
+      csv+='"'+w.name+'","'+w.dept+'","'+role+'","'+ci+'","'+co+'","'+net+'","נכח"\n';
+    });
+    absent.forEach(w=>{
+      const role=w.role==='manager'?'מנהל':w.role==='supervisor'?'אחראי':w.role==='helper'?'עוזר':'עובד';
+      csv+='"'+w.name+'","'+w.dept+'","'+role+'","--","--","","נעדר"\n';
+    });
+    const blob=new Blob([csv],{type:'text/csv;charset=utf-8'});
+    const fd=new FormData();
+    fd.append('chat_id',chatId);
+    fd.append('document',blob,'נוכחות_'+today+'.csv');
+    fd.append('caption','📎 קובץ נוכחות להדפסה — '+today);
+    fetch('https://api.telegram.org/bot'+token+'/sendDocument',{method:'POST',body:fd});
+  }catch(e){}
 }
 function scheduleDailyReport(){
   const now=new Date();
