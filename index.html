@@ -1314,12 +1314,21 @@ async function sendDailyAttReport(){
 }
 function scheduleDailyReport(){
   const now=new Date();
+  const today=todayStr();
+  const lastSent=localStorage.getItem('txops_daily_report_sent');
   const target=new Date(now.getFullYear(),now.getMonth(),now.getDate(),15,15,0);
-  if(target<=now)target.setDate(target.getDate()+1); // אם עברנו 15:15 — קבע למחר
+  // אם עברנו 15:15 ועדיין לא נשלח היום — שלח מיד
+  if(now>=target && lastSent!==today){
+    localStorage.setItem('txops_daily_report_sent',today);
+    setTimeout(async()=>{await sendDailyAttReport();},3000); // המתן 3 שניות לטעינת נתונים
+  }
+  // קבע טיימר ל-15:15 הבא
+  if(now>=target)target.setDate(target.getDate()+1);
   const msUntil=target-now;
   setTimeout(async()=>{
+    localStorage.setItem('txops_daily_report_sent',todayStr());
     await sendDailyAttReport();
-    scheduleDailyReport(); // קבע שוב ל-24 שעות הבאות
+    scheduleDailyReport();
   },msUntil);
 }
 scheduleDailyReport();
