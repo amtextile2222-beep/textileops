@@ -2626,7 +2626,7 @@ async function _workerCaptureFace(){
   // 5 דגימות — שמור וסגור הרשאה
   const w=S.workers.find(x=>x.id===_faceRegWorkerId);
   if(w){
-    w.faceDescriptors=_faceRegSamples.slice();
+    w.faceDescriptors=Object.fromEntries(_faceRegSamples.map((s,i)=>[i,s]));
     w.faceUpdateAllowed=false;
     if(S.fbConnected)await fbSet('workers',w.id,w);
     saveLS();
@@ -4577,7 +4577,8 @@ async function _runFaceAuthLoop(){
     if(video.readyState<2)return;
     const det=await faceapi.detectSingleFace(video,opts).withFaceLandmarks(true).withFaceDescriptor();
     if(!det){successStreak=0;document.getElementById('face-auth-status').textContent='לא זוהו פנים — קרב/י למצלמה';return;}
-    const rawList=S._pendingUser.faceDescriptors||[S._pendingUser.faceDescriptor];
+    const fd=S._pendingUser.faceDescriptors;
+    const rawList=fd?Object.values(fd):[S._pendingUser.faceDescriptor];
     const storedList=rawList.filter(Boolean).map(d=>new Float32Array(Object.values(d)));
     const dist=Math.min(...storedList.map(s=>faceapi.euclideanDistance(det.descriptor,s)));
     if(dist<0.55){
@@ -4741,7 +4742,7 @@ async function _captureAndLogin(){
       _faceRegSamples=[];
       return;
     }
-    w.faceDescriptors=_faceRegSamples.slice();
+    w.faceDescriptors=Object.fromEntries(_faceRegSamples.map((s,i)=>[i,s]));
     w.faceUpdateAllowed=false;
     _faceRegSamples=[];
     if(S.fbConnected)await fbSet('workers',w.id,w);
