@@ -295,6 +295,9 @@ code{background:var(--bg2);border:0.5px solid var(--b);border-radius:4px;padding
           <button class="btn danger" onclick="punchOut()">🚪 <span data-i18n="att_out">יציאה</span></button>
         </div>
         <div class="sep" style="width:100%"></div>
+        <div id="att-face-update-box" class="hidden" style="width:100%">
+          <button class="btn warn" style="width:100%;justify-content:center;font-size:13px" onclick="workerUpdateFace()">📸 עדכן פנים — מנהל אישר</button>
+        </div>
         <button class="btn" style="width:100%;justify-content:center;font-size:13px" onclick="openMsgToMgr()">📩 שלח הודעה למנהל</button>
         <div id="msg-to-mgr-box" class="hidden" style="width:100%;display:flex;flex-direction:column;gap:6px">
           <textarea id="msg-to-mgr-txt" placeholder="כתוב הודעה למנהל... (אופציונלי אם שולח תמונה)" rows="3" style="width:100%;border-radius:var(--r);border:1px solid var(--b2);background:var(--bg2);color:var(--txt);font-size:13px;padding:8px;resize:none;font-family:inherit;box-sizing:border-box"></textarea>
@@ -1638,6 +1641,12 @@ function fmtNetH(ms){
 }
 function fAtt(f){S.attFilter=f;renderAtt();}
 function renderAtt(){
+  // הצג/הסתר כפתור עדכון פנים לעובד המחובר
+  const faceBox=document.getElementById('att-face-update-box');
+  if(faceBox&&S.user){
+    const me=S.workers.find(x=>x.id===S.user.id);
+    faceBox.classList.toggle('hidden',!(me&&me.faceUpdateAllowed));
+  }
   const inW=S.workers.filter(w=>w.status==='in');
   const outW=S.workers.filter(w=>w.status==='out');
   document.getElementById('att-in').textContent=inW.length;
@@ -2381,6 +2390,7 @@ function renderAdmin(){
       <div style="font-size:11px;color:var(--txt3)">${esc(w.dept)} · ${w.role==='manager'?'מנהל':w.role==='supervisor'?'אחראי':w.role==='helper'?'עוזר':'עובד'} · @${esc(w.user)}</div></div>
       ${w.requireFactoryIP?`<span title="חייב WiFi מפעל" style="font-size:16px">🏭</span>`:''}
       ${w.faceAuth?`<span title="${(w.faceDescriptor||w.faceDescriptors?.length)?'זיהוי פנים פעיל':'זיהוי פנים — פנים לא רשומים'}" style="font-size:16px">${(w.faceDescriptor||w.faceDescriptors?.length)?'🟢':'🟡'}</span>`:''}
+      ${w.faceAuth?`<button class="btn ${w.faceUpdateAllowed?'success':''}\" style="font-size:11px;padding:4px 8px" title="${w.faceUpdateAllowed?'עדכון פנים מאושר — לחץ לביטול':'אפשר לעובד לעדכן פנים מהטלפון'}" onclick="toggleFaceUpdate('${w.id}')">${w.faceUpdateAllowed?'📸✅':'📸'}</button>`:''}
       <button class="btn" style="font-size:11px;padding:4px 8px" onclick="openModal('edit-worker','${w.id}')">✏</button>
       <button class="btn warn" style="font-size:11px;padding:4px 8px" onclick="resetPass('${w.id}')">🔑</button>
       <button class="btn danger" style="font-size:11px;padding:4px 8px" onclick="delWorker('${w.id}')">🗑</button>
@@ -2561,6 +2571,91 @@ function openModal(action,id){
         </div>
       </div>`;
   }
+}
+async function toggleFaceUpdate(id){
+  const w=S.workers.find(x=>x.id===id);if(!w)return;
+  w.faceUpdateAllowed=!w.faceUpdateAllowed;
+  if(S.fbConnected)await fbSet('workers',w.id,w);
+  saveLS();renderAdmin();
+}
+async function workerUpdateFace(){
+  if(!S.user)return;
+  const w=S.workers.find(x=>x.id===S.user.id);
+  if(!w||!w.faceUpdateAllowed){alert('אין אישור לעדכון פנים');return;}
+  _faceRegWorkerId=w.id;
+  _faceRegSamples=[];
+  const btn=document.getElementById('face-reg-btn');
+  btn.textContent='📸 צלם דגימה 1/5';
+  btn.onclick=_workerCaptureFace;
+  document.getElementById('face-reg-title').textContent='עדכון פנים — '+esc(w.name);
+  document.getElementById('face-reg-status').textContent='טוען מודלי זיהוי...';
+  btn.disabled=true;
+  document.querySelector('#face-reg-screen .btn:not(.primary)').style.display='none';
+  document.getElementById('app-screen').classList.add('hidden');
+  document.getElementById('face-reg-screen').classList.remove('hidden');
+  const ok=await loadFaceModels();
+  if(!ok){document.getElementById('face-reg-status').textContent='שגיאה בטעינת מודלים';return;}
+  try{
+    _faceRegStream=await navigator.mediaDevices.getUserMedia({video:{facingMode:'user'},audio:false});
+    const video=document.getElementById('face-reg-video');
+    video.srcObject=_faceRegStream;
+    await new Promise(r=>video.onloadedmetadata=r);
+    document.getElementById('face-reg-status').textContent='מצלמה פעילה — לחץ "צלם דגימה 1/5"';
+    btn.disabled=false;
+  }catch(e){
+    document.getElementById('face-reg-status').innerHTML='⛔ הגישה למצלמה נחסמה.<br><button class="btn" style="margin-top:8px;font-size:13px" onclick="workerUpdateFace()">🔄 נסה שוב</button>';
+  }
+}
+async function _workerCaptureFace(){
+  const video=document.getElementById('face-reg-video');
+  const statusEl=document.getElementById('face-reg-status');
+  const btnEl=document.getElementById('face-reg-btn');
+  statusEl.textContent='מזהה פנים...';
+  btnEl.disabled=true;
+  const opts=new faceapi.TinyFaceDetectorOptions({inputSize:224,scoreThreshold:0.5});
+  const det=await faceapi.detectSingleFace(video,opts).withFaceLandmarks(true).withFaceDescriptor();
+  if(!det){statusEl.textContent='לא זוהו פנים — נסה שוב';btnEl.disabled=false;return;}
+  _faceRegSamples.push(Array.from(det.descriptor));
+  const n=_faceRegSamples.length;
+  if(n<5){
+    statusEl.textContent='✅ דגימה '+n+'/5 — זוז קצת והמשך';
+    btnEl.textContent='📸 צלם דגימה '+(n+1)+'/5';
+    btnEl.disabled=false;
+    return;
+  }
+  // 5 דגימות — שמור וסגור הרשאה
+  const w=S.workers.find(x=>x.id===_faceRegWorkerId);
+  if(w){
+    w.faceDescriptors=_faceRegSamples.slice();
+    w.faceUpdateAllowed=false;
+    if(S.fbConnected)await fbSet('workers',w.id,w);
+    saveLS();
+    try{
+      const snap=document.createElement('canvas');
+      snap.width=video.videoWidth;snap.height=video.videoHeight;
+      snap.getContext('2d').drawImage(video,0,0);
+      snap.toBlob(async blob=>{
+        if(!blob)return;
+        const token=(S.settings.waToken||'').trim();
+        const chatId=(S.settings.waChatId||'').trim();
+        if(!token||!chatId)return;
+        const now=new Date().toLocaleTimeString('he-IL',{hour:'2-digit',minute:'2-digit'});
+        const fd=new FormData();
+        fd.append('chat_id',chatId);fd.append('photo',blob,'face.jpg');
+        fd.append('caption','📸 TextileOps — עובד עדכן פנים (5 דגימות)\n👤 עובד: '+w.name+'\n🕐 שעה: '+now);
+        fetch('https://api.telegram.org/bot'+token+'/sendPhoto',{method:'POST',body:fd});
+      },'image/jpeg',0.8);
+    }catch(e){}
+  }
+  _faceRegSamples=[];
+  if(_faceRegStream){_faceRegStream.getTracks().forEach(t=>t.stop());_faceRegStream=null;}
+  document.getElementById('face-reg-screen').classList.add('hidden');
+  document.getElementById('app-screen').classList.remove('hidden');
+  document.querySelector('#face-reg-screen .btn:not(.primary)').style.display='';
+  document.getElementById('face-reg-btn').textContent='📸 צלם דגימה 1/5';
+  document.getElementById('face-reg-btn').onclick=captureFaceDescriptor;
+  alert('✅ פנים עודכנו בהצלחה!');
+  renderAtt();
 }
 async function resetPass(id){
   const w=S.workers.find(x=>x.id===id);if(!w)return;
