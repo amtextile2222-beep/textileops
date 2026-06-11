@@ -1315,6 +1315,11 @@ async function sendDailyAttReport(){
   const dayName=dayNames[new Date().getDay()];
   const present=S.workers.filter(w=>w.checkin&&w.checkin.slice(0,10)===today);
   const absent=S.workers.filter(w=>w.role!=='manager'&&(!w.checkin||w.checkin.slice(0,10)!==today));
+  // יום חופש/חג — אף אחד לא נכח: שורה אחת במקום דוח מלא + CSV
+  if(!present.length){
+    await sendTelegram('📋 דוח נוכחות — '+today+' יום '+dayName+'\nאין נוכחות היום');
+    return;
+  }
   const fmtTime=iso=>{if(!iso)return '--:--';const d=new Date(iso);return(d.getHours()+'').padStart(2,'0')+':'+(d.getMinutes()+'').padStart(2,'0');};
   const fmtNet=ms=>{if(!ms||ms<=0)return '';const h=Math.floor(ms/3600000);const m=Math.floor((ms%3600000)/60000);return h+'ש '+m+'ד';};
   // הודעת טקסט
