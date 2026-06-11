@@ -946,9 +946,9 @@ code{background:var(--bg2);border:0.5px solid var(--b);border-radius:4px;padding
 <!-- FIREBASE SDK -->
 <script type="module">
 import{initializeApp}from'https://www.gstatic.com/firebasejs/10.12.0/firebase-app.js';
-import{getFirestore,collection,doc,getDoc,setDoc,onSnapshot,query,orderBy,limit,serverTimestamp,deleteDoc,updateDoc}from'https://www.gstatic.com/firebasejs/10.12.0/firebase-firestore.js';
+import{getFirestore,collection,doc,getDoc,setDoc,onSnapshot,query,orderBy,limit,serverTimestamp,deleteDoc,updateDoc,runTransaction}from'https://www.gstatic.com/firebasejs/10.12.0/firebase-firestore.js';
 import{getAuth,signInAnonymously}from'https://www.gstatic.com/firebasejs/10.12.0/firebase-auth.js';
-window._fb={initializeApp,getFirestore,collection,doc,getDoc,setDoc,onSnapshot,query,orderBy,limit,serverTimestamp,deleteDoc,updateDoc,getAuth,signInAnonymously};
+window._fb={initializeApp,getFirestore,collection,doc,getDoc,setDoc,onSnapshot,query,orderBy,limit,serverTimestamp,deleteDoc,updateDoc,runTransaction,getAuth,signInAnonymously};
 window._fbReady=true;
 document.dispatchEvent(new Event('fbSDKReady'));
 </script>
@@ -1362,19 +1362,22 @@ async function sendDailyAttReport(){
     fetch('https://api.telegram.org/bot'+token+'/sendDocument',{method:'POST',body:fd});
   }catch(e){}
 }
-// נעילה כפולה: localStorage (מקומי) + Firebase (בין מכשירים) — מונע דוח כפול
+// נעילה אטומית ב-Firestore Transaction — מונע דוח כפול גם כששני מכשירים יורים באותה שנייה
 async function _claimDailyReport(){
   const today=todayStr();
   if(localStorage.getItem('txops_daily_report_sent')===today)return false;
+  // בלי Firebase מחובר אין דוח — מונע דוח ריק/ישן ממכשיר לא מסונכרן
+  if(!S.fbConnected||!db)return false;
+  try{
+    const{runTransaction,doc}=window._fb;
+    await runTransaction(db,async tx=>{
+      const ref=doc(db,'appSettings','dailyReport');
+      const snap=await tx.get(ref);
+      if(snap.exists()&&snap.data().date===today)throw new Error('already-sent');
+      tx.set(ref,{date:today});
+    });
+  }catch(e){return false;} // מכשיר אחר זכה בנעילה — לא שולחים
   localStorage.setItem('txops_daily_report_sent',today);
-  if(S.fbConnected&&db){
-    try{
-      const{getDoc,doc}=window._fb;
-      const snap=await getDoc(doc(db,'appSettings','dailyReport'));
-      if(snap.exists()&&snap.data().date===today)return false; // מכשיר אחר כבר שלח
-      await fbSet('appSettings','dailyReport',{date:today});
-    }catch(e){}
-  }
   return true;
 }
 function scheduleDailyReport(){
