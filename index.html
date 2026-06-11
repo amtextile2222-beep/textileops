@@ -1981,8 +1981,11 @@ function fillDeptSelects(){
 function renderScanActive(){
   fillDeptSelects();
   const el=document.getElementById('scan-active');if(!el)return;
-  if(!S.activeTasks.length){el.innerHTML='<div style="text-align:center;padding:2rem;color:var(--txt3)">📭 אין משימות פעילות</div>';return;}
-  el.innerHTML=S.activeTasks.slice(0,8).map(t=>`
+  // עובד רגיל רואה רק את המשימות שלו
+  const isMgr=S.user?.role==='manager'||S.user?.role==='supervisor';
+  const vis=isMgr?S.activeTasks:S.activeTasks.filter(t=>t.workerId===S.user?.id);
+  if(!vis.length){el.innerHTML='<div style="text-align:center;padding:2rem;color:var(--txt3)">📭 אין משימות פעילות</div>';return;}
+  el.innerHTML=vis.slice(0,8).map(t=>`
     <div class="task-card">
       <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:6px">
         <div><div style="font-size:13px;font-weight:500;color:var(--txt)">${esc(t.workerName)}</div><div style="font-size:11px;color:var(--txt3)">${esc(t.dept)}</div></div>
@@ -1997,17 +2000,22 @@ function renderScanActive(){
 
 // ─── TASKS ──────────────────────────────────────────────────
 function renderTasks(){
-  document.getElementById('tk-act').textContent=S.activeTasks.length;
-  document.getElementById('tk-done').textContent=S.histTasks.length;
-  document.getElementById('tk-units').textContent=sumUnitsDedup(S.histTasks);
-  if(S.histTasks.length){
-    const avg=Math.round(S.histTasks.reduce((s,t)=>s+(t.duration||0),0)/S.histTasks.length);
+  // עובד רגיל רואה רק את המשימות שלו; מנהל/אחראי רואים הכל
+  const isMgr=S.user?.role==='manager'||S.user?.role==='supervisor';
+  const visActive=isMgr?S.activeTasks:S.activeTasks.filter(t=>t.workerId===S.user?.id);
+  const visHist=isMgr?S.histTasks:S.histTasks.filter(t=>t.workerId===S.user?.id);
+  document.getElementById('tk-act').textContent=visActive.length;
+  document.getElementById('tk-done').textContent=visHist.length;
+  document.getElementById('tk-units').textContent=sumUnitsDedup(visHist);
+  if(visHist.length){
+    const avg=Math.round(visHist.reduce((s,t)=>s+(t.duration||0),0)/visHist.length);
     document.getElementById('tk-avg').textContent=fmtM(avg);
-  }
+  }else{document.getElementById('tk-avg').textContent='—';}
+  const fn=document.getElementById('tk-f-name');if(fn)fn.style.display=isMgr?'':'none';
   const thresh=S.settings.thresh*60;
   const al=document.getElementById('tk-active-list');
-  if(!S.activeTasks.length){al.innerHTML='<div style="text-align:center;padding:2rem;color:var(--txt3)">📷 סרוק ברקוד להתחלת משימה</div>';}
-  else{al.innerHTML=S.activeTasks.map(t=>{
+  if(!visActive.length){al.innerHTML='<div style="text-align:center;padding:2rem;color:var(--txt3)">📷 סרוק ברקוד להתחלת משימה</div>';}
+  else{al.innerHTML=visActive.map(t=>{
     const over=t.elapsed>thresh;
     return`<div class="task-card">
       <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:6px">
@@ -2033,7 +2041,9 @@ function renderTaskHist(){
   const fProd=(document.getElementById('tk-f-prod')?.value||'').trim().toLowerCase();
   const fType=(document.getElementById('tk-f-type')?.value||'').trim().toLowerCase();
   const fDate=(document.getElementById('tk-f-date')?.value||'').trim();
-  const filtered=S.histTasks.filter(t=>{
+  const isMgr=S.user?.role==='manager'||S.user?.role==='supervisor';
+  const base=isMgr?S.histTasks:S.histTasks.filter(t=>t.workerId===S.user?.id);
+  const filtered=base.filter(t=>{
     if(fName&&!t.workerName?.toLowerCase().includes(fName))return false;
     if(fProd&&!String(t.prod||'').toLowerCase().includes(fProd))return false;
     if(fType&&!String(t.taskType||'').toLowerCase().includes(fType))return false;
@@ -2061,7 +2071,7 @@ function renderTaskHist(){
     if(filtered.length>_tkHistLimit){
       more.innerHTML=`<button class="btn" onclick="_tkHistLimit+=20;renderTaskHist()">טען עוד (${filtered.length-_tkHistLimit} נוספות)</button>`;
     }else{
-      more.innerHTML=filtered.length>0&&filtered.length<S.histTasks.length?`<div style="font-size:11px;color:var(--txt3)">מוצגות ${filtered.length} תוצאות</div>`:'';
+      more.innerHTML=filtered.length>0&&filtered.length<base.length?`<div style="font-size:11px;color:var(--txt3)">מוצגות ${filtered.length} תוצאות</div>`:'';
     }
   }
 }
