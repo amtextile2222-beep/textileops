@@ -1401,6 +1401,49 @@ function scheduleDailyReport(){
 }
 scheduleDailyReport();
 
+// ─── התראת 15:45 — עובדים שלא החתימו יציאה ─────────────
+async function _claimPunchOutAlert(){
+  const today=todayStr();
+  if(localStorage.getItem('txops_poalert_sent')===today)return false;
+  if(!S.fbConnected||!db)return false;
+  try{
+    const{runTransaction,doc}=window._fb;
+    await runTransaction(db,async tx=>{
+      const ref=doc(db,'appSettings','punchOutAlert');
+      const snap=await tx.get(ref);
+      if(snap.exists()&&snap.data().date===today)throw new Error('already-sent');
+      tx.set(ref,{date:today});
+    });
+  }catch(e){return false;}
+  localStorage.setItem('txops_poalert_sent',today);
+  return true;
+}
+async function sendPunchOutAlert(){
+  const stillIn=S.workers.filter(w=>w.status==='in');
+  if(!stillIn.length)return;
+  let msg='⏰ TextileOps — עובדים שלא החתימו יציאה:\n';
+  stillIn.forEach(w=>{
+    const ci=w.checkin?new Date(w.checkin):null;
+    msg+='• '+w.name+' — '+w.dept+(ci?' (כניסה '+pad2(ci.getHours())+':'+pad2(ci.getMinutes())+')':'')+'\n';
+  });
+  msg+='\nלתיקון: ניהול משימות ← ✏️ ליד העובד';
+  await sendTelegram(msg);
+}
+function schedulePunchOutAlert(){
+  const now=new Date();
+  const target=new Date(now.getFullYear(),now.getMonth(),now.getDate(),15,45,0);
+  // אם עברנו 15:45 וטרם נבדק היום — בדוק עכשיו (אחרי טעינת נתונים)
+  if(now>=target){
+    setTimeout(async()=>{if(await _claimPunchOutAlert())await sendPunchOutAlert();},5000);
+    target.setDate(target.getDate()+1);
+  }
+  setTimeout(async()=>{
+    if(await _claimPunchOutAlert())await sendPunchOutAlert();
+    schedulePunchOutAlert();
+  },target-now);
+}
+schedulePunchOutAlert();
+
 migratePasswords();
 migrateToSessions();
 migrateBreaks();
