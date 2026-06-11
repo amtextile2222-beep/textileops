@@ -978,6 +978,19 @@ const fmtS=s=>pad2(Math.floor(s/3600))+':'+pad2(Math.floor(s/60)%60)+':'+pad2(s%
 const fmtM=s=>Math.round(s/60)+" דק'";
 const todayStr=()=>{const d=new Date();return d.getFullYear()+'-'+pad2(d.getMonth()+1)+'-'+pad2(d.getDate());};
 const esc=s=>String(s??'').replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;');
+// ברקוד מלא של משימה (תאימות למשימות ישנות בלי שדה bc)
+const taskBc=t=>t.bc||String(t.cust)+String(t.prod)+String(t.size||'0')+String(t.qty).padStart(3,'0')+String(t.col);
+// ספירת יחידות בלי כפילויות: אותו ברקוד + אותו שלב + אותו יום = נספר פעם אחת
+// (שני עובדים שחולקים ברקוד באותו שלב לא מכפילים את הכמות)
+function unitKey(t){
+  const d=t.startTime instanceof Date?t.startTime:new Date(t.startTime);
+  return taskBc(t)+'|'+(t.taskType||'').trim().toLowerCase()+'|'+d.getFullYear()+'-'+pad2(d.getMonth()+1)+'-'+pad2(d.getDate());
+}
+function sumUnitsDedup(tasks){
+  const seen=new Set();let total=0;
+  tasks.forEach(t=>{const k=unitKey(t);if(seen.has(k))return;seen.add(k);total+=(t.qty||0);});
+  return total;
+}
 
 // ─── STATE ──────────────────────────────────────────────────
 let S={
@@ -1936,17 +1949,23 @@ async function submitBc(){
   const u=S.user;
   const wu=S.workers.find(x=>x.id===u.id);
   if(!wu||wu.status!=='in'){alert('לא ניתן להתחיל משימה — יש להירשם כנוכח תחילה (כניסה לעבודה בלשונית נוכחות)');return;}
-  // close existing task for this worker
+  // ברקוד שכבר בעבודה אצל עובד אחר באותו שלב — אישור הצטרפות
+  const otherSame=S.activeTasks.find(t=>t.workerId!==u.id&&taskBc(t)===raw&&(t.taskType||'').trim().toLowerCase()===taskType.toLowerCase());
+  if(otherSame&&!confirm('הברקוד הזה כבר בעבודה אצל '+otherSame.workerName+(otherSame.taskType?' ('+otherSame.taskType+')':'')+'.\nלהצטרף למשימה? (היחידות ייספרו פעם אחת בדוחות)'))return;
+  // משימה פעילה קיימת — לסגור אותה או לעבוד במקביל
   const existIdx=S.activeTasks.findIndex(t=>t.workerId===u.id);
   if(existIdx>-1){
-    const t=S.activeTasks[existIdx];
-    const endTime=new Date();
-    const done={...t,endTime,duration:Math.round((endTime-new Date(t.startTime))/1000)};
-    S.histTasks.unshift(done);
-    S.activeTasks.splice(existIdx,1);
-    if(S.fbConnected){await fbDel('activeTasks',String(t.id));await fbSet('histTasks',String(t.id),{...done,startTime:done.startTime instanceof Date?done.startTime.toISOString():done.startTime,endTime:done.endTime.toISOString()});}
+    const prev=S.activeTasks[existIdx];
+    const parallel=confirm('יש לך משימה פעילה (מוצר '+prev.prod+').\n\nאישור = לעבוד על שתי המשימות במקביל\nביטול = לסגור את הקודמת ולהתחיל את החדשה');
+    if(!parallel){
+      const endTime=new Date();
+      const done={...prev,endTime,duration:Math.round((endTime-new Date(prev.startTime))/1000)};
+      S.histTasks.unshift(done);
+      S.activeTasks.splice(existIdx,1);
+      if(S.fbConnected){await fbDel('activeTasks',String(prev.id));await fbSet('histTasks',String(prev.id),{...done,startTime:done.startTime instanceof Date?done.startTime.toISOString():done.startTime,endTime:done.endTime.toISOString()});}
+    }
   }
-  const newTask={id:String(S.nextTId++),workerId:u.id,workerName:u.name,dept:taskDept||u.dept,cust,prod,size,qty,col,taskType,startTime:new Date(),elapsed:0};
+  const newTask={id:String(S.nextTId++),workerId:u.id,workerName:u.name,dept:taskDept||u.dept,cust,prod,size,qty,col,taskType,bc:raw,startTime:new Date(),elapsed:0};
   S.activeTasks.unshift(newTask);
   if(S.fbConnected)await fbSet('activeTasks',newTask.id,{...newTask,startTime:newTask.startTime.toISOString()});
   document.getElementById('bc-inp').value='';parseBc('');
@@ -1980,7 +1999,7 @@ function renderScanActive(){
 function renderTasks(){
   document.getElementById('tk-act').textContent=S.activeTasks.length;
   document.getElementById('tk-done').textContent=S.histTasks.length;
-  document.getElementById('tk-units').textContent=S.histTasks.reduce((s,t)=>s+t.qty,0);
+  document.getElementById('tk-units').textContent=sumUnitsDedup(S.histTasks);
   if(S.histTasks.length){
     const avg=Math.round(S.histTasks.reduce((s,t)=>s+(t.duration||0),0)/S.histTasks.length);
     document.getElementById('tk-avg').textContent=fmtM(avg);
@@ -2077,7 +2096,7 @@ function buildRep(){
   document.getElementById('rp-tot').textContent=fl.length;
   const totalS=fl.reduce((s,t)=>s+(t.duration||t.elapsed||0),0);
   document.getElementById('rp-time').textContent=(totalS/3600).toFixed(1)+" שע'";
-  document.getElementById('rp-units').textContent=fl.reduce((s,t)=>s+t.qty,0);
+  document.getElementById('rp-units').textContent=sumUnitsDedup(fl);
   const done=fl.filter(t=>t.done).length;
   document.getElementById('rp-eff').textContent=fl.length?Math.round(done/fl.length*100)+'%':'—';
   document.getElementById('rp-body').innerHTML=fl.map(t=>{
@@ -2444,7 +2463,13 @@ async function tsStartTask(){
   const cust=raw.slice(0,2),prod=raw.slice(2,7),size=raw.slice(7,8),qty=parseInt(raw.slice(8,11))||0,col=raw.slice(11,13);
   const taskType=(document.getElementById('ts-tasktype').value||'').trim();
   const taskDept=(document.getElementById('ts-dept').value||'').trim();
-  const task={id:String(S.nextTId++),workerId:w.id,workerName:w.name,dept:taskDept||w.dept,cust,prod,size,qty,col,taskType,startTime:new Date(),elapsed:0};
+  // ברקוד שכבר בעבודה אצל עובד אחר באותו שלב — אישור הצטרפות
+  const otherSame=S.activeTasks.find(t=>t.workerId!==w.id&&taskBc(t)===raw&&(t.taskType||'').trim().toLowerCase()===taskType.toLowerCase());
+  if(otherSame&&!confirm('הברקוד הזה כבר בעבודה אצל '+otherSame.workerName+(otherSame.taskType?' ('+otherSame.taskType+')':'')+'.\nלצרף את '+w.name+' למשימה? (היחידות ייספרו פעם אחת בדוחות)'))return;
+  // משימה פעילה קיימת לעובד — אישור עבודה במקביל
+  const mine=S.activeTasks.find(t=>t.workerId===w.id);
+  if(mine&&!confirm('ל'+w.name+' יש כבר משימה פעילה (מוצר '+mine.prod+').\nלהוסיף משימה נוספת במקביל?'))return;
+  const task={id:String(S.nextTId++),workerId:w.id,workerName:w.name,dept:taskDept||w.dept,cust,prod,size,qty,col,taskType,bc:raw,startTime:new Date(),elapsed:0};
   S.activeTasks.push(task);
   if(S.fbConnected)await fbSet('activeTasks',String(task.id),{...task,startTime:task.startTime.toISOString()});
   saveLS();renderMgrTasks();
@@ -2554,16 +2579,22 @@ async function mgrStartTask(){
   const cust=raw.slice(0,2),prod=raw.slice(2,7),size=raw.slice(7,8),qty=parseInt(raw.slice(8,11))||0,col=raw.slice(11,13);
   const taskType=(document.getElementById('mgr-tasktype').value||'').trim();
   const taskDept=(document.getElementById('mgr-dept').value||'').trim();
-  // close existing
+  // ברקוד שכבר בעבודה אצל עובד אחר באותו שלב — אישור הצטרפות
+  const otherSame=S.activeTasks.find(t=>t.workerId!==empId&&taskBc(t)===raw&&(t.taskType||'').trim().toLowerCase()===taskType.toLowerCase());
+  if(otherSame&&!confirm('הברקוד הזה כבר בעבודה אצל '+otherSame.workerName+(otherSame.taskType?' ('+otherSame.taskType+')':'')+'.\nלצרף את '+w.name+' למשימה? (היחידות ייספרו פעם אחת בדוחות)'))return;
+  // משימה פעילה קיימת — לסגור אותה או לעבוד במקביל
   const existIdx=S.activeTasks.findIndex(t=>t.workerId===empId);
   if(existIdx>-1){
-    const t=S.activeTasks[existIdx];
-    const endTime=new Date();
-    const done={...t,endTime,duration:Math.round((endTime-new Date(t.startTime))/1000)};
-    S.histTasks.unshift(done);S.activeTasks.splice(existIdx,1);
-    if(S.fbConnected){await fbDel('activeTasks',String(t.id));await fbSet('histTasks',String(t.id),{...done,startTime:done.startTime instanceof Date?done.startTime.toISOString():done.startTime,endTime:done.endTime.toISOString()});}
+    const prev=S.activeTasks[existIdx];
+    const parallel=confirm('ל'+w.name+' יש משימה פעילה (מוצר '+prev.prod+').\n\nאישור = עבודה על שתי המשימות במקביל\nביטול = סגירת הקודמת והתחלת החדשה');
+    if(!parallel){
+      const endTime=new Date();
+      const done={...prev,endTime,duration:Math.round((endTime-new Date(prev.startTime))/1000)};
+      S.histTasks.unshift(done);S.activeTasks.splice(existIdx,1);
+      if(S.fbConnected){await fbDel('activeTasks',String(prev.id));await fbSet('histTasks',String(prev.id),{...done,startTime:done.startTime instanceof Date?done.startTime.toISOString():done.startTime,endTime:done.endTime.toISOString()});}
+    }
   }
-  const newTask={id:String(S.nextTId++),workerId:empId,workerName:w.name,dept:taskDept||w.dept,cust,prod,size,qty,col,taskType,startTime:new Date(),elapsed:0};
+  const newTask={id:String(S.nextTId++),workerId:empId,workerName:w.name,dept:taskDept||w.dept,cust,prod,size,qty,col,taskType,bc:raw,startTime:new Date(),elapsed:0};
   S.activeTasks.unshift(newTask);
   if(S.fbConnected)await fbSet('activeTasks',newTask.id,{...newTask,startTime:newTask.startTime.toISOString()});
   document.getElementById('mgr-bc-inp').value='';parseMgrBc('');
@@ -3689,6 +3720,7 @@ function calcCosts(){
 
   // חישוב עלות לכל משימה
   let totalWages=0, totalOverhead=0, totalNonTaskWage=0;
+  const _unitSeen=new Set();
   const enriched=tasks.map(t=>{
     const d=(t.startTime instanceof Date?t.startTime:new Date(t.startTime)).toISOString().slice(0,10);
     const dayTotalSec=byDay[d]?.totalSec||1;
@@ -3713,7 +3745,10 @@ function calcCosts(){
     totalOverhead+=overhead;
     if(nonTaskShare)totalNonTaskWage+=nonTaskShare;
 
-    return{...t,wage,nonTaskShare,overhead,total:wage+nonTaskShare+overhead,date:d,taskRatio};
+    // ספירת יחידות פעם אחת לברקוד+שלב+יום (עובדים שחולקים ברקוד)
+    const ukey=taskBc(t)+'|'+(t.taskType||'').trim().toLowerCase()+'|'+d;
+    const unitCounted=!_unitSeen.has(ukey);_unitSeen.add(ukey);
+    return{...t,wage,nonTaskShare,overhead,total:wage+nonTaskShare+overhead,date:d,taskRatio,unitCounted};
   });
 
   const grandTotal=totalWages+totalOverhead;
@@ -3744,7 +3779,7 @@ function renderCostTab(){
     enriched.forEach(t=>{
       const k=t.prod||'—';
       if(!map[k])map[k]={prod:k,tasks:0,wage:0,overhead:0,total:0,qty:0,custs:new Set()};
-      map[k].tasks++;map[k].wage+=t.wage;map[k].overhead+=t.overhead;map[k].total+=t.total;map[k].qty+=t.qty||0;map[k].custs.add(t.cust);
+      map[k].tasks++;map[k].wage+=t.wage;map[k].overhead+=t.overhead;map[k].total+=t.total;map[k].qty+=t.unitCounted?(t.qty||0):0;map[k].custs.add(t.cust);
     });
     const rows=Object.values(map).sort((a,b)=>b.total-a.total);
     el.innerHTML=`<div style="overflow-x:auto"><table style="width:100%;border-collapse:collapse;font-size:13px">
@@ -3773,7 +3808,7 @@ function renderCostTab(){
     enriched.forEach(t=>{
       const k=t.cust||'—';
       if(!map[k])map[k]={cust:k,tasks:0,wage:0,overhead:0,total:0,qty:0,prods:new Set()};
-      map[k].tasks++;map[k].wage+=t.wage;map[k].overhead+=t.overhead;map[k].total+=t.total;map[k].qty+=t.qty||0;map[k].prods.add(t.prod);
+      map[k].tasks++;map[k].wage+=t.wage;map[k].overhead+=t.overhead;map[k].total+=t.total;map[k].qty+=t.unitCounted?(t.qty||0):0;map[k].prods.add(t.prod);
     });
     const rows=Object.values(map).sort((a,b)=>b.total-a.total);
     el.innerHTML=`<div style="overflow-x:auto"><table style="width:100%;border-collapse:collapse;font-size:13px">
