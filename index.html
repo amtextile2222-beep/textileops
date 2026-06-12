@@ -1013,6 +1013,8 @@ let S={
   settings:{thresh:60,absent:5,waEnabled:false,waToken:'',waChatId:'',waInterval:60,waFrom:'07:00',waTo:'18:00',waLong:true,waAbsent:true,factoryIP:'188.225.231.120'},
   waLastSent:0,
   wifiAlertSent:{},
+  tgSentAlerts:{},
+  tgAbsentSig:'',
   nextTId:1,
   fbConnected:false,
   attFilter:'all',
@@ -1302,6 +1304,8 @@ function runDailyReset(){
       }
     });
     S.activeTasks=[];
+    S.tgSentAlerts={};
+    S.tgAbsentSig='';
     saveLS();
     renderAll();
   }
@@ -2162,31 +2166,39 @@ function checkAlerts(){
   const absThresh=parseInt(document.getElementById('al-absent')?.value)||5;
   S.alerts=[];
   S.activeTasks.forEach(t=>{
-    if(t.elapsed>thresh)S.alerts.push({type:'long',msg:`${t.workerName} — ${fmtM(t.elapsed)} על לקוח ${t.cust} מוצר ${t.prod}`,sev:'warn'});
+    if(t.elapsed>thresh)S.alerts.push({type:'long',key:'long:'+t.id,msg:`${t.workerName} — ${fmtM(t.elapsed)} על לקוח ${t.cust} מוצר ${t.prod}`,sev:'warn'});
   });
-  const abs=S.workers.filter(w=>w.status==='out').length;
-  if(abs>=absThresh)S.alerts.push({type:'absent',msg:`${abs} עובדים נעדרים היום`,sev:'err'});
+  const absW=S.workers.filter(w=>w.status==='out');
+  const abs=absW.length;
+  if(abs>=absThresh)S.alerts.push({type:'absent',sig:absW.map(w=>w.id).sort().join(','),msg:`${abs} עובדים נעדרים היום: ${absW.map(w=>w.name).join(', ')}`,sev:'err'});
   const cnt=S.alerts.length;
   const el=document.getElementById('al-cnt');
   if(el){el.textContent=cnt;cnt>0?el.classList.remove('hidden'):el.classList.add('hidden');}
   const s=document.getElementById('al-sum');if(s)s.textContent=cnt;
   const lg=document.getElementById('al-long');if(lg)lg.textContent=S.alerts.filter(a=>a.type==='long').length;
   const ab=document.getElementById('al-abs');if(ab)ab.textContent=S.alerts.filter(a=>a.type==='absent').length;
-  // שליחת WhatsApp אוטומטית
+  // שליחה לטלגרם — רק התראות חדשות או שהשתנו (לא לחזור על אותה התראה)
   const ws=S.settings;
   if(ws.waEnabled&&cnt>0&&waInWorkingHours()){
-    const nowMs=Date.now();
-    const intervalMs=(ws.waInterval||60)*60*1000;
-    if(nowMs-S.waLastSent>=intervalMs){
-      const lines=S.alerts
-        .filter(a=>(a.type==='long'&&ws.waLong)||(a.type==='absent'&&ws.waAbsent))
-        .map(a=>(a.type==='long'?'⏰ ':'👤 ')+a.msg);
-      if(lines.length){
-        const msg='TextileOps — התראות:\n'+lines.join('\n');
-        sendTelegram(msg).then(ok=>{
-          if(ok){S.waLastSent=nowMs;const st=document.getElementById('wa-status');if(st){st.textContent='✅ נשלח '+new Date().toLocaleTimeString('he-IL');st.style.color='var(--green-txt)';}}
-        });
+    const lines=[];const sentKeys=[];
+    if(ws.waLong){
+      S.alerts.filter(a=>a.type==='long'&&!S.tgSentAlerts[a.key]).forEach(a=>{
+        S.tgSentAlerts[a.key]=true;sentKeys.push(a.key);lines.push('⏰ '+a.msg);
+      });
+    }
+    let prevAbsSig=null;
+    if(ws.waAbsent){
+      const absAlert=S.alerts.find(a=>a.type==='absent');
+      if(absAlert&&absAlert.sig!==S.tgAbsentSig){
+        prevAbsSig=S.tgAbsentSig;S.tgAbsentSig=absAlert.sig;lines.push('👤 '+absAlert.msg);
       }
+    }
+    if(lines.length){
+      const msg='TextileOps — התראות:\n'+lines.join('\n');
+      sendTelegram(msg).then(ok=>{
+        if(ok){S.waLastSent=Date.now();const st=document.getElementById('wa-status');if(st){st.textContent='✅ נשלח '+new Date().toLocaleTimeString('he-IL');st.style.color='var(--green-txt)';}}
+        else{sentKeys.forEach(k=>delete S.tgSentAlerts[k]);if(prevAbsSig!==null)S.tgAbsentSig=prevAbsSig;}
+      });
     }
   }
 }
