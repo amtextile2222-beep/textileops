@@ -1286,6 +1286,13 @@ function sha256(str){
 }
 function hashPass(p){return'$h:'+sha256(p);}
 
+// ─── TOAST הודעה גלויה תמיד ───────────────────────────────
+function showToast(txt,color='var(--green-txt)',dur=3500){
+  let t=document.getElementById('_toast');
+  if(!t){t=document.createElement('div');t.id='_toast';t.style.cssText='position:fixed;top:64px;left:50%;transform:translateX(-50%);z-index:99999;background:var(--card);border:2px solid currentColor;border-radius:10px;padding:10px 18px;font-size:14px;font-weight:600;text-align:center;max-width:90vw;box-shadow:0 4px 16px rgba(0,0,0,.25);transition:opacity .3s';document.body.appendChild(t);}
+  t.style.color=color;t.textContent=txt;t.style.opacity='1';
+  clearTimeout(t._tid);t._tid=setTimeout(()=>t.style.opacity='0',dur);
+}
 // ─── CONFIRM MODAL (במקום confirm() שנחסם ב-iOS) ───────────
 let _cfmResolve=null;
 function showConfirm(title,msg,okText='אישור',cancelText='ביטול'){
@@ -2511,12 +2518,11 @@ function tsStopCam(){
 async function tsStartTask(){
   const empId=document.getElementById('ts-emp-sel').value;
   const raw=(document.getElementById('ts-bc-inp').value||'').replace(/\D/g,'');
-  const msg=document.getElementById('ts-start-msg');
   const T=LANGS[currentLang];
-  if(!empId){msg.textContent=T.err_sel_worker||'⚠ בחר עובד';msg.style.color='var(--red-txt)';return;}
-  if(raw.length!==13){msg.textContent=T.err_barcode_13||'⚠ ברקוד חייב להיות 13 ספרות';msg.style.color='var(--red-txt)';return;}
+  if(!empId){showToast(T.err_sel_worker||'⚠ בחר עובד','var(--red-txt)');return;}
+  if(raw.length!==13){showToast(T.err_barcode_13||'⚠ ברקוד חייב להיות 13 ספרות','var(--red-txt)');return;}
   const w=S.workers.find(x=>x.id===empId);
-  if(!w||w.status!=='in'){msg.textContent='⚠ העובד לא נמצא בעבודה';msg.style.color='var(--red-txt)';return;}
+  if(!w||w.status!=='in'){showToast('⚠ העובד לא נמצא בעבודה — וודא שחתם כניסה','var(--red-txt)',5000);return;}
   const cust=raw.slice(0,2),prod=raw.slice(2,7),size=raw.slice(7,8),qty=parseInt(raw.slice(8,11))||0,col=raw.slice(11,13);
   const taskType=(document.getElementById('ts-tasktype').value||'').trim();
   const taskDept=(document.getElementById('ts-dept').value||'').trim();
@@ -2530,10 +2536,9 @@ async function tsStartTask(){
   S.activeTasks.push(task);
   if(S.fbConnected)await fbSet('activeTasks',String(task.id),{...task,startTime:task.startTime.toISOString()});
   saveLS();renderMgrTasks();
-  msg.style.color='var(--green-txt)';msg.textContent='✅ משימה הותחלה עבור '+w.name;
+  showToast('✅ משימה הותחלה עבור '+w.name);
   document.getElementById('ts-bc-inp').value='';document.getElementById('ts-bc-prev').innerHTML='';
   document.getElementById('ts-tasktype').value='';
-  setTimeout(()=>msg.textContent='',3000);
 }
 function renderTsScan(){
   const sel=document.getElementById('ts-emp-sel');if(!sel)return;
@@ -2627,12 +2632,11 @@ async function mgrPunchOut(wId){
 async function mgrStartTask(){
   const empId=document.getElementById('mgr-emp-sel').value;
   const raw=(document.getElementById('mgr-bc-inp').value||'').replace(/\D/g,'');
-  const msg=document.getElementById('mgr-start-msg');
   const T=LANGS[currentLang];
-  if(!empId){msg.textContent=T.err_sel_worker||'⚠ בחר עובד';msg.style.color='var(--red-txt)';return;}
-  if(raw.length!==13){msg.textContent=T.err_barcode_13||'⚠ ברקוד חייב להיות 13 ספרות';msg.style.color='var(--red-txt)';return;}
+  if(!empId){showToast(T.err_sel_worker||'⚠ בחר עובד','var(--red-txt)');return;}
+  if(raw.length!==13){showToast(T.err_barcode_13||'⚠ ברקוד חייב להיות 13 ספרות','var(--red-txt)');return;}
   const w=S.workers.find(x=>x.id===empId);
-  if(!w||w.status!=='in'){msg.textContent='⚠ העובד לא נמצא בעבודה';msg.style.color='var(--red-txt)';return;}
+  if(!w||w.status!=='in'){showToast('⚠ העובד לא נמצא בעבודה — וודא שחתם כניסה','var(--red-txt)',5000);return;}
   const cust=raw.slice(0,2),prod=raw.slice(2,7),size=raw.slice(7,8),qty=parseInt(raw.slice(8,11))||0,col=raw.slice(11,13);
   const taskType=(document.getElementById('mgr-tasktype').value||'').trim();
   const taskDept=(document.getElementById('mgr-dept').value||'').trim();
@@ -2658,8 +2662,7 @@ async function mgrStartTask(){
   document.getElementById('mgr-tasktype').value='';
   document.getElementById('mgr-dept').value='';
   saveLS();renderMgrTasks();
-  msg.textContent=`✅ משימה התחילה עבור ${w.name}`;msg.style.color='var(--green-txt)';
-  setTimeout(()=>msg.textContent='',3000);
+  showToast('✅ משימה התחילה עבור '+w.name);
 }
 async function deleteActiveTask(taskId){
   const t=S.activeTasks.find(x=>x.id===taskId);if(!t)return;
