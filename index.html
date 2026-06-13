@@ -1030,7 +1030,7 @@ let S={
 // ─── LOCAL STORAGE ──────────────────────────────────────────
 function saveLS(){
   try{
-    const d={workers:S.workers,depts:S.depts,activeTasks:S.activeTasks.map(t=>({...t,startTime:t.startTime instanceof Date?t.startTime.toISOString():t.startTime})),histTasks:S.histTasks.map(t=>({...t,startTime:t.startTime instanceof Date?t.startTime.toISOString():t.startTime,endTime:t.endTime instanceof Date?t.endTime.toISOString():t.endTime})),settings:S.settings,nextTId:S.nextTId,attHistory:S.attHistory,costs:S.costs,customerNames:S.customerNames,customColors:S.customColors,products:S.products};
+    const d={workers:S.workers,depts:S.depts,activeTasks:S.activeTasks.map(t=>({...t,startTime:t.startTime instanceof Date?t.startTime.toISOString():t.startTime})),histTasks:S.histTasks.map(t=>({...t,startTime:t.startTime instanceof Date?t.startTime.toISOString():t.startTime,endTime:t.endTime instanceof Date?t.endTime.toISOString():t.endTime})),settings:S.settings,nextTId:S.nextTId,attHistory:S.attHistory,costs:S.costs,customerNames:S.customerNames,customColors:S.customColors,products:S.products,tgSentAlerts:S.tgSentAlerts,tgAbsentSig:S.tgAbsentSig};
     localStorage.setItem('txops_v3',JSON.stringify(d));
   }catch(e){}
 }
@@ -1050,6 +1050,8 @@ function loadLS(){
     if(d.customerNames)S.customerNames=d.customerNames;
     if(d.customColors){S.customColors=d.customColors;Object.assign(COLORS,d.customColors);}
     if(d.products)S.products=d.products;
+    if(d.tgSentAlerts)S.tgSentAlerts=d.tgSentAlerts;
+    if(d.tgAbsentSig)S.tgAbsentSig=d.tgAbsentSig;
   }catch(e){}
 }
 loadLS();
@@ -1769,6 +1771,9 @@ async function autoPunchIn(){
   const w=S.workers.find(x=>x.id===S.user.id);
   if(!w)return;
   if(!w.sessions)w.sessions=[];
+  // נקה sessions מימים קודמים — Firebase עלול לטעון נתונים ישנים לפני שהאיפוס היומי רץ
+  const today=todayStr();
+  w.sessions=w.sessions.filter(s=>{if(!s.in)return false;const d=new Date(s.in);return d.getFullYear()+'-'+pad2(d.getMonth()+1)+'-'+pad2(d.getDate())>=today;});
   if(w.sessions.find(s=>!s.out))return; // כבר נכנס
   const now=new Date();
   w.sessions.push({in:now.toISOString(),out:null});
@@ -1786,6 +1791,8 @@ async function punchIn(){
   const w=S.workers.find(x=>x.id===S.user.id);
   if(!w)return;
   if(!w.sessions)w.sessions=[];
+  const today=todayStr();
+  w.sessions=w.sessions.filter(s=>{if(!s.in)return false;const d=new Date(s.in);return d.getFullYear()+'-'+pad2(d.getMonth()+1)+'-'+pad2(d.getDate())>=today;});
   if(w.sessions.find(s=>!s.out)){document.getElementById('att-msg').textContent='כבר רשום/ת כנוכח/ת';return;}
   const now=new Date();
   w.sessions.push({in:now.toISOString(),out:null});
@@ -2196,7 +2203,7 @@ function checkAlerts(){
     if(lines.length){
       const msg='TextileOps — התראות:\n'+lines.join('\n');
       sendTelegram(msg).then(ok=>{
-        if(ok){S.waLastSent=Date.now();const st=document.getElementById('wa-status');if(st){st.textContent='✅ נשלח '+new Date().toLocaleTimeString('he-IL');st.style.color='var(--green-txt)';}}
+        if(ok){S.waLastSent=Date.now();saveLS();const st=document.getElementById('wa-status');if(st){st.textContent='✅ נשלח '+new Date().toLocaleTimeString('he-IL');st.style.color='var(--green-txt)';}}
         else{sentKeys.forEach(k=>delete S.tgSentAlerts[k]);if(prevAbsSig!==null)S.tgAbsentSig=prevAbsSig;}
       });
     }
