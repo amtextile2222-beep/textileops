@@ -875,6 +875,18 @@ code{background:var(--bg2);border:0.5px solid var(--b);border-radius:4px;padding
     <div id="bc-gen-output" style="margin-top:1rem"></div>
   </div>
 
+  <!-- מודל אישור כללי -->
+  <div class="overlay hidden" id="cfm-wrap" style="z-index:300">
+    <div class="modal" style="max-width:340px;text-align:center">
+      <div class="modal-title" id="cfm-title" style="font-size:15px"></div>
+      <div id="cfm-msg" style="font-size:13px;color:var(--txt2);margin:10px 0 18px;line-height:1.7"></div>
+      <div style="display:flex;gap:10px">
+        <button class="btn danger full" id="cfm-cancel" style="font-size:14px"></button>
+        <button class="btn success full" id="cfm-ok" style="font-size:14px"></button>
+      </div>
+    </div>
+  </div>
+
   <!-- מודל מוצר -->
   <div class="overlay hidden" id="prod-modal-wrap" onclick="if(event.target===this)closeProdModal()">
     <div class="modal" style="max-width:600px;max-height:90vh;overflow-y:auto" id="prod-modal-box">
@@ -1272,6 +1284,24 @@ function sha256(str){
   return[a,b,c,d,e,f,g,h].map(x=>(x>>>0).toString(16).padStart(8,'0')).join('');
 }
 function hashPass(p){return'$h:'+sha256(p);}
+
+// ─── CONFIRM MODAL (במקום confirm() שנחסם ב-iOS) ───────────
+let _cfmResolve=null;
+function showConfirm(title,msg,okText='אישור',cancelText='ביטול'){
+  return new Promise(res=>{
+    _cfmResolve=res;
+    document.getElementById('cfm-title').textContent=title;
+    document.getElementById('cfm-msg').innerHTML=msg.replace(/\n/g,'<br>');
+    document.getElementById('cfm-ok').textContent=okText;
+    document.getElementById('cfm-cancel').textContent=cancelText;
+    document.getElementById('cfm-wrap').classList.remove('hidden');
+  });
+}
+function _cfmClose(val){if(_cfmResolve){_cfmResolve(val);_cfmResolve=null;}document.getElementById('cfm-wrap').classList.add('hidden');}
+document.addEventListener('DOMContentLoaded',()=>{
+  document.getElementById('cfm-ok').addEventListener('click',()=>_cfmClose(true));
+  document.getElementById('cfm-cancel').addEventListener('click',()=>_cfmClose(false));
+});
 
 // מיגרציה: מצפין סיסמאות קיימות בטקסט רגיל
 function migratePasswords(){
@@ -1963,12 +1993,12 @@ async function submitBc(){
   if(!wu||wu.status!=='in'){alert('לא ניתן להתחיל משימה — יש להירשם כנוכח תחילה (כניסה לעבודה בלשונית נוכחות)');return;}
   // ברקוד שכבר בעבודה אצל עובד אחר באותו שלב — אישור הצטרפות
   const otherSame=S.activeTasks.find(t=>t.workerId!==u.id&&taskBc(t)===raw&&(t.taskType||'').trim().toLowerCase()===taskType.toLowerCase());
-  if(otherSame&&!confirm('הברקוד הזה כבר בעבודה אצל '+otherSame.workerName+(otherSame.taskType?' ('+otherSame.taskType+')':'')+'.\nלהצטרף למשימה? (היחידות ייספרו פעם אחת בדוחות)'))return;
+  if(otherSame&&!await showConfirm('הצטרפות למשימה','הברקוד כבר בעבודה אצל '+otherSame.workerName+(otherSame.taskType?' ('+otherSame.taskType+')':'')+'\nלהצטרף? (הכמות תיספר פעם אחת)','הצטרף','ביטול'))return;
   // משימה פעילה קיימת — לסגור אותה או לעבוד במקביל
   const existIdx=S.activeTasks.findIndex(t=>t.workerId===u.id);
   if(existIdx>-1){
     const prev=S.activeTasks[existIdx];
-    const parallel=confirm('יש לך משימה פעילה (מוצר '+prev.prod+').\n\nאישור = לעבוד על שתי המשימות במקביל\nביטול = לסגור את הקודמת ולהתחיל את החדשה');
+    const parallel=await showConfirm('משימה קיימת','יש לך משימה פעילה (מוצר '+prev.prod+')\nבחר פעולה:','עבודה במקביל','סגור ישנה + התחל חדשה');
     if(!parallel){
       const endTime=new Date();
       const done={...prev,endTime,duration:Math.round((endTime-new Date(prev.startTime))/1000)};
@@ -2495,10 +2525,10 @@ async function tsStartTask(){
   const taskDept=(document.getElementById('ts-dept').value||'').trim();
   // ברקוד שכבר בעבודה אצל עובד אחר באותו שלב — אישור הצטרפות
   const otherSame=S.activeTasks.find(t=>t.workerId!==w.id&&taskBc(t)===raw&&(t.taskType||'').trim().toLowerCase()===taskType.toLowerCase());
-  if(otherSame&&!confirm('הברקוד הזה כבר בעבודה אצל '+otherSame.workerName+(otherSame.taskType?' ('+otherSame.taskType+')':'')+'.\nלצרף את '+w.name+' למשימה? (היחידות ייספרו פעם אחת בדוחות)'))return;
+  if(otherSame&&!await showConfirm('הצטרפות למשימה','הברקוד כבר בעבודה אצל '+otherSame.workerName+(otherSame.taskType?' ('+otherSame.taskType+')':'')+'\nלצרף את '+w.name+'? (הכמות תיספר פעם אחת)','הצטרף','ביטול'))return;
   // משימה פעילה קיימת לעובד — אישור עבודה במקביל
   const mine=S.activeTasks.find(t=>t.workerId===w.id);
-  if(mine&&!confirm('ל'+w.name+' יש כבר משימה פעילה (מוצר '+mine.prod+').\nלהוסיף משימה נוספת במקביל?'))return;
+  if(mine&&!await showConfirm('משימה קיימת','ל'+w.name+' יש משימה פעילה (מוצר '+mine.prod+')\nלהוסיף משימה נוספת במקביל?','כן, הוסף','ביטול'))return;
   const task={id:String(S.nextTId++),workerId:w.id,workerName:w.name,dept:taskDept||w.dept,cust,prod,size,qty,col,taskType,bc:raw,startTime:new Date(),elapsed:0};
   S.activeTasks.push(task);
   if(S.fbConnected)await fbSet('activeTasks',String(task.id),{...task,startTime:task.startTime.toISOString()});
@@ -2611,12 +2641,12 @@ async function mgrStartTask(){
   const taskDept=(document.getElementById('mgr-dept').value||'').trim();
   // ברקוד שכבר בעבודה אצל עובד אחר באותו שלב — אישור הצטרפות
   const otherSame=S.activeTasks.find(t=>t.workerId!==empId&&taskBc(t)===raw&&(t.taskType||'').trim().toLowerCase()===taskType.toLowerCase());
-  if(otherSame&&!confirm('הברקוד הזה כבר בעבודה אצל '+otherSame.workerName+(otherSame.taskType?' ('+otherSame.taskType+')':'')+'.\nלצרף את '+w.name+' למשימה? (היחידות ייספרו פעם אחת בדוחות)'))return;
+  if(otherSame&&!await showConfirm('הצטרפות למשימה','הברקוד כבר בעבודה אצל '+otherSame.workerName+(otherSame.taskType?' ('+otherSame.taskType+')':'')+'\nלצרף את '+w.name+'? (הכמות תיספר פעם אחת)','הצטרף','ביטול'))return;
   // משימה פעילה קיימת — לסגור אותה או לעבוד במקביל
   const existIdx=S.activeTasks.findIndex(t=>t.workerId===empId);
   if(existIdx>-1){
     const prev=S.activeTasks[existIdx];
-    const parallel=confirm('ל'+w.name+' יש משימה פעילה (מוצר '+prev.prod+').\n\nאישור = עבודה על שתי המשימות במקביל\nביטול = סגירת הקודמת והתחלת החדשה');
+    const parallel=await showConfirm('משימה קיימת ל'+w.name,'מוצר '+prev.prod+' פעיל\nבחר פעולה:','עבודה במקביל','סגור ישנה + התחל חדשה');
     if(!parallel){
       const endTime=new Date();
       const done={...prev,endTime,duration:Math.round((endTime-new Date(prev.startTime))/1000)};
