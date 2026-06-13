@@ -876,8 +876,8 @@ code{background:var(--bg2);border:0.5px solid var(--b);border-radius:4px;padding
   </div>
 
   <!-- מודל אישור כללי -->
-  <div class="overlay hidden" id="cfm-wrap" style="z-index:300">
-    <div class="modal" style="max-width:340px;text-align:center">
+  <div class="overlay hidden" id="cfm-wrap" style="z-index:9999" onclick="if(event.target===this)_cfmClose(false)">
+    <div class="modal" style="max-width:340px;text-align:center" onclick="event.stopPropagation()">
       <div class="modal-title" id="cfm-title" style="font-size:15px"></div>
       <div id="cfm-msg" style="font-size:13px;color:var(--txt2);margin:10px 0 18px;line-height:1.7"></div>
       <div style="display:flex;gap:10px">
