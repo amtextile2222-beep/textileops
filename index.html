@@ -956,6 +956,7 @@ document.dispatchEvent(new Event('fbSDKReady'));
 <script>
 // ─── CONSTANTS ─────────────────────────────────────────────
 let COLORS={'01':'לבן','02':'שחור','03':'אדום','04':'כחול','05':'ירוק','06':'צהוב','07':'אפור','08':'ורוד','09':'חום','10':'כתום','11':'נייבי','12':'בז\'','13':'טורקיז','14':'בורדו','15':'זית','16':'לילך','17':'קרם','18':'כסוף','19':'זהב','20':'שחור מלנג\''};
+const COLORS_AR={'01':'أبيض','02':'أسود','03':'أحمر','04':'أزرق','05':'أخضر','06':'أصفر','07':'رمادي','08':'وردي','09':'بني','10':'برتقالي','11':'كحلي','12':'بيج','13':'تركواز','14':'بوردو','15':'زيتي','16':'ليلكي','17':'كريمي','18':'فضي','19':'ذهبي','20':'أسود مخلوط'};
 const WORKER_PAGES=[
   {id:'dash',label:'לוח בקרה'},
   {id:'att',label:'נוכחות'},
@@ -4116,7 +4117,7 @@ function bcLoadFromProduct(){
 function bcAddRow(){
   const container=document.getElementById('bc-gen-rows');
   if(!container)return;
-  const colorOpts=Object.entries(COLORS).map(([k,v])=>`<option value="${k}">${v}</option>`).join('');
+  const colorOpts=Object.entries(COLORS).map(([k,v])=>`<option value="${k}">${COLORS_AR[k]||v} — ${v}</option>`).join('');
   const div=document.createElement('div');
   div.className='bc-row';
   div.style.cssText='display:grid;grid-template-columns:80px 80px 1fr 36px;gap:8px;align-items:end;margin-bottom:8px;background:var(--bg2);padding:8px;border-radius:8px';
@@ -4288,7 +4289,7 @@ function _applyPDFResult(result){
   if(!container)return;
   container.innerHTML='';
   result.colors.forEach(c=>{
-    const colorOpts=Object.entries(COLORS).map(([k,v])=>`<option value="${esc(k)}" ${k===_guessColor(c.name)?'selected':''}>${esc(v)}</option>`).join('');
+    const colorOpts=Object.entries(COLORS).map(([k,v])=>`<option value="${esc(k)}" ${k===_guessColor(c.name)?'selected':''}>${esc(COLORS_AR[k]||v)} — ${esc(v)}</option>`).join('');
     const div=document.createElement('div');
     div.className='bc-row';
     div.style.cssText='display:grid;grid-template-columns:80px 80px 1fr 36px;gap:8px;align-items:end;margin-bottom:8px;background:var(--bg2);padding:8px;border-radius:8px';
