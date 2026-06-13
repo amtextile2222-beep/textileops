@@ -4065,6 +4065,34 @@ function printPayroll(){
 let _editProdId=null;
 
 // ─── BARCODE GENERATOR ───────────────────────────────────────
+function bcFromProduct(pid){
+  const p=S.products.find(x=>x.id===pid);if(!p)return;
+  goPage('barcodes');
+  setTimeout(()=>{
+    document.getElementById('bc-gen-cust').value=p.cust||'';
+    document.getElementById('bc-gen-prod').value=p.prod||'';
+    const container=document.getElementById('bc-gen-rows');
+    if(!container)return;
+    container.innerHTML='';
+    const qty=p.quantities||[];
+    if(qty.length){
+      qty.forEach(q=>{
+        bcAddRow();
+        const rows=container.querySelectorAll('.bc-row');
+        const row=rows[rows.length-1];
+        if(row){
+          const sizeEl=row.querySelector('.bc-size');
+          const qtyEl=row.querySelector('.bc-qty');
+          const colEl=row.querySelector('.bc-col');
+          if(sizeEl)sizeEl.value=q.size||'0';
+          if(qtyEl)qtyEl.value=q.qty||1;
+          if(colEl){colEl.value=q.color||'00';colEl.style.color=q.color==='00'?'var(--txt3)':'var(--txt)';}
+        }
+      });
+    } else {bcAddRow();}
+    bcGenerate();
+  },100);
+}
 function bcFillProductSelect(){
   const sel=document.getElementById('bc-prod-select');
   if(!sel)return;
@@ -4359,6 +4387,7 @@ function renderProducts(){
           ${stageHtml}${qtyRows}${imgHtml}${docHtml}
         </div>
         <div style="display:flex;gap:6px;flex-shrink:0">
+          <button class="btn" style="font-size:11px;padding:4px 10px" onclick="bcFromProduct('${p.id}')">🏷️ ברקודים</button>
           <button class="btn" style="font-size:11px;padding:4px 10px" onclick="openProductModal('${p.id}')">✏️ עריכה</button>
           <button class="btn danger" style="font-size:11px;padding:4px 8px;opacity:.7" onclick="deleteProduct('${p.id}')">🗑</button>
         </div>
