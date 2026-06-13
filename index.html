@@ -881,8 +881,8 @@ code{background:var(--bg2);border:0.5px solid var(--b);border-radius:4px;padding
       <div class="modal-title" id="cfm-title" style="font-size:15px"></div>
       <div id="cfm-msg" style="font-size:13px;color:var(--txt2);margin:10px 0 18px;line-height:1.7"></div>
       <div style="display:flex;gap:10px">
-        <button class="btn danger full" id="cfm-cancel" style="font-size:14px"></button>
-        <button class="btn success full" id="cfm-ok" style="font-size:14px"></button>
+        <button class="btn danger full" id="cfm-cancel" style="font-size:14px" onclick="_cfmClose(false)"></button>
+        <button class="btn success full" id="cfm-ok" style="font-size:14px" onclick="_cfmClose(true)"></button>
       </div>
     </div>
   </div>
@@ -1299,10 +1299,6 @@ function showConfirm(title,msg,okText='אישור',cancelText='ביטול'){
   });
 }
 function _cfmClose(val){if(_cfmResolve){_cfmResolve(val);_cfmResolve=null;}document.getElementById('cfm-wrap').classList.add('hidden');}
-document.addEventListener('DOMContentLoaded',()=>{
-  document.getElementById('cfm-ok').addEventListener('click',()=>_cfmClose(true));
-  document.getElementById('cfm-cancel').addEventListener('click',()=>_cfmClose(false));
-});
 
 // מיגרציה: מצפין סיסמאות קיימות בטקסט רגיל
 function migratePasswords(){
