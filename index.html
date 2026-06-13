@@ -1987,6 +1987,7 @@ function tryDemo(){
 }
 async function submitBc(){
   const raw=(document.getElementById('bc-inp').value||'').replace(/\D/g,'');
+  const T=LANGS[currentLang];
   if(raw.length!==13){alert('ברקוד חייב להיות 13 ספרות בדיוק');return;}
   if(!S.user){alert('יש להתחבר תחילה');return;}
   const cust=raw.slice(0,2),prod=raw.slice(2,7),size=raw.slice(7,8),qty=parseInt(raw.slice(8,11))||0,col=raw.slice(11,13);
@@ -1997,12 +1998,12 @@ async function submitBc(){
   if(!wu||wu.status!=='in'){alert('לא ניתן להתחיל משימה — יש להירשם כנוכח תחילה (כניסה לעבודה בלשונית נוכחות)');return;}
   // ברקוד שכבר בעבודה אצל עובד אחר באותו שלב — אישור הצטרפות
   const otherSame=S.activeTasks.find(t=>t.workerId!==u.id&&taskBc(t)===raw&&(t.taskType||'').trim().toLowerCase()===taskType.toLowerCase());
-  if(otherSame&&!await showConfirm('הצטרפות למשימה','הברקוד כבר בעבודה אצל '+otherSame.workerName+(otherSame.taskType?' ('+otherSame.taskType+')':'')+'\nלהצטרף? (הכמות תיספר פעם אחת)','הצטרף','ביטול'))return;
+  if(otherSame&&!await showConfirm(T.cfm_join_title||'הצטרפות למשימה',T.cfm_join_msg+otherSame.workerName+(otherSame.taskType?' ('+otherSame.taskType+')':'')+T.cfm_join_msg2,T.cfm_join_ok||'הצטרף',T.cancel||'ביטול'))return;
   // משימה פעילה קיימת — לסגור אותה או לעבוד במקביל
   const existIdx=S.activeTasks.findIndex(t=>t.workerId===u.id);
   if(existIdx>-1){
     const prev=S.activeTasks[existIdx];
-    const parallel=await showConfirm('משימה קיימת','יש לך משימה פעילה (מוצר '+prev.prod+')\nבחר פעולה:','עבודה במקביל','סגור ישנה + התחל חדשה');
+    const parallel=await showConfirm(T.cfm_existing_title||'משימה קיימת','מוצר '+prev.prod+T.cfm_existing_msg,T.cfm_parallel||'עבודה במקביל',T.cfm_close_old||'סגור ישנה + התחל חדשה');
     if(!parallel){
       const endTime=new Date();
       const done={...prev,endTime,duration:Math.round((endTime-new Date(prev.startTime))/1000)};
@@ -2522,18 +2523,18 @@ async function tsStartTask(){
   if(!empId){showToast(T.err_sel_worker||'⚠ בחר עובד','var(--red-txt)');return;}
   if(raw.length!==13){showToast(T.err_barcode_13||'⚠ ברקוד חייב להיות 13 ספרות','var(--red-txt)');return;}
   const w=S.workers.find(x=>x.id===empId);
-  if(!w||w.status!=='in'){showToast('⚠ העובד לא נמצא בעבודה — וודא שחתם כניסה','var(--red-txt)',5000);return;}
+  if(!w||w.status!=='in'){showToast(T.cfm_worker_not_in||'⚠ העובד לא נמצא בעבודה — וודא שחתם כניסה','var(--red-txt)',5000);return;}
   const cust=raw.slice(0,2),prod=raw.slice(2,7),size=raw.slice(7,8),qty=parseInt(raw.slice(8,11))||0,col=raw.slice(11,13);
   const taskType=(document.getElementById('ts-tasktype').value||'').trim();
   const taskDept=(document.getElementById('ts-dept').value||'').trim();
   // ברקוד שכבר בעבודה אצל עובד אחר באותו שלב — אישור הצטרפות
   const otherSame=S.activeTasks.find(t=>t.workerId!==w.id&&taskBc(t)===raw&&(t.taskType||'').trim().toLowerCase()===taskType.toLowerCase());
-  if(otherSame&&!await showConfirm('הצטרפות למשימה','הברקוד כבר בעבודה אצל '+otherSame.workerName+(otherSame.taskType?' ('+otherSame.taskType+')':'')+'\nלצרף את '+w.name+'? (הכמות תיספר פעם אחת)','הצטרף','ביטול'))return;
+  if(otherSame&&!await showConfirm(T.cfm_join_title||'הצטרפות למשימה',T.cfm_join_msg+otherSame.workerName+(otherSame.taskType?' ('+otherSame.taskType+')':'')+T.cfm_join_msg2,T.cfm_join_ok||'הצטרף',T.cancel||'ביטול'))return;
   // משימה פעילה קיימת לעובד — עבודה במקביל או סגור ישנה
   const existIdxTs=S.activeTasks.findIndex(t=>t.workerId===w.id);
   if(existIdxTs>-1){
     const prevTs=S.activeTasks[existIdxTs];
-    const parallelTs=await showConfirm('משימה קיימת ל'+w.name,'מוצר '+prevTs.prod+' פעיל\nבחר פעולה:','עבודה במקביל','סגור ישנה + התחל חדשה');
+    const parallelTs=await showConfirm(T.cfm_existing_title+' - '+w.name||'משימה קיימת','מוצר '+prevTs.prod+T.cfm_existing_msg,T.cfm_parallel||'עבודה במקביל',T.cfm_close_old||'סגור ישנה + התחל חדשה');
     if(parallelTs===null)return;
     if(!parallelTs){
       const endTime=new Date();
@@ -2646,18 +2647,18 @@ async function mgrStartTask(){
   if(!empId){showToast(T.err_sel_worker||'⚠ בחר עובד','var(--red-txt)');return;}
   if(raw.length!==13){showToast(T.err_barcode_13||'⚠ ברקוד חייב להיות 13 ספרות','var(--red-txt)');return;}
   const w=S.workers.find(x=>x.id===empId);
-  if(!w||w.status!=='in'){showToast('⚠ העובד לא נמצא בעבודה — וודא שחתם כניסה','var(--red-txt)',5000);return;}
+  if(!w||w.status!=='in'){showToast(T.cfm_worker_not_in||'⚠ העובד לא נמצא בעבודה — וודא שחתם כניסה','var(--red-txt)',5000);return;}
   const cust=raw.slice(0,2),prod=raw.slice(2,7),size=raw.slice(7,8),qty=parseInt(raw.slice(8,11))||0,col=raw.slice(11,13);
   const taskType=(document.getElementById('mgr-tasktype').value||'').trim();
   const taskDept=(document.getElementById('mgr-dept').value||'').trim();
   // ברקוד שכבר בעבודה אצל עובד אחר באותו שלב — אישור הצטרפות
   const otherSame=S.activeTasks.find(t=>t.workerId!==empId&&taskBc(t)===raw&&(t.taskType||'').trim().toLowerCase()===taskType.toLowerCase());
-  if(otherSame&&!await showConfirm('הצטרפות למשימה','הברקוד כבר בעבודה אצל '+otherSame.workerName+(otherSame.taskType?' ('+otherSame.taskType+')':'')+'\nלצרף את '+w.name+'? (הכמות תיספר פעם אחת)','הצטרף','ביטול'))return;
+  if(otherSame&&!await showConfirm(T.cfm_join_title||'הצטרפות למשימה',T.cfm_join_msg+otherSame.workerName+(otherSame.taskType?' ('+otherSame.taskType+')':'')+T.cfm_join_msg2,T.cfm_join_ok||'הצטרף',T.cancel||'ביטול'))return;
   // משימה פעילה קיימת — לסגור אותה או לעבוד במקביל
   const existIdx=S.activeTasks.findIndex(t=>t.workerId===empId);
   if(existIdx>-1){
     const prev=S.activeTasks[existIdx];
-    const parallel=await showConfirm('משימה קיימת ל'+w.name,'מוצר '+prev.prod+' פעיל\nבחר פעולה:','עבודה במקביל','סגור ישנה + התחל חדשה');
+    const parallel=await showConfirm(T.cfm_existing_title+' - '+w.name||'משימה קיימת','מוצר '+prev.prod+T.cfm_existing_msg,T.cfm_parallel||'עבודה במקביל',T.cfm_close_old||'סגור ישנה + התחל חדשה');
     if(!parallel){
       const endTime=new Date();
       const done={...prev,endTime,duration:Math.round((endTime-new Date(prev.startTime))/1000)};
@@ -3319,6 +3320,15 @@ const LANGS={
     th_end_time:'סיום',
     th_duration:'משך',
     th_status:'סטטוס',
+    cfm_join_title:'הצטרפות למשימה',
+    cfm_join_msg:'הברקוד כבר בעבודה אצל ',
+    cfm_join_msg2:'\nלהצטרף? (הכמות תיספר פעם אחת)',
+    cfm_join_ok:'הצטרף',
+    cfm_existing_title:'משימה קיימת',
+    cfm_existing_msg:' פעיל\nבחר פעולה:',
+    cfm_parallel:'עבודה במקביל',
+    cfm_close_old:'סגור ישנה + התחל חדשה',
+    cfm_worker_not_in:'⚠ העובד לא נמצא בעבודה — וודא שחתם כניסה',
   },
   ar:{
     login_title:'تسجيل الدخول',
@@ -3413,6 +3423,15 @@ const LANGS={
     th_end_time:'النهاية',
     th_duration:'المدة',
     th_status:'الحالة',
+    cfm_join_title:'الانضمام للمهمة',
+    cfm_join_msg:'الباركود قيد العمل لدى ',
+    cfm_join_msg2:'\nللانضمام؟ (الكمية تُحسب مرة واحدة)',
+    cfm_join_ok:'انضم',
+    cfm_existing_title:'مهمة قائمة',
+    cfm_existing_msg:' نشط\nاختر إجراءً:',
+    cfm_parallel:'عمل متوازٍ',
+    cfm_close_old:'إغلاق القديمة + بدء جديدة',
+    cfm_worker_not_in:'⚠ العامل غير مسجل حضوراً — تأكد من تسجيل الدخول',
   },
   en:{
     login_title:'Login',
