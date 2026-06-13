@@ -4160,7 +4160,7 @@ function bcGenerate(){
   const printArea=document.getElementById('bc-print-area');
   items.forEach(it=>{
     const code=cust+prod+it.size+it.qty+it.col;
-    const colName=COLORS[it.col]||it.col;
+    const colName=(COLORS_AR[it.col]||COLORS[it.col]||it.col);
     const div=document.createElement('div');
     div.className='bc-card';
     div.style.cssText='background:#fff;border:2px solid #333;border-radius:6px;padding:10px;display:flex;align-items:center;gap:12px;break-inside:avoid';
