@@ -2529,9 +2529,19 @@ async function tsStartTask(){
   // ברקוד שכבר בעבודה אצל עובד אחר באותו שלב — אישור הצטרפות
   const otherSame=S.activeTasks.find(t=>t.workerId!==w.id&&taskBc(t)===raw&&(t.taskType||'').trim().toLowerCase()===taskType.toLowerCase());
   if(otherSame&&!await showConfirm('הצטרפות למשימה','הברקוד כבר בעבודה אצל '+otherSame.workerName+(otherSame.taskType?' ('+otherSame.taskType+')':'')+'\nלצרף את '+w.name+'? (הכמות תיספר פעם אחת)','הצטרף','ביטול'))return;
-  // משימה פעילה קיימת לעובד — אישור עבודה במקביל
-  const mine=S.activeTasks.find(t=>t.workerId===w.id);
-  if(mine&&!await showConfirm('משימה קיימת','ל'+w.name+' יש משימה פעילה (מוצר '+mine.prod+')\nלהוסיף משימה נוספת במקביל?','כן, הוסף','ביטול'))return;
+  // משימה פעילה קיימת לעובד — עבודה במקביל או סגור ישנה
+  const existIdxTs=S.activeTasks.findIndex(t=>t.workerId===w.id);
+  if(existIdxTs>-1){
+    const prevTs=S.activeTasks[existIdxTs];
+    const parallelTs=await showConfirm('משימה קיימת ל'+w.name,'מוצר '+prevTs.prod+' פעיל\nבחר פעולה:','עבודה במקביל','סגור ישנה + התחל חדשה');
+    if(parallelTs===null)return;
+    if(!parallelTs){
+      const endTime=new Date();
+      const done={...prevTs,endTime,duration:Math.round((endTime-new Date(prevTs.startTime))/1000)};
+      S.histTasks.unshift(done);S.activeTasks.splice(existIdxTs,1);
+      if(S.fbConnected){await fbDel('activeTasks',String(prevTs.id));await fbSet('histTasks',String(prevTs.id),{...done,startTime:done.startTime instanceof Date?done.startTime.toISOString():done.startTime,endTime:done.endTime.toISOString()});}
+    }
+  }
   const task={id:String(S.nextTId++),workerId:w.id,workerName:w.name,dept:taskDept||w.dept,cust,prod,size,qty,col,taskType,bc:raw,startTime:new Date(),elapsed:0};
   S.activeTasks.push(task);
   if(S.fbConnected)await fbSet('activeTasks',String(task.id),{...task,startTime:task.startTime.toISOString()});
