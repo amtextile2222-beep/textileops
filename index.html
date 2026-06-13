@@ -1203,6 +1203,7 @@ function listenFb(){
       if(d.id==='costs'){S.costs={...S.costs,...data};saveLS();}
       if(d.id==='customerNames'){S.customerNames=data;saveLS();}
       if(d.id==='customColors'){S.customColors=data;Object.assign(COLORS,data);saveLS();}
+      if(d.id==='depts'&&data.list&&data.list.length){S.depts=data.list;saveLS();fillDeptSelects();}
       if(d.id==='telegramSettings'){
         S.settings.waToken=data.waToken||S.settings.waToken;
         S.settings.waChatId=data.waChatId||S.settings.waChatId;
@@ -3128,15 +3129,19 @@ async function delWorker(id){
   if(S.fbConnected)await fbDel('workers',id);
   saveLS();renderAdmin();
 }
+function saveDepts(){
+  saveLS();
+  if(S.fbConnected)fbSet('appSettings','depts',{list:S.depts});
+}
 function addDept(){
   const v=document.getElementById('new-dept').value.trim();
   if(!v||S.depts.includes(v)){alert(!v?'הזן שם מחלקה':'מחלקה כבר קיימת');return;}
   S.depts.push(v);document.getElementById('new-dept').value='';
-  saveLS();renderAdmin();
+  saveDepts();renderAdmin();
 }
 function delDept(d){
   if(S.workers.some(w=>w.dept===d)){alert('לא ניתן למחוק מחלקה שיש בה עובדים');return;}
-  S.depts=S.depts.filter(x=>x!==d);saveLS();renderAdmin();
+  S.depts=S.depts.filter(x=>x!==d);saveDepts();renderAdmin();
 }
 
 // ─── REFRESH DASH EVERY 5s ──────────────────────────────────
