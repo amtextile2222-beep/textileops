@@ -4276,6 +4276,7 @@ function bcGenerate(){
     const colName=(COLORS_AR[it.col]||COLORS[it.col]||it.col);
     const div=document.createElement('div');
     div.className='bc-card';
+    div.dataset.col=it.col;
     div.style.cssText='background:#fff;border:2px solid #333;border-radius:6px;padding:10px;display:flex;align-items:center;gap:12px;break-inside:avoid';
     const qrWrap=document.createElement('div');
     qrWrap.style.cssText='flex-shrink:0;width:150px;height:150px;overflow:hidden';
@@ -4298,7 +4299,11 @@ function bcGenerate(){
 function bcPrint(){
   const area=document.getElementById('bc-print-area');
   if(!area)return;
-  const htmlCards=[...area.querySelectorAll('.bc-card')].map(card=>{
+  // קבץ לפי צבע — כל צבע בעמוד נפרד
+  const byColor=new Map();
+  [...area.querySelectorAll('.bc-card')].forEach(card=>{
+    const col=card.dataset.col||'00';
+    if(!byColor.has(col))byColor.set(col,[]);
     const clone=card.cloneNode(true);
     const origCanvas=card.querySelector('canvas');
     const cloneCanvas=clone.querySelector('canvas');
@@ -4308,15 +4313,23 @@ function bcPrint(){
       img.style.cssText='width:150px;height:150px';
       cloneCanvas.replaceWith(img);
     }
-    return clone.outerHTML;
+    byColor.get(col).push(clone.outerHTML);
+  });
+  const pages=[...byColor.entries()].map(([col,cards],i,arr)=>{
+    const colName=(COLORS_AR[col]||COLORS[col]||col);
+    const pageBreak=i<arr.length-1?'page-break-after:always':'';
+    return`<div style="${pageBreak}">
+      <div style="text-align:right;padding:6px 10px 4px;font-size:14px;font-weight:700;color:#333">צבע: ${col} · ${colName} — ${cards.length} יחידות</div>
+      <div class="grid">${cards.join('')}</div>
+    </div>`;
   }).join('');
   const win=window.open('','_blank');
   win.document.write(`<html dir="rtl"><head><title>QR קודים למשימות</title>
     <style>body{margin:0;font-family:Arial,sans-serif;background:#fff}
-    .grid{display:grid;grid-template-columns:repeat(2,1fr);gap:10px;padding:10px}
+    .grid{display:grid;grid-template-columns:repeat(2,1fr);gap:10px;padding:6px 10px}
     .bc-card{border:2px solid #333;border-radius:6px;padding:10px;display:flex;align-items:center;gap:12px;break-inside:avoid}
     @media print{@page{size:A4 portrait;margin:8mm}}</style></head><body>
-    <div class="grid">${htmlCards}</div>
+    ${pages}
     <script>window.onload=()=>window.print()<\/script></body></html>`);
   win.document.close();
 }
@@ -5419,7 +5432,7 @@ function cancelFaceReg(){
 
 /* ── AUTO UPDATE CHECK ── */
 (function(){
-  const CURRENT_VERSION = '20260614-2';
+  const CURRENT_VERSION = '20260614-3';
   const VERSION_URL = 'https://amtextile2222-beep.github.io/textileops/version.json';
   const CHECK_INTERVAL = 5 * 60 * 1000; // 5 דקות
 
