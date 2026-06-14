@@ -1999,17 +1999,20 @@ async function submitBc(){
   // ברקוד שכבר בעבודה אצל עובד אחר באותו שלב — אישור הצטרפות
   const otherSame=S.activeTasks.find(t=>t.workerId!==u.id&&taskBc(t)===raw&&(t.taskType||'').trim().toLowerCase()===taskType.toLowerCase());
   if(otherSame&&!await showConfirm(T.cfm_join_title||'הצטרפות למשימה',T.cfm_join_msg+otherSame.workerName+(otherSame.taskType?' ('+otherSame.taskType+')':'')+T.cfm_join_msg2,T.cfm_join_ok||'הצטרף',T.cancel||'ביטול'))return;
-  // משימה פעילה קיימת — לסגור אותה או לעבוד במקביל
-  const existIdx=S.activeTasks.findIndex(t=>t.workerId===u.id);
-  if(existIdx>-1){
-    const prev=S.activeTasks[existIdx];
-    const parallel=await showConfirm(T.cfm_existing_title||'משימה קיימת','מוצר '+prev.prod+T.cfm_existing_msg,T.cfm_parallel||'עבודה במקביל',T.cfm_close_old||'סגור ישנה + התחל חדשה');
+  // משימה פעילה קיימת — לסגור את כולן או לעבוד במקביל
+  const existTasks=S.activeTasks.filter(t=>t.workerId===u.id);
+  if(existTasks.length>0){
+    const prev=existTasks[0];
+    const msg=existTasks.length>1?existTasks.length+' משימות פעילות — '+existTasks.map(t=>t.prod).join(', ')+T.cfm_existing_msg:'מוצר '+prev.prod+T.cfm_existing_msg;
+    const parallel=await showConfirm(T.cfm_existing_title||'משימה קיימת',msg,T.cfm_parallel||'עבודה במקביל',T.cfm_close_old||'סגור ישנה + התחל חדשה');
     if(!parallel){
       const endTime=new Date();
-      const done={...prev,endTime,duration:Math.round((endTime-new Date(prev.startTime))/1000)};
-      S.histTasks.unshift(done);
-      S.activeTasks.splice(existIdx,1);
-      if(S.fbConnected){await fbDel('activeTasks',String(prev.id));await fbSet('histTasks',String(prev.id),{...done,startTime:done.startTime instanceof Date?done.startTime.toISOString():done.startTime,endTime:done.endTime.toISOString()});}
+      for(const t of existTasks){
+        const done={...t,endTime,duration:Math.round((endTime-new Date(t.startTime))/1000)};
+        S.histTasks.unshift(done);
+        if(S.fbConnected){await fbDel('activeTasks',String(t.id));await fbSet('histTasks',String(t.id),{...done,startTime:done.startTime instanceof Date?done.startTime.toISOString():done.startTime,endTime:done.endTime.toISOString()});}
+      }
+      S.activeTasks=S.activeTasks.filter(t=>t.workerId!==u.id);
     }
   }
   const newTask={id:String(S.nextTId++),workerId:u.id,workerName:u.name,dept:taskDept||u.dept,cust,prod,size,qty,col,taskType,bc:raw,startTime:new Date(),elapsed:0};
@@ -2530,17 +2533,21 @@ async function tsStartTask(){
   // ברקוד שכבר בעבודה אצל עובד אחר באותו שלב — אישור הצטרפות
   const otherSame=S.activeTasks.find(t=>t.workerId!==w.id&&taskBc(t)===raw&&(t.taskType||'').trim().toLowerCase()===taskType.toLowerCase());
   if(otherSame&&!await showConfirm(T.cfm_join_title||'הצטרפות למשימה',T.cfm_join_msg+otherSame.workerName+(otherSame.taskType?' ('+otherSame.taskType+')':'')+T.cfm_join_msg2,T.cfm_join_ok||'הצטרף',T.cancel||'ביטול'))return;
-  // משימה פעילה קיימת לעובד — עבודה במקביל או סגור ישנה
-  const existIdxTs=S.activeTasks.findIndex(t=>t.workerId===w.id);
-  if(existIdxTs>-1){
-    const prevTs=S.activeTasks[existIdxTs];
-    const parallelTs=await showConfirm(T.cfm_existing_title+' - '+w.name||'משימה קיימת','מוצר '+prevTs.prod+T.cfm_existing_msg,T.cfm_parallel||'עבודה במקביל',T.cfm_close_old||'סגור ישנה + התחל חדשה');
+  // משימה פעילה קיימת לעובד — עבודה במקביל או סגור את כולן
+  const existTasksTs=S.activeTasks.filter(t=>t.workerId===w.id);
+  if(existTasksTs.length>0){
+    const prevTs=existTasksTs[0];
+    const msgTs=existTasksTs.length>1?existTasksTs.length+' משימות פעילות — '+existTasksTs.map(t=>t.prod).join(', ')+T.cfm_existing_msg:'מוצר '+prevTs.prod+T.cfm_existing_msg;
+    const parallelTs=await showConfirm(T.cfm_existing_title+' - '+w.name||'משימה קיימת',msgTs,T.cfm_parallel||'עבודה במקביל',T.cfm_close_old||'סגור ישנה + התחל חדשה');
     if(parallelTs===null)return;
     if(!parallelTs){
       const endTime=new Date();
-      const done={...prevTs,endTime,duration:Math.round((endTime-new Date(prevTs.startTime))/1000)};
-      S.histTasks.unshift(done);S.activeTasks.splice(existIdxTs,1);
-      if(S.fbConnected){await fbDel('activeTasks',String(prevTs.id));await fbSet('histTasks',String(prevTs.id),{...done,startTime:done.startTime instanceof Date?done.startTime.toISOString():done.startTime,endTime:done.endTime.toISOString()});}
+      for(const t of existTasksTs){
+        const done={...t,endTime,duration:Math.round((endTime-new Date(t.startTime))/1000)};
+        S.histTasks.unshift(done);
+        if(S.fbConnected){await fbDel('activeTasks',String(t.id));await fbSet('histTasks',String(t.id),{...done,startTime:done.startTime instanceof Date?done.startTime.toISOString():done.startTime,endTime:done.endTime.toISOString()});}
+      }
+      S.activeTasks=S.activeTasks.filter(t=>t.workerId!==w.id);
     }
   }
   const task={id:String(S.nextTId++),workerId:w.id,workerName:w.name,dept:taskDept||w.dept,cust,prod,size,qty,col,taskType,bc:raw,startTime:new Date(),elapsed:0};
@@ -2654,16 +2661,20 @@ async function mgrStartTask(){
   // ברקוד שכבר בעבודה אצל עובד אחר באותו שלב — אישור הצטרפות
   const otherSame=S.activeTasks.find(t=>t.workerId!==empId&&taskBc(t)===raw&&(t.taskType||'').trim().toLowerCase()===taskType.toLowerCase());
   if(otherSame&&!await showConfirm(T.cfm_join_title||'הצטרפות למשימה',T.cfm_join_msg+otherSame.workerName+(otherSame.taskType?' ('+otherSame.taskType+')':'')+T.cfm_join_msg2,T.cfm_join_ok||'הצטרף',T.cancel||'ביטול'))return;
-  // משימה פעילה קיימת — לסגור אותה או לעבוד במקביל
-  const existIdx=S.activeTasks.findIndex(t=>t.workerId===empId);
-  if(existIdx>-1){
-    const prev=S.activeTasks[existIdx];
-    const parallel=await showConfirm(T.cfm_existing_title+' - '+w.name||'משימה קיימת','מוצר '+prev.prod+T.cfm_existing_msg,T.cfm_parallel||'עבודה במקביל',T.cfm_close_old||'סגור ישנה + התחל חדשה');
+  // משימה פעילה קיימת — לסגור את כולן או לעבוד במקביל
+  const existTasksMgr=S.activeTasks.filter(t=>t.workerId===empId);
+  if(existTasksMgr.length>0){
+    const prev=existTasksMgr[0];
+    const msgMgr=existTasksMgr.length>1?existTasksMgr.length+' משימות פעילות — '+existTasksMgr.map(t=>t.prod).join(', ')+T.cfm_existing_msg:'מוצר '+prev.prod+T.cfm_existing_msg;
+    const parallel=await showConfirm(T.cfm_existing_title+' - '+w.name||'משימה קיימת',msgMgr,T.cfm_parallel||'עבודה במקביל',T.cfm_close_old||'סגור ישנה + התחל חדשה');
     if(!parallel){
       const endTime=new Date();
-      const done={...prev,endTime,duration:Math.round((endTime-new Date(prev.startTime))/1000)};
-      S.histTasks.unshift(done);S.activeTasks.splice(existIdx,1);
-      if(S.fbConnected){await fbDel('activeTasks',String(prev.id));await fbSet('histTasks',String(prev.id),{...done,startTime:done.startTime instanceof Date?done.startTime.toISOString():done.startTime,endTime:done.endTime.toISOString()});}
+      for(const t of existTasksMgr){
+        const done={...t,endTime,duration:Math.round((endTime-new Date(t.startTime))/1000)};
+        S.histTasks.unshift(done);
+        if(S.fbConnected){await fbDel('activeTasks',String(t.id));await fbSet('histTasks',String(t.id),{...done,startTime:done.startTime instanceof Date?done.startTime.toISOString():done.startTime,endTime:done.endTime.toISOString()});}
+      }
+      S.activeTasks=S.activeTasks.filter(t=>t.workerId!==empId);
     }
   }
   const newTask={id:String(S.nextTId++),workerId:empId,workerName:w.name,dept:taskDept||w.dept,cust,prod,size,qty,col,taskType,bc:raw,startTime:new Date(),elapsed:0};
