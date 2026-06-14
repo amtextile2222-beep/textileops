@@ -2028,6 +2028,13 @@ function fillDeptSelects(){
   const opts=`<option value="">${selDept}</option>`+S.depts.map(d=>`<option value="${esc(d)}">${esc(d)}</option>`).join('');
   ['bc-dept','mgr-dept','ts-dept'].forEach(id=>{const s=document.getElementById(id);if(s)s.innerHTML=opts;});
 }
+function totalBcSecs(bc, workerId){
+  return S.histTasks.filter(t=>t.bc===bc&&t.workerId===workerId).reduce((s,t)=>s+(t.duration||0),0);
+}
+function totalBcSessions(bc, workerId){
+  return S.histTasks.filter(t=>t.bc===bc&&t.workerId===workerId).length;
+}
+
 function renderScanActive(){
   fillDeptSelects();
   const el=document.getElementById('scan-active');if(!el)return;
@@ -2079,7 +2086,9 @@ function renderTasks(){
         <span class="bc-seg bc-c">לקוח ${t.cust}</span><span class="bc-seg bc-p">${t.prod}</span><span class="bc-seg bc-q">${t.qty} יח'</span><span class="bc-seg bc-col">${COLORS[t.col]||t.col}</span>
         ${t.taskType?`<span class="badge gray">📋 ${esc(t.taskType)}</span>`:''}
         ${over?'<span class="badge amber">⚠ ארוכה</span>':''}
-      </div></div>`;
+      </div>
+      ${(()=>{const prev=totalBcSecs(t.bc,t.workerId);const ses=totalBcSessions(t.bc,t.workerId);return prev>0?`<div style="font-size:11px;color:var(--txt3);margin-top:4px">📊 סה"כ על מוצר זה: <b>${fmtM(prev)}</b> (${ses} ${ses===1?'יום':'ימים'} קודמים)</div>`:''})()}
+      </div>`;
   }).join('');}
   renderTaskHist();
 }
@@ -2109,7 +2118,9 @@ function renderTaskHist(){
     return`<div class="row">
       <div style="flex:1"><div style="font-size:12px;font-weight:500;color:var(--txt)">${esc(t.workerName)}</div>
       <div style="font-size:11px;color:var(--txt3)">${dateStr} | לקוח ${t.cust} | ${t.prod} | ${t.qty} יח' | ${COLORS[t.col]||t.col}${t.taskType?' | 📋 '+esc(t.taskType):''}</div>
-      <div style="font-size:11px;color:var(--txt3)">▶ ${stStr} → ◀ ${etStr}</div></div>
+      <div style="font-size:11px;color:var(--txt3)">▶ ${stStr} → ◀ ${etStr}</div>
+      ${(()=>{const tot=totalBcSecs(t.bc,t.workerId);const ses=totalBcSessions(t.bc,t.workerId);return ses>1?`<div style="font-size:11px;color:var(--blue-txt)">📊 סה"כ מצטבר: <b>${fmtM(tot)}</b> (${ses} ימים)</div>`:''})()}
+      </div>
       <div style="display:flex;align-items:center;gap:6px">
         <span class="badge blue">${fmtM(t.duration||0)}</span>
         ${(S.user?.role==='manager'||S.user?.role==='supervisor')?`<button class="btn" style="font-size:11px;padding:3px 8px" onclick="openEditTask('${t.id}',true)" title="עריכה">✏️</button>`:''}
@@ -5408,7 +5419,7 @@ function cancelFaceReg(){
 
 /* ── AUTO UPDATE CHECK ── */
 (function(){
-  const CURRENT_VERSION = '20260614-1';
+  const CURRENT_VERSION = '20260614-2';
   const VERSION_URL = 'https://amtextile2222-beep.github.io/textileops/version.json';
   const CHECK_INTERVAL = 5 * 60 * 1000; // 5 דקות
 
