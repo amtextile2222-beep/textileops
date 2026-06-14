@@ -2079,7 +2079,7 @@ function renderTasks(){
         <div><div style="font-size:13px;font-weight:500;color:var(--txt)">${esc(t.workerName)}</div><div style="font-size:11px;color:var(--txt3)">${esc(t.dept)}</div></div>
         <div style="display:flex;align-items:center;gap:6px">
           <div class="task-tmr ${over?'over':''}" id="tmr-${t.id}">${fmtS(t.elapsed||0)}</div>
-          ${(S.user?.role==='manager'||S.user?.role==='supervisor')?`<button class="btn" style="font-size:11px;padding:3px 8px" onclick="openEditTask('${t.id}')" title="עריכת משימה">✏️</button><button class="btn danger" style="font-size:11px;padding:3px 8px;opacity:0.7" onclick="deleteActiveTask('${t.id}')" title="מחק משימה בטעות">🗑</button>`:''}
+          ${(S.user?.role==='manager'||S.user?.role==='supervisor')?`<button class="btn" style="font-size:11px;padding:3px 8px" onclick="openEditTask('${t.id}')" title="עריכת משימה">✏️</button><button class="btn" style="font-size:11px;padding:3px 8px;color:var(--blue-txt)" onclick="transferTask('${t.id}')" title="העבר לעובד אחר">🔄</button><button class="btn danger" style="font-size:11px;padding:3px 8px;opacity:0.7" onclick="deleteActiveTask('${t.id}')" title="מחק משימה בטעות">🗑</button>`:''}
         </div>
       </div>
       <div style="display:flex;gap:4px;flex-wrap:wrap">
@@ -2410,6 +2410,7 @@ function renderMgrTasks(){
         </div>
         <div style="display:flex;gap:4px">
           <button class="btn" style="font-size:11px;padding:4px 10px" onclick="openEditTask('${t.id}')">✏️ ערוך</button>
+          <button class="btn" style="font-size:11px;padding:4px 10px;color:var(--blue-txt)" onclick="transferTask('${t.id}')">🔄 העבר</button>
           <button class="btn danger" style="font-size:11px;padding:4px 10px" onclick="mgrEndTask('${t.id}')">⏹ סיים</button>
           <button class="btn danger" style="font-size:11px;padding:4px 8px;opacity:0.7" onclick="deleteActiveTask('${t.id}')" title="מחק משימה שנפתחה בטעות">🗑</button>
         </div>
@@ -2706,6 +2707,24 @@ async function deleteActiveTask(taskId){
   if(w&&w.activeTaskId===taskId){w.activeTaskId=null;}
   if(S.fbConnected)await fbDel('activeTasks',String(taskId));
   saveLS();renderTasks();renderMgrTasks();renderDash();
+}
+async function transferTask(taskId){
+  const t=S.activeTasks.find(x=>x.id===taskId);if(!t)return;
+  const eligible=S.workers.filter(w=>w.status==='in'&&w.id!==t.workerId);
+  if(!eligible.length){alert('אין עובדים אחרים נוכחים כרגע');return;}
+  const opts=eligible.map(w=>`<option value="${esc(w.id)}">${esc(w.name)} (${esc(w.dept)})</option>`).join('');
+  const sel=`<select id="transfer-sel" style="width:100%;padding:8px;font-size:14px;border-radius:6px;border:1px solid #ccc;margin-top:8px">${opts}</select>`;
+  const ok=await showConfirm('🔄 העברת משימה',`משימה של <b>${esc(t.workerName)}</b> — מוצר ${t.prod}<br>${sel}`,'העבר','ביטול');
+  if(!ok)return;
+  const newWorkerId=document.getElementById('transfer-sel')?.value;
+  const newWorker=S.workers.find(w=>w.id===newWorkerId);
+  if(!newWorker){return;}
+  t.workerId=newWorker.id;
+  t.workerName=newWorker.name;
+  t.dept=newWorker.dept;
+  if(S.fbConnected)await fbSet('activeTasks',String(t.id),{...t,startTime:t.startTime instanceof Date?t.startTime.toISOString():t.startTime});
+  saveLS();renderTasks();renderMgrTasks();
+  showToast(`✅ המשימה הועברה ל-${newWorker.name}`);
 }
 async function mgrEndTask(taskId){
   const t=S.activeTasks.find(x=>x.id===taskId);if(!t)return;
@@ -5432,7 +5451,7 @@ function cancelFaceReg(){
 
 /* ── AUTO UPDATE CHECK ── */
 (function(){
-  const CURRENT_VERSION = '20260614-3';
+  const CURRENT_VERSION = '20260614-4';
   const VERSION_URL = 'https://amtextile2222-beep.github.io/textileops/version.json';
   const CHECK_INTERVAL = 5 * 60 * 1000; // 5 דקות
 
