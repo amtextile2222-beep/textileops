@@ -5394,6 +5394,27 @@ function cancelFaceReg(){
   document.getElementById('face-reg-screen').classList.add('hidden');
   document.getElementById('app-screen').classList.remove('hidden');
 }
+
+/* ── AUTO UPDATE CHECK ── */
+(function(){
+  const CURRENT_VERSION = '20260614-1';
+  const VERSION_URL = 'https://amtextile2222-beep.github.io/textileops/version.json';
+  const CHECK_INTERVAL = 5 * 60 * 1000; // 5 דקות
+
+  async function checkVersion(){
+    if(document.hidden) return; // לא לרענן כשהטאב ברקע — ממתינים לפעם הבאה
+    try {
+      const res = await fetch(VERSION_URL + '?t=' + Date.now(), {cache:'no-store'});
+      if(!res.ok) return;
+      const data = await res.json();
+      if(data.v && data.v !== CURRENT_VERSION){
+        window.location.reload(true);
+      }
+    } catch(e){}
+  }
+
+  setInterval(checkVersion, CHECK_INTERVAL);
+})();
 </script>
 </body>
 </html>
