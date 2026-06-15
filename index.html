@@ -3050,24 +3050,9 @@ async function _workerFaceRegDone(){
     w.faceUpdateAllowed=false;
     if(S.fbConnected)await fbSet('workers',w.id,w);
     saveLS();
-    try{
-      const snap=document.createElement('canvas');
-      snap.width=video.videoWidth;snap.height=video.videoHeight;
-      snap.getContext('2d').drawImage(video,0,0);
-      snap.toBlob(async blob=>{
-        if(!blob)return;
-        const token=(S.settings.waToken||'').trim();
-        const chatId=(S.settings.waChatId||'').trim();
-        if(!token||!chatId)return;
-        const now=new Date().toLocaleTimeString('he-IL',{hour:'2-digit',minute:'2-digit'});
-        const fd=new FormData();
-        fd.append('chat_id',chatId);fd.append('photo',blob,'face.jpg');
-        fd.append('caption','📸 TextileOps — עובד עדכן פנים (5 דגימות)\n👤 עובד: '+w.name+'\n🕐 שעה: '+now);
-        fetch('https://api.telegram.org/bot'+token+'/sendPhoto',{method:'POST',body:fd});
-      },'image/jpeg',0.8);
-    }catch(e){}
+    sendFaceRegPhotos(w.name,[..._faceRegSnaps]);
   }
-  _faceRegSamples=[];
+  _faceRegSamples=[];_faceRegSnaps=[];
   if(_faceRegStream){_faceRegStream.getTracks().forEach(t=>t.stop());_faceRegStream=null;}
   document.getElementById('face-reg-screen').classList.add('hidden');
   document.getElementById('app-screen').classList.remove('hidden');
@@ -5046,6 +5031,23 @@ let _faceAuthLoop=null;
 let _faceRegStream=null;
 let _faceRegWorkerId=null;
 let _faceRegSamples=[];
+let _faceRegSnaps=[];
+async function sendFaceRegPhotos(workerName,snaps){
+  const token=(S.settings.waToken||'').trim();
+  const chatId=(S.settings.waChatId||'').trim();
+  if(!token||!chatId||!snaps.length)return;
+  const now=new Date().toLocaleTimeString('he-IL',{hour:'2-digit',minute:'2-digit'});
+  for(let i=0;i<snaps.length;i++){
+    try{
+      const res=await fetch(snaps[i]);const blob=await res.blob();
+      const fd=new FormData();
+      fd.append('chat_id',chatId);
+      fd.append('photo',blob,'face'+(i+1)+'.jpg');
+      fd.append('caption',i===0?'📸 רישום פנים — '+workerName+' | '+now+'\nדגימה '+(i+1)+'/'+snaps.length:'דגימה '+(i+1)+'/'+snaps.length);
+      fetch('https://api.telegram.org/bot'+token+'/sendPhoto',{method:'POST',body:fd});
+    }catch(e){}
+  }
+}
 
 async function loadFaceModels(){
   if(_faceModelsLoaded)return true;
@@ -5498,6 +5500,9 @@ function faceRegRetake(){
 async function faceRegConfirm(){
   if(!window._pendingDescriptor)return;
   _faceRegSamples.push(window._pendingDescriptor);
+  // שמור את התמונה המאושרת לשליחה בטלגרם
+  const previewCanvas=document.getElementById('face-reg-preview-canvas');
+  if(previewCanvas)_faceRegSnaps.push(previewCanvas.toDataURL('image/jpeg',0.7));
   window._pendingDescriptor=null;
   document.getElementById('face-reg-preview-box').style.display='none';
   document.getElementById('face-reg-capture-box').style.display='flex';
@@ -5518,25 +5523,9 @@ async function faceRegConfirm(){
     w.faceDescriptors=Object.fromEntries(_faceRegSamples.map((s,i)=>[i,s]));
     if(S.fbConnected)await fbSet('workers',w.id,w);
     saveLS();
-    try{
-      const snapCanvas=document.createElement('canvas');
-      snapCanvas.width=video.videoWidth;snapCanvas.height=video.videoHeight;
-      snapCanvas.getContext('2d').drawImage(video,0,0);
-      snapCanvas.toBlob(async blob=>{
-        if(!blob)return;
-        const token=(S.settings.waToken||'').trim();
-        const chatId=(S.settings.waChatId||'').trim();
-        if(!token||!chatId)return;
-        const now=new Date().toLocaleTimeString('he-IL',{hour:'2-digit',minute:'2-digit'});
-        const fd=new FormData();
-        fd.append('chat_id',chatId);
-        fd.append('photo',blob,'face.jpg');
-        fd.append('caption','📸 TextileOps — פנים עודכנו (5 דגימות)\n👤 עובד: '+w.name+'\n🕐 שעה: '+now);
-        fetch('https://api.telegram.org/bot'+token+'/sendPhoto',{method:'POST',body:fd});
-      },'image/jpeg',0.8);
-    }catch(e){}
+    sendFaceRegPhotos(w.name,[..._faceRegSnaps]);
   }
-  _faceRegSamples=[];
+  _faceRegSamples=[];_faceRegSnaps=[];
   cancelFaceReg();
   alert('✅ פנים נרשמו בהצלחה עבור '+w?.name);
   renderAdmin();
@@ -5545,7 +5534,7 @@ async function faceRegConfirm(){
 function cancelFaceReg(){
   if(_faceRegStream){_faceRegStream.getTracks().forEach(t=>t.stop());_faceRegStream=null;}
   _faceRegWorkerId=null;
-  _faceRegSamples=[];
+  _faceRegSamples=[];_faceRegSnaps=[];
   const btn=document.getElementById('face-reg-btn');
   btn.textContent='📸 צלם דגימה 1/5';
   btn.onclick=captureFaceDescriptor;
