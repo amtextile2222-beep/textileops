@@ -3916,8 +3916,8 @@ function calcCosts(){
     totalOverhead+=overhead;
     if(nonTaskShare)totalNonTaskWage+=nonTaskShare;
 
-    // ספירת יחידות פעם אחת לברקוד+שלב+יום (עובדים שחולקים ברקוד)
-    const ukey=taskBc(t)+'|'+(t.taskType||'').trim().toLowerCase()+'|'+d;
+    // ספירת יחידות פיזיות: כל ברקוד נספר פעם אחת (ללא קשר לשלב או יום)
+    const ukey=taskBc(t);
     const unitCounted=!_unitSeen.has(ukey);_unitSeen.add(ukey);
     return{...t,wage,nonTaskShare,overhead,total:wage+nonTaskShare+overhead,date:d,taskRatio,unitCounted};
   });
