@@ -1320,7 +1320,11 @@ function runDailyReset(){
   const today=todayStr();
   if(lastDate&&lastDate!==today){
     S.workers.forEach(w=>{
-      if(w.status==='in'){
+      // בדוק אם ל-session יש תאריך ישן (מ-localStorage) — רק אז כותבים ל-Firebase
+      const firstIn=w.sessions?.[0]?.in||w.checkin;
+      const sessionDay=firstIn?firstIn.slice(0,10):null;
+      const hadOldSession=sessionDay&&sessionDay<today;
+      if(w.status==='in'&&hadOldSession){
         const sessions=w.sessions&&w.sessions.length?w.sessions:(w.checkin?[{in:w.checkin,out:null}]:[]);
         const rec={workerId:w.id,workerName:w.name,dept:w.dept,date:lastDate,
           sessions,checkin:sessions[0]?.in||w.checkin,checkout:null,
@@ -1329,7 +1333,7 @@ function runDailyReset(){
         if(S.fbConnected)fbSet('attHistory',w.id+'_'+lastDate,rec);
       }
       w.status='out';w.checkin=null;w.checkout=null;w.sessions=[];
-      if(S.fbConnected)fbSet('workers',w.id,w);
+      // אל תכתוב ל-Firebase — listenFb() מקבל נתונים טריים ומטפל באיפוס בצורה בטוחה
     });
     S.activeTasks.forEach(t=>{
       const endTime=new Date(lastDate+'T23:59:59');
