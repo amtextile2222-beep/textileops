@@ -2971,7 +2971,7 @@ function openModal(action,id){
         </label>
         ${w?`<div style="margin-top:8px;display:flex;align-items:center;gap:8px">
           <span style="font-size:12px;color:var(--txt3)">${(w.faceDescriptor||w.faceDescriptors&&Object.keys(w.faceDescriptors).length)?'✅ פנים רשומים':'⚠️ פנים לא רשומים'}</span>
-          <button type="button" class="btn" style="font-size:11px;padding:4px 10px" onclick="closeModal();openFaceRegister('${w.id}')">📸 ${(w.faceDescriptor||w.faceDescriptors&&Object.keys(w.faceDescriptors).length)?'עדכן פנים':'רשום פנים'}</button>
+          <button type="button" class="btn" style="font-size:11px;padding:4px 10px" onclick="closeModal();allowFaceUpdateByAdmin('${w.id}')">📸 ${(w.faceDescriptor||w.faceDescriptors&&Object.keys(w.faceDescriptors).length)?'אשר עדכון פנים לעובד':'אשר רישום פנים לעובד'}</button>
         </div>`:'<div style="font-size:11px;color:var(--txt3);margin-top:6px">שמור עובד תחילה, אחר כך רשום פנים</div>'}
       </div>
       <div class="field" id="mf-perms-box" style="display:${wRole==='manager'?'none':'block'}">
@@ -2984,6 +2984,13 @@ function openModal(action,id){
         </div>
       </div>`;
   }
+}
+async function allowFaceUpdateByAdmin(id){
+  const w=S.workers.find(x=>x.id===id);if(!w)return;
+  w.faceUpdateAllowed=true;
+  if(S.fbConnected)await fbSet('workers',w.id,w);
+  saveLS();renderAdmin();
+  alert('✅ '+w.name+' יכול עכשיו לעדכן פנים מהטלפון שלו\nהעובד יראה כפתור "עדכן פנים" במסך הכניסה');
 }
 async function toggleFaceUpdate(id){
   const w=S.workers.find(x=>x.id===id);if(!w)return;
