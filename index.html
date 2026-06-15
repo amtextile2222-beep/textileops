@@ -993,6 +993,15 @@ const todayStr=()=>{const d=new Date();return d.getFullYear()+'-'+pad2(d.getMont
 const esc=s=>String(s??'').replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;');
 // ברקוד מלא של משימה (תאימות למשימות ישנות בלי שדה bc)
 const taskBc=t=>t.bc||String(t.cust)+String(t.prod)+String(t.size||'0')+String(t.qty).padStart(3,'0')+String(t.col);
+// ברקוד "כל הכמות": size='9', col='00'
+function isTotalBc(raw){return raw&&raw.length===13&&raw.slice(7,8)==='9'&&raw.slice(11,13)==='00';}
+function getTotalQty(cust,prod){
+  const p=S.products.find(x=>x.cust===cust&&x.prod===prod);
+  if(p&&p.quantities&&p.quantities.length)return p.quantities.reduce((s,q)=>s+(parseInt(q.qty)||0),0);
+  if(window._bcLastGen&&window._bcLastGen.cust===cust&&window._bcLastGen.prod===prod)
+    return window._bcLastGen.items.reduce((s,it)=>s+(parseInt(it.qty)||0),0);
+  return 0;
+}
 // ספירת יחידות בלי כפילויות: אותו ברקוד + אותו שלב + אותו יום = נספר פעם אחת
 // (שני עובדים שחולקים ברקוד באותו שלב לא מכפילים את הכמות)
 function unitKey(t){
@@ -1976,13 +1985,21 @@ function parseBc(v){
   const el=document.getElementById('bc-prev');
   if(v.length<2){el.innerHTML='';return;}
   const c=v.slice(0,2),p=v.slice(2,7),sz=v.slice(7,8),q=v.slice(8,11),col=v.slice(11,13);
-  el.innerHTML=`<div style="display:flex;gap:5px;flex-wrap:wrap;align-items:center;padding:8px;background:var(--bg2);border-radius:var(--r)">
-    <span class="bc-seg bc-c">לקוח: ${c||'__'}</span>
-    <span class="bc-seg bc-p">מוצר: ${p.padEnd(5,'_')}</span>
-    <span class="bc-seg" style="background:var(--amber-bg);color:var(--amber-txt)">מידה: ${sz||'_'}</span>
-    <span class="bc-seg bc-q">כמות: ${q.padEnd(3,'_')}</span>
-    <span class="bc-seg bc-col">צבע: ${COLORS[col]||col||'__'}</span>
-  </div>`;
+  const isTotal=isTotalBc(v);
+  const totalQty=isTotal?getTotalQty(c,p):0;
+  el.innerHTML=isTotal
+    ?`<div style="display:flex;gap:5px;flex-wrap:wrap;align-items:center;padding:8px;background:var(--bg2);border-radius:var(--r)">
+        <span class="bc-seg bc-c">לקוח: ${c||'__'}</span>
+        <span class="bc-seg bc-p">מוצר: ${p.padEnd(5,'_')}</span>
+        <span class="bc-seg" style="background:var(--green-bg,#d1fae5);color:var(--green-txt,#065f46);font-weight:700">📦 כל הכמות${totalQty?' — '+totalQty+' יח׳':''}</span>
+      </div>`
+    :`<div style="display:flex;gap:5px;flex-wrap:wrap;align-items:center;padding:8px;background:var(--bg2);border-radius:var(--r)">
+        <span class="bc-seg bc-c">לקוח: ${c||'__'}</span>
+        <span class="bc-seg bc-p">מוצר: ${p.padEnd(5,'_')}</span>
+        <span class="bc-seg" style="background:var(--amber-bg);color:var(--amber-txt)">מידה: ${sz||'_'}</span>
+        <span class="bc-seg bc-q">כמות: ${q.padEnd(3,'_')}</span>
+        <span class="bc-seg bc-col">צבע: ${COLORS[col]||col||'__'}</span>
+      </div>`;
 }
 function tryDemo(){
   document.getElementById('bc-inp').value='0710042302503';
@@ -1994,7 +2011,9 @@ async function submitBc(){
   const T=LANGS[currentLang];
   if(raw.length!==13){alert('ברקוד חייב להיות 13 ספרות בדיוק');return;}
   if(!S.user){alert('יש להתחבר תחילה');return;}
-  const cust=raw.slice(0,2),prod=raw.slice(2,7),size=raw.slice(7,8),qty=parseInt(raw.slice(8,11))||0,col=raw.slice(11,13);
+  const cust=raw.slice(0,2),prod=raw.slice(2,7),size=raw.slice(7,8),col=raw.slice(11,13);
+  const isTotal=isTotalBc(raw);
+  const qty=isTotal?getTotalQty(cust,prod):parseInt(raw.slice(8,11))||0;
   const taskType=(document.getElementById('bc-tasktype').value||'').trim();
   const taskDept=(document.getElementById('bc-dept').value||'').trim();
   const u=S.user;
@@ -2019,7 +2038,7 @@ async function submitBc(){
       S.activeTasks=S.activeTasks.filter(t=>t.workerId!==u.id);
     }
   }
-  const newTask={id:String(S.nextTId++),workerId:u.id,workerName:u.name,dept:taskDept||u.dept,cust,prod,size,qty,col,taskType,bc:raw,startTime:new Date(),elapsed:0};
+  const newTask={id:String(S.nextTId++),workerId:u.id,workerName:u.name,dept:taskDept||u.dept,cust,prod,size,qty,col,taskType,bc:raw,isTotal:isTotal||undefined,startTime:new Date(),elapsed:0};
   S.activeTasks.unshift(newTask);
   if(S.fbConnected)await fbSet('activeTasks',newTask.id,{...newTask,startTime:newTask.startTime.toISOString()});
   document.getElementById('bc-inp').value='';parseBc('');
@@ -2121,7 +2140,7 @@ function renderTaskHist(){
     const dateStr=pad2(st.getDate())+'/'+pad2(st.getMonth()+1)+'/'+st.getFullYear();
     return`<div class="row">
       <div style="flex:1"><div style="font-size:12px;font-weight:500;color:var(--txt)">${esc(t.workerName)}</div>
-      <div style="font-size:11px;color:var(--txt3)">${dateStr} | לקוח ${t.cust} | ${t.prod} | ${t.qty} יח' | ${COLORS[t.col]||t.col}${t.taskType?' | 📋 '+esc(t.taskType):''}</div>
+      <div style="font-size:11px;color:var(--txt3)">${dateStr} | לקוח ${t.cust} | ${t.prod} | ${t.qty} יח'${t.isTotal?' | <span style="color:#059669;font-weight:700">📦 כל הכמות</span>':' | '+(COLORS[t.col]||t.col)}${t.taskType?' | 📋 '+esc(t.taskType):''}</div>
       <div style="font-size:11px;color:var(--txt3)">▶ ${stStr} → ◀ ${etStr}</div>
       ${(()=>{const tot=totalBcSecs(t.bc,t.workerId);const ses=totalBcSessions(t.bc,t.workerId);return ses>1?`<div style="font-size:11px;color:var(--blue-txt)">📊 סה"כ מצטבר: <b>${fmtM(tot)}</b> (${ses} ימים)</div>`:''})()}
       </div>
@@ -2358,7 +2377,7 @@ function renderDash(){
     <div class="row">
       <div style="flex:1"><span style="font-size:13px;font-weight:500">${esc(t.workerName)}</span>
       <span class="badge ${t.endTime?'green':'blue'}" style="margin-right:6px">${t.endTime?'הושלם':'פעיל'}</span>
-      <div style="font-size:11px;color:var(--txt3)">לקוח ${t.cust} · מוצר ${t.prod} · ${t.qty} יח' · ${COLORS[t.col]||t.col}</div></div>
+      <div style="font-size:11px;color:var(--txt3)">לקוח ${t.cust} · מוצר ${t.prod} · ${t.qty} יח'${t.isTotal?' · <span style="color:#059669;font-weight:700">📦 כל הכמות</span>':' · '+(COLORS[t.col]||t.col)}</div></div>
       <span style="font-size:12px;color:var(--txt2)">${t.endTime?fmtM(t.duration||0):fmtS(t.elapsed||0)}</span>
     </div>`).join('');
 }
@@ -2439,10 +2458,15 @@ function parseMgrBc(v){
   const el=document.getElementById('mgr-bc-prev');if(!el)return;
   if(v.length<2){el.innerHTML='';return;}
   const c=v.slice(0,2),p=v.slice(2,7),sz=v.slice(7,8),q=v.slice(8,11),col=v.slice(11,13);
-  el.innerHTML=`<div style="display:flex;gap:5px;flex-wrap:wrap;padding:6px;background:var(--bg2);border-radius:var(--r)">
-    <span class="bc-seg bc-c">לקוח: ${c||'__'}</span><span class="bc-seg bc-p">מוצר: ${p.padEnd(5,'_')}</span>
-    <span class="bc-seg" style="background:var(--amber-bg);color:var(--amber-txt)">מידה: ${sz||'_'}</span>
-    <span class="bc-seg bc-q">כמות: ${q.padEnd(3,'_')}</span><span class="bc-seg bc-col">צבע: ${COLORS[col]||col||'__'}</span></div>`;
+  const isTotal=isTotalBc(v);const totalQty=isTotal?getTotalQty(c,p):0;
+  el.innerHTML=isTotal
+    ?`<div style="display:flex;gap:5px;flex-wrap:wrap;padding:6px;background:var(--bg2);border-radius:var(--r)">
+        <span class="bc-seg bc-c">לקוח: ${c||'__'}</span><span class="bc-seg bc-p">מוצר: ${p.padEnd(5,'_')}</span>
+        <span class="bc-seg" style="background:var(--green-bg,#d1fae5);color:var(--green-txt,#065f46);font-weight:700">📦 כל הכמות${totalQty?' — '+totalQty+' יח׳':''}</span></div>`
+    :`<div style="display:flex;gap:5px;flex-wrap:wrap;padding:6px;background:var(--bg2);border-radius:var(--r)">
+        <span class="bc-seg bc-c">לקוח: ${c||'__'}</span><span class="bc-seg bc-p">מוצר: ${p.padEnd(5,'_')}</span>
+        <span class="bc-seg" style="background:var(--amber-bg);color:var(--amber-txt)">מידה: ${sz||'_'}</span>
+        <span class="bc-seg bc-q">כמות: ${q.padEnd(3,'_')}</span><span class="bc-seg bc-col">צבע: ${COLORS[col]||col||'__'}</span></div>`;
 }
 
 let mgrCamStream=null;let mgrCamInterval=null;
@@ -2496,10 +2520,15 @@ function tsParseBc(v){
   const el=document.getElementById('ts-bc-prev');if(!el)return;
   if(v.length<2){el.innerHTML='';return;}
   const c=v.slice(0,2),p=v.slice(2,7),sz=v.slice(7,8),q=v.slice(8,11),col=v.slice(11,13);
-  el.innerHTML=`<div style="display:flex;gap:5px;flex-wrap:wrap;padding:6px;background:var(--bg2);border-radius:var(--r)">
-    <span class="bc-seg bc-c">לקוח: ${c||'__'}</span><span class="bc-seg bc-p">מוצר: ${p.padEnd(5,'_')}</span>
-    <span class="bc-seg" style="background:var(--amber-bg);color:var(--amber-txt)">מידה: ${sz||'_'}</span>
-    <span class="bc-seg bc-q">כמות: ${q.padEnd(3,'_')}</span><span class="bc-seg bc-col">צבע: ${COLORS[col]||col||'__'}</span></div>`;
+  const isTotal=isTotalBc(v);const totalQty=isTotal?getTotalQty(c,p):0;
+  el.innerHTML=isTotal
+    ?`<div style="display:flex;gap:5px;flex-wrap:wrap;padding:6px;background:var(--bg2);border-radius:var(--r)">
+        <span class="bc-seg bc-c">לקוח: ${c||'__'}</span><span class="bc-seg bc-p">מוצר: ${p.padEnd(5,'_')}</span>
+        <span class="bc-seg" style="background:var(--green-bg,#d1fae5);color:var(--green-txt,#065f46);font-weight:700">📦 כל הכמות${totalQty?' — '+totalQty+' יח׳':''}</span></div>`
+    :`<div style="display:flex;gap:5px;flex-wrap:wrap;padding:6px;background:var(--bg2);border-radius:var(--r)">
+        <span class="bc-seg bc-c">לקוח: ${c||'__'}</span><span class="bc-seg bc-p">מוצר: ${p.padEnd(5,'_')}</span>
+        <span class="bc-seg" style="background:var(--amber-bg);color:var(--amber-txt)">מידה: ${sz||'_'}</span>
+        <span class="bc-seg bc-q">כמות: ${q.padEnd(3,'_')}</span><span class="bc-seg bc-col">צבע: ${COLORS[col]||col||'__'}</span></div>`;
 }
 async function tsStartCam(){
   const container=document.getElementById('ts-cam-container');
@@ -2543,7 +2572,9 @@ async function tsStartTask(){
   if(raw.length!==13){showToast(T.err_barcode_13||'⚠ ברקוד חייב להיות 13 ספרות','var(--red-txt)');return;}
   const w=S.workers.find(x=>x.id===empId);
   if(!w||w.status!=='in'){showToast(T.cfm_worker_not_in||'⚠ העובד לא נמצא בעבודה — וודא שחתם כניסה','var(--red-txt)',5000);return;}
-  const cust=raw.slice(0,2),prod=raw.slice(2,7),size=raw.slice(7,8),qty=parseInt(raw.slice(8,11))||0,col=raw.slice(11,13);
+  const cust=raw.slice(0,2),prod=raw.slice(2,7),size=raw.slice(7,8),col=raw.slice(11,13);
+  const isTotal=isTotalBc(raw);
+  const qty=isTotal?getTotalQty(cust,prod):parseInt(raw.slice(8,11))||0;
   const taskType=(document.getElementById('ts-tasktype').value||'').trim();
   const taskDept=(document.getElementById('ts-dept').value||'').trim();
   // ברקוד שכבר בעבודה אצל עובד אחר באותו שלב — אישור הצטרפות
@@ -2566,7 +2597,7 @@ async function tsStartTask(){
       S.activeTasks=S.activeTasks.filter(t=>t.workerId!==w.id);
     }
   }
-  const task={id:String(S.nextTId++),workerId:w.id,workerName:w.name,dept:taskDept||w.dept,cust,prod,size,qty,col,taskType,bc:raw,startTime:new Date(),elapsed:0};
+  const task={id:String(S.nextTId++),workerId:w.id,workerName:w.name,dept:taskDept||w.dept,cust,prod,size,qty,col,taskType,bc:raw,isTotal:isTotal||undefined,startTime:new Date(),elapsed:0};
   S.activeTasks.push(task);
   if(S.fbConnected)await fbSet('activeTasks',String(task.id),{...task,startTime:task.startTime.toISOString()});
   saveLS();renderMgrTasks();
@@ -2671,7 +2702,9 @@ async function mgrStartTask(){
   if(raw.length!==13){showToast(T.err_barcode_13||'⚠ ברקוד חייב להיות 13 ספרות','var(--red-txt)');return;}
   const w=S.workers.find(x=>x.id===empId);
   if(!w||w.status!=='in'){showToast(T.cfm_worker_not_in||'⚠ העובד לא נמצא בעבודה — וודא שחתם כניסה','var(--red-txt)',5000);return;}
-  const cust=raw.slice(0,2),prod=raw.slice(2,7),size=raw.slice(7,8),qty=parseInt(raw.slice(8,11))||0,col=raw.slice(11,13);
+  const cust=raw.slice(0,2),prod=raw.slice(2,7),size=raw.slice(7,8),col=raw.slice(11,13);
+  const isTotal=isTotalBc(raw);
+  const qty=isTotal?getTotalQty(cust,prod):parseInt(raw.slice(8,11))||0;
   const taskType=(document.getElementById('mgr-tasktype').value||'').trim();
   const taskDept=(document.getElementById('mgr-dept').value||'').trim();
   // ברקוד שכבר בעבודה אצל עובד אחר באותו שלב — אישור הצטרפות
@@ -2693,7 +2726,7 @@ async function mgrStartTask(){
       S.activeTasks=S.activeTasks.filter(t=>t.workerId!==empId);
     }
   }
-  const newTask={id:String(S.nextTId++),workerId:empId,workerName:w.name,dept:taskDept||w.dept,cust,prod,size,qty,col,taskType,bc:raw,startTime:new Date(),elapsed:0};
+  const newTask={id:String(S.nextTId++),workerId:empId,workerName:w.name,dept:taskDept||w.dept,cust,prod,size,qty,col,taskType,bc:raw,isTotal:isTotal||undefined,startTime:new Date(),elapsed:0};
   S.activeTasks.unshift(newTask);
   if(S.fbConnected)await fbSet('activeTasks',newTask.id,{...newTask,startTime:newTask.startTime.toISOString()});
   document.getElementById('mgr-bc-inp').value='';parseMgrBc('');
@@ -4281,6 +4314,8 @@ function bcGenerate(){
   const out=document.getElementById('bc-gen-output');
   if(!out)return;
   window._bcLastGen={cust,prod,items};
+  const totalQtyAll=items.reduce((s,it)=>s+(parseInt(it.qty)||0),0);
+  const totalCode=cust+prod+'9'+'000'+'00';
   // בניית HTML עם canvas לכל ברקוד
   out.innerHTML=`
     <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:12px;flex-wrap:wrap;gap:8px">
@@ -4294,6 +4329,28 @@ function bcGenerate(){
     </div>`;
   // צור QR canvas לכל פריט
   const printArea=document.getElementById('bc-print-area');
+  // כרטיס "כל הכמות" — ברקוד אחד לכל המוצר
+  (()=>{
+    const div=document.createElement('div');
+    div.className='bc-card';
+    div.dataset.col='total';
+    div.style.cssText='background:#fff;border:3px solid #059669;border-radius:6px;padding:10px;display:flex;align-items:center;gap:12px;break-inside:avoid;grid-column:1/-1';
+    const qrWrap=document.createElement('div');
+    qrWrap.style.cssText='flex-shrink:0;width:150px;height:150px;overflow:hidden';
+    const infoDiv=document.createElement('div');
+    infoDiv.style.cssText='text-align:right;line-height:2;flex:1';
+    infoDiv.innerHTML=`
+      <div style="font-size:15px;font-weight:800;color:#059669;margin-bottom:4px">📦 כל הכמות</div>
+      <div style="font-size:13px;font-weight:700;color:#000">לקוח: ${cust}</div>
+      <div style="font-size:13px;font-weight:700;color:#000">מוצר: ${prod}</div>
+      <div style="font-size:16px;font-weight:800;color:#059669">סה"כ: ${totalQtyAll} יח׳</div>
+      <div style="font-size:11px;color:#555;margin-top:4px">${totalCode}</div>`;
+    div.appendChild(qrWrap);
+    div.appendChild(infoDiv);
+    printArea.appendChild(div);
+    new QRCode(qrWrap,{text:totalCode,width:150,height:150,colorDark:'#059669',colorLight:'#ffffff',correctLevel:QRCode.CorrectLevel.M});
+    setTimeout(()=>{const im=qrWrap.querySelector('img');if(im)im.style.display='none';},50);
+  })();
   items.forEach(it=>{
     const code=cust+prod+it.size+it.qty+it.col;
     const colName=(COLORS_AR[it.col]||COLORS[it.col]||it.col);
