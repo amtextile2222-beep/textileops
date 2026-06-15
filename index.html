@@ -224,7 +224,16 @@ code{background:var(--bg2);border:0.5px solid var(--b);border-radius:4px;padding
       </div>
     </div>
     <div id="face-reg-status" style="font-size:13px;min-height:20px;margin-bottom:12px;color:var(--txt2)"></div>
-    <div style="display:flex;gap:8px">
+    <!-- תצוגה מקדימה אחרי כל צילום -->
+    <div id="face-reg-preview-box" style="display:none;margin-bottom:12px">
+      <canvas id="face-reg-preview-canvas" style="width:100%;border-radius:8px;border:2px solid var(--blue)"></canvas>
+      <div style="font-size:13px;color:var(--txt2);margin:6px 0">האם הפנים בתמונה נכונים?</div>
+      <div style="display:flex;gap:8px">
+        <button class="btn full" onclick="faceRegRetake()">🔄 צלם שוב</button>
+        <button class="btn success full" onclick="faceRegConfirm()">✅ נכון</button>
+      </div>
+    </div>
+    <div id="face-reg-capture-box" style="display:flex;gap:8px">
       <button class="btn full" onclick="cancelFaceReg()">ביטול</button>
       <button class="btn primary full" id="face-reg-btn" onclick="captureFaceDescriptor()">📸 צלם פנים</button>
     </div>
@@ -3019,14 +3028,21 @@ async function _workerCaptureFace(){
   const opts=new faceapi.TinyFaceDetectorOptions({inputSize:224,scoreThreshold:0.5});
   const det=await faceapi.detectSingleFace(video,opts).withFaceLandmarks(true).withFaceDescriptor();
   if(!det){statusEl.textContent='לא זוהו פנים — נסה שוב';btnEl.disabled=false;return;}
-  _faceRegSamples.push(Array.from(det.descriptor));
-  const n=_faceRegSamples.length;
-  if(n<5){
-    statusEl.textContent='✅ דגימה '+n+'/5 — זוז קצת והמשך';
-    btnEl.textContent='📸 צלם דגימה '+(n+1)+'/5';
-    btnEl.disabled=false;
-    return;
-  }
+  // תצוגה מקדימה לאישור
+  window._pendingDescriptor=Array.from(det.descriptor);
+  window._faceRegWorkerMode=true;
+  const canvas=document.getElementById('face-reg-preview-canvas');
+  canvas.width=video.videoWidth;canvas.height=video.videoHeight;
+  const ctx=canvas.getContext('2d');
+  ctx.save();ctx.scale(-1,1);ctx.drawImage(video,-video.videoWidth,0);ctx.restore();
+  document.getElementById('face-reg-preview-box').style.display='';
+  document.getElementById('face-reg-capture-box').style.display='none';
+  statusEl.textContent='בדוק שהפנים בתמונה הם של העובד הנכון';
+  return;
+  // המשך ב-faceRegConfirm()
+}
+async function _workerFaceRegDone(){
+  const video=document.getElementById('face-reg-video');
   // 5 דגימות — שמור וסגור הרשאה
   const w=S.workers.find(x=>x.id===_faceRegWorkerId);
   if(w){
@@ -5461,7 +5477,32 @@ async function captureFaceDescriptor(){
     btnEl.disabled=false;
     return;
   }
-  _faceRegSamples.push(Array.from(det.descriptor));
+  // שמור descriptor זמני והצג תצוגה מקדימה לאישור
+  window._pendingDescriptor=Array.from(det.descriptor);
+  const canvas=document.getElementById('face-reg-preview-canvas');
+  canvas.width=video.videoWidth;canvas.height=video.videoHeight;
+  const ctx=canvas.getContext('2d');
+  ctx.save();ctx.scale(-1,1);ctx.drawImage(video,-video.videoWidth,0);ctx.restore();
+  document.getElementById('face-reg-preview-box').style.display='';
+  document.getElementById('face-reg-capture-box').style.display='none';
+  statusEl.textContent='בדוק שהפנים בתמונה הם של העובד הנכון';
+}
+function faceRegRetake(){
+  window._pendingDescriptor=null;
+  document.getElementById('face-reg-preview-box').style.display='none';
+  document.getElementById('face-reg-capture-box').style.display='flex';
+  const btnEl=document.getElementById('face-reg-btn');
+  btnEl.disabled=false;
+  document.getElementById('face-reg-status').textContent='צלם שוב';
+}
+async function faceRegConfirm(){
+  if(!window._pendingDescriptor)return;
+  _faceRegSamples.push(window._pendingDescriptor);
+  window._pendingDescriptor=null;
+  document.getElementById('face-reg-preview-box').style.display='none';
+  document.getElementById('face-reg-capture-box').style.display='flex';
+  const statusEl=document.getElementById('face-reg-status');
+  const btnEl=document.getElementById('face-reg-btn');
   const n=_faceRegSamples.length;
   if(n<5){
     statusEl.textContent='✅ דגימה '+n+'/5 — זוז קצת והמשך';
@@ -5469,7 +5510,9 @@ async function captureFaceDescriptor(){
     btnEl.disabled=false;
     return;
   }
-  // 5 דגימות הושלמו
+  // 5 דגימות הושלמו — הפנה לפונקציית סיום לפי מצב
+  if(window._faceRegWorkerMode){window._faceRegWorkerMode=false;await _workerFaceRegDone();return;}
+  const video=document.getElementById('face-reg-video');
   const w=S.workers.find(x=>x.id===_faceRegWorkerId);
   if(w){
     w.faceDescriptors=Object.fromEntries(_faceRegSamples.map((s,i)=>[i,s]));
