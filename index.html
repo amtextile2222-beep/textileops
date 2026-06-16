@@ -282,9 +282,22 @@ code{background:var(--bg2);border:0.5px solid var(--b);border-radius:4px;padding
       <div class="card"><div class="mlbl" data-i18n="dash_done">הושלמו היום</div><div class="mval" id="d-done">—</div><div class="msub">משימות</div></div>
       <div class="card"><div class="mlbl" data-i18n="dash_goal">יעד יומי</div><div class="mval" id="d-goal">—</div><div class="pbar"><div class="pfill" id="d-goal-bar" style="width:0%"></div></div></div>
     </div>
+    <!-- שיפור 5: התראה ויזואלית — עובדים שלא נכנסו -->
+    <div id="d-absent-alert" style="display:none;background:var(--red-bg);border:1px solid var(--red-txt);border-radius:var(--rl);padding:10px 14px;margin-bottom:1rem;font-size:13px;color:var(--red-txt)"></div>
+    <!-- שיפורים 2+3+4 -->
+    <div class="g3" style="margin-bottom:1rem">
+      <div class="card"><div class="mlbl">⏱ ממוצע זמן משימה</div><div class="mval" id="d-avg-time">—</div><div class="msub" id="d-avg-sub"></div></div>
+      <div class="card"><div class="mlbl">🏆 הכי פרודוקטיבי היום</div><div class="mval" style="font-size:16px" id="d-top-worker">—</div><div class="msub" id="d-top-sub"></div></div>
+      <div class="card"><div class="mlbl">📦 מוצרים בייצור</div><div class="mval" id="d-prods-active">—</div><div class="msub" id="d-prods-sub"></div></div>
+    </div>
     <div class="g2">
       <div class="card"><div class="sec" data-i18n="dash_depts">מחלקות</div><div id="d-depts"></div></div>
       <div class="card"><div class="sec" data-i18n="dash_alerts">התראות</div><div id="d-alerts-prev"></div></div>
+    </div>
+    <!-- מוצרים בייצור לפי שלב -->
+    <div class="card" style="margin-top:1rem" id="d-prods-stages-card">
+      <div class="sec">📦 מוצרים בתהליך ייצור</div>
+      <div id="d-prods-stages"></div>
     </div>
     <div class="card" style="margin-top:1rem"><div class="sec" data-i18n="dash_recent">פעילות אחרונה</div><div id="d-recent"></div></div>
   </div>
@@ -2446,13 +2459,21 @@ function waInWorkingHours(){
 function renderDash(){
   const inW=S.workers.filter(w=>w.status==='in');
   document.getElementById('d-active').textContent=inW.length;
-  document.getElementById('d-total-sub').textContent='מתוך '+S.workers.length+' עובדים';
+  const today=todayStr();
+  document.getElementById('d-total-sub').textContent='מתוך '+S.workers.filter(w=>w.role!=='manager').length+' עובדים';
   document.getElementById('d-tasks').textContent=S.activeTasks.length;
-  document.getElementById('d-done').textContent=S.histTasks.length;
-  const total=S.activeTasks.length+S.histTasks.length;
-  const goal=total?Math.min(100,Math.round(S.histTasks.length/total*100)):0;
-  document.getElementById('d-goal').textContent=goal+'%';
-  document.getElementById('d-goal-bar').style.width=goal+'%';
+  // משימות שהושלמו היום
+  const doneToday=S.histTasks.filter(t=>{try{return new Date(t.endTime||t.startTime).toISOString().slice(0,10)===today;}catch(e){return false;}});
+  document.getElementById('d-done').textContent=doneToday.length;
+  // 1 — יעד יומי אוטומטי (ממוצע 7 ימים אחרונים)
+  const days7={};
+  S.histTasks.forEach(t=>{try{const d=new Date(t.endTime||t.startTime).toISOString().slice(0,10);if(d<today)days7[d]=(days7[d]||0)+1;}catch(e){}});
+  const vals=Object.values(days7);
+  const autoGoal=vals.length?Math.round(vals.reduce((s,v)=>s+v,0)/vals.length):0;
+  const goalPct=autoGoal?Math.min(100,Math.round(doneToday.length/autoGoal*100)):0;
+  document.getElementById('d-goal').textContent=doneToday.length+(autoGoal?' / '+autoGoal:'');
+  document.getElementById('d-goal-bar').style.width=goalPct+'%';
+  // מחלקות
   const dc={};S.depts.forEach(d=>{dc[d]={in:0,total:0}});
   S.workers.forEach(w=>{if(dc[w.dept]){dc[w.dept].total++;if(w.status==='in')dc[w.dept].in++;}});
   document.getElementById('d-depts').innerHTML=S.depts.map(d=>`
@@ -2466,14 +2487,63 @@ function renderDash(){
   const dp=document.getElementById('d-alerts-prev');
   if(!S.alerts.length)dp.innerHTML='<div style="color:var(--green-txt);font-size:13px;padding:.5rem 0">✅ אין התראות</div>';
   else dp.innerHTML=S.alerts.slice(0,3).map(a=>`<div class="al-item ${a.sev}" style="margin-bottom:4px"><div>${a.type==='long'?'⏰':'👤'}</div><div style="font-size:12px">${esc(a.msg)}</div></div>`).join('');
-  const recent=[...S.histTasks.slice(0,3),...S.activeTasks.slice(0,2)].slice(0,4);
-  document.getElementById('d-recent').innerHTML=recent.map(t=>`
+  // 2 — ממוצע זמן משימה היום vs אתמול
+  const yesterday=new Date(Date.now()-86400000).toISOString().slice(0,10);
+  const doneTodayDur=doneToday.filter(t=>t.duration>0);
+  const avgToday=doneTodayDur.length?Math.round(doneTodayDur.reduce((s,t)=>s+(t.duration||0),0)/doneTodayDur.length/60):0;
+  const doneYest=S.histTasks.filter(t=>{try{return new Date(t.endTime||t.startTime).toISOString().slice(0,10)===yesterday&&t.duration>0;}catch(e){return false;}});
+  const avgYest=doneYest.length?Math.round(doneYest.reduce((s,t)=>s+(t.duration||0),0)/doneYest.length/60):0;
+  const avgDiff=avgYest&&avgToday?avgToday-avgYest:0;
+  document.getElementById('d-avg-time').textContent=avgToday?avgToday+' דק\'':'—';
+  document.getElementById('d-avg-sub').textContent=avgYest?(avgDiff===0?'כמו אתמול':avgDiff>0?'▲ '+avgDiff+' דק\' מאתמול':'▼ '+Math.abs(avgDiff)+' דק\' מאתמול'):'';
+  // 3 — מוצרים בייצור
+  const prodsInProg=(S.products||[]).filter(p=>{const log=p.stageLog||[];if(!log.length)return false;return log[log.length-1].id!==PROD_STAGES[PROD_STAGES.length-1].id;});
+  document.getElementById('d-prods-active').textContent=prodsInProg.length;
+  document.getElementById('d-prods-sub').textContent='מתוך '+(S.products||[]).length+' מוצרים';
+  const stagesEl=document.getElementById('d-prods-stages');
+  const stagesCard=document.getElementById('d-prods-stages-card');
+  if(stagesEl){
+    if(!prodsInProg.length){if(stagesCard)stagesCard.style.display='none';}
+    else{
+      if(stagesCard)stagesCard.style.display='';
+      stagesEl.innerHTML=prodsInProg.slice(0,6).map(p=>{
+        const log=p.stageLog||[];
+        const lastStage=log.length?PROD_STAGES.find(s=>s.id===log[log.length-1].id):null;
+        const totalS=PROD_STAGES.filter(s=>!p.stageSkipped?.includes(s.id)).length;
+        const pct=totalS?Math.round(log.length/totalS*100):0;
+        return`<div class="row" style="margin-bottom:8px"><div style="flex:1">
+          <div style="font-size:13px;font-weight:500">${esc(p.name||p.prod)}</div>
+          <div style="font-size:11px;color:var(--txt3)">${lastStage?esc(lastStage.name):'טרם התחיל'}</div>
+          <div style="background:var(--bg2);border-radius:3px;height:5px;margin-top:4px;overflow:hidden"><div style="background:var(--blue);width:${pct}%;height:100%"></div></div>
+        </div><span style="font-size:11px;color:var(--txt3);margin-right:8px">${pct}%</span></div>`;
+      }).join('');
+    }
+  }
+  // 4 — עובד הכי פרודוקטיבי היום
+  const workerCount={};
+  doneToday.forEach(t=>{workerCount[t.workerName]=(workerCount[t.workerName]||0)+1;});
+  const topEntry=Object.entries(workerCount).sort((a,b)=>b[1]-a[1])[0];
+  document.getElementById('d-top-worker').textContent=topEntry?topEntry[0]:'—';
+  document.getElementById('d-top-sub').textContent=topEntry?topEntry[1]+' משימות היום':'';
+  // 5 — התראה ויזואלית: עובדים שלא נכנסו אחרי 09:00
+  const alertEl=document.getElementById('d-absent-alert');
+  if(alertEl){
+    const hour=new Date().getHours();
+    if(hour>=9){
+      const notIn=S.workers.filter(w=>w.role!=='manager'&&w.status!=='in');
+      if(notIn.length){alertEl.style.display='';alertEl.innerHTML='⚠️ '+notIn.length+' עובדים עדיין לא נכנסו: '+notIn.map(w=>esc(w.name)).join(', ');}
+      else{alertEl.style.display='none';}
+    }else{alertEl.style.display='none';}
+  }
+  // פעילות אחרונה
+  const recent=[...doneToday.slice(0,3),...S.activeTasks.slice(0,2)].slice(0,4);
+  document.getElementById('d-recent').innerHTML=recent.length?recent.map(t=>`
     <div class="row">
       <div style="flex:1"><span style="font-size:13px;font-weight:500">${esc(t.workerName)}</span>
       <span class="badge ${t.endTime?'green':'blue'}" style="margin-right:6px">${t.endTime?'הושלם':'פעיל'}</span>
       <div style="font-size:11px;color:var(--txt3)">לקוח ${t.cust} · מוצר ${t.prod} · ${t.qty} יח'${t.isTotal?' · <span style="color:#059669;font-weight:700">📦 כל הכמות</span>':' · '+(COLORS[t.col]||t.col)}</div></div>
       <span style="font-size:12px;color:var(--txt2)">${t.endTime?fmtM(t.duration||0):fmtS(t.elapsed||0)}</span>
-    </div>`).join('');
+    </div>`).join(''):'<div style="color:var(--txt3);font-size:13px;padding:.5rem 0">אין פעילות היום עדיין</div>';
 }
 
 // ─── MANAGER TASKS ──────────────────────────────────────────
