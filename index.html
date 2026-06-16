@@ -4985,33 +4985,54 @@ function handleLogoClick(){
   }
 }
 
-// ─── WIFI MONITOR (בדיקה כל 5 דקות לעובדים בנוכחות פעילה) ──
+// ─── WIFI MONITOR ────────────────────────────────────────────
+// עובד: שולח את ה-IP שלו ל-Firebase כל 5 דקות
+// מנהל: קורא מ-Firebase ומתריע אם עובד יצא מה-WiFi
 setInterval(async()=>{
   if(document.hidden)return;
   const factoryIP=(S.settings.factoryIP||'188.225.231.120').trim();
+  const u=S.user;
+  if(!u)return;
+
+  // --- צד עובד: שלח IP שלך ל-Firebase ---
+  if(u.role==='worker'||u.role==='helper'||u.role==='supervisor'){
+    const w=S.workers.find(x=>x.id===u.id);
+    if(w&&w.status==='in'&&w.requireFactoryIP){
+      try{
+        const res=await fetch('https://api.ipify.org?format=json');
+        const ip=(await res.json()).ip||'';
+        await fbSet('workerWifi',w.id,{ip,lastSeen:Date.now(),name:w.name,dept:w.dept});
+      }catch(e){}
+    }
+    return;
+  }
+
+  // --- צד מנהל: קרא מ-Firebase ובדוק כל עובד ---
+  if(u.role!=='manager')return;
   const activeWorkers=S.workers.filter(w=>w.status==='in'&&w.requireFactoryIP);
   if(!activeWorkers.length)return;
-  let currentIP='';
-  try{
-    const res=await fetch('https://api.ipify.org?format=json');
-    currentIP=(await res.json()).ip||'';
-  }catch(e){return;}// תקלת רשת — לא להתריע
   const now=new Date().toLocaleTimeString('he-IL',{hour:'2-digit',minute:'2-digit'});
-  activeWorkers.forEach(async w=>{
-    if(currentIP!==factoryIP){
-      // יצא מה-WiFi — שלח התראה פעם אחת
-      if(!S.wifiAlertSent[w.id]){
-        S.wifiAlertSent[w.id]=true;
-        await sendTelegram('📡 TextileOps — עובד יצא מרשת המפעל\n👤 עובד: '+w.name+'\n🏭 מחלקה: '+w.dept+'\n🌐 IP נוכחי: '+currentIP+'\n🕐 שעה: '+now+'\nהעובד נמצא בנוכחות פעילה ויצא מטווח ה-WiFi של המפעל.');
+  for(const w of activeWorkers){
+    try{
+      const{doc,getDoc}=window._fb;
+      const snap=await getDoc(doc(db,'workerWifi',w.id));
+      if(!snap.exists()){continue;}
+      const data=snap.data();
+      const stale=Date.now()-data.lastSeen>15*60*1000;// לא עדכן 15+ דקות
+      if(stale){continue;}// לא יודעים — לא להתריע
+      if(data.ip!==factoryIP){
+        if(!S.wifiAlertSent[w.id]){
+          S.wifiAlertSent[w.id]=true;
+          await sendTelegram('📡 TextileOps — עובד יצא מרשת המפעל\n👤 עובד: '+w.name+'\n🏭 מחלקה: '+w.dept+'\n🌐 IP נוכחי: '+data.ip+'\n🕐 שעה: '+now+'\nהעובד נמצא בנוכחות פעילה ויצא מטווח ה-WiFi של המפעל.');
+        }
+      }else{
+        if(S.wifiAlertSent[w.id]){
+          S.wifiAlertSent[w.id]=false;
+          await sendTelegram('✅ TextileOps — עובד חזר לרשת המפעל\n👤 עובד: '+w.name+'\n🕐 שעה: '+now);
+        }
       }
-    } else {
-      // חזר ל-WiFi — אפס ההתראה
-      if(S.wifiAlertSent[w.id]){
-        S.wifiAlertSent[w.id]=false;
-        await sendTelegram('✅ TextileOps — עובד חזר לרשת המפעל\n👤 עובד: '+w.name+'\n🕐 שעה: '+now);
-      }
-    }
-  });
+    }catch(e){}
+  }
 },5*60*1000);
 
 // ─── FACTORY IP CHECK ────────────────────────────────────────
