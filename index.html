@@ -459,6 +459,10 @@ code{background:var(--bg2);border:0.5px solid var(--b);border-radius:4px;padding
       <div class="tbl-wrap"><table><thead><tr><th data-i18n="th_worker">עובד</th><th data-i18n="th_dept">מחלקה</th><th data-i18n="th_task_type">סוג משימה</th><th data-i18n="th_customer">לקוח</th><th data-i18n="th_product">מוצר</th><th data-i18n="th_qty">כמות</th><th data-i18n="th_color">צבע</th><th data-i18n="th_start_time">התחלה</th><th data-i18n="th_end_time">סיום</th><th data-i18n="th_duration">משך</th><th data-i18n="th_status">סטטוס</th></tr></thead>
       <tbody id="rp-body"></tbody></table></div>
     </div>
+    <div class="card" style="margin-top:1rem">
+      <div class="sec">📦 דוח ייצור לפי שלב</div>
+      <div id="rp-stages-body"></div>
+    </div>
   </div>
 
   <!-- ALERTS -->
@@ -2272,6 +2276,39 @@ function buildRep(){
   rfw.innerHTML='<option value="">כל העובדים</option>'+wOpts.map(w=>`<option value="${esc(w)}" ${w===wf?'selected':''}>${esc(w)}</option>`).join('');
   rfc.innerHTML='<option value="">כל הלקוחות</option>'+cOpts.map(c=>`<option value="${c}" ${c===cf?'selected':''}>לקוח ${c}</option>`).join('');
   rfp.innerHTML='<option value="">כל המוצרים</option>'+pOpts.map(p=>`<option value="${p}" ${p===pf?'selected':''}>מוצר ${p}</option>`).join('');
+  buildStageReport();
+}
+function buildStageReport(){
+  const el=document.getElementById('rp-stages-body');if(!el)return;
+  const prods=S.products||[];
+  if(!prods.length){el.innerHTML='<div style="color:var(--txt3);font-size:13px;padding:8px">אין מוצרים</div>';return;}
+  // לכל מוצר — מצא את השלב האחרון שהושלם
+  const rows=prods.map(p=>{
+    const log=p.stageLog||[];
+    const lastStage=log.length?PROD_STAGES.find(s=>s.id===log[log.length-1].id):null;
+    const lastDate=log.length?log[log.length-1].date:'—';
+    const totalStages=PROD_STAGES.filter(s=>!p.stageSkipped?.includes(s.id)).length;
+    const doneStages=log.length;
+    const pct=totalStages?Math.round(doneStages/totalStages*100):0;
+    const isDone=lastStage?.id===PROD_STAGES[PROD_STAGES.length-1].id;
+    return`<tr>
+      <td><span class="bc-seg bc-c">${p.cust}</span> <span class="bc-seg bc-p">${p.prod}</span></td>
+      <td style="font-size:13px">${esc(p.name||'—')}</td>
+      <td>${lastStage?esc(lastStage.name):'טרם התחיל'}</td>
+      <td>${lastDate}</td>
+      <td style="min-width:120px">
+        <div style="background:var(--bg2);border-radius:4px;height:8px;overflow:hidden">
+          <div style="background:${isDone?'var(--green)':'var(--blue)'};width:${pct}%;height:100%;border-radius:4px;transition:width .3s"></div>
+        </div>
+        <div style="font-size:10px;color:var(--txt3);margin-top:2px">${doneStages}/${totalStages} שלבים (${pct}%)</div>
+      </td>
+      <td><span class="badge ${isDone?'green':doneStages>0?'blue':'red'}">${isDone?'הושלם':doneStages>0?'בתהליך':'טרם התחיל'}</span></td>
+    </tr>`;
+  }).join('');
+  el.innerHTML=`<div class="tbl-wrap"><table>
+    <thead><tr><th>לקוח / מוצר</th><th>שם</th><th>שלב נוכחי</th><th>תאריך</th><th>התקדמות</th><th>סטטוס</th></tr></thead>
+    <tbody>${rows}</tbody>
+  </table></div>`;
 }
 function exportCSV(){
   const fromD=document.getElementById('rf-from')?.value||'';
@@ -5056,7 +5093,19 @@ async function saveProduct(){
   const {stageLog,stageSkipped}=readStagesFromModal();
   if(_editProdId){
     const p=S.products.find(x=>x.id===_editProdId);
-    if(p){Object.assign(p,{prod,cust,name,images:_prodImgs,docs:_prodDocs,quantities,stageLog,stageSkipped});}
+    if(p){
+      // זהה שלבים חדשים שנוספו — שלח התראה לטלגרם
+      const oldStageIds=(p.stageLog||[]).map(s=>s.id);
+      const newStages=stageLog.filter(s=>!oldStageIds.includes(s.id));
+      if(newStages.length){
+        const now=new Date().toLocaleTimeString('he-IL',{hour:'2-digit',minute:'2-digit'});
+        for(const s of newStages){
+          const stageName=PROD_STAGES.find(x=>x.id===s.id)?.name||s.id;
+          sendTelegram('📦 TextileOps — מוצר עבר שלב ייצור\n🏷 מוצר: '+name+' ('+cust+'-'+prod+')\n📍 שלב: '+stageName+'\n📅 תאריך: '+s.date+' '+s.time+'\n🕐 עודכן: '+now).catch(()=>{});
+        }
+      }
+      Object.assign(p,{prod,cust,name,images:_prodImgs,docs:_prodDocs,quantities,stageLog,stageSkipped});
+    }
   }else{
     const id='p'+Date.now();
     S.products.push({id,prod,cust,name,images:_prodImgs,docs:_prodDocs,quantities,stageLog,stageSkipped});
@@ -5070,7 +5119,14 @@ async function saveProduct(){
 }
 
 async function deleteProduct(id){
-  if(!confirm('למחוק את המוצר?'))return;
+  const p=S.products.find(x=>x.id===id);if(!p)return;
+  // בדיקה: יש משימות פעילות למוצר זה?
+  const activeProd=S.activeTasks.filter(t=>t.cust===p.cust&&t.prod===p.prod);
+  if(activeProd.length){
+    alert('⛔ לא ניתן למחוק — יש '+activeProd.length+' משימות פעילות למוצר זה.\nסגור את המשימות תחילה.');
+    return;
+  }
+  if(!confirm('למחוק את המוצר "'+p.name+'" ('+p.cust+'-'+p.prod+')?\nהפעולה בלתי הפיכה.'))return;
   S.products=S.products.filter(x=>x.id!==id);
   if(S.fbConnected)await fbDel('products',id);
   saveLS();renderProducts();
