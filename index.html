@@ -1161,6 +1161,7 @@ async function initFb(){
   S.fbConnected=true;
   setFbStatus('ok','✅ Firebase מחובר');
   listenFb();
+  listenWorkerMessages();
 }
 
 function listenFb(){
@@ -1681,6 +1682,7 @@ async function doLogin(){
     return;
   }
   S.user=w;
+  listenWorkerMessages();
   document.getElementById('login-screen').classList.add('hidden');
   document.getElementById('app-screen').classList.remove('hidden');
   document.getElementById('top-name').textContent=w.name;
@@ -2572,6 +2574,7 @@ function renderMgrTasks(){
         ${!bulk?`<span class="badge ${isIn?'green':'red'}" style="align-self:center">${isIn?'<span class="pulse"></span> בעבודה':'יצא/ה'}</span>`:''}
         ${!bulk&&!isIn?`<button class="btn success" style="font-size:11px;padding:5px 12px" onclick="mgrPunchIn('${w.id}')">✅ כניסה</button>`:''}
         ${!bulk&&isIn?`<button class="btn danger" style="font-size:11px;padding:5px 12px" onclick="mgrPunchOut('${w.id}')">🚪 יציאה</button>`:''}
+        ${!bulk&&isIn?`<button class="btn" style="font-size:11px;padding:5px 10px" onclick="mgrSendMsg('${w.id}','${esc(w.name)}')" title="שלח הודעה לעובד">📢</button>`:''}
         <button class="btn" style="font-size:11px;padding:5px 10px" onclick="mgrEditAtt('${w.id}')" title="עריכת שעות">✏️</button>
       </div>`;
     }).join('');
@@ -2899,6 +2902,56 @@ function mgrStopCam(){
   mgrCamStream=null;mgrCamInterval=null;
   const c=document.getElementById('mgr-cam-container');if(c)c.style.display='none';
   const b=document.getElementById('mgr-cam-btn');if(b)b.style.display='flex';
+}
+// ─── הודעות מנהל לעובד ───────────────────────────────────────
+async function mgrSendMsg(wId,wName){
+  const msg=prompt('הודעה ל'+wName+':');
+  if(!msg||!msg.trim())return;
+  if(!S.fbConnected){showToast('⚠ Firebase לא מחובר','var(--red-txt)');return;}
+  const from=S.user?.name||'מנהל';
+  try{
+    await fbSet('workerMessages',wId,{msg:msg.trim(),from,ts:Date.now()});
+    showToast('✅ הודעה נשלחה ל'+wName,'var(--green-txt)');
+  }catch(e){showToast('❌ שגיאה בשליחה','var(--red-txt)');}
+}
+function playAlertSound(){
+  try{
+    const ctx=new(window.AudioContext||window.webkitAudioContext)();
+    [0,200,400].forEach(delay=>{
+      const o=ctx.createOscillator();const g=ctx.createGain();
+      o.connect(g);g.connect(ctx.destination);
+      o.frequency.value=880;g.gain.setValueAtTime(0.3,ctx.currentTime+delay/1000);
+      g.gain.exponentialRampToValueAtTime(0.001,ctx.currentTime+delay/1000+0.2);
+      o.start(ctx.currentTime+delay/1000);o.stop(ctx.currentTime+delay/1000+0.2);
+    });
+  }catch(e){}
+}
+function showWorkerMsgPopup(msg,from){
+  // הסר popup קודם אם יש
+  document.getElementById('worker-msg-popup')?.remove();
+  const div=document.createElement('div');
+  div.id='worker-msg-popup';
+  div.style.cssText='position:fixed;top:0;left:0;right:0;bottom:0;background:rgba(0,0,0,.6);z-index:99999;display:flex;align-items:center;justify-content:center;padding:20px';
+  div.innerHTML=`<div style="background:var(--bg);border-radius:var(--rl);padding:24px;max-width:340px;width:100%;text-align:center;box-shadow:0 8px 32px rgba(0,0,0,.3)">
+    <div style="font-size:36px;margin-bottom:12px">📢</div>
+    <div style="font-size:13px;color:var(--txt3);margin-bottom:8px">הודעה מ${esc(from)}</div>
+    <div style="font-size:17px;font-weight:600;color:var(--txt);margin-bottom:20px;line-height:1.5">${esc(msg)}</div>
+    <button class="btn primary" style="width:100%;padding:10px;font-size:14px" onclick="document.getElementById('worker-msg-popup').remove()">✅ הבנתי</button>
+  </div>`;
+  document.body.appendChild(div);
+  playAlertSound();
+}
+let _workerMsgLastTs=0;
+function listenWorkerMessages(){
+  if(!S.fbConnected||!db||!S.user||S.user.role==='manager')return;
+  const{doc,onSnapshot}=window._fb;
+  onSnapshot(doc(db,'workerMessages',S.user.id),snap=>{
+    if(!snap.exists())return;
+    const data=snap.data();
+    if(!data.ts||data.ts<=_workerMsgLastTs)return;
+    _workerMsgLastTs=data.ts;
+    showWorkerMsgPopup(data.msg,data.from||'מנהל');
+  });
 }
 function mgrBulkToggle(){
   window._mgrBulkMode=!window._mgrBulkMode;
@@ -5487,6 +5540,7 @@ function _completeFaceAuth(success){
   if(success){
     const w=S._pendingUser;S._pendingUser=null;
     S.user=w;
+    listenWorkerMessages();
     document.getElementById('app-screen').classList.remove('hidden');
     document.getElementById('top-name').textContent=w.name;
     document.getElementById('top-role').textContent=w.role==='manager'?'מנהל':w.role==='supervisor'?'אחראי':w.role==='helper'?'עוזר':'עובד';
