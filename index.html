@@ -2602,9 +2602,11 @@ async function tsStartTask(){
     if(!parallelTs){
       const endTime=new Date();
       for(const t of existTasksTs){
-        const done={...t,endTime,duration:Math.round((endTime-new Date(t.startTime))/1000)};
-        S.histTasks.unshift(done);
-        if(S.fbConnected){await fbDel('activeTasks',String(t.id));await fbSet('histTasks',String(t.id),{...done,startTime:done.startTime instanceof Date?done.startTime.toISOString():done.startTime,endTime:done.endTime.toISOString()});}
+        try{
+          const done={...t,endTime,duration:Math.round((endTime-new Date(t.startTime))/1000)};
+          S.histTasks.unshift(done);
+          if(S.fbConnected){await fbDel('activeTasks',String(t.id));await fbSet('histTasks',String(t.id),{...done,startTime:done.startTime instanceof Date?done.startTime.toISOString():done.startTime,endTime:done.endTime.toISOString()});}
+        }catch(e){showToast('⚠ שגיאה בסגירת משימה ישנה: '+e.message,'var(--amber-txt)',6000);}
       }
       S.activeTasks=S.activeTasks.filter(t=>t.workerId!==w.id);
     }
