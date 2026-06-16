@@ -655,7 +655,16 @@ code{background:var(--bg2);border:0.5px solid var(--b);border-radius:4px;padding
     <div class="card" style="max-width:500px;margin:0 auto">
       <div class="sec" data-i18n="task_start_sec">▶ התחלת משימה לעובד</div>
       <div class="field"><label data-i18n="th_worker">עובד</label>
-        <select id="ts-emp-sel" style="font-size:13px"><option value="">בחר עובד...</option></select>
+        <div style="display:flex;gap:6px;align-items:center">
+          <select id="ts-emp-sel" style="font-size:13px;flex:1"><option value="">בחר עובד...</option></select>
+          <button class="btn primary" onclick="tsStartWorkerCam()" id="ts-emp-cam-btn" style="font-size:13px;padding:8px 12px;flex-shrink:0" title="סרוק ברקוד עובד">📷 עובד</button>
+        </div>
+        <div id="ts-emp-cam-container" style="display:none;margin-top:8px;position:relative">
+          <video id="ts-emp-cam-video" style="width:100%;border-radius:var(--rl);background:#000;max-height:200px;object-fit:cover" autoplay muted playsinline></video>
+          <div style="position:absolute;inset:0;border:3px solid var(--green);border-radius:var(--rl);pointer-events:none;opacity:.6"></div>
+          <button class="btn danger" onclick="tsStopWorkerCam()" style="position:absolute;top:8px;left:8px;padding:4px 10px;font-size:12px">✕ סגור</button>
+          <div id="ts-emp-cam-status" style="position:absolute;bottom:8px;right:0;left:0;text-align:center;font-size:12px;color:#fff;background:rgba(0,0,0,.5);padding:4px">מחפש ברקוד עובד...</div>
+        </div>
       </div>
       <div class="field"><label data-i18n="lbl_task_barcode13">ברקוד משימה (13 ספרות)</label>
         <div id="ts-cam-container" style="display:none;margin-bottom:.75rem;position:relative">
@@ -882,6 +891,12 @@ code{background:var(--bg2);border:0.5px solid var(--b);border-radius:4px;padding
     </div>
     <button class="btn primary" style="width:100%;justify-content:center;font-size:14px;padding:10px" onclick="bcGenerate()">🏷️ צור ברקודים</button>
     <div id="bc-gen-output" style="margin-top:1rem"></div>
+  </div>
+  <div class="card" style="margin-top:1rem">
+    <div style="font-size:15px;font-weight:700;margin-bottom:10px">👤 ברקודים לעובדים</div>
+    <div style="font-size:12px;color:var(--txt3);margin-bottom:10px">סרוק את הברקוד בסורק משימות במקום להקליד שם עובד</div>
+    <button class="btn primary" style="width:100%;justify-content:center;font-size:14px;padding:10px" onclick="renderWorkerBarcodes()">👤 צור ברקודים לעובדים</button>
+    <div id="worker-bc-output" style="margin-top:1rem"></div>
   </div>
 
   <!-- מודל אישור כללי -->
@@ -2527,6 +2542,63 @@ function mgrStartDecoding(video,status){
 }
 // ─── TASK SCAN PAGE ──────────────────────────────────────────
 let tsCamStream=null;let tsCamInterval=null;
+let tsEmpCamStream=null;let tsEmpCamInterval=null;
+async function tsStartWorkerCam(){
+  const container=document.getElementById('ts-emp-cam-container');
+  const video=document.getElementById('ts-emp-cam-video');
+  const status=document.getElementById('ts-emp-cam-status');
+  const btn=document.getElementById('ts-emp-cam-btn');
+  try{
+    tsEmpCamStream=await navigator.mediaDevices.getUserMedia({video:{facingMode:'environment',width:{ideal:1920},height:{ideal:1080}}});
+    video.srcObject=tsEmpCamStream;container.style.display='block';btn.style.display='none';
+    status.textContent='מחפש ברקוד עובד...';await video.play();
+    const canvas=document.createElement('canvas');const ctx=canvas.getContext('2d');
+    tsEmpCamInterval=setInterval(async()=>{
+      if(!tsEmpCamStream||video.readyState<2)return;
+      canvas.width=video.videoWidth;canvas.height=video.videoHeight;
+      ctx.drawImage(video,0,0);
+      try{
+        const imageData=ctx.getImageData(0,0,canvas.width,canvas.height);
+        const result=jsQR(imageData.data,imageData.width,imageData.height,{inversionAttempts:'attemptBoth'});
+        const text=result?.data||'';
+        if(text.startsWith('EMP:')){
+          const empId=text.slice(4);
+          const sel=document.getElementById('ts-emp-sel');
+          const w=S.workers.find(x=>x.id===empId);
+          if(sel)sel.value=empId;
+          if(w){status.textContent='✅ עובד: '+w.name;showToast('✅ עובד זוהה: '+w.name,'var(--green-txt)');}
+          else{status.textContent='⚠ עובד לא נמצא';showToast('⚠ עובד לא נמצא','var(--red-txt)');}
+          clearInterval(tsEmpCamInterval);setTimeout(()=>tsStopWorkerCam(),800);
+        }
+      }catch(e){}
+    },150);
+  }catch(e){alert('לא ניתן לגשת למצלמה.');}
+}
+function tsStopWorkerCam(){
+  if(tsEmpCamStream)tsEmpCamStream.getTracks().forEach(t=>t.stop());
+  if(tsEmpCamInterval)clearInterval(tsEmpCamInterval);
+  tsEmpCamStream=null;tsEmpCamInterval=null;
+  const c=document.getElementById('ts-emp-cam-container');if(c)c.style.display='none';
+  const b=document.getElementById('ts-emp-cam-btn');if(b)b.style.display='';
+}
+function renderWorkerBarcodes(){
+  const out=document.getElementById('worker-bc-output');if(!out)return;
+  const workers=S.workers.filter(w=>w.role!=='manager');
+  if(!workers.length){out.innerHTML='<div style="color:var(--txt3);font-size:13px">אין עובדים</div>';return;}
+  out.innerHTML=`<div style="display:grid;grid-template-columns:repeat(auto-fill,minmax(160px,1fr));gap:12px;margin-bottom:12px">
+    ${workers.map(w=>`<div style="background:var(--bg2);border:0.5px solid var(--b);border-radius:var(--rl);padding:12px;text-align:center;break-inside:avoid">
+      <div id="worker-qr-${w.id}" style="display:flex;justify-content:center"></div>
+      <div style="font-size:13px;font-weight:600;margin-top:6px">${esc(w.name)}</div>
+      <div style="font-size:11px;color:var(--txt3)">${esc(w.dept||'')} · ${w.role==='supervisor'?'אחראי':w.role==='helper'?'עוזר':'עובד'}</div>
+      <div style="font-size:10px;color:var(--txt3);font-family:monospace;margin-top:3px">EMP:${w.id}</div>
+    </div>`).join('')}
+  </div>
+  <button class="btn" style="font-size:13px" onclick="window.print()">🖨️ הדפס</button>`;
+  workers.forEach(w=>{
+    const el=document.getElementById('worker-qr-'+w.id);
+    if(el&&window.QRCode){new QRCode(el,{text:'EMP:'+w.id,width:120,height:120,correctLevel:QRCode.CorrectLevel.M});}
+  });
+}
 function tsParseBc(v){
   v=(v||'').replace(/\D/g,'');
   const el=document.getElementById('ts-bc-prev');if(!el)return;
