@@ -2602,39 +2602,51 @@ function renderWorkerBarcodes(){
 function printWorkerBarcodes(){
   const workers=S.workers.filter(w=>w.role!=='manager');
   if(!workers.length){alert('אין עובדים');return;}
-  // בנה QR כל עובד ב-canvas ואסוף כ-dataURL
-  const items=workers.map(w=>{
-    const div=document.createElement('div');
-    if(window.QRCode)new QRCode(div,{text:'EMP:'+w.id,width:130,height:130,correctLevel:QRCode.CorrectLevel.M});
-    const img=div.querySelector('img');
-    const src=img?img.src:'';
-    return {name:w.name,dept:w.dept||'',role:w.role==='supervisor'?'אחראי':w.role==='helper'?'עוזר':'עובד',id:w.id,src};
+  if(!window.QRCode){alert('ספריית QR לא נטענה');return;}
+  // יצור QR לכל עובד בתוך ה-DOM הנוכחי, קרא canvas.toDataURL, ואז פתח חלון
+  const tmpWrap=document.createElement('div');
+  tmpWrap.style.cssText='position:fixed;top:-9999px;left:-9999px;visibility:hidden';
+  document.body.appendChild(tmpWrap);
+  const divs=workers.map(w=>{
+    const d=document.createElement('div');
+    tmpWrap.appendChild(d);
+    new QRCode(d,{text:'EMP:'+w.id,width:130,height:130,correctLevel:QRCode.CorrectLevel.M});
+    return d;
   });
-  // פתח חלון הדפסה
-  const win=window.open('','_blank','width=800,height=600');
-  win.document.write(`<!DOCTYPE html><html dir="rtl"><head><meta charset="UTF-8"><title>ברקודים עובדים</title>
-  <style>
-    *{box-sizing:border-box;margin:0;padding:0}
-    body{font-family:Arial,sans-serif;background:#fff;padding:10px}
-    .grid{display:grid;grid-template-columns:repeat(4,1fr);gap:10px}
-    .card{border:1px solid #ccc;border-radius:8px;padding:10px;text-align:center;break-inside:avoid}
-    .card img{width:120px;height:120px}
-    .name{font-size:13px;font-weight:700;margin-top:5px}
-    .sub{font-size:11px;color:#666}
-    .code{font-size:9px;color:#999;font-family:monospace;margin-top:2px}
-    @media print{@page{margin:10mm}body{padding:0}}
-  </style></head><body>
-  <div class="grid">
-    ${items.map(w=>`<div class="card">
-      <img src="${w.src}" onerror="this.style.display='none'"/>
-      <div class="name">${w.name}</div>
-      <div class="sub">${w.dept} · ${w.role}</div>
-      <div class="code">EMP:${w.id}</div>
-    </div>`).join('')}
-  </div>
-  <script>window.onload=function(){window.print();}<\/script>
-  </body></html>`);
-  win.document.close();
+  // המתן שה-QR יסיים לצייר (canvas/img נוצרים סינכרונית בספרייה זו, אבל img.src טוען async)
+  setTimeout(()=>{
+    const items=workers.map((w,i)=>{
+      const canvas=divs[i].querySelector('canvas');
+      const src=canvas?canvas.toDataURL('image/png'):'';
+      return {name:w.name,dept:w.dept||'',role:w.role==='supervisor'?'אחראי':w.role==='helper'?'עוזר':'עובד',id:w.id,src};
+    });
+    document.body.removeChild(tmpWrap);
+    const win=window.open('','_blank','width=800,height=600');
+    if(!win){alert('אפשר חלונות קופצים בדפדפן');return;}
+    win.document.write(`<!DOCTYPE html><html dir="rtl"><head><meta charset="UTF-8"><title>ברקודים עובדים</title>
+    <style>
+      *{box-sizing:border-box;margin:0;padding:0}
+      body{font-family:Arial,sans-serif;background:#fff;padding:10px}
+      .grid{display:grid;grid-template-columns:repeat(4,1fr);gap:10px}
+      .card{border:1px solid #ccc;border-radius:8px;padding:10px;text-align:center;break-inside:avoid}
+      .card img{width:120px;height:120px;display:block;margin:0 auto}
+      .name{font-size:13px;font-weight:700;margin-top:5px}
+      .sub{font-size:11px;color:#666}
+      .code{font-size:9px;color:#999;font-family:monospace;margin-top:2px}
+      @media print{@page{margin:10mm}body{padding:0}}
+    </style></head><body>
+    <div class="grid">
+      ${items.map(w=>`<div class="card">
+        ${w.src?`<img src="${w.src}"/>`:''}
+        <div class="name">${w.name}</div>
+        <div class="sub">${w.dept} · ${w.role}</div>
+        <div class="code">EMP:${w.id}</div>
+      </div>`).join('')}
+    </div>
+    <script>window.onload=function(){window.print();}<\/script>
+    </body></html>`);
+    win.document.close();
+  },300);
 }
 function tsParseBc(v){
   v=(v||'').replace(/\D/g,'');
