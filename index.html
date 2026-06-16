@@ -1492,6 +1492,36 @@ function scheduleDailyReport(){
 }
 scheduleDailyReport();
 
+// ─── גיבוי אוטומטי יומי ב-17:00 (רק אצל מנהל) ──────────
+function runDailyBackup(){
+  if(!S.user||S.user.role!=='manager')return;
+  const today=todayStr();
+  if(localStorage.getItem('txops_backup_done')===today)return;
+  localStorage.setItem('txops_backup_done',today);
+  const data={
+    exportDate:new Date().toISOString(),
+    workers:S.workers,
+    activeTasks:S.activeTasks,
+    histTasks:S.histTasks,
+    attHistory:S.attHistory,
+    products:S.products||[],
+    settings:S.settings
+  };
+  const blob=new Blob([JSON.stringify(data,null,2)],{type:'application/json'});
+  const a=document.createElement('a');
+  a.href=URL.createObjectURL(blob);
+  a.download='textileops_backup_'+today+'.json';
+  a.click();
+  URL.revokeObjectURL(a.href);
+}
+function scheduleDailyBackup(){
+  const now=new Date();
+  const target=new Date(now.getFullYear(),now.getMonth(),now.getDate(),17,0,0);
+  if(now>=target)target.setDate(target.getDate()+1);
+  setTimeout(()=>{runDailyBackup();scheduleDailyBackup();},target-now);
+}
+scheduleDailyBackup();
+
 // ─── התראת 15:45 — עובדים שלא החתימו יציאה ─────────────
 async function _claimPunchOutAlert(){
   const today=todayStr();
@@ -1895,7 +1925,7 @@ async function punchOut(){
   const netMs=calcNetWork(w);
   const rec={workerId:w.id,workerName:w.name,dept:w.dept,date:todayStr(),sessions:w.sessions,checkin:w.sessions[0]?.in||'',checkout:now.toISOString(),breakStart:w.breakStart||'',breakEnd:w.breakEnd||'',breakActive:!!w.breakActive,netMs};
   S.attHistory.unshift(rec);
-  if(S.fbConnected){await fbSet('workers',w.id,w);await fbSet('attHistory',w.id+'_'+todayStr(),rec);}
+  if(S.fbConnected){await fbSet('workers',w.id,w);await fbSet('attHistory',w.id+'_'+todayStr(),rec);try{await fbDel('workerWifi',w.id);}catch(e){}}
   saveLS();renderAtt();
   document.getElementById('att-msg').textContent='🚪 יציאה: '+pad2(now.getHours())+':'+pad2(now.getMinutes())+(myTasks.length?' | '+myTasks.length+' משימות נסגרו':'');
 }
@@ -2827,7 +2857,7 @@ async function mgrPunchOut(wId){
   const netMs=calcNetWork(w);
   const rec={workerId:w.id,workerName:w.name,dept:w.dept,date:todayStr(),sessions:w.sessions,checkin:w.sessions[0]?.in||'',checkout:now.toISOString(),breakStart:w.breakStart||'',breakEnd:w.breakEnd||'',breakActive:!!w.breakActive,netMs};
   S.attHistory.unshift(rec);
-  if(S.fbConnected){await fbSet('workers',w.id,w);await fbSet('attHistory',w.id+'_'+todayStr(),rec);}
+  if(S.fbConnected){await fbSet('workers',w.id,w);await fbSet('attHistory',w.id+'_'+todayStr(),rec);try{await fbDel('workerWifi',w.id);}catch(e){}}
   saveLS();renderMgrTasks();renderAtt();
 }
 async function mgrStartTask(){
