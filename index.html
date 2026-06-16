@@ -2047,13 +2047,16 @@ async function submitBc(){
       S.activeTasks=S.activeTasks.filter(t=>t.workerId!==u.id);
     }
   }
-  const newTask={id:String(S.nextTId++),workerId:u.id,workerName:u.name,dept:taskDept||u.dept,cust,prod,size,qty,col,taskType,bc:raw,isTotal:isTotal||undefined,startTime:new Date(),elapsed:0};
-  S.activeTasks.unshift(newTask);
-  if(S.fbConnected)await fbSet('activeTasks',newTask.id,{...newTask,startTime:newTask.startTime.toISOString()});
-  document.getElementById('bc-inp').value='';parseBc('');
-  document.getElementById('bc-tasktype').value='';
-  document.getElementById('bc-dept').value='';
-  saveLS();renderScanActive();renderTasks();goPage('tasks');
+  try{
+    const newTask={id:String(S.nextTId++),workerId:u.id,workerName:u.name,dept:taskDept||u.dept,cust,prod,size,qty,col,taskType,bc:raw,isTotal:isTotal||undefined,startTime:new Date(),elapsed:0};
+    S.activeTasks.unshift(newTask);
+    if(S.fbConnected)await fbSet('activeTasks',newTask.id,{...newTask,startTime:newTask.startTime.toISOString()});
+    document.getElementById('bc-inp').value='';parseBc('');
+    document.getElementById('bc-tasktype').value='';
+    document.getElementById('bc-dept').value='';
+    saveLS();renderScanActive();renderTasks();goPage('tasks');
+    showToast('✅ משימה הותחלה');
+  }catch(e){showToast('❌ שגיאה בפתיחת משימה: '+e.message,'var(--red-txt)',8000);}
 }
 function fillDeptSelects(){
   const selDept=LANGS[currentLang].sel_dept||'-- בחר מחלקה --';
@@ -2606,13 +2609,15 @@ async function tsStartTask(){
       S.activeTasks=S.activeTasks.filter(t=>t.workerId!==w.id);
     }
   }
-  const task={id:String(S.nextTId++),workerId:w.id,workerName:w.name,dept:taskDept||w.dept,cust,prod,size,qty,col,taskType,bc:raw,isTotal:isTotal||undefined,startTime:new Date(),elapsed:0};
-  S.activeTasks.push(task);
-  if(S.fbConnected)await fbSet('activeTasks',String(task.id),{...task,startTime:task.startTime.toISOString()});
-  saveLS();renderMgrTasks();
-  showToast('✅ משימה הותחלה עבור '+w.name);
-  document.getElementById('ts-bc-inp').value='';document.getElementById('ts-bc-prev').innerHTML='';
-  document.getElementById('ts-tasktype').value='';
+  try{
+    const task={id:String(S.nextTId++),workerId:w.id,workerName:w.name,dept:taskDept||w.dept,cust,prod,size,qty,col,taskType,bc:raw,isTotal:isTotal||undefined,startTime:new Date(),elapsed:0};
+    S.activeTasks.push(task);
+    if(S.fbConnected)await fbSet('activeTasks',String(task.id),{...task,startTime:task.startTime.toISOString()});
+    saveLS();renderTasks();goPage('tasks');
+    showToast('✅ משימה הותחלה עבור '+w.name);
+    document.getElementById('ts-bc-inp').value='';document.getElementById('ts-bc-prev').innerHTML='';
+    document.getElementById('ts-tasktype').value='';
+  }catch(e){showToast('❌ שגיאה בפתיחת משימה: '+e.message,'var(--red-txt)',8000);}
 }
 function renderTsScan(){
   const sel=document.getElementById('ts-emp-sel');if(!sel)return;
