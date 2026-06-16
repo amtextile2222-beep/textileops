@@ -4681,8 +4681,10 @@ function closeProdModal(){
 function addQtyBulk(){
   const color=document.getElementById('pm-bulk-color')?.value;
   const qty=parseInt(document.getElementById('pm-bulk-qty')?.value)||0;
-  const from=parseInt(document.getElementById('pm-bulk-from')?.value)||1;
-  const to=parseInt(document.getElementById('pm-bulk-to')?.value)||6;
+  const fromVal=document.getElementById('pm-bulk-from')?.value;
+  const from=fromVal===''||fromVal==null?1:parseInt(fromVal);
+  const toVal=document.getElementById('pm-bulk-to')?.value;
+  const to=toVal===''||toVal==null?6:parseInt(toVal);
   if(!color){alert('בחר צבע');return;}
   if(from>to){alert('מידה "מ" חייבת להיות קטנה מ"עד"');return;}
   const colorOpts=Object.entries(COLORS).map(([k,v])=>`<option value="${k}"${k===color?' selected':''}>${v}</option>`).join('');
