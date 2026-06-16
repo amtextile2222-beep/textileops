@@ -2633,9 +2633,16 @@ async function tsStartWorkerCam(){
           const sel=document.getElementById('ts-emp-sel');
           const w=S.workers.find(x=>x.id===empId);
           if(sel)sel.value=empId;
-          if(w){status.textContent='✅ עובד: '+w.name;showToast('✅ עובד זוהה: '+w.name,'var(--green-txt)');}
-          else{status.textContent='⚠ עובד לא נמצא';showToast('⚠ עובד לא נמצא','var(--red-txt)');}
-          clearInterval(tsEmpCamInterval);setTimeout(()=>tsStopWorkerCam(),800);
+          if(w){
+            status.textContent='✅ עובד: '+w.name;
+            showToast('✅ עובד זוהה: '+w.name,'var(--green-txt)');
+            clearInterval(tsEmpCamInterval);
+            setTimeout(()=>{tsStopWorkerCam();tsStartCam();},800);// עבור אוטומטית לסריקת מוצר
+          }else{
+            status.textContent='⚠ עובד לא נמצא';
+            showToast('⚠ עובד לא נמצא','var(--red-txt)');
+            clearInterval(tsEmpCamInterval);setTimeout(()=>tsStopWorkerCam(),800);
+          }
         }
       }catch(e){}
     },150);
