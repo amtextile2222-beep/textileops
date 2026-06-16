@@ -2593,11 +2593,48 @@ function renderWorkerBarcodes(){
       <div style="font-size:10px;color:var(--txt3);font-family:monospace;margin-top:3px">EMP:${w.id}</div>
     </div>`).join('')}
   </div>
-  <button class="btn" style="font-size:13px" onclick="window.print()">🖨️ הדפס</button>`;
+  <button class="btn" style="font-size:13px" onclick="printWorkerBarcodes()">🖨️ הדפס ברקודים</button>`;
   workers.forEach(w=>{
     const el=document.getElementById('worker-qr-'+w.id);
     if(el&&window.QRCode){new QRCode(el,{text:'EMP:'+w.id,width:120,height:120,correctLevel:QRCode.CorrectLevel.M});}
   });
+}
+function printWorkerBarcodes(){
+  const workers=S.workers.filter(w=>w.role!=='manager');
+  if(!workers.length){alert('אין עובדים');return;}
+  // בנה QR כל עובד ב-canvas ואסוף כ-dataURL
+  const items=workers.map(w=>{
+    const div=document.createElement('div');
+    if(window.QRCode)new QRCode(div,{text:'EMP:'+w.id,width:130,height:130,correctLevel:QRCode.CorrectLevel.M});
+    const img=div.querySelector('img');
+    const src=img?img.src:'';
+    return {name:w.name,dept:w.dept||'',role:w.role==='supervisor'?'אחראי':w.role==='helper'?'עוזר':'עובד',id:w.id,src};
+  });
+  // פתח חלון הדפסה
+  const win=window.open('','_blank','width=800,height=600');
+  win.document.write(`<!DOCTYPE html><html dir="rtl"><head><meta charset="UTF-8"><title>ברקודים עובדים</title>
+  <style>
+    *{box-sizing:border-box;margin:0;padding:0}
+    body{font-family:Arial,sans-serif;background:#fff;padding:10px}
+    .grid{display:grid;grid-template-columns:repeat(4,1fr);gap:10px}
+    .card{border:1px solid #ccc;border-radius:8px;padding:10px;text-align:center;break-inside:avoid}
+    .card img{width:120px;height:120px}
+    .name{font-size:13px;font-weight:700;margin-top:5px}
+    .sub{font-size:11px;color:#666}
+    .code{font-size:9px;color:#999;font-family:monospace;margin-top:2px}
+    @media print{@page{margin:10mm}body{padding:0}}
+  </style></head><body>
+  <div class="grid">
+    ${items.map(w=>`<div class="card">
+      <img src="${w.src}" onerror="this.style.display='none'"/>
+      <div class="name">${w.name}</div>
+      <div class="sub">${w.dept} · ${w.role}</div>
+      <div class="code">EMP:${w.id}</div>
+    </div>`).join('')}
+  </div>
+  <script>window.onload=function(){window.print();}<\/script>
+  </body></html>`);
+  win.document.close();
 }
 function tsParseBc(v){
   v=(v||'').replace(/\D/g,'');
