@@ -476,6 +476,10 @@ code{background:var(--bg2);border:0.5px solid var(--b);border-radius:4px;padding
       <tbody id="rp-body"></tbody></table></div>
     </div>
     <div class="card" style="margin-top:1rem">
+      <div class="sec">👥 דוח מרוכז — שעות לפי עובד</div>
+      <div id="rp-summary-body"></div>
+    </div>
+    <div class="card" style="margin-top:1rem">
       <div class="sec">📦 דוח ייצור לפי שלב</div>
       <div id="rp-stages-body"></div>
     </div>
@@ -2313,7 +2317,43 @@ function buildRep(){
   rfw.innerHTML='<option value="">כל העובדים</option>'+wOpts.map(w=>`<option value="${esc(w)}" ${w===wf?'selected':''}>${esc(w)}</option>`).join('');
   rfc.innerHTML='<option value="">כל הלקוחות</option>'+cOpts.map(c=>`<option value="${c}" ${c===cf?'selected':''}>לקוח ${c}</option>`).join('');
   rfp.innerHTML='<option value="">כל המוצרים</option>'+pOpts.map(p=>`<option value="${p}" ${p===pf?'selected':''}>מוצר ${p}</option>`).join('');
+  buildSummaryReport(fl);
   buildStageReport();
+}
+function buildSummaryReport(fl){
+  const el=document.getElementById('rp-summary-body');if(!el)return;
+  if(!fl.length){el.innerHTML='<div style="color:var(--txt3);font-size:12px;padding:.5rem 0">אין נתונים</div>';return;}
+  // קיבוץ לפי עובד — זמן אמיתי (union intervals)
+  const workers={};
+  fl.forEach(t=>{if(!workers[t.workerId])workers[t.workerId]={name:t.workerName,dept:t.dept,tasks:[]};workers[t.workerId].tasks.push(t);});
+  const rows=Object.values(workers).map(w=>{
+    const secs=calcActualTaskTime(w.tasks);
+    const units=w.tasks.reduce((s,t)=>s+(t.qty||0),0);
+    return{name:w.name,dept:w.dept,secs,units};
+  }).sort((a,b)=>b.secs-a.secs);
+  const grandSecs=rows.reduce((s,r)=>s+r.secs,0);
+  const grandUnits=rows.reduce((s,r)=>s+r.units,0);
+  el.innerHTML=`<table style="width:100%;border-collapse:collapse;font-size:13px">
+    <thead><tr style="border-bottom:1px solid var(--b)">
+      <th style="text-align:right;padding:6px 8px">עובד</th>
+      <th style="text-align:right;padding:6px 8px">מחלקה</th>
+      <th style="text-align:right;padding:6px 8px">יחידות</th>
+      <th style="text-align:right;padding:6px 8px">שעות עבודה</th>
+    </tr></thead>
+    <tbody>
+    ${rows.map(r=>`<tr style="border-bottom:0.5px solid var(--b)">
+      <td style="padding:7px 8px;font-weight:500">${esc(r.name)}</td>
+      <td style="padding:7px 8px;color:var(--txt2)">${esc(r.dept)}</td>
+      <td style="padding:7px 8px">${r.units}</td>
+      <td style="padding:7px 8px"><span class="badge blue">${(r.secs/3600).toFixed(1)} שע'</span></td>
+    </tr>`).join('')}
+    </tbody>
+    <tfoot><tr style="border-top:1.5px solid var(--b);font-weight:600;background:var(--bg2)">
+      <td style="padding:8px 8px" colspan="2">סה"כ</td>
+      <td style="padding:8px 8px">${grandUnits}</td>
+      <td style="padding:8px 8px"><span class="badge green">${(grandSecs/3600).toFixed(1)} שע'</span></td>
+    </tr></tfoot>
+  </table>`;
 }
 function buildStageReport(){
   const el=document.getElementById('rp-stages-body');if(!el)return;
