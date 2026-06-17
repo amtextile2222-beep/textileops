@@ -2414,17 +2414,18 @@ function buildAttDayTable(uid,fromD,toD,T){
     const netH=rec.netMs?rec.netMs/3600000:0;
     rows.push({date:d,firstIn,lastOut,netH});
   });
-  // today's live sessions
+  // today's live sessions — only if not already in attHistory
   const todayW=(S.workers||[]).find(w=>w.id===uid);
   if(todayW){
     const td=todayStr();
-    if(!fromD||td>=fromD){if(!toD||td<=toD){
+    const alreadyHave=rows.some(r=>r.date===td);
+    if(!alreadyHave&&(!fromD||td>=fromD)&&(!toD||td<=toD)){
       const ses=todayW.sessions||[];
       const firstIn=ses.length?ses[0].in:todayW.checkin||null;
       const lastOut=ses.length?ses[ses.length-1].out:todayW.checkout||null;
-      const netMs=calcNetWork(todayW)*1000;
+      const netMs=calcNetWork(todayW); // already in ms
       if(firstIn)rows.push({date:td,firstIn,lastOut,netH:netMs/3600000,isToday:true});
-    }}
+    }
   }
   if(!rows.length)return'';
   rows.sort((a,b)=>b.date.localeCompare(a.date));
