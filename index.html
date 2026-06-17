@@ -2227,7 +2227,11 @@ function renderTasks(){
   const fn=document.getElementById('tk-f-name');if(fn)fn.style.display=isMgr?'':'none';
   const thresh=S.settings.thresh*60;
   const al=document.getElementById('tk-active-list');
-  if(!visActive.length){al.innerHTML='<div style="text-align:center;padding:2rem;color:var(--txt3)">📷 סרוק ברקוד להתחלת משימה</div>';}
+  if(!visActive.length){
+    const T=LANGS[currentLang];
+    const emptyMsg=isMgr?'📷 '+(T.scan_to_start||'סרוק ברקוד להתחלת משימה'):'⏳ '+(T.no_task_worker||'אין משימה פעילה כרגע — המתן עד שהאחראי יפתח לך משימה');
+    al.innerHTML=`<div style="text-align:center;padding:3rem 1rem;color:var(--txt3);font-size:14px">${emptyMsg}</div>`;
+  }
   else{al.innerHTML=visActive.map(t=>{
     const over=t.elapsed>thresh;
     return`<div class="task-card">
@@ -3832,6 +3836,7 @@ const LANGS={
     cfm_parallel:'עבודה במקביל',
     cfm_close_old:'סגור ישנה + התחל חדשה',
     cfm_worker_not_in:'⚠ העובד לא נמצא בעבודה — וודא שחתם כניסה',
+    no_task_worker:'אין משימה פעילה כרגע — המתן עד שהאחראי יפתח לך משימה',
   },
   ar:{
     login_title:'تسجيل الدخول',
@@ -3935,6 +3940,7 @@ const LANGS={
     cfm_parallel:'عمل متوازٍ',
     cfm_close_old:'إغلاق القديمة + بدء جديدة',
     cfm_worker_not_in:'⚠ العامل غير مسجل حضوراً — تأكد من تسجيل الدخول',
+    no_task_worker:'لا توجد مهمة نشطة الآن — انتظر حتى يفتح لك المسؤول مهمة',
   },
   en:{
     login_title:'Login',
@@ -4029,6 +4035,7 @@ const LANGS={
     th_end_time:'End',
     th_duration:'Duration',
     th_status:'Status',
+    no_task_worker:'No active task right now — wait for your supervisor to assign one',
   }
 };
 
