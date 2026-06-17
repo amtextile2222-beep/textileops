@@ -521,6 +521,13 @@ code{background:var(--bg2);border:0.5px solid var(--b);border-radius:4px;padding
         <button class="btn primary" onclick="checkAlerts();renderAlerts()">🔄 רענן</button>
       </div>
       <div class="card">
+        <div class="sec">⏱️ עיגול שעות נוכחות</div>
+        <div class="field"><label>שעת התחלת משמרת</label><input type="time" id="st-shift-start" value="06:30" onchange="saveSettings()"/></div>
+        <div class="field"><label>שעת סיום משמרת</label><input type="time" id="st-shift-end" value="15:00" onchange="saveSettings()"/></div>
+        <div class="field"><label>חלון עיגול (דקות) — ±</label><input type="number" id="st-round-min" value="5" min="0" max="30" onchange="saveSettings()"/></div>
+        <div style="font-size:12px;color:var(--txt3);margin-top:4px">כניסה בטווח של ±<span id="st-round-preview">5</span> דק' מ-06:30 תעוגל ל-06:30. יציאה בטווח ±<span id="st-round-preview2">5</span> דק' מ-15:00 תעוגל ל-15:00</div>
+      </div>
+      <div class="card">
         <div class="sec">סיכום</div>
         <div class="row"><span style="flex:1;font-size:13px" data-i18n="al_active">התראות פעילות</span><span class="badge red" id="al-sum">0</span></div>
         <div class="row"><span style="flex:1;font-size:13px" data-i18n="al_long">משימות ארוכות</span><span class="badge amber" id="al-long">0</span></div>
@@ -1114,7 +1121,7 @@ let S={
   activeTasks:[],
   histTasks:[],
   alerts:[],
-  settings:{thresh:60,absent:5,waEnabled:false,waToken:'',waChatId:'',waInterval:60,waFrom:'07:00',waTo:'18:00',waLong:true,waAbsent:true,factoryIP:'188.225.231.120'},
+  settings:{thresh:60,absent:5,waEnabled:false,waToken:'',waChatId:'',waInterval:60,waFrom:'07:00',waTo:'18:00',waLong:true,waAbsent:true,factoryIP:'188.225.231.120',shiftStart:'06:30',shiftEnd:'15:00',roundMinutes:5},
   waLastSent:0,
   wifiAlertSent:{},
   tgSentAlerts:{},
@@ -1962,6 +1969,18 @@ async function autoPunchIn(){
 }
 
 // ─── ATTENDANCE ──────────────────────────────────────────────
+function roundAttTime(now, isIn){
+  const rm=S.settings.roundMinutes??5;
+  if(!rm)return now;
+  const ref=isIn?(S.settings.shiftStart||'06:30'):(S.settings.shiftEnd||'15:00');
+  const [rh,rm2]=ref.split(':').map(Number);
+  const target=new Date(now);
+  target.setHours(rh,rm2,0,0);
+  const diffMs=now.getTime()-target.getTime();
+  const diffMin=diffMs/60000;
+  if(Math.abs(diffMin)<=rm)return target;
+  return now;
+}
 async function punchIn(){
   if(!S.user)return;
   const w=S.workers.find(x=>x.id===S.user.id);
@@ -1970,14 +1989,16 @@ async function punchIn(){
   const today=todayStr();
   w.sessions=w.sessions.filter(s=>{if(!s.in)return false;const d=new Date(s.in);return d.getFullYear()+'-'+pad2(d.getMonth()+1)+'-'+pad2(d.getDate())>=today;});
   if(w.sessions.find(s=>!s.out)){document.getElementById('att-msg').textContent='כבר רשום/ת כנוכח/ת';return;}
-  const now=new Date();
+  const nowRaw=new Date();
+  const now=roundAttTime(nowRaw,true);
   w.sessions.push({in:now.toISOString(),out:null});
   w.status='in';
   w.checkin=w.sessions[0].in;
   if(S.fbConnected)await fbSet('workers',w.id,w);
   if(w.requireFactoryIP&&S.fbConnected){try{const r=await fetch('https://api.ipify.org?format=json');const ip=(await r.json()).ip||'';await fbSet('workerWifi',w.id,{ip,lastSeen:Date.now(),name:w.name,dept:w.dept});}catch(e){}}
   saveLS();renderAtt();
-  document.getElementById('att-msg').textContent='✅ כניסה '+(w.sessions.length>1?w.sessions.length+': ':'')+pad2(now.getHours())+':'+pad2(now.getMinutes());
+  const rounded=now.getTime()!==nowRaw.getTime();
+  document.getElementById('att-msg').textContent='✅ כניסה '+(w.sessions.length>1?w.sessions.length+': ':'')+pad2(now.getHours())+':'+pad2(now.getMinutes())+(rounded?' (עוגל)':'');
 }
 async function punchOut(){
   if(!S.user)return;
@@ -1986,7 +2007,8 @@ async function punchOut(){
   if(!w.sessions)w.sessions=[];
   const openIdx=w.sessions.findIndex(s=>!s.out);
   if(openIdx===-1){document.getElementById('att-msg').textContent='כבר רשום/ת כיצא/ה';return;}
-  const now=new Date();
+  const nowRaw=new Date();
+  const now=roundAttTime(nowRaw,false);
   w.sessions[openIdx].out=now.toISOString();
   w.status='out';
   w.checkout=now.toISOString();
@@ -2002,7 +2024,8 @@ async function punchOut(){
   S.attHistory.unshift(rec);
   if(S.fbConnected){await fbSet('workers',w.id,w);await fbSet('attHistory',w.id+'_'+todayStr(),rec);try{await fbDel('workerWifi',w.id);}catch(e){}}
   saveLS();renderAtt();
-  document.getElementById('att-msg').textContent='🚪 יציאה: '+pad2(now.getHours())+':'+pad2(now.getMinutes())+(myTasks.length?' | '+myTasks.length+' משימות נסגרו':'');
+  const roundedOut=now.getTime()!==nowRaw.getTime();
+  document.getElementById('att-msg').textContent='🚪 יציאה: '+pad2(now.getHours())+':'+pad2(now.getMinutes())+(roundedOut?' (עוגל)':'')+(myTasks.length?' | '+myTasks.length+' משימות נסגרו':'');
 }
 function calcNetWorkRaw(checkin,checkout,breakActive,breakStart,breakEnd,refDate){
   if(!checkin)return 0;
@@ -2661,6 +2684,11 @@ function saveSettings(){
   S.settings.waLong=document.getElementById('wa-long')?.checked??true;
   S.settings.waAbsent=document.getElementById('wa-absent')?.checked??true;
   S.settings.factoryIP=document.getElementById('factory-ip')?.value||'188.225.231.120';
+  S.settings.shiftStart=document.getElementById('st-shift-start')?.value||'06:30';
+  S.settings.shiftEnd=document.getElementById('st-shift-end')?.value||'15:00';
+  S.settings.roundMinutes=parseInt(document.getElementById('st-round-min')?.value)||5;
+  const rp=document.getElementById('st-round-preview');if(rp)rp.textContent=S.settings.roundMinutes;
+  const rp2=document.getElementById('st-round-preview2');if(rp2)rp2.textContent=S.settings.roundMinutes;
   saveLS();
   // שמור הגדרות טלגרם + IP ב-Firebase כדי שכל מכשיר יקבל אותם
   if(S.fbConnected){
@@ -2683,6 +2711,11 @@ function loadWaSettings(){
   set('wa-long',s.waLong??true);
   set('wa-absent',s.waAbsent??true);
   set('factory-ip',s.factoryIP||'188.225.231.120');
+  set('st-shift-start',s.shiftStart||'06:30');
+  set('st-shift-end',s.shiftEnd||'15:00');
+  set('st-round-min',s.roundMinutes??5);
+  const rp=document.getElementById('st-round-preview');if(rp)rp.textContent=s.roundMinutes??5;
+  const rp2=document.getElementById('st-round-preview2');if(rp2)rp2.textContent=s.roundMinutes??5;
 }
 async function sendTelegram(message){
   const token=(S.settings.waToken||document.getElementById('wa-token')?.value||'').trim();
