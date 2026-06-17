@@ -1556,19 +1556,18 @@ function runDailyBackup(){
   a.click();
   URL.revokeObjectURL(a.href);
 }
-async function manualBackup(){
+function manualBackup(){
   if(!S.user||S.user.role!=='manager')return;
   const st=document.getElementById('backup-status');
-  st.style.color='var(--txt3)';st.textContent='מגבה...';
   const data={exportDate:new Date().toISOString(),workers:S.workers,activeTasks:S.activeTasks,histTasks:S.histTasks,attHistory:S.attHistory,products:S.products||[],settings:S.settings};
   try{
-    if(S.fbConnected){
-      await fbSet('backups','latest',{...data,exportDate:new Date().toISOString()});
-      await fbSet('backups',todayStr(),{...data,exportDate:new Date().toISOString()});
-      st.style.color='var(--green-txt)';st.textContent='✅ גובה בענן — '+new Date().toLocaleTimeString('he-IL',{hour:'2-digit',minute:'2-digit'});
-    }else{
-      st.style.color='var(--red-txt)';st.textContent='⚠ אין חיבור ל-Firebase';
-    }
+    const blob=new Blob([JSON.stringify(data,null,2)],{type:'application/json'});
+    const a=document.createElement('a');
+    a.href=URL.createObjectURL(blob);
+    a.download='textileops_backup_'+todayStr()+'_'+new Date().toLocaleTimeString('he-IL',{hour:'2-digit',minute:'2-digit'}).replace(':','-')+'.json';
+    a.click();
+    URL.revokeObjectURL(a.href);
+    st.style.color='var(--green-txt)';st.textContent='✅ גיבוי הורד — '+new Date().toLocaleTimeString('he-IL',{hour:'2-digit',minute:'2-digit'});
   }catch(e){st.style.color='var(--red-txt)';st.textContent='שגיאה: '+e.message;}
 }
 function scheduleDailyBackup(){
