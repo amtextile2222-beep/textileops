@@ -2115,7 +2115,7 @@ async function submitBc(){
     }
   }
   try{
-    const newTask={id:String(S.nextTId++),workerId:u.id,workerName:u.name,dept:taskDept||u.dept,cust,prod,size,qty,col,taskType,bc:raw,isTotal:isTotal||false,startTime:new Date(),elapsed:0};
+    const newTask={id:String(Date.now())+Math.random().toString(36).slice(2,6),workerId:u.id,workerName:u.name,dept:taskDept||u.dept,cust,prod,size,qty,col,taskType,bc:raw,isTotal:isTotal||false,startTime:new Date(),elapsed:0};
     S.activeTasks.unshift(newTask);
     if(S.fbConnected)await fbSet('activeTasks',newTask.id,{...newTask,startTime:newTask.startTime.toISOString()});
     document.getElementById('bc-inp').value='';parseBc('');
@@ -2882,7 +2882,7 @@ async function tsStartTask(){
     }
   }
   try{
-    const task={id:String(S.nextTId++),workerId:w.id,workerName:w.name,dept:taskDept||w.dept,cust,prod,size,qty,col,taskType,bc:raw,isTotal:isTotal||false,startTime:new Date(),elapsed:0};
+    const task={id:String(Date.now())+Math.random().toString(36).slice(2,6),workerId:w.id,workerName:w.name,dept:taskDept||w.dept,cust,prod,size,qty,col,taskType,bc:raw,isTotal:isTotal||false,startTime:new Date(),elapsed:0};
     S.activeTasks.push(task);
     if(S.fbConnected)await fbSet('activeTasks',String(task.id),{...task,startTime:task.startTime.toISOString()});
     saveLS();renderTasks();goPage('tasks');
@@ -3062,7 +3062,7 @@ async function mgrStartTask(){
       S.activeTasks=S.activeTasks.filter(t=>t.workerId!==empId);
     }
   }
-  const newTask={id:String(S.nextTId++),workerId:empId,workerName:w.name,dept:taskDept||w.dept,cust,prod,size,qty,col,taskType,bc:raw,isTotal:isTotal||false,startTime:new Date(),elapsed:0};
+  const newTask={id:String(Date.now())+Math.random().toString(36).slice(2,6),workerId:empId,workerName:w.name,dept:taskDept||w.dept,cust,prod,size,qty,col,taskType,bc:raw,isTotal:isTotal||false,startTime:new Date(),elapsed:0};
   S.activeTasks.unshift(newTask);
   if(S.fbConnected)await fbSet('activeTasks',newTask.id,{...newTask,startTime:newTask.startTime.toISOString()});
   document.getElementById('mgr-bc-inp').value='';parseMgrBc('');
