@@ -463,7 +463,16 @@ code{background:var(--bg2);border:0.5px solid var(--b);border-radius:4px;padding
       <select id="rf-p" style="font-size:12px" onchange="buildRep()"><option value="">כל המוצרים</option></select>
       <button class="btn success" onclick="exportCSV()">⬇ ייצוא CSV</button>
       <button class="btn" onclick="buildRep()">🔄</button>
-      <button class="btn" onclick="printPage('page-reports','דוח משימות')">🖨 הדפס</button>
+      <button class="btn" onclick="showPrintChoice()">🖨 הדפס</button>
+    </div>
+    <div id="print-choice-panel" class="hidden" style="background:var(--bg);border:1px solid var(--b2);border-radius:var(--rl);padding:1rem;margin-bottom:1rem;display:flex;flex-wrap:wrap;align-items:center;gap:12px">
+      <span style="font-size:13px;font-weight:600">מה להדפיס?</span>
+      <label style="display:flex;align-items:center;gap:6px;font-size:13px;cursor:pointer"><input type="radio" name="print-choice" value="detail" checked style="width:auto"/> פירוט משימות</label>
+      <label style="display:flex;align-items:center;gap:6px;font-size:13px;cursor:pointer"><input type="radio" name="print-choice" value="summary" style="width:auto"/> דוח מרוכז</label>
+      <label style="display:flex;align-items:center;gap:6px;font-size:13px;cursor:pointer"><input type="radio" name="print-choice" value="stages" style="width:auto"/> דוח ייצור לפי שלב</label>
+      <label style="display:flex;align-items:center;gap:6px;font-size:13px;cursor:pointer"><input type="radio" name="print-choice" value="all" style="width:auto"/> הכל</label>
+      <button class="btn primary" onclick="doPrintChoice()">🖨 הדפס</button>
+      <button class="btn" onclick="document.getElementById('print-choice-panel').classList.add('hidden')">ביטול</button>
     </div>
     <div class="g4" style="margin-bottom:1rem">
       <div class="card"><div class="mlbl" data-i18n="rep_total">סה"כ משימות</div><div class="mval" id="rp-tot">0</div></div>
@@ -5356,6 +5365,28 @@ function viewImg(prodId,src){
 }
 
 // ─── PRINT ───────────────────────────────────────────────────
+function showPrintChoice(){
+  const p=document.getElementById('print-choice-panel');
+  p.classList.toggle('hidden');
+}
+function doPrintChoice(){
+  const val=document.querySelector('input[name="print-choice"]:checked')?.value||'all';
+  document.getElementById('print-choice-panel').classList.add('hidden');
+  const now=new Date().toLocaleDateString('he-IL');
+  let html='';
+  if(val==='detail'||val==='all'){
+    html+=`<div class="card"><div class="sec">פירוט לפי לקוח ומוצר</div><div class="tbl-wrap"><table><thead><tr><th>עובד</th><th>מחלקה</th><th>סוג משימה</th><th>לקוח</th><th>מוצר</th><th>כמות</th><th>צבע</th><th>התחלה</th><th>סיום</th><th>משך</th><th>סטטוס</th></tr></thead><tbody>${document.getElementById('rp-body')?.innerHTML||''}</tbody></table></div></div>`;
+  }
+  if(val==='summary'||val==='all'){
+    html+=`<div class="card" style="margin-top:12px"><div class="sec">👥 דוח מרוכז — שעות לפי עובד</div>${document.getElementById('rp-summary-body')?.innerHTML||''}</div>`;
+  }
+  if(val==='stages'||val==='all'){
+    html+=`<div class="card" style="margin-top:12px"><div class="sec">📦 דוח ייצור לפי שלב</div>${document.getElementById('rp-stages-body')?.innerHTML||''}</div>`;
+  }
+  const win=window.open('','_blank','width=900,height=700');
+  win.document.write(`<!DOCTYPE html><html dir="rtl" lang="he"><head><meta charset="UTF-8"/><title>דוח משימות</title><style>*{box-sizing:border-box;margin:0;padding:0}body{font-family:Arial,sans-serif;padding:20px;color:#000;background:#fff;font-size:13px}h1{font-size:18px;margin-bottom:4px;color:#185FA5}.print-date{font-size:11px;color:#666;margin-bottom:16px}.card{background:#fff;border:1px solid #ddd;border-radius:8px;padding:12px 16px;margin-bottom:12px}.sec{font-size:14px;font-weight:700;margin-bottom:8px}table{width:100%;border-collapse:collapse;font-size:12px}th{background:#f0f0f0;padding:7px 8px;text-align:right;font-weight:600;border-bottom:2px solid #ddd}td{padding:6px 8px;border-bottom:1px solid #eee}.badge{display:inline-block;padding:2px 8px;border-radius:999px;font-size:11px;font-weight:600}@media print{body{padding:10px}}</style></head><body><h1>TextileOps — דוח משימות</h1><div class="print-date">${now}</div>${html}<script>window.onload=()=>window.print();<\/script></body></html>`);
+  win.document.close();
+}
 function printPage(pageId, title){
   const content=document.getElementById(pageId)?.innerHTML||'';
   const now=new Date().toLocaleDateString('he-IL');
