@@ -445,6 +445,23 @@ code{background:var(--bg2);border:0.5px solid var(--b);border-radius:4px;padding
         <div id="tk-hist-more" style="text-align:center;margin-top:8px"></div>
       </div>
     </div>
+    <div class="card" id="worker-personal-report" style="margin-top:1rem">
+      <div class="sec">📊 <span data-i18n="personal_report">דוח אישי</span></div>
+      <div style="display:flex;gap:8px;flex-wrap:wrap;align-items:center;margin-bottom:1rem">
+        <div style="display:flex;align-items:center;gap:4px">
+          <label style="font-size:11px;color:var(--txt2)" data-i18n="from">מ-</label>
+          <input type="date" id="pr-from" style="font-size:12px;width:auto" onchange="buildPersonalReport()"/>
+        </div>
+        <div style="display:flex;align-items:center;gap:4px">
+          <label style="font-size:11px;color:var(--txt2)" data-i18n="to">עד</label>
+          <input type="date" id="pr-to" style="font-size:12px;width:auto" onchange="buildPersonalReport()"/>
+        </div>
+        <button class="btn primary" style="font-size:12px" onclick="setPrRange('week')" data-i18n="this_week">שבוע זה</button>
+        <button class="btn" style="font-size:12px" onclick="setPrRange('month')" data-i18n="this_month">חודש זה</button>
+        <button class="btn" style="font-size:12px" onclick="setPrRange('all')" data-i18n="all_time">הכל</button>
+      </div>
+      <div id="pr-body"></div>
+    </div>
   </div>
 
   <!-- REPORTS -->
@@ -1751,7 +1768,7 @@ function goPage(p){
   if(p==='dash')renderDash();
   if(p==='att')renderAtt();
   if(p==='scan')renderScanActive();
-  if(p==='tasks')renderTasks();
+  if(p==='tasks'){renderTasks();buildPersonalReport();}
   if(p==='reports'){
     const today=todayStr();
     const monthAgo=new Date();monthAgo.setDate(monthAgo.getDate()-30);
@@ -2225,6 +2242,7 @@ function renderTasks(){
     document.getElementById('tk-avg').textContent=fmtM(avg);
   }else{document.getElementById('tk-avg').textContent='—';}
   const fn=document.getElementById('tk-f-name');if(fn)fn.style.display=isMgr?'':'none';
+  const pr=document.getElementById('worker-personal-report');if(pr)pr.style.display=isMgr?'none':'';
   const thresh=S.settings.thresh*60;
   const al=document.getElementById('tk-active-list');
   if(!visActive.length){
@@ -2312,6 +2330,74 @@ setInterval(()=>{
   checkAlerts();
 },1000);
 
+// ─── PERSONAL REPORT ────────────────────────────────────────
+function setPrRange(range){
+  const today=todayStr();
+  const d=new Date();
+  if(range==='week'){
+    const day=d.getDay();
+    const mon=new Date(d);mon.setDate(d.getDate()-day+1);
+    document.getElementById('pr-from').value=mon.toISOString().slice(0,10);
+    document.getElementById('pr-to').value=today;
+  }else if(range==='month'){
+    document.getElementById('pr-from').value=d.getFullYear()+'-'+pad2(d.getMonth()+1)+'-01';
+    document.getElementById('pr-to').value=today;
+  }else{
+    document.getElementById('pr-from').value='';
+    document.getElementById('pr-to').value='';
+  }
+  buildPersonalReport();
+}
+function buildPersonalReport(){
+  const el=document.getElementById('pr-body');if(!el)return;
+  const isMgr=S.user?.role==='manager'||S.user?.role==='supervisor';
+  if(isMgr){el.innerHTML='';return;}
+  const uid=S.user?.id;if(!uid)return;
+  const fromD=document.getElementById('pr-from')?.value||'';
+  const toD=document.getElementById('pr-to')?.value||'';
+  const myTasks=S.histTasks.filter(t=>{
+    if(t.workerId!==uid)return false;
+    const d=new Date(t.startTime).toISOString().slice(0,10);
+    return(!fromD||d>=fromD)&&(!toD||d<=toD);
+  });
+  if(!myTasks.length){el.innerHTML='<div style="color:var(--txt3);font-size:13px;padding:1rem 0;text-align:center">אין נתונים בטווח הנבחר</div>';return;}
+  // סה"כ שעות אמיתיות
+  const totalSecs=calcActualTaskTime(myTasks);
+  const totalUnits=myTasks.reduce((s,t)=>s+(t.qty||0),0);
+  // קיבוץ לפי מוצר
+  const byProd={};
+  myTasks.forEach(t=>{
+    const key=t.prod;
+    if(!byProd[key])byProd[key]={prod:t.prod,cust:t.cust,taskType:t.taskType||'',tasks:[]};
+    byProd[key].tasks.push(t);
+  });
+  const prodRows=Object.values(byProd).map(p=>{
+    const secs=calcActualTaskTime(p.tasks);
+    const units=p.tasks.reduce((s,t)=>s+(t.qty||0),0);
+    return{prod:p.prod,cust:p.cust,taskType:p.taskType,secs,units};
+  }).sort((a,b)=>b.secs-a.secs);
+  const T=LANGS[currentLang];
+  el.innerHTML=`
+    <div class="g4" style="margin-bottom:1rem">
+      <div class="card"><div class="mlbl">${T.rep_time||'זמן כולל'}</div><div class="mval">${(totalSecs/3600).toFixed(1)} ${T.hours||"שע'"}</div></div>
+      <div class="card"><div class="mlbl">${T.rep_units||'יחידות'}</div><div class="mval">${totalUnits}</div></div>
+      <div class="card"><div class="mlbl">${T.rep_total||'סה"כ משימות'}</div><div class="mval">${myTasks.length}</div></div>
+    </div>
+    <table style="width:100%;border-collapse:collapse;font-size:13px">
+      <thead><tr style="border-bottom:1px solid var(--b)">
+        <th style="text-align:right;padding:6px 8px">${T.th_product||'מוצר'}</th>
+        <th style="text-align:right;padding:6px 8px">${T.th_task_type||'סוג משימה'}</th>
+        <th style="text-align:right;padding:6px 8px">${T.tasks_units||'יחידות'}</th>
+        <th style="text-align:right;padding:6px 8px">${T.rep_time||'שעות'}</th>
+      </tr></thead>
+      <tbody>${prodRows.map(r=>`<tr style="border-bottom:0.5px solid var(--b)">
+        <td style="padding:7px 8px"><span class="bc-seg bc-p">${r.prod}</span> <span style="font-size:11px;color:var(--txt3)">לקוח ${r.cust}</span></td>
+        <td style="padding:7px 8px;color:var(--txt2)">${esc(r.taskType||'—')}</td>
+        <td style="padding:7px 8px">${r.units}</td>
+        <td style="padding:7px 8px"><span class="badge blue">${(r.secs/3600).toFixed(1)} ${T.hours||"שע'"}</span></td>
+      </tr>`).join('')}</tbody>
+    </table>`;
+}
 // ─── REPORTS ────────────────────────────────────────────────
 function buildRep(){
   const wf=document.getElementById('rf-w').value;
@@ -3837,6 +3923,11 @@ const LANGS={
     cfm_close_old:'סגור ישנה + התחל חדשה',
     cfm_worker_not_in:'⚠ העובד לא נמצא בעבודה — וודא שחתם כניסה',
     no_task_worker:'אין משימה פעילה כרגע — המתן עד שהאחראי יפתח לך משימה',
+    personal_report:'דוח אישי',
+    this_week:'שבוע זה',
+    this_month:'חודש זה',
+    all_time:'הכל',
+    hours:"שע'",
   },
   ar:{
     login_title:'تسجيل الدخول',
@@ -3941,6 +4032,11 @@ const LANGS={
     cfm_close_old:'إغلاق القديمة + بدء جديدة',
     cfm_worker_not_in:'⚠ العامل غير مسجل حضوراً — تأكد من تسجيل الدخول',
     no_task_worker:'لا توجد مهمة نشطة الآن — انتظر حتى يفتح لك المسؤول مهمة',
+    personal_report:'تقرير شخصي',
+    this_week:'هذا الأسبوع',
+    this_month:'هذا الشهر',
+    all_time:'الكل',
+    hours:'ساعة',
   },
   en:{
     login_title:'Login',
