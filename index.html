@@ -2396,7 +2396,57 @@ function buildPersonalReport(){
         <td style="padding:7px 8px">${r.units}</td>
         <td style="padding:7px 8px"><span class="badge blue">${(r.secs/3600).toFixed(1)} ${T.hours||"שע'"}</span></td>
       </tr>`).join('')}</tbody>
-    </table>`;
+    </table>
+    ${buildAttDayTable(uid,fromD,toD,T)}`;
+}
+function buildAttDayTable(uid,fromD,toD,T){
+  // build attendance by day from attHistory + today's sessions
+  const rows=[];
+  // historical days
+  (S.attHistory||[]).forEach(rec=>{
+    if(rec.workerId!==uid)return;
+    const d=rec.date||'';
+    if(fromD&&d<fromD)return;
+    if(toD&&d>toD)return;
+    const ses=rec.sessions||[];
+    const firstIn=ses.length?ses[0].in:rec.checkin||null;
+    const lastOut=ses.length?ses[ses.length-1].out:rec.checkout||null;
+    const netH=rec.netMs?rec.netMs/3600000:0;
+    rows.push({date:d,firstIn,lastOut,netH});
+  });
+  // today's live sessions
+  const todayW=(S.workers||[]).find(w=>w.id===uid);
+  if(todayW){
+    const td=todayStr();
+    if(!fromD||td>=fromD){if(!toD||td<=toD){
+      const ses=todayW.sessions||[];
+      const firstIn=ses.length?ses[0].in:todayW.checkin||null;
+      const lastOut=ses.length?ses[ses.length-1].out:todayW.checkout||null;
+      const netMs=calcNetWork(todayW)*1000;
+      if(firstIn)rows.push({date:td,firstIn,lastOut,netH:netMs/3600000,isToday:true});
+    }}
+  }
+  if(!rows.length)return'';
+  rows.sort((a,b)=>b.date.localeCompare(a.date));
+  const fmtTime=iso=>{if(!iso)return'—';const d=new Date(iso);return pad2(d.getHours())+':'+pad2(d.getMinutes());};
+  const fmtDate=d=>{const[y,m,dd]=d.split('-');return dd+'/'+m+'/'+y;};
+  return`<div style="margin-top:1.5rem">
+    <div style="font-weight:600;font-size:13px;margin-bottom:.5rem;color:var(--txt)">🕐 ${T.att_by_day||'נוכחות לפי יום'}</div>
+    <table style="width:100%;border-collapse:collapse;font-size:13px">
+      <thead><tr style="border-bottom:1px solid var(--b)">
+        <th style="text-align:right;padding:6px 8px">${T.th_date||'תאריך'}</th>
+        <th style="text-align:right;padding:6px 8px">כניסה</th>
+        <th style="text-align:right;padding:6px 8px">יציאה</th>
+        <th style="text-align:right;padding:6px 8px">שעות</th>
+      </tr></thead>
+      <tbody>${rows.map(r=>`<tr style="border-bottom:0.5px solid var(--b)${r.isToday?';background:var(--bg2)':''}">
+        <td style="padding:7px 8px">${fmtDate(r.date)}${r.isToday?' <span style="font-size:10px;color:var(--blue-txt)">(היום)</span>':''}</td>
+        <td style="padding:7px 8px">${fmtTime(r.firstIn)}</td>
+        <td style="padding:7px 8px">${fmtTime(r.lastOut)||'<span style="color:var(--orange-txt)">בעבודה</span>'}</td>
+        <td style="padding:7px 8px"><span class="badge${r.isToday?' blue':''}">${r.netH>0?r.netH.toFixed(1)+' שע\'':'—'}</span></td>
+      </tr>`).join('')}</tbody>
+    </table>
+  </div>`;
 }
 // ─── REPORTS ────────────────────────────────────────────────
 function buildRep(){
