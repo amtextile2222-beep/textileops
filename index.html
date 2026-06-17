@@ -1965,6 +1965,24 @@ function calcNetWorkRaw(checkin,checkout,breakActive,breakStart,breakEnd,refDate
   }
   return Math.max(0,total);
 }
+function calcActualTaskTime(tasks){
+  // מחשב זמן עבודה אמיתי — משימות מקביל נספרות פעם אחת (union of intervals)
+  const byWorker={};
+  tasks.forEach(t=>{if(!byWorker[t.workerId])byWorker[t.workerId]=[];byWorker[t.workerId].push(t);});
+  let totalMs=0;
+  Object.values(byWorker).forEach(wt=>{
+    const ivs=wt.map(t=>[new Date(t.startTime).getTime(),t.endTime?new Date(t.endTime).getTime():new Date(t.startTime).getTime()+(t.elapsed||0)*1000])
+      .filter(([s,e])=>e>s).sort((a,b)=>a[0]-b[0]);
+    let cs=null,ce=null;
+    for(const[s,e]of ivs){
+      if(cs===null){cs=s;ce=e;}
+      else if(s<=ce){ce=Math.max(ce,e);}
+      else{totalMs+=ce-cs;cs=s;ce=e;}
+    }
+    if(cs!==null)totalMs+=ce-cs;
+  });
+  return totalMs/1000;
+}
 function calcNetWork(w){
   const sessions=w.sessions&&w.sessions.length?w.sessions:
     (w.checkin?[{in:w.checkin,out:w.checkout||null}]:[]);
@@ -2268,7 +2286,7 @@ function buildRep(){
     return(!wf||t.workerName===wf)&&(!cf||t.cust===cf)&&(!pf||t.prod===pf)&&(!fromD||d>=fromD)&&(!toD||d<=toD);
   });
   document.getElementById('rp-tot').textContent=fl.length;
-  const totalS=fl.reduce((s,t)=>s+(t.duration||t.elapsed||0),0);
+  const totalS=calcActualTaskTime(fl);
   document.getElementById('rp-time').textContent=(totalS/3600).toFixed(1)+" שע'";
   document.getElementById('rp-units').textContent=sumUnitsDedup(fl);
   const done=fl.filter(t=>t.done).length;
