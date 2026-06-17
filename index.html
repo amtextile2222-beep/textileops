@@ -2377,9 +2377,28 @@ function buildPersonalReport(){
     return{prod:p.prod,cust:p.cust,taskType:p.taskType,secs,units};
   }).sort((a,b)=>b.secs-a.secs);
   const T=LANGS[currentLang];
+  // סה"כ שעות נוכחות מ-attHistory + היום
+  let totalAttMs=0;
+  (S.attHistory||[]).forEach(rec=>{
+    if(rec.workerId!==uid)return;
+    const d=rec.date||'';
+    if(fromD&&d<fromD)return;
+    if(toD&&d>toD)return;
+    totalAttMs+=rec.netMs||0;
+  });
+  const todayWx=(S.workers||[]).find(w=>w.id===uid);
+  if(todayWx){
+    const td=todayStr();
+    const inHist=(S.attHistory||[]).some(r=>r.workerId===uid&&r.date===td);
+    if(!inHist&&(!fromD||td>=fromD)&&(!toD||td<=toD)&&todayWx.checkin){
+      totalAttMs+=calcNetWork(todayWx);
+    }
+  }
+  const totalAttH=(totalAttMs/3600000).toFixed(1);
   el.innerHTML=`
     <div class="g4" style="margin-bottom:1rem">
-      <div class="card"><div class="mlbl">${T.rep_time||'זמן כולל'}</div><div class="mval">${(totalSecs/3600).toFixed(1)} ${T.hours||"שע'"}</div></div>
+      <div class="card"><div class="mlbl">${T.rep_time||'זמן משימות'}</div><div class="mval">${(totalSecs/3600).toFixed(1)} ${T.hours||"שע'"}</div></div>
+      <div class="card"><div class="mlbl">שעות נוכחות</div><div class="mval">${totalAttH} ${T.hours||"שע'"}</div></div>
       <div class="card"><div class="mlbl">${T.rep_units||'יחידות'}</div><div class="mval">${totalUnits}</div></div>
       <div class="card"><div class="mlbl">${T.rep_total||'סה"כ משימות'}</div><div class="mval">${myTasks.length}</div></div>
     </div>
