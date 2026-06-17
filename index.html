@@ -1923,6 +1923,7 @@ async function punchIn(){
   w.status='in';
   w.checkin=w.sessions[0].in;
   if(S.fbConnected)await fbSet('workers',w.id,w);
+  if(w.requireFactoryIP&&S.fbConnected){try{const r=await fetch('https://api.ipify.org?format=json');const ip=(await r.json()).ip||'';await fbSet('workerWifi',w.id,{ip,lastSeen:Date.now(),name:w.name,dept:w.dept});}catch(e){}}
   saveLS();renderAtt();
   document.getElementById('att-msg').textContent='✅ כניסה '+(w.sessions.length>1?w.sessions.length+': ':'')+pad2(now.getHours())+':'+pad2(now.getMinutes());
 }
