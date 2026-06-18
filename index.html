@@ -1318,6 +1318,19 @@ function listenFb(){
         if(data.shiftStart)S.settings.shiftStart=data.shiftStart;
         if(data.shiftEnd)S.settings.shiftEnd=data.shiftEnd;
         if(data.roundMinutes!==undefined)S.settings.roundMinutes=data.roundMinutes;
+        // אם שדות חסרים ב-Firebase — המנהל דוחף את ההגדרות המקומיות שלו
+        const missingFields=data.waInterval===undefined||!data.waFrom||!data.shiftStart;
+        if(missingFields&&S.user?.role==='manager'){
+          fbSet('appSettings','telegramSettings',{
+            waToken:S.settings.waToken,waChatId:S.settings.waChatId,
+            factoryIP:S.settings.factoryIP,waEnabled:S.settings.waEnabled,
+            waInterval:S.settings.waInterval,waFrom:S.settings.waFrom,
+            waTo:S.settings.waTo,waLong:S.settings.waLong,waAbsent:S.settings.waAbsent,
+            thresh:S.settings.thresh,absent:S.settings.absent,
+            shiftStart:S.settings.shiftStart,shiftEnd:S.settings.shiftEnd,
+            roundMinutes:S.settings.roundMinutes
+          });
+        }
         saveLS();loadWaSettings();
       }
     });
