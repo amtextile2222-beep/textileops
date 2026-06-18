@@ -1307,6 +1307,7 @@ function listenFb(){
         S.settings.waToken=data.waToken||S.settings.waToken;
         S.settings.waChatId=data.waChatId||S.settings.waChatId;
         S.settings.factoryIP=data.factoryIP||S.settings.factoryIP;
+        if(data.waEnabled!==undefined)S.settings.waEnabled=data.waEnabled;
         saveLS();loadWaSettings();
       }
     });
@@ -1964,6 +1965,7 @@ async function autoPunchIn(){
   w.checkin=w.sessions[0].in;
   saveLS(); // שמור מקומי תחילה — לא תלוי ב-Firebase
   try{if(S.fbConnected)await fbSet('workers',w.id,w);}catch(e){}
+  tgPunch(w.name,w.dept,true,now);
   try{renderAdmin();}catch(e){}
   try{renderAtt();}catch(e){}
 }
@@ -1996,6 +1998,7 @@ async function punchIn(){
   w.checkin=w.sessions[0].in;
   if(S.fbConnected)await fbSet('workers',w.id,w);
   if(w.requireFactoryIP&&S.fbConnected){try{const r=await fetch('https://api.ipify.org?format=json');const ip=(await r.json()).ip||'';await fbSet('workerWifi',w.id,{ip,lastSeen:Date.now(),name:w.name,dept:w.dept});}catch(e){}}
+  tgPunch(w.name,w.dept,true,now);
   saveLS();renderAtt();
   const rounded=now.getTime()!==nowRaw.getTime();
   document.getElementById('att-msg').textContent='✅ כניסה '+(w.sessions.length>1?w.sessions.length+': ':'')+pad2(now.getHours())+':'+pad2(now.getMinutes())+(rounded?' (עוגל)':'');
@@ -2023,6 +2026,7 @@ async function punchOut(){
   const rec={workerId:w.id,workerName:w.name,dept:w.dept,date:todayStr(),sessions:w.sessions,checkin:w.sessions[0]?.in||'',checkout:now.toISOString(),breakStart:w.breakStart||'',breakEnd:w.breakEnd||'',breakActive:!!w.breakActive,netMs};
   S.attHistory.unshift(rec);
   if(S.fbConnected){await fbSet('workers',w.id,w);await fbSet('attHistory',w.id+'_'+todayStr(),rec);try{await fbDel('workerWifi',w.id);}catch(e){}}
+  tgPunch(w.name,w.dept,false,now);
   saveLS();renderAtt();
   const roundedOut=now.getTime()!==nowRaw.getTime();
   document.getElementById('att-msg').textContent='🚪 יציאה: '+pad2(now.getHours())+':'+pad2(now.getMinutes())+(roundedOut?' (עוגל)':'')+(myTasks.length?' | '+myTasks.length+' משימות נסגרו':'');
@@ -2212,6 +2216,7 @@ async function submitBc(){
     const newTask={id:String(Date.now())+Math.random().toString(36).slice(2,6),workerId:u.id,workerName:u.name,dept:taskDept||u.dept,cust,prod,size,qty,col,taskType,bc:raw,isTotal:isTotal||false,startTime:new Date(),elapsed:0};
     S.activeTasks.unshift(newTask);
     if(S.fbConnected)await fbSet('activeTasks',newTask.id,{...newTask,startTime:newTask.startTime.toISOString()});
+    tgTask(newTask,true);
     document.getElementById('bc-inp').value='';parseBc('');
     document.getElementById('bc-tasktype').value='';
     document.getElementById('bc-dept').value='';
@@ -2695,7 +2700,8 @@ function saveSettings(){
     fbSet('appSettings','telegramSettings',{
       waToken:S.settings.waToken,
       waChatId:S.settings.waChatId,
-      factoryIP:S.settings.factoryIP
+      factoryIP:S.settings.factoryIP,
+      waEnabled:S.settings.waEnabled
     });
   }
 }
@@ -2725,6 +2731,21 @@ async function sendTelegram(message){
     const res=await fetch(`https://api.telegram.org/bot${token}/sendMessage`,{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({chat_id:chatId,text:message})});
     return res.ok;
   }catch(e){return false;}
+}
+function tgPunch(name,dept,isIn,time){
+  const ts=pad2(time.getHours())+':'+pad2(time.getMinutes());
+  sendTelegram((isIn?'✅ כניסה לעבודה':'🚪 יציאה מהעבודה')+'\n👤 עובד: '+name+'\n🏭 מחלקה: '+dept+'\n🕐 שעה: '+ts).catch(()=>{});
+}
+function tgTask(task,isStart,endTime){
+  const custName=(S.customerNames&&S.customerNames[task.cust])||task.cust;
+  const colName=COLORS[task.col]||task.col;
+  const st=task.startTime instanceof Date?task.startTime:new Date(task.startTime);
+  const ts=isStart?(pad2(st.getHours())+':'+pad2(st.getMinutes())):(pad2(endTime.getHours())+':'+pad2(endTime.getMinutes()));
+  let msg=(isStart?'🔧 התחלת משימה':'✅ סיום משימה')+'\n👤 עובד: '+task.workerName+'\n🏭 מחלקה: '+task.dept+'\n🏷 לקוח: '+custName+'\n📦 מוצר: '+task.prod+'\n📏 מידה: '+task.size+'\n🎨 צבע: '+colName+'\n📊 כמות: '+task.qty+' יח\'';
+  if(task.taskType)msg+='\n📋 סוג: '+task.taskType;
+  msg+='\n🕐 שעה: '+ts;
+  if(!isStart&&endTime){const dur=Math.round((endTime-st)/60000);msg+='\n⏱ משך: '+dur+' דק\'';}
+  sendTelegram(msg).catch(()=>{});
 }
 async function testWhatsApp(){
   saveSettings();
@@ -3168,6 +3189,7 @@ async function tsStartTask(){
     const task={id:String(Date.now())+Math.random().toString(36).slice(2,6),workerId:w.id,workerName:w.name,dept:taskDept||w.dept,cust,prod,size,qty,col,taskType,bc:raw,isTotal:isTotal||false,startTime:new Date(),elapsed:0};
     S.activeTasks.push(task);
     if(S.fbConnected)await fbSet('activeTasks',String(task.id),{...task,startTime:task.startTime.toISOString()});
+    tgTask(task,true);
     saveLS();renderTasks();goPage('tasks');
     showToast('✅ משימה הותחלה עבור '+w.name);
     document.getElementById('ts-bc-inp').value='';document.getElementById('ts-bc-prev').innerHTML='';
@@ -3291,6 +3313,7 @@ async function mgrPunchIn(wId){
   w.sessions.push({in:now.toISOString(),out:null});
   w.status='in';w.checkin=w.sessions[0].in;
   if(S.fbConnected)await fbSet('workers',w.id,w);
+  tgPunch(w.name,w.dept,true,now);
   saveLS();renderMgrTasks();renderAtt();
 }
 async function mgrPunchOut(wId){
@@ -3311,6 +3334,7 @@ async function mgrPunchOut(wId){
   const rec={workerId:w.id,workerName:w.name,dept:w.dept,date:todayStr(),sessions:w.sessions,checkin:w.sessions[0]?.in||'',checkout:now.toISOString(),breakStart:w.breakStart||'',breakEnd:w.breakEnd||'',breakActive:!!w.breakActive,netMs};
   S.attHistory.unshift(rec);
   if(S.fbConnected){await fbSet('workers',w.id,w);await fbSet('attHistory',w.id+'_'+todayStr(),rec);try{await fbDel('workerWifi',w.id);}catch(e){}}
+  tgPunch(w.name,w.dept,false,now);
   saveLS();renderMgrTasks();renderAtt();
 }
 async function mgrStartTask(){
@@ -3348,6 +3372,7 @@ async function mgrStartTask(){
   const newTask={id:String(Date.now())+Math.random().toString(36).slice(2,6),workerId:empId,workerName:w.name,dept:taskDept||w.dept,cust,prod,size,qty,col,taskType,bc:raw,isTotal:isTotal||false,startTime:new Date(),elapsed:0};
   S.activeTasks.unshift(newTask);
   if(S.fbConnected)await fbSet('activeTasks',newTask.id,{...newTask,startTime:newTask.startTime.toISOString()});
+  tgTask(newTask,true);
   document.getElementById('mgr-bc-inp').value='';parseMgrBc('');
   document.getElementById('mgr-tasktype').value='';
   document.getElementById('mgr-dept').value='';
@@ -3388,6 +3413,7 @@ async function mgrEndTask(taskId){
   const done={...t,endTime,duration:Math.round((endTime-new Date(t.startTime))/1000)};
   S.histTasks.unshift(done);S.activeTasks=S.activeTasks.filter(x=>x.id!==taskId);
   if(S.fbConnected){await fbDel('activeTasks',taskId);await fbSet('histTasks',taskId,{...done,startTime:done.startTime instanceof Date?done.startTime.toISOString():done.startTime,endTime:done.endTime.toISOString()});}
+  tgTask(t,false,endTime);
   saveLS();renderMgrTasks();renderTasks();
 }
 async function mgrUpdateBreak(wId,field,val){
