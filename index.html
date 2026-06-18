@@ -5095,18 +5095,42 @@ function bcGenerateOpenQty(){
   const code=cust+prod+'900000';
   const out=document.getElementById('bc-gen-output');
   if(!out)return;
-  out.innerHTML=`<div style="background:#fff;border:3px solid var(--amber-txt);border-radius:8px;padding:14px;display:flex;align-items:center;gap:14px;max-width:400px">
-    <div id="bc-openqty-qr" style="flex-shrink:0;width:150px;height:150px"></div>
-    <div style="line-height:2">
-      <div style="font-size:14px;font-weight:800;color:var(--amber-txt)">✂️ ספירה / גזירה</div>
-      <div style="font-size:13px;font-weight:700">לקוח: ${cust}</div>
-      <div style="font-size:13px;font-weight:700">מוצר: ${prod}</div>
-      <div style="font-size:12px;color:var(--txt3)">⏳ כמות פתוחה</div>
-      <div style="font-size:11px;color:var(--txt3);margin-top:4px">${code}</div>
+  out.innerHTML=`
+    <div style="display:flex;gap:8px;margin-bottom:10px">
+      <button class="btn" onclick="bcPrintOpenQty('${cust}','${prod}','${code}')" style="font-size:13px">🖨️ הדפס</button>
     </div>
-  </div>`;
+    <div id="bc-openqty-card" style="background:#fff;border:3px solid var(--amber-txt);border-radius:8px;padding:14px;display:flex;align-items:center;gap:14px;max-width:400px">
+      <div id="bc-openqty-qr" style="flex-shrink:0;width:150px;height:150px"></div>
+      <div style="line-height:2">
+        <div style="font-size:14px;font-weight:800;color:var(--amber-txt)">✂️ ספירה / גזירה</div>
+        <div style="font-size:13px;font-weight:700">לקוח: ${cust}</div>
+        <div style="font-size:13px;font-weight:700">מוצר: ${prod}</div>
+        <div style="font-size:12px;color:var(--txt3)">⏳ כמות פתוחה</div>
+        <div style="font-size:11px;color:var(--txt3);margin-top:4px">${code}</div>
+      </div>
+    </div>`;
   new QRCode(document.getElementById('bc-openqty-qr'),{text:code,width:150,height:150,colorDark:'#d97706',colorLight:'#ffffff',correctLevel:QRCode.CorrectLevel.M});
   setTimeout(()=>{const im=document.getElementById('bc-openqty-qr')?.querySelector('img');if(im)im.style.display='none';},50);
+}
+function bcPrintOpenQty(cust,prod,code){
+  const canvas=document.querySelector('#bc-openqty-qr canvas');
+  const img=canvas?`<img src="${canvas.toDataURL('image/png')}" style="width:150px;height:150px"/>`:'';
+  const win=window.open('','_blank');
+  win.document.write(`<html dir="rtl"><head><title>ברקוד ספירה/גזירה</title>
+    <style>body{margin:20px;font-family:Arial,sans-serif;background:#fff}
+    .card{border:3px solid #d97706;border-radius:8px;padding:16px;display:inline-flex;align-items:center;gap:16px}
+    @media print{@page{size:A4 portrait;margin:10mm}}</style></head><body>
+    <div class="card">
+      ${img}
+      <div style="line-height:2.2">
+        <div style="font-size:16px;font-weight:800;color:#d97706">✂️ ספירה / גזירה</div>
+        <div style="font-size:14px;font-weight:700">לקוח: ${cust}</div>
+        <div style="font-size:14px;font-weight:700">מוצר: ${prod}</div>
+        <div style="font-size:13px;color:#666">⏳ כמות פתוחה</div>
+        <div style="font-size:11px;color:#999;margin-top:4px">${code}</div>
+      </div>
+    </div>
+    <script>window.onload=()=>window.print()<\/script></body></html>`);
 }
 function bcGenerate(){
   const cust=(document.getElementById('bc-gen-cust')?.value||'').replace(/\D/g,'').padStart(2,'0').slice(0,2);
