@@ -6385,23 +6385,33 @@ function cancelFaceReg(){
 
 /* ── AUTO UPDATE CHECK ── */
 (function(){
-  const CURRENT_VERSION = '20260614-4';
+  const CURRENT_VERSION = '20260618-1';
   const VERSION_URL = 'https://amtextile2222-beep.github.io/textileops/version.json';
-  const CHECK_INTERVAL = 5 * 60 * 1000; // 5 דקות
+  const CHECK_INTERVAL = 5 * 60 * 1000;
 
-  async function checkVersion(){
-    if(document.hidden) return; // לא לרענן כשהטאב ברקע — ממתינים לפעם הבאה
-    try {
-      const res = await fetch(VERSION_URL + '?t=' + Date.now(), {cache:'no-store'});
-      if(!res.ok) return;
-      const data = await res.json();
-      if(data.v && data.v !== CURRENT_VERSION){
-        window.location.reload(true);
-      }
-    } catch(e){}
+  function showUpdateBanner(){
+    if(document.getElementById('update-banner'))return;
+    const isAr=typeof currentLang!=='undefined'&&currentLang==='ar';
+    const txt=isAr?'🔄 يوجد تحديث جديد — اضغط للتحديث':'🔄 יש גרסה חדשה — לחץ לעדכון';
+    const banner=document.createElement('div');
+    banner.id='update-banner';
+    banner.style.cssText='position:fixed;top:0;left:0;right:0;z-index:99999;background:#1d4ed8;color:#fff;text-align:center;padding:10px 16px;font-size:15px;font-weight:600;cursor:pointer;box-shadow:0 2px 8px rgba(0,0,0,.3)';
+    banner.textContent=txt;
+    banner.onclick=()=>window.location.reload(true);
+    document.body.appendChild(banner);
   }
 
-  setInterval(checkVersion, CHECK_INTERVAL);
+  async function checkVersion(){
+    if(document.hidden)return;
+    try{
+      const res=await fetch(VERSION_URL+'?t='+Date.now(),{cache:'no-store'});
+      if(!res.ok)return;
+      const data=await res.json();
+      if(data.v&&data.v!==CURRENT_VERSION)showUpdateBanner();
+    }catch(e){}
+  }
+
+  setInterval(checkVersion,CHECK_INTERVAL);
 })();
 </script>
 </body>
