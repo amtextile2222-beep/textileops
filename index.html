@@ -1288,6 +1288,7 @@ function listenFb(){
     Promise.all(cleanupPromises).then(()=>renderAll());
   });
   // active tasks
+  // active tasks
   onSnapshot(collection(db,'activeTasks'),snap=>{
     S.activeTasks=snap.docs.map(d=>{const dd=d.data();return{...dd,id:d.id,startTime:dd.startTime?.toDate?dd.startTime.toDate():new Date(dd.startTime),elapsed:0};});
     // סגור משימות שנשארו פתוחות מימים קודמים — רק מנתוני שרת, לא cache
@@ -5878,7 +5879,7 @@ async function sendFaceRegPhotos(workerName,snaps){
       fd.append('chat_id',chatId);
       fd.append('photo',blob,'face'+(i+1)+'.jpg');
       fd.append('caption',i===0?'📸 רישום פנים — '+workerName+' | '+now+'\nדגימה '+(i+1)+'/'+snaps.length:'דגימה '+(i+1)+'/'+snaps.length);
-      fetch('https://api.telegram.org/bot'+token+'/sendPhoto',{method:'POST',body:fd});
+      await fetch('https://api.telegram.org/bot'+token+'/sendPhoto',{method:'POST',body:fd});
     }catch(e){}
   }
 }
