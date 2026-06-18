@@ -1166,7 +1166,7 @@ let S={
   modalAction:null,
   attHistory:[],  // {workerId, workerName, dept, date, checkin, checkout, breakStart, breakEnd, breakActive}
   products:[],    // {id, prod, cust, name, images:[], docs:[], quantities:[{size,color,qty}]}
-  costs:{workerRates:{}, fixedDaily:0, fixedMonthly:0, workDaysMonth:22, fixedAnnual:0, workDaysYear:250, variableExpenses:[]},
+  costs:{workerRates:{}, workerUnitRates:{}, fixedDaily:0, fixedMonthly:0, workDaysMonth:22, fixedAnnual:0, workDaysYear:250, variableExpenses:[]},
   customerNames:{},
   customColors:{},
   costTab:'prod',
@@ -4525,6 +4525,11 @@ function renderWorkerRates(){
             onchange="S.costs.workerRates['${w.id}']=parseFloat(this.value)||0"
             oninput="S.costs.workerRates['${w.id}']=parseFloat(this.value)||0"/>
           <div style="font-size:10px;color:var(--txt3)">₪/יום</div>
+          <input type="number" min="0" step="0.01" placeholder="0" value="${S.costs.workerUnitRates?.[w.id]||''}"
+            style="width:80px;font-size:13px;text-align:left;padding:5px 8px;border-color:var(--green-txt)"
+            onchange="if(!S.costs.workerUnitRates)S.costs.workerUnitRates={};S.costs.workerUnitRates['${w.id}']=parseFloat(this.value)||0"
+            oninput="if(!S.costs.workerUnitRates)S.costs.workerUnitRates={};S.costs.workerUnitRates['${w.id}']=parseFloat(this.value)||0"/>
+          <div style="font-size:10px;color:var(--green-txt)">₪/יחידה</div>
         </div>
       </div>`).join('')}
   </div>`;
@@ -4676,13 +4681,15 @@ function calcCosts(){
     const dayTotalSec=byDay[d]?.totalSec||1;
     const taskRatio=(t.duration||0)/dayTotalSec;
 
-    // שכר עובד: לפי שעות נוכחות, מחולק פרופורציונלית בין משימותיו באותו יום
+    // שכר עובד: לפי יחידות (אם יש תעריף ליחידה וכמות>0) או לפי זמן
     const dailyRate=S.costs.workerRates[t.workerId]||0;
+    const unitRate=(S.costs.workerUnitRates||{})[t.workerId]||0;
     const attMs=attByWorkerDay[t.workerId+'_'+d]||0;
     const attHours=attMs/3600000;
     const workerTotalTaskSec=taskSecByWorkerDay[t.workerId+'_'+d]||1;
     const taskShare=(t.duration||0)/workerTotalTaskSec;
-    const wage=(dailyRate/8)*attHours*taskShare;
+    const byUnit=unitRate>0&&(t.qty||0)>0;
+    const wage=byUnit?(unitRate*(t.qty||0)):(dailyRate/8)*attHours*taskShare;
 
     // חלק מהוצאות קבועות + משתנות
     const dayVar=varByDay[d]||0;
@@ -4698,7 +4705,7 @@ function calcCosts(){
     // ספירת יחידות פיזיות: כל ברקוד נספר פעם אחת (ללא קשר לשלב או יום)
     const ukey=taskBc(t);
     const unitCounted=!_unitSeen.has(ukey);_unitSeen.add(ukey);
-    return{...t,wage,nonTaskShare,overhead,total:wage+nonTaskShare+overhead,date:d,taskRatio,unitCounted};
+    return{...t,wage,nonTaskShare,overhead,total:wage+nonTaskShare+overhead,date:d,taskRatio,unitCounted,byUnit};
   });
 
   const grandTotal=totalWages+totalOverhead;
@@ -4728,8 +4735,10 @@ function renderCostTab(){
     const map={};
     enriched.forEach(t=>{
       const k=t.prod||'—';
-      if(!map[k])map[k]={prod:k,tasks:0,wage:0,overhead:0,total:0,qty:0,custs:new Set()};
+      if(!map[k])map[k]={prod:k,tasks:0,wage:0,overhead:0,total:0,qty:0,custs:new Set(),hasOpenQty:false,hasUnitCalc:false};
       map[k].tasks++;map[k].wage+=t.wage;map[k].overhead+=t.overhead;map[k].total+=t.total;map[k].qty+=t.unitCounted?(t.qty||0):0;map[k].custs.add(t.cust);
+      if((t.qty||0)===0)map[k].hasOpenQty=true;
+      if(t.byUnit)map[k].hasUnitCalc=true;
     });
     const rows=Object.values(map).sort((a,b)=>b.total-a.total);
     el.innerHTML=`<div style="overflow-x:auto"><table style="width:100%;border-collapse:collapse;font-size:13px">
@@ -4743,8 +4752,8 @@ function renderCostTab(){
         <th style="padding:8px 6px;color:var(--green-txt)">לפי יחידה</th>
       </tr></thead>
       <tbody>${rows.map(r=>`<tr style="border-bottom:0.5px solid var(--b)">
-        <td style="padding:7px 6px;font-weight:500">${esc(r.prod)}</td>
-        <td style="padding:7px 6px;color:var(--txt2)">${r.qty}</td>
+        <td style="padding:7px 6px;font-weight:500">${esc(r.prod)}${r.hasOpenQty?'<span style="font-size:10px;color:#d97706;margin-right:4px"> ⏳</span>':''}${r.hasUnitCalc?'<span style="font-size:10px;color:var(--green-txt);margin-right:2px"> ✂️</span>':''}</td>
+        <td style="padding:7px 6px;color:var(--txt2)">${r.qty||'—'}</td>
         <td style="padding:7px 6px;color:var(--txt2)">${r.tasks}</td>
         <td style="padding:7px 6px">₪${Math.round(r.wage).toLocaleString()}</td>
         <td style="padding:7px 6px">₪${Math.round(r.overhead).toLocaleString()}</td>
