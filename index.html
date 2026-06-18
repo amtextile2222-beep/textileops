@@ -976,6 +976,13 @@ code{background:var(--bg2);border:0.5px solid var(--b);border-radius:4px;padding
         <div class="field" style="margin:0"><label>מוצר/דגם (5 ספרות)</label>
           <input id="bc-gen-prod" maxlength="5" inputmode="numeric" placeholder="14415" style="font-size:14px"/></div>
       </div>
+      <div style="background:var(--amber-bg);border:1px solid var(--amber-txt);border-radius:8px;padding:10px 12px;margin-bottom:12px;display:flex;align-items:center;justify-content:space-between;gap:10px;flex-wrap:wrap">
+        <div>
+          <div style="font-size:13px;font-weight:700;color:var(--amber-txt)">✂️ ברקוד ספירה / גזירה</div>
+          <div style="font-size:11px;color:var(--txt3);margin-top:2px">כמות פתוחה — לפני שהכמות ידועה</div>
+        </div>
+        <button class="btn" style="font-size:13px;padding:7px 14px;border-color:var(--amber-txt);color:var(--amber-txt)" onclick="bcGenerateOpenQty()">✂️ צור ברקוד</button>
+      </div>
       <div class="sec" style="margin-top:12px">מידות וכמויות</div>
       <div style="font-size:11px;color:var(--txt3);margin-bottom:8px">כל שורה = ברקוד נפרד. מידה = ספרה אחת (1,2,3...). כמות = עד 999.</div>
       <div id="bc-gen-rows"></div>
@@ -2422,7 +2429,7 @@ function renderTaskHist(){
     const dateStr=pad2(st.getDate())+'/'+pad2(st.getMonth()+1)+'/'+st.getFullYear();
     return`<div class="row">
       <div style="flex:1"><div style="font-size:12px;font-weight:500;color:var(--txt)">${esc(t.workerName)}</div>
-      <div style="font-size:11px;color:var(--txt3)">${dateStr} | לקוח ${t.cust} | ${t.prod} | ${t.qty} יח'${t.isTotal?' | <span style="color:#059669;font-weight:700">📦 כל הכמות</span>':' | '+(COLORS[t.col]||t.col)}${t.taskType?' | 📋 '+esc(t.taskType):''}</div>
+      <div style="font-size:11px;color:var(--txt3)">${dateStr} | לקוח ${t.cust} | ${t.prod} | ${t.qty===0?'<span style="color:#d97706;font-weight:700">⏳ כמות פתוחה</span>':t.qty+' יח\''}${t.isTotal?' | <span style="color:#059669;font-weight:700">📦 כל הכמות</span>':' | '+(COLORS[t.col]||t.col)}${t.taskType?' | 📋 '+esc(t.taskType):''}</div>
       <div style="font-size:11px;color:var(--txt3)">▶ ${stStr} → ◀ ${etStr}</div>
       ${(()=>{const tot=totalBcSecs(t.bc,t.workerId);const ses=totalBcSessions(t.bc,t.workerId);return ses>1?`<div style="font-size:11px;color:var(--blue-txt)">📊 סה"כ מצטבר: <b>${fmtM(tot)}</b> (${ses} ימים)</div>`:''})()}
       </div>
@@ -2959,7 +2966,7 @@ function renderDash(){
     <div class="row">
       <div style="flex:1"><span style="font-size:13px;font-weight:500">${esc(t.workerName)}</span>
       <span class="badge ${t.endTime?'green':'blue'}" style="margin-right:6px">${t.endTime?'הושלם':'פעיל'}</span>
-      <div style="font-size:11px;color:var(--txt3)">לקוח ${t.cust} · מוצר ${t.prod} · ${t.qty} יח'${t.isTotal?' · <span style="color:#059669;font-weight:700">📦 כל הכמות</span>':' · '+(COLORS[t.col]||t.col)}</div></div>
+      <div style="font-size:11px;color:var(--txt3)">לקוח ${t.cust} · מוצר ${t.prod} · ${t.qty===0?'<span style="color:#d97706;font-weight:700">⏳ כמות פתוחה</span>':t.qty+' יח\''}${t.isTotal?' · <span style="color:#059669;font-weight:700">📦 כל הכמות</span>':' · '+(COLORS[t.col]||t.col)}</div></div>
       <span style="font-size:12px;color:var(--txt2)">${t.endTime?fmtM(t.duration||0):fmtS(t.elapsed||0)}</span>
     </div>`).join(''):'<div style="color:var(--txt3);font-size:13px;padding:.5rem 0">אין פעילות היום עדיין</div>';
 }
@@ -3674,7 +3681,7 @@ function openEditTask(taskId, isHist){
     <div class="field"><label>לקוח (2 ספרות)</label><input id="mf-t-cust" value="${t.cust}" maxlength="2" style="font-size:13px"/></div>
     <div class="field"><label>מוצר (5 ספרות)</label><input id="mf-t-prod" value="${t.prod}" maxlength="5" style="font-size:13px"/></div>
     <div class="field"><label>מידה</label><input id="mf-t-size" value="${esc(t.size||'')}" maxlength="1" placeholder="מידה (ספרה אחת)" style="font-size:13px"/></div>
-    <div class="field"><label>כמות</label><input type="number" inputmode="numeric" id="mf-t-qty" value="${t.qty}" min="1" style="font-size:13px"/></div>
+    <div class="field"><label>כמות ${t.qty===0?'<span style="color:var(--amber-txt);font-size:11px">⏳ כמות פתוחה — עדכן לאחר ספירה/גזירה</span>':''}</label><input type="number" inputmode="numeric" id="mf-t-qty" value="${t.qty}" min="0" style="font-size:13px"/></div>
     <div class="field"><label>צבע</label><select id="mf-t-col" style="font-size:13px">${colorOpts}</select></div>
     <div class="field"><label>סוג משימה</label><input id="mf-t-type" value="${esc(t.taskType||'')}" style="font-size:13px"/></div>
     <div class="field"><label>מחלקה</label><select id="mf-t-dept" style="font-size:13px">${S.depts.map(d=>`<option value="${esc(d)}" ${(t.dept||'')=== d?'selected':''}>${esc(d)}</option>`).join('')}</select></div>
@@ -3907,7 +3914,7 @@ async function confirmModal(){
     t.cust=(document.getElementById('mf-t-cust')?.value||'').padStart(2,'0').slice(0,2);
     t.prod=(document.getElementById('mf-t-prod')?.value||'').padStart(5,'0').slice(0,5);
     t.size=document.getElementById('mf-t-size')?.value||t.size||'';
-    t.qty=parseInt(document.getElementById('mf-t-qty')?.value)||t.qty;
+    const _qtyVal=document.getElementById('mf-t-qty')?.value;t.qty=_qtyVal!==''&&_qtyVal!==undefined?Math.max(0,parseInt(_qtyVal)||0):t.qty;
     t.col=document.getElementById('mf-t-col')?.value||t.col;
     t.taskType=document.getElementById('mf-t-type')?.value||'';
     t.dept=document.getElementById('mf-t-dept')?.value||t.dept||'';
@@ -3933,7 +3940,7 @@ async function confirmModal(){
     t.cust=(document.getElementById('mf-t-cust')?.value||'').padStart(2,'0').slice(0,2);
     t.prod=(document.getElementById('mf-t-prod')?.value||'').padStart(5,'0').slice(0,5);
     t.size=document.getElementById('mf-t-size')?.value||t.size||'';
-    t.qty=parseInt(document.getElementById('mf-t-qty')?.value)||t.qty;
+    const _qtyVal=document.getElementById('mf-t-qty')?.value;t.qty=_qtyVal!==''&&_qtyVal!==undefined?Math.max(0,parseInt(_qtyVal)||0):t.qty;
     t.col=document.getElementById('mf-t-col')?.value||t.col;
     t.taskType=document.getElementById('mf-t-type')?.value||'';
     t.dept=document.getElementById('mf-t-dept')?.value||t.dept||'';
@@ -5071,6 +5078,26 @@ function bcAddRow(){
       <select class="bc-col" style="font-size:13px">${colorOpts}</select></div>
     <button onclick="this.closest('.bc-row').remove()" style="background:none;border:none;cursor:pointer;color:var(--red-txt);font-size:20px;padding-bottom:2px">✕</button>`;
   container.appendChild(div);
+}
+function bcGenerateOpenQty(){
+  const cust=(document.getElementById('bc-gen-cust')?.value||'').replace(/\D/g,'').padStart(2,'0').slice(0,2);
+  const prod=(document.getElementById('bc-gen-prod')?.value||'').replace(/\D/g,'').padStart(5,'0').slice(0,5);
+  if(cust==='00'||prod==='00000'){alert('הזן מספר לקוח ומספר מוצר');return;}
+  const code=cust+prod+'900000';
+  const out=document.getElementById('bc-gen-output');
+  if(!out)return;
+  out.innerHTML=`<div style="background:#fff;border:3px solid var(--amber-txt);border-radius:8px;padding:14px;display:flex;align-items:center;gap:14px;max-width:400px">
+    <div id="bc-openqty-qr" style="flex-shrink:0;width:150px;height:150px"></div>
+    <div style="line-height:2">
+      <div style="font-size:14px;font-weight:800;color:var(--amber-txt)">✂️ ספירה / גזירה</div>
+      <div style="font-size:13px;font-weight:700">לקוח: ${cust}</div>
+      <div style="font-size:13px;font-weight:700">מוצר: ${prod}</div>
+      <div style="font-size:12px;color:var(--txt3)">⏳ כמות פתוחה</div>
+      <div style="font-size:11px;color:var(--txt3);margin-top:4px">${code}</div>
+    </div>
+  </div>`;
+  new QRCode(document.getElementById('bc-openqty-qr'),{text:code,width:150,height:150,colorDark:'#d97706',colorLight:'#ffffff',correctLevel:QRCode.CorrectLevel.M});
+  setTimeout(()=>{const im=document.getElementById('bc-openqty-qr')?.querySelector('img');if(im)im.style.display='none';},50);
 }
 function bcGenerate(){
   const cust=(document.getElementById('bc-gen-cust')?.value||'').replace(/\D/g,'').padStart(2,'0').slice(0,2);
