@@ -1308,6 +1308,16 @@ function listenFb(){
         S.settings.waChatId=data.waChatId||S.settings.waChatId;
         S.settings.factoryIP=data.factoryIP||S.settings.factoryIP;
         if(data.waEnabled!==undefined)S.settings.waEnabled=data.waEnabled;
+        if(data.waInterval!==undefined)S.settings.waInterval=data.waInterval;
+        if(data.waFrom)S.settings.waFrom=data.waFrom;
+        if(data.waTo)S.settings.waTo=data.waTo;
+        if(data.waLong!==undefined)S.settings.waLong=data.waLong;
+        if(data.waAbsent!==undefined)S.settings.waAbsent=data.waAbsent;
+        if(data.thresh!==undefined)S.settings.thresh=data.thresh;
+        if(data.absent!==undefined)S.settings.absent=data.absent;
+        if(data.shiftStart)S.settings.shiftStart=data.shiftStart;
+        if(data.shiftEnd)S.settings.shiftEnd=data.shiftEnd;
+        if(data.roundMinutes!==undefined)S.settings.roundMinutes=data.roundMinutes;
         saveLS();loadWaSettings();
       }
     });
@@ -2702,7 +2712,17 @@ function saveSettings(){
       waToken:S.settings.waToken,
       waChatId:S.settings.waChatId,
       factoryIP:S.settings.factoryIP,
-      waEnabled:S.settings.waEnabled
+      waEnabled:S.settings.waEnabled,
+      waInterval:S.settings.waInterval,
+      waFrom:S.settings.waFrom,
+      waTo:S.settings.waTo,
+      waLong:S.settings.waLong,
+      waAbsent:S.settings.waAbsent,
+      thresh:S.settings.thresh,
+      absent:S.settings.absent,
+      shiftStart:S.settings.shiftStart,
+      shiftEnd:S.settings.shiftEnd,
+      roundMinutes:S.settings.roundMinutes
     });
   }
 }
