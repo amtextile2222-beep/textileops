@@ -3334,7 +3334,7 @@ async function mgrSendMsg(wId,wName){
   if(!S.fbConnected){showToast('⚠ Firebase לא מחובר','var(--red-txt)');return;}
   const from=S.user?.name||'מנהל';
   try{
-    await fbSet('workerMessages',wId,{msg:msg.trim(),from,ts:Date.now()});
+    await fbSet('workerMessages',wId,{msg:msg.trim(),from,ts:Date.now(),read:false});
     showToast('✅ הודעה נשלחה ל'+wName,'var(--green-txt)');
   }catch(e){showToast('❌ שגיאה בשליחה','var(--red-txt)');}
 }
@@ -3360,19 +3360,24 @@ function showWorkerMsgPopup(msg,from){
     <div style="font-size:36px;margin-bottom:12px">📢</div>
     <div style="font-size:13px;color:var(--txt3);margin-bottom:8px">הודעה מ${esc(from)}</div>
     <div style="font-size:17px;font-weight:600;color:var(--txt);margin-bottom:20px;line-height:1.5">${esc(msg)}</div>
-    <button class="btn primary" style="width:100%;padding:10px;font-size:14px" onclick="document.getElementById('worker-msg-popup').remove()">✅ הבנתי</button>
+    <button class="btn primary" style="width:100%;padding:10px;font-size:14px" onclick="markWorkerMsgRead();document.getElementById('worker-msg-popup').remove()">✅ הבנתי</button>
   </div>`;
   document.body.appendChild(div);
   playAlertSound();
 }
 let _workerMsgLastTs=0;
+function markWorkerMsgRead(){
+  if(!S.fbConnected||!db||!S.user)return;
+  const{doc,setDoc}=window._fb;
+  setDoc(doc(db,'workerMessages',S.user.id),{ts:_workerMsgLastTs,read:true},{merge:true});
+}
 function listenWorkerMessages(){
   if(!S.fbConnected||!db||!S.user||S.user.role==='manager')return;
   const{doc,onSnapshot}=window._fb;
   onSnapshot(doc(db,'workerMessages',S.user.id),snap=>{
     if(!snap.exists())return;
     const data=snap.data();
-    if(!data.ts||data.ts<=_workerMsgLastTs)return;
+    if(!data.ts||data.ts<=_workerMsgLastTs||data.read)return;
     _workerMsgLastTs=data.ts;
     showWorkerMsgPopup(data.msg,data.from||'מנהל');
   });
