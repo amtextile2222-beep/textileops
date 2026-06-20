@@ -284,6 +284,7 @@ code{background:var(--bg2);border:0.5px solid var(--b);border-radius:4px;padding
       <button class="nb hidden" onclick="goPage('taskscan')" id="nb-taskscan">📷 סורק משימות</button>
       <button class="nb hidden" onclick="goPage('setup')" id="nb-setup">🔗 <span data-i18n="nav_setup">Firebase</span></button>
       <button class="nb hidden" onclick="goPage('costs')" id="nb-costs">💰 עלויות</button>
+      <button class="nb hidden" onclick="goPage('expenses')" id="nb-expenses">💸 הוצאות</button>
       <button class="nb hidden" onclick="goPage('products')" id="nb-products">👗 מוצרים</button>
       <button class="nb hidden" onclick="goPage('barcodes')" id="nb-barcodes">🏷️ ברקודים</button>
     </div>
@@ -933,6 +934,26 @@ code{background:var(--bg2);border:0.5px solid var(--b);border-radius:4px;padding
     </div>
   </div>
 
+  <!-- EXPENSES PAGE -->
+  <div class="page" id="page-expenses">
+    <div class="card" style="margin-bottom:12px">
+      <div class="sec">➕ הוצאה חדשה</div>
+      <div class="field"><label>סכום (₪)</label><input type="number" id="exp-amount" min="0" step="0.01" placeholder="0.00" style="font-size:16px;font-weight:600"/></div>
+      <div class="field"><label>פירוט ההוצאה</label><input type="text" id="exp-desc" placeholder="לדוגמה: חוט תפירה, כפתורים..." style="font-size:14px"/></div>
+      <div class="field"><label>צילום מסמך / קבלה (אופציונלי)</label><input type="file" id="exp-photo" accept="image/*" capture="environment" onchange="previewExpensePhoto(this)" style="font-size:13px"/></div>
+      <div id="exp-photo-preview" style="margin-top:6px"></div>
+      <button class="btn primary" onclick="submitExpense()" style="margin-top:12px;width:100%;font-size:15px">📤 שלח הוצאה</button>
+      <div id="exp-msg" style="margin-top:8px;font-size:13px;text-align:center;min-height:20px"></div>
+    </div>
+    <div class="card">
+      <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:10px">
+        <div class="sec" id="exp-list-title" style="margin:0">📋 ההוצאות שלי</div>
+        <div id="exp-total-badge" style="font-size:12px;color:var(--txt3)"></div>
+      </div>
+      <div id="exp-list"><div style="color:var(--txt3);text-align:center;padding:20px">אין הוצאות</div></div>
+    </div>
+  </div>
+
   <!-- עמוד מוצרים -->
   <div class="page" id="page-products">
     <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:12px;flex-wrap:wrap;gap:8px">
@@ -1100,6 +1121,7 @@ const WORKER_PAGES=[
   {id:'reports',label:'דוחות'},
   {id:'alerts',label:'התראות'},
   {id:'taskscan',label:'סורק משימות'},
+  {id:'expenses',label:'💸 הוצאות'},
 ];
 const SUPERVISOR_EXTRA_PAGES=[
   {id:'mgrtasks',label:'ניהול משימות'},
@@ -1167,6 +1189,7 @@ let S={
   attHistory:[],  // {workerId, workerName, dept, date, checkin, checkout, breakStart, breakEnd, breakActive}
   products:[],    // {id, prod, cust, name, images:[], docs:[], quantities:[{size,color,qty}]}
   costs:{workerRates:{}, workerUnitRates:{}, fixedDaily:0, fixedMonthly:0, workDaysMonth:22, fixedAnnual:0, workDaysYear:250, variableExpenses:[]},
+  workerExpenses:[],
   customerNames:{},
   customColors:{},
   costTab:'prod',
@@ -1370,6 +1393,12 @@ function listenFb(){
       }
     });
     renderAll();
+  });
+  onSnapshot(collection(db,'workerExpenses'),snap=>{
+    S.workerExpenses=[];
+    snap.forEach(d=>{if(d.data().id)S.workerExpenses.push(d.data());});
+    S.workerExpenses.sort((a,b)=>b.ts-a.ts);
+    renderExpenses();
   });
 }
 
@@ -1871,6 +1900,7 @@ function renderAll(){
   if(id==='taskscan')renderTsScan();
   if(id==='attrep')initAttRep();
   if(id==='alerts'){checkAlerts();renderAlerts();loadWaSettings();}
+  if(id==='expenses')renderExpenses();
 }
 
 // ─── ATTENDANCE REPORT ──────────────────────────────────────
@@ -4572,6 +4602,107 @@ function delVarExp(i){
   saveLS();renderVarExpList();
 }
 
+// ─── הוצאות עובדים ───────────────────────────────────────────
+function previewExpensePhoto(input){
+  const prev=document.getElementById('exp-photo-preview');
+  if(!prev)return;
+  const f=input.files[0];
+  if(!f){prev.innerHTML='';return;}
+  compressImage(f,400,0.6).then(b64=>{
+    prev.innerHTML=`<img src="${b64}" style="max-width:100%;max-height:140px;border-radius:8px;border:1px solid var(--border)"/>`;
+  }).catch(()=>{prev.innerHTML='';});
+}
+
+function compressImage(file,maxPx,quality){
+  return new Promise((resolve,reject)=>{
+    const reader=new FileReader();
+    reader.onload=e=>{
+      const img=new Image();
+      img.onload=()=>{
+        let w=img.width,h=img.height;
+        if(w>maxPx||h>maxPx){if(w>h){h=Math.round(h*maxPx/w);w=maxPx;}else{w=Math.round(w*maxPx/h);h=maxPx;}}
+        const canvas=document.createElement('canvas');
+        canvas.width=w;canvas.height=h;
+        canvas.getContext('2d').drawImage(img,0,0,w,h);
+        resolve(canvas.toDataURL('image/jpeg',quality));
+      };
+      img.onerror=reject;
+      img.src=e.target.result;
+    };
+    reader.onerror=reject;
+    reader.readAsDataURL(file);
+  });
+}
+
+async function submitExpense(){
+  if(!S.user)return;
+  const amountEl=document.getElementById('exp-amount');
+  const descEl=document.getElementById('exp-desc');
+  const msgEl=document.getElementById('exp-msg');
+  const amount=parseFloat(amountEl?.value);
+  const desc=(descEl?.value||'').trim();
+  if(!amount||amount<=0){if(msgEl){msgEl.style.color='var(--danger)';msgEl.textContent='⚠️ הכנס סכום';} return;}
+  if(!desc){if(msgEl){msgEl.style.color='var(--danger)';msgEl.textContent='⚠️ הכנס פירוט';} return;}
+  const photoFile=document.getElementById('exp-photo')?.files[0];
+  let photo='';
+  if(photoFile){try{photo=await compressImage(photoFile,800,0.5);}catch(e){}}
+  const id='exp_'+Date.now()+'_'+S.user.id;
+  const exp={id,workerId:S.user.id,workerName:S.user.name,dept:S.user.dept||'',
+    amount,desc,photo,date:todayStr(),ts:Date.now()};
+  S.workerExpenses.unshift(exp);
+  if(S.fbConnected&&db)fbSet('workerExpenses',id,exp);
+  amountEl.value='';descEl.value='';
+  document.getElementById('exp-photo').value='';
+  document.getElementById('exp-photo-preview').innerHTML='';
+  if(msgEl){msgEl.style.color='green';msgEl.textContent='✅ ההוצאה נשלחה!';}
+  setTimeout(()=>{if(msgEl)msgEl.textContent='';},3000);
+  renderExpenses();
+}
+
+function renderExpenses(){
+  const listEl=document.getElementById('exp-list');
+  if(!listEl)return;
+  const isManager=S.user?.role==='manager';
+  const titleEl=document.getElementById('exp-list-title');
+  const exps=isManager
+    ?[...S.workerExpenses]
+    :S.workerExpenses.filter(e=>e.workerId===S.user?.id);
+  if(titleEl)titleEl.textContent=isManager?'📋 כל ההוצאות ('+exps.length+')':'📋 ההוצאות שלי ('+exps.length+')';
+  const total=exps.reduce((s,e)=>s+Number(e.amount||0),0);
+  const badge=document.getElementById('exp-total-badge');
+  if(badge)badge.textContent=exps.length?'סה"כ: ₪'+total.toFixed(2):'';
+  if(!exps.length){listEl.innerHTML='<div style="color:var(--txt3);text-align:center;padding:20px">אין הוצאות</div>';return;}
+  listEl.innerHTML=exps.map(e=>`
+    <div style="border:1px solid var(--border);border-radius:8px;padding:10px 12px;margin-bottom:8px;display:flex;justify-content:space-between;align-items:flex-start;gap:8px">
+      <div style="flex:1;min-width:0">
+        <div style="font-weight:700;font-size:16px;color:var(--primary)">₪${Number(e.amount).toFixed(2)}</div>
+        <div style="font-size:13px;color:var(--txt2);margin-top:2px;word-break:break-word">${e.desc}</div>
+        ${isManager?`<div style="font-size:12px;color:var(--txt3);margin-top:3px">👤 ${e.workerName||''} — ${e.dept||''}</div>`:''}
+        <div style="font-size:11px;color:var(--txt3);margin-top:2px">📅 ${e.date||''}</div>
+      </div>
+      <div style="display:flex;flex-direction:column;gap:5px;align-items:flex-end;flex-shrink:0">
+        ${e.photo?`<button class="btn" onclick="viewExpensePhoto('${e.id}')" style="font-size:11px;padding:3px 8px">🖼 קבלה</button>`:''}
+        ${isManager?`<button class="btn danger" onclick="deleteExpense('${e.id}')" style="font-size:11px;padding:3px 8px">🗑</button>`:''}
+      </div>
+    </div>`).join('');
+}
+
+function viewExpensePhoto(id){
+  const exp=S.workerExpenses.find(e=>e.id===id);
+  if(!exp?.photo)return;
+  const win=window.open('','_blank','width=700,height=600,resizable=yes');
+  if(!win)return;
+  win.document.write(`<!DOCTYPE html><html dir="rtl"><head><meta charset="UTF-8"><title>קבלה — ${exp.desc}</title><style>body{margin:0;background:#111;display:flex;flex-direction:column;align-items:center;justify-content:center;min-height:100vh;gap:8px}img{max-width:100%;max-height:90vh;border-radius:6px}p{color:#eee;font-family:Arial;font-size:13px}</style></head><body><p>${exp.workerName||''} | ${exp.desc} | ${exp.date||''} | ₪${Number(exp.amount).toFixed(2)}</p><img src="${exp.photo}"/></body></html>`);
+}
+
+async function deleteExpense(id){
+  if(!confirm('מחק הוצאה זו?'))return;
+  S.workerExpenses=S.workerExpenses.filter(e=>e.id!==id);
+  if(S.fbConnected&&db)await fbDel('workerExpenses',id);
+  renderExpenses();
+}
+// ─────────────────────────────────────────────────────────────
+
 function saveCostSettings(){
   S.costs.fixedDaily=parseFloat(document.getElementById('cost-fixed').value)||0;
   S.costs.fixedMonthly=parseFloat(document.getElementById('cost-fixed-monthly').value)||0;
@@ -4632,6 +4763,12 @@ function calcCosts(){
   (S.costs.variableExpenses||[]).forEach(e=>{
     if(e.date>=from&&e.date<=to){
       varByDay[e.date]=(varByDay[e.date]||0)+Number(e.amount);
+    }
+  });
+  // הוצאות שהוגשו ע"י עובדים
+  (S.workerExpenses||[]).forEach(e=>{
+    if(e.date>=from&&e.date<=to){
+      varByDay[e.date]=(varByDay[e.date]||0)+Number(e.amount||0);
     }
   });
 
