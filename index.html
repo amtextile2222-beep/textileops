@@ -945,10 +945,18 @@ code{background:var(--bg2);border:0.5px solid var(--b);border-radius:4px;padding
       <button class="btn primary" onclick="submitExpense()" style="margin-top:12px;width:100%;font-size:15px" data-i18n="exp_submit">📤 שלח הוצאה</button>
       <div id="exp-msg" style="margin-top:8px;font-size:13px;text-align:center;min-height:20px"></div>
     </div>
+    <div class="card" style="margin-bottom:12px">
+      <div class="sec" data-i18n="exp_filter">📅 סינון לפי תאריך</div>
+      <div style="display:flex;gap:8px;align-items:flex-end;flex-wrap:wrap">
+        <div class="field" style="margin:0;flex:1"><label data-i18n="exp_from">מ-</label><input type="date" id="exp-from" style="font-size:13px" onchange="renderExpenses()"/></div>
+        <div class="field" style="margin:0;flex:1"><label data-i18n="exp_to">עד-</label><input type="date" id="exp-to" style="font-size:13px" onchange="renderExpenses()"/></div>
+        <button class="btn" style="font-size:12px;padding:6px 12px" onclick="clearExpFilter()" data-i18n="exp_show_all">הכל</button>
+      </div>
+    </div>
     <div class="card">
       <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:10px">
         <div class="sec" id="exp-list-title" style="margin:0"></div>
-        <div id="exp-total-badge" style="font-size:12px;color:var(--txt3)"></div>
+        <div id="exp-total-badge" style="font-size:13px;font-weight:600;color:var(--primary)"></div>
       </div>
       <div id="exp-list"></div>
     </div>
@@ -4232,6 +4240,10 @@ const LANGS={
     exp_total:'סה"כ',
     exp_view_receipt:'🖼 קבלה',
     exp_delete_confirm:'מחק הוצאה זו?',
+    exp_filter:'📅 סינון לפי תאריך',
+    exp_from:'מ-',
+    exp_to:'עד-',
+    exp_show_all:'הכל',
   },
   ar:{
     login_title:'تسجيل الدخول',
@@ -4358,6 +4370,10 @@ const LANGS={
     exp_total:'الإجمالي',
     exp_view_receipt:'🖼 الفاتورة',
     exp_delete_confirm:'حذف هذا المصروف؟',
+    exp_filter:'📅 تصفية حسب التاريخ',
+    exp_from:'من',
+    exp_to:'إلى',
+    exp_show_all:'الكل',
   },
   en:{
     login_title:'Login',
@@ -4470,6 +4486,10 @@ const LANGS={
     exp_total:'Total',
     exp_view_receipt:'🖼 Receipt',
     exp_delete_confirm:'Delete this expense?',
+    exp_filter:'📅 Filter by date',
+    exp_from:'From',
+    exp_to:'To',
+    exp_show_all:'All',
   }
 };
 
@@ -4702,8 +4722,10 @@ async function submitExpense(){
   let photo='';
   if(photoFile){try{photo=await compressImage(photoFile,800,0.5);}catch(e){}}
   const id='exp_'+Date.now()+'_'+S.user.id;
+  const now=new Date();
+  const time=pad2(now.getHours())+':'+pad2(now.getMinutes());
   const exp={id,workerId:S.user.id,workerName:S.user.name,dept:S.user.dept||'',
-    amount,desc,photo,date:todayStr(),ts:Date.now()};
+    amount,desc,photo,date:todayStr(),time,ts:Date.now()};
   S.workerExpenses.unshift(exp);
   if(S.fbConnected&&db)fbSet('workerExpenses',id,exp);
   amountEl.value='';descEl.value='';
@@ -4714,16 +4736,24 @@ async function submitExpense(){
   renderExpenses();
 }
 
+function clearExpFilter(){
+  const f=document.getElementById('exp-from');const t=document.getElementById('exp-to');
+  if(f)f.value='';if(t)t.value='';
+  renderExpenses();
+}
+
 function renderExpenses(){
   const listEl=document.getElementById('exp-list');
   if(!listEl)return;
   const T=LANGS[currentLang]||LANGS.he;
   const isManager=S.user?.role==='manager';
+  const fromVal=document.getElementById('exp-from')?.value||'';
+  const toVal=document.getElementById('exp-to')?.value||'';
+  let exps=[...S.workerExpenses];
+  if(fromVal)exps=exps.filter(e=>(e.date||'')>=fromVal);
+  if(toVal)exps=exps.filter(e=>(e.date||'')<=toVal);
   const titleEl=document.getElementById('exp-list-title');
-  const exps=isManager
-    ?[...S.workerExpenses]
-    :S.workerExpenses.filter(e=>e.workerId===S.user?.id);
-  if(titleEl)titleEl.textContent=(isManager?T.exp_all_list:T.exp_my_list)+' ('+exps.length+')';
+  if(titleEl)titleEl.textContent=T.exp_all_list+' ('+exps.length+')';
   const total=exps.reduce((s,e)=>s+Number(e.amount||0),0);
   const badge=document.getElementById('exp-total-badge');
   if(badge)badge.textContent=exps.length?T.exp_total+': ₪'+total.toFixed(2):'';
@@ -4733,8 +4763,8 @@ function renderExpenses(){
       <div style="flex:1;min-width:0">
         <div style="font-weight:700;font-size:16px;color:var(--primary)">₪${Number(e.amount).toFixed(2)}</div>
         <div style="font-size:13px;color:var(--txt2);margin-top:2px;word-break:break-word">${e.desc}</div>
-        ${isManager?`<div style="font-size:12px;color:var(--txt3);margin-top:3px">👤 ${e.workerName||''} — ${e.dept||''}</div>`:''}
-        <div style="font-size:11px;color:var(--txt3);margin-top:2px">📅 ${e.date||''}</div>
+        <div style="font-size:12px;color:var(--txt3);margin-top:3px">👤 ${e.workerName||''} — ${e.dept||''}</div>
+        <div style="font-size:11px;color:var(--txt3);margin-top:2px">📅 ${e.date||''}${e.time?' ⏰ '+e.time:''}</div>
       </div>
       <div style="display:flex;flex-direction:column;gap:5px;align-items:flex-end;flex-shrink:0">
         ${e.photo?`<button class="btn" onclick="viewExpensePhoto('${e.id}')" style="font-size:11px;padding:3px 8px">${T.exp_view_receipt}</button>`:''}
