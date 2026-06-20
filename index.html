@@ -1994,6 +1994,7 @@ function exportAttCSV(){
   const blob1=new Blob([csv],{type:'text/csv;charset=utf-8'});
   const a=document.createElement('a');a.href=URL.createObjectURL(blob1);
   a.download='נוכחות_'+new Date().toLocaleDateString('he-IL').replace(/\//g,'-')+'.csv';a.click();URL.revokeObjectURL(a.href);
+}
 
 // ─── MSG TO MANAGER ──────────────────────────────────────────
 function openMsgModal(){
@@ -2774,6 +2775,7 @@ function exportCSV(){
   const blob2=new Blob([csv],{type:'text/csv;charset=utf-8'});
   const a=document.createElement('a');a.href=URL.createObjectURL(blob2);
   a.download='TextileOps_'+new Date().toLocaleDateString('he-IL').replace(/\//g,'-')+'.csv';a.click();URL.revokeObjectURL(a.href);
+}
 
 // ─── ALERTS ─────────────────────────────────────────────────
 function checkAlerts(){
