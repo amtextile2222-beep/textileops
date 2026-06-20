@@ -1268,8 +1268,8 @@ async function initFb(){
   if(!fbConfig)throw new Error('אין Firebase Config');
   const{initializeApp,getFirestore,getAuth,signInAnonymously}=window._fb;
   const app=initializeApp(fbConfig,'txops3');
-  // התחברות אנונימית — נדרשת ע"י Firestore Security Rules (request.auth != null)
-  try{await signInAnonymously(getAuth(app));}catch(e){console.error('Anonymous auth failed:',e);}
+  // התחברות אנונימית — timeout של 8 שניות למניעת תקיעה
+  try{await Promise.race([signInAnonymously(getAuth(app)),new Promise((_,r)=>setTimeout(()=>r(new Error('auth timeout')),8000))]);}catch(e){console.error('Anonymous auth failed:',e);}
   db=getFirestore(app);
   S.fbConnected=true;
   setFbStatus('ok','✅ Firebase מחובר');
