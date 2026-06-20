@@ -1188,7 +1188,7 @@ function loadLS(){
     if(d.depts)S.depts=d.depts;
     if(d.activeTasks)S.activeTasks=d.activeTasks.map(t=>({...t,startTime:new Date(t.startTime),elapsed:0}));
     if(d.histTasks)S.histTasks=d.histTasks.map(t=>({...t,startTime:new Date(t.startTime),endTime:t.endTime?new Date(t.endTime):null}));
-    if(d.settings)S.settings=d.settings;
+    if(d.settings)S.settings={...S.settings,...d.settings};
     if(d.nextTId)S.nextTId=d.nextTId;
     if(d.attHistory)S.attHistory=d.attHistory;
     if(d.costs)S.costs={...S.costs,...d.costs};
@@ -1562,8 +1562,8 @@ async function sendDailyAttReport(){
     const chatId=(S.settings.waChatId||'').trim();
     if(!token||!chatId)return;
     // בניית CSV
-    const BOM='﻿'; // תמיכה בעברית ב-Excel
-    let csv=BOM+'שם,מחלקה,תפקיד,כניסה,יציאה,שעות נטו,סטטוס\n';
+    const BOM='﻿'; // UTF-8 BOM
+    let csv=BOM+'sep=,\n'+'שם,מחלקה,תפקיד,כניסה,יציאה,שעות נטו,סטטוס\n';
     present.forEach(w=>{
       const ci=fmtTime(w.checkin);
       const co=w.checkout?fmtTime(w.checkout):'בתוך';
