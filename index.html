@@ -284,7 +284,7 @@ code{background:var(--bg2);border:0.5px solid var(--b);border-radius:4px;padding
       <button class="nb hidden" onclick="goPage('taskscan')" id="nb-taskscan">📷 סורק משימות</button>
       <button class="nb hidden" onclick="goPage('setup')" id="nb-setup">🔗 <span data-i18n="nav_setup">Firebase</span></button>
       <button class="nb hidden" onclick="goPage('costs')" id="nb-costs">💰 עלויות</button>
-      <button class="nb hidden" onclick="goPage('expenses')" id="nb-expenses">💸 הוצאות</button>
+      <button class="nb hidden" onclick="goPage('expenses')" id="nb-expenses">💸 <span data-i18n="nav_expenses">הוצאות</span></button>
       <button class="nb hidden" onclick="goPage('products')" id="nb-products">👗 מוצרים</button>
       <button class="nb hidden" onclick="goPage('barcodes')" id="nb-barcodes">🏷️ ברקודים</button>
     </div>
@@ -937,20 +937,20 @@ code{background:var(--bg2);border:0.5px solid var(--b);border-radius:4px;padding
   <!-- EXPENSES PAGE -->
   <div class="page" id="page-expenses">
     <div class="card" style="margin-bottom:12px">
-      <div class="sec">➕ הוצאה חדשה</div>
-      <div class="field"><label>סכום (₪)</label><input type="number" id="exp-amount" min="0" step="0.01" placeholder="0.00" style="font-size:16px;font-weight:600"/></div>
-      <div class="field"><label>פירוט ההוצאה</label><input type="text" id="exp-desc" placeholder="לדוגמה: חוט תפירה, כפתורים..." style="font-size:14px"/></div>
-      <div class="field"><label>צילום מסמך / קבלה (אופציונלי)</label><input type="file" id="exp-photo" accept="image/*" capture="environment" onchange="previewExpensePhoto(this)" style="font-size:13px"/></div>
+      <div class="sec" data-i18n="exp_new">➕ הוצאה חדשה</div>
+      <div class="field"><label data-i18n="exp_amount">סכום (₪)</label><input type="number" id="exp-amount" min="0" step="0.01" placeholder="0.00" data-i18n-ph="exp_amount_ph" style="font-size:16px;font-weight:600"/></div>
+      <div class="field"><label data-i18n="exp_desc">פירוט ההוצאה</label><input type="text" id="exp-desc" data-i18n-ph="exp_desc_ph" placeholder="לדוגמה: חוט תפירה, כפתורים..." style="font-size:14px"/></div>
+      <div class="field"><label data-i18n="exp_photo_lbl">צילום מסמך / קבלה (אופציונלי)</label><input type="file" id="exp-photo" accept="image/*" capture="environment" onchange="previewExpensePhoto(this)" style="font-size:13px"/></div>
       <div id="exp-photo-preview" style="margin-top:6px"></div>
-      <button class="btn primary" onclick="submitExpense()" style="margin-top:12px;width:100%;font-size:15px">📤 שלח הוצאה</button>
+      <button class="btn primary" onclick="submitExpense()" style="margin-top:12px;width:100%;font-size:15px" data-i18n="exp_submit">📤 שלח הוצאה</button>
       <div id="exp-msg" style="margin-top:8px;font-size:13px;text-align:center;min-height:20px"></div>
     </div>
     <div class="card">
       <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:10px">
-        <div class="sec" id="exp-list-title" style="margin:0">📋 ההוצאות שלי</div>
+        <div class="sec" id="exp-list-title" style="margin:0"></div>
         <div id="exp-total-badge" style="font-size:12px;color:var(--txt3)"></div>
       </div>
-      <div id="exp-list"><div style="color:var(--txt3);text-align:center;padding:20px">אין הוצאות</div></div>
+      <div id="exp-list"></div>
     </div>
   </div>
 
@@ -4214,6 +4214,23 @@ const LANGS={
     this_month:'חודש זה',
     all_time:'הכל',
     hours:"שע'",
+    nav_expenses:'הוצאות',
+    exp_new:'➕ הוצאה חדשה',
+    exp_amount:'סכום (₪)',
+    exp_amount_ph:'0.00',
+    exp_desc:'פירוט ההוצאה',
+    exp_desc_ph:'לדוגמה: חוט תפירה, כפתורים...',
+    exp_photo_lbl:'צילום מסמך / קבלה (אופציונלי)',
+    exp_submit:'📤 שלח הוצאה',
+    exp_my_list:'📋 ההוצאות שלי',
+    exp_all_list:'📋 כל ההוצאות',
+    exp_empty:'אין הוצאות',
+    exp_err_amount:'⚠️ הכנס סכום',
+    exp_err_desc:'⚠️ הכנס פירוט',
+    exp_sent:'✅ ההוצאה נשלחה!',
+    exp_total:'סה"כ',
+    exp_view_receipt:'🖼 קבלה',
+    exp_delete_confirm:'מחק הוצאה זו?',
   },
   ar:{
     login_title:'تسجيل الدخول',
@@ -4323,6 +4340,23 @@ const LANGS={
     this_month:'هذا الشهر',
     all_time:'الكل',
     hours:'ساعة',
+    nav_expenses:'المصروفات',
+    exp_new:'➕ مصروف جديد',
+    exp_amount:'المبلغ (₪)',
+    exp_amount_ph:'0.00',
+    exp_desc:'تفاصيل المصروف',
+    exp_desc_ph:'مثال: خيط خياطة، أزرار...',
+    exp_photo_lbl:'صورة المستند / الفاتورة (اختياري)',
+    exp_submit:'📤 إرسال المصروف',
+    exp_my_list:'📋 مصروفاتي',
+    exp_all_list:'📋 جميع المصروفات',
+    exp_empty:'لا توجد مصروفات',
+    exp_err_amount:'⚠️ أدخل المبلغ',
+    exp_err_desc:'⚠️ أدخل التفاصيل',
+    exp_sent:'✅ تم إرسال المصروف!',
+    exp_total:'الإجمالي',
+    exp_view_receipt:'🖼 الفاتورة',
+    exp_delete_confirm:'حذف هذا المصروف؟',
   },
   en:{
     login_title:'Login',
@@ -4418,6 +4452,23 @@ const LANGS={
     th_duration:'Duration',
     th_status:'Status',
     no_task_worker:'No active task right now — wait for your supervisor to assign one',
+    nav_expenses:'Expenses',
+    exp_new:'➕ New Expense',
+    exp_amount:'Amount (₪)',
+    exp_amount_ph:'0.00',
+    exp_desc:'Description',
+    exp_desc_ph:'e.g. thread, buttons...',
+    exp_photo_lbl:'Receipt / Document photo (optional)',
+    exp_submit:'📤 Submit Expense',
+    exp_my_list:'📋 My Expenses',
+    exp_all_list:'📋 All Expenses',
+    exp_empty:'No expenses',
+    exp_err_amount:'⚠️ Enter amount',
+    exp_err_desc:'⚠️ Enter description',
+    exp_sent:'✅ Expense submitted!',
+    exp_total:'Total',
+    exp_view_receipt:'🖼 Receipt',
+    exp_delete_confirm:'Delete this expense?',
   }
 };
 
@@ -4636,13 +4687,14 @@ function compressImage(file,maxPx,quality){
 
 async function submitExpense(){
   if(!S.user)return;
+  const T=LANGS[currentLang]||LANGS.he;
   const amountEl=document.getElementById('exp-amount');
   const descEl=document.getElementById('exp-desc');
   const msgEl=document.getElementById('exp-msg');
   const amount=parseFloat(amountEl?.value);
   const desc=(descEl?.value||'').trim();
-  if(!amount||amount<=0){if(msgEl){msgEl.style.color='var(--danger)';msgEl.textContent='⚠️ הכנס סכום';} return;}
-  if(!desc){if(msgEl){msgEl.style.color='var(--danger)';msgEl.textContent='⚠️ הכנס פירוט';} return;}
+  if(!amount||amount<=0){if(msgEl){msgEl.style.color='var(--danger)';msgEl.textContent=T.exp_err_amount;} return;}
+  if(!desc){if(msgEl){msgEl.style.color='var(--danger)';msgEl.textContent=T.exp_err_desc;} return;}
   const photoFile=document.getElementById('exp-photo')?.files[0];
   let photo='';
   if(photoFile){try{photo=await compressImage(photoFile,800,0.5);}catch(e){}}
@@ -4654,7 +4706,7 @@ async function submitExpense(){
   amountEl.value='';descEl.value='';
   document.getElementById('exp-photo').value='';
   document.getElementById('exp-photo-preview').innerHTML='';
-  if(msgEl){msgEl.style.color='green';msgEl.textContent='✅ ההוצאה נשלחה!';}
+  if(msgEl){msgEl.style.color='green';msgEl.textContent=T.exp_sent;}
   setTimeout(()=>{if(msgEl)msgEl.textContent='';},3000);
   renderExpenses();
 }
@@ -4662,16 +4714,17 @@ async function submitExpense(){
 function renderExpenses(){
   const listEl=document.getElementById('exp-list');
   if(!listEl)return;
+  const T=LANGS[currentLang]||LANGS.he;
   const isManager=S.user?.role==='manager';
   const titleEl=document.getElementById('exp-list-title');
   const exps=isManager
     ?[...S.workerExpenses]
     :S.workerExpenses.filter(e=>e.workerId===S.user?.id);
-  if(titleEl)titleEl.textContent=isManager?'📋 כל ההוצאות ('+exps.length+')':'📋 ההוצאות שלי ('+exps.length+')';
+  if(titleEl)titleEl.textContent=(isManager?T.exp_all_list:T.exp_my_list)+' ('+exps.length+')';
   const total=exps.reduce((s,e)=>s+Number(e.amount||0),0);
   const badge=document.getElementById('exp-total-badge');
-  if(badge)badge.textContent=exps.length?'סה"כ: ₪'+total.toFixed(2):'';
-  if(!exps.length){listEl.innerHTML='<div style="color:var(--txt3);text-align:center;padding:20px">אין הוצאות</div>';return;}
+  if(badge)badge.textContent=exps.length?T.exp_total+': ₪'+total.toFixed(2):'';
+  if(!exps.length){listEl.innerHTML='<div style="color:var(--txt3);text-align:center;padding:20px">'+T.exp_empty+'</div>';return;}
   listEl.innerHTML=exps.map(e=>`
     <div style="border:1px solid var(--border);border-radius:8px;padding:10px 12px;margin-bottom:8px;display:flex;justify-content:space-between;align-items:flex-start;gap:8px">
       <div style="flex:1;min-width:0">
@@ -4681,7 +4734,7 @@ function renderExpenses(){
         <div style="font-size:11px;color:var(--txt3);margin-top:2px">📅 ${e.date||''}</div>
       </div>
       <div style="display:flex;flex-direction:column;gap:5px;align-items:flex-end;flex-shrink:0">
-        ${e.photo?`<button class="btn" onclick="viewExpensePhoto('${e.id}')" style="font-size:11px;padding:3px 8px">🖼 קבלה</button>`:''}
+        ${e.photo?`<button class="btn" onclick="viewExpensePhoto('${e.id}')" style="font-size:11px;padding:3px 8px">${T.exp_view_receipt}</button>`:''}
         ${isManager?`<button class="btn danger" onclick="deleteExpense('${e.id}')" style="font-size:11px;padding:3px 8px">🗑</button>`:''}
       </div>
     </div>`).join('');
@@ -4696,7 +4749,8 @@ function viewExpensePhoto(id){
 }
 
 async function deleteExpense(id){
-  if(!confirm('מחק הוצאה זו?'))return;
+  const T=LANGS[currentLang]||LANGS.he;
+  if(!confirm(T.exp_delete_confirm))return;
   S.workerExpenses=S.workerExpenses.filter(e=>e.id!==id);
   if(S.fbConnected&&db)await fbDel('workerExpenses',id);
   renderExpenses();
