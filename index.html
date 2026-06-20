@@ -1885,6 +1885,7 @@ function goPage(p){
   if(p==='attrep')initAttRep();
   if(p==='costs')initCostsPage();
   if(p==='products')renderProducts();
+  if(p==='expenses')renderExpenses();
 }
 
 function renderAll(){
@@ -4499,6 +4500,8 @@ function setLang(code){
     if(b1)b1.classList.toggle('active',lc===code);
     if(b2)b2.classList.toggle('active',lc===code);
   });
+  // עדכן תוכן דינמי בדף הוצאות אם פתוח
+  if(document.getElementById('page-expenses')?.classList.contains('active'))renderExpenses();
 }
 
 // restore on page load
