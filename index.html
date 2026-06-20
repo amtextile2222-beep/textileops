@@ -1977,7 +1977,7 @@ function exportAttCSV(){
   const from=document.getElementById('ar-from')?.value;
   const to=document.getElementById('ar-to')?.value;
   const wid=document.getElementById('ar-worker')?.value;
-  const todayRecs=S.workers.filter(w=>w.checkin).map(w=>({workerId:w.id,workerName:w.name,dept:w.dept,date:w.checkin?.slice(0,10)||todayStr(),checkin:w.checkin,checkout:w.checkout||null,breakStart:w.breakStart||'',breakEnd:w.breakEnd||'',breakActive:!!w.breakActive,netMs:calcNetWork(w)}));
+  const todayRecs=S.workers.filter(w=>w.checkin&&w.checkin.slice(0,10)===todayStr()).map(w=>({workerId:w.id,workerName:w.name,dept:w.dept,date:w.checkin?.slice(0,10)||todayStr(),checkin:w.checkin,checkout:w.checkout||null,breakStart:w.breakStart||'',breakEnd:w.breakEnd||'',breakActive:!!w.breakActive,netMs:calcNetWork(w)}));
   let fl=[...todayRecs,...S.attHistory.filter(r=>!todayRecs.find(t=>t.date===r.date&&t.workerId===r.workerId))];
   if(from)fl=fl.filter(r=>r.date>=from);
   if(to)fl=fl.filter(r=>r.date<=to);
@@ -1988,7 +1988,7 @@ function exportAttCSV(){
     const ci=r.checkin?new Date(r.checkin):null;
     const co=r.checkout?new Date(r.checkout):null;
     const d=new Date(r.date+'T00:00:00');
-    rows.push([r.workerName,r.dept,pad2(d.getDate())+'/'+pad2(d.getMonth()+1)+'/'+d.getFullYear(),DAYS_HE[d.getDay()],ci?pad2(ci.getHours())+':'+pad2(ci.getMinutes()):'',co?pad2(co.getHours())+':'+pad2(co.getMinutes()):'',r.breakActive?r.breakStart:'',r.breakActive?r.breakEnd:'',fmtNetH(r.netMs)]);
+    rows.push([r.workerName,r.dept,pad2(d.getDate())+'/'+pad2(d.getMonth()+1)+'/'+d.getFullYear(),DAYS_HE[d.getDay()],ci?pad2(ci.getHours())+':'+pad2(ci.getMinutes()):'',co?pad2(co.getHours())+':'+pad2(co.getMinutes()):'',r.breakStart||'',r.breakEnd||'',fmtNetH(r.netMs)]);
   });
   const csv='﻿'+'sep=,\n'+rows.map(r=>r.join(',')).join('\n');
   const blob1=new Blob([csv],{type:'text/csv;charset=utf-8'});
