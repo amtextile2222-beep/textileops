@@ -2469,7 +2469,7 @@ function renderTaskHist(){
       <div style="flex:1"><div style="font-size:12px;font-weight:500;color:var(--txt)">${esc(t.workerName)}</div>
       <div style="font-size:11px;color:var(--txt3)">${dateStr} | לקוח ${t.cust} | ${t.prod} | ${t.qty===0?'<span style="color:#d97706;font-weight:700">⏳ כמות פתוחה</span>':t.qty+' יח\''}${t.isTotal?' | <span style="color:#059669;font-weight:700">📦 כל הכמות</span>':' | '+(COLORS[t.col]||t.col)}${t.taskType?' | 📋 '+esc(t.taskType):''}</div>
       <div style="font-size:11px;color:var(--txt3)">▶ ${stStr} → ◀ ${etStr}</div>
-      ${(()=>{const tot=totalBcSecs(t.bc,t.workerId);const ses=totalBcSessions(t.bc,t.workerId);return ses>1?`<div style="font-size:11px;color:var(--blue-txt)">📊 סה"כ מצטבר: <b>${fmtM(tot)}</b> (${ses} ימים)</div>`:''})()}
+      ${(()=>{const prev=S.histTasks.filter(x=>x.bc===t.bc&&x.workerId===t.workerId&&x.id!==t.id);const tot=prev.reduce((s,x)=>s+(x.duration||0),0);const ses=prev.length;return ses>0?`<div style="font-size:11px;color:var(--blue-txt)">📊 מצטבר קודם: <b>${fmtM(tot)}</b> (${ses} ${ses===1?'משימה':'משימות'})</div>`:''})()}
       </div>
       <div style="display:flex;align-items:center;gap:6px">
         <span class="badge blue">${fmtM(t.duration||0)}</span>
