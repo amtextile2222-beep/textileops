@@ -4904,7 +4904,11 @@ function calcCosts(){
 
   // חישוב עלות לכל משימה
   let totalWages=0, totalOverhead=0, totalNonTaskWage=0;
+  // מוצרים שנעשה בהם שימוש בברקוד "כל הכמות" — לא לספור גם את הברקודים הפרטניים
+  const _totalBcProds=new Set();
+  tasks.forEach(t=>{if(isTotalBc(t.bc))_totalBcProds.add(t.cust+'_'+t.prod);});
   const _unitSeen=new Set();
+  const _prodCounted=new Set();
   const enriched=tasks.map(t=>{
     const d=(t.startTime instanceof Date?t.startTime:new Date(t.startTime)).toISOString().slice(0,10);
     const dayTotalSec=byDay[d]?.totalSec||1;
@@ -4931,9 +4935,15 @@ function calcCosts(){
     totalOverhead+=overhead;
     if(nonTaskShare)totalNonTaskWage+=nonTaskShare;
 
-    // ספירת יחידות פיזיות: כל ברקוד נספר פעם אחת (ללא קשר לשלב או יום)
-    const ukey=taskBc(t);
-    const unitCounted=!_unitSeen.has(ukey);_unitSeen.add(ukey);
+    // ספירת יחידות פיזיות: אם מוצר השתמש ב"כל הכמות" — נספור רק אותו, לא ברקודים פרטניים
+    const prodKey=t.cust+'_'+t.prod;
+    let unitCounted=false;
+    if(_totalBcProds.has(prodKey)){
+      if(isTotalBc(t.bc)&&!_prodCounted.has(prodKey)){unitCounted=true;_prodCounted.add(prodKey);}
+    }else{
+      const ukey=t.cust+'_'+t.prod+'_'+(t.size||'0');
+      if(!_unitSeen.has(ukey)){unitCounted=true;_unitSeen.add(ukey);}
+    }
     return{...t,wage,nonTaskShare,overhead,total:wage+nonTaskShare+overhead,date:d,taskRatio,unitCounted,byUnit};
   });
 
