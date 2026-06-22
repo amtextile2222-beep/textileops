@@ -2476,7 +2476,7 @@ function renderTaskHist(){
       </div>
       <div style="display:flex;align-items:center;gap:6px">
         <span class="badge blue">${fmtM(t.duration||0)}</span>
-        ${(S.user?.role==='manager'||S.user?.role==='supervisor')?`<button class="btn" style="font-size:11px;padding:3px 8px" onclick="openEditTask('${t.id}',true)" title="עריכה">✏️</button><button class="btn" style="font-size:11px;padding:3px 8px;background:var(--red-bg,#fee2e2);color:var(--red-txt,#dc2626)" onclick="deleteHistTask('${t.id}')" title="מחיקה">🗑️</button>`:''}
+        ${(S.user?.role==='manager'||S.user?.role==='supervisor')?`<button class="btn" style="font-size:11px;padding:3px 8px" onclick="openEditTask('${t.id}',true)" title="עריכה">✏️</button><button class="btn" style="font-size:11px;padding:3px 8px;background:var(--green-bg,#d1fae5);color:var(--green-txt,#065f46)" onclick="restoreHistTask('${t.id}')" title="החזר לפעיל">↩️</button><button class="btn" style="font-size:11px;padding:3px 8px;background:var(--red-bg,#fee2e2);color:var(--red-txt,#dc2626)" onclick="deleteHistTask('${t.id}')" title="מחיקה">🗑️</button>`:''}
       </div>
     </div>`;
   }).join('')||'<div style="color:var(--txt3);font-size:12px;padding:.75rem 0;text-align:center">אין היסטוריה עדיין</div>';
@@ -3712,6 +3712,21 @@ async function deleteHistTask(taskId){
   S.histTasks=S.histTasks.filter(t=>t.id!==taskId);
   if(S.fbConnected){try{await fbDel('histTasks',String(taskId));}catch(e){}}
   saveLS();renderTaskHist();
+}
+async function restoreHistTask(taskId){
+  if(!confirm('להחזיר משימה זו לרשימת הפעילות?'))return;
+  const t=S.histTasks.find(x=>x.id===taskId);if(!t)return;
+  const restored={...t,startTime:new Date(t.startTime),endTime:null,duration:0,elapsed:0};
+  delete restored.endTime;
+  S.histTasks=S.histTasks.filter(x=>x.id!==taskId);
+  S.activeTasks.push(restored);
+  if(S.fbConnected){
+    try{await fbDel('histTasks',String(taskId));}catch(e){}
+    const st=restored.startTime instanceof Date?restored.startTime.toISOString():restored.startTime;
+    await fbSet('activeTasks',String(taskId),{...restored,startTime:st});
+  }
+  saveLS();renderTaskHist();renderMgrTasks();renderTasks();
+  showToast('✅ המשימה הוחזרה לרשימת הפעילות','var(--green-txt)',3000);
 }
 function openEditTask(taskId, isHist){
   const t=isHist?S.histTasks.find(x=>x.id===taskId):S.activeTasks.find(x=>x.id===taskId);
