@@ -2122,14 +2122,9 @@ async function autoPunchIn(){
 function roundAttTime(now, isIn){
   const rm=S.settings.roundMinutes??5;
   if(!rm)return now;
-  const ref=isIn?(S.settings.shiftStart||'06:30'):(S.settings.shiftEnd||'15:00');
-  const [rh,rm2]=ref.split(':').map(Number);
-  const target=new Date(now);
-  target.setHours(rh,rm2,0,0);
-  const diffMs=now.getTime()-target.getTime();
-  const diffMin=diffMs/60000;
-  if(Math.abs(diffMin)<=rm)return target;
-  return now;
+  const ms=rm*60*1000;
+  const rounded=new Date(Math.round(now.getTime()/ms)*ms);
+  return rounded;
 }
 async function punchIn(){
   if(!S.user)return;
