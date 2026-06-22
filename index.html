@@ -3245,7 +3245,7 @@ function printWorkerBarcodes(){
       .name{font-size:13px;font-weight:700;margin-top:5px}
       .sub{font-size:11px;color:#666}
       .code{font-size:9px;color:#999;font-family:monospace;margin-top:2px}
-      @media print{@page{margin:10mm}body{padding:0}}
+      @media print{@page{margin:0}body{padding:8mm}}
     </style></head><body>
     <div class="grid">
       ${items.map(w=>`<div class="card">
@@ -5497,7 +5497,7 @@ function bcPrint(){
     <style>body{margin:0;font-family:Arial,sans-serif;background:#fff}
     .grid{display:grid;grid-template-columns:repeat(2,1fr);gap:10px;padding:6px 10px}
     .bc-card{border:2px solid #333;border-radius:6px;padding:10px;display:flex;align-items:center;gap:12px;break-inside:avoid}
-    @media print{@page{size:A4 portrait;margin:8mm}}</style></head><body>
+    @media print{@page{size:A4 portrait;margin:0}body{padding:8mm}}</style></head><body>
     ${pages}
     <script>window.onload=()=>window.print()<\/script></body></html>`);
   win.document.close();
