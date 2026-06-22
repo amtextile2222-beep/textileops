@@ -413,7 +413,8 @@ code{background:var(--bg2);border:0.5px solid var(--b);border-radius:4px;padding
           <input class="bc-inp" id="bc-inp" maxlength="13" placeholder="הזן 13 ספרות..." oninput="parseBc(this.value)" onkeydown="if(event.key==='Enter')submitBc()"/>
           <div id="bc-prev" style="margin-top:.75rem;min-height:36px"></div>
           <div class="field" style="margin-top:.75rem;margin-bottom:0">
-            <label style="font-size:12px;color:var(--txt2);margin-bottom:5px;display:block" data-i18n="lbl_task_type">סוג משימה</label>
+            <label style="font-size:12px;color:var(--txt2);margin-bottom:5px;display:block" data-i18n="lbl_task_type">שלב עבודה</label>
+            <select id="bc-workstep" style="font-size:13px;display:none"><option value="">-- בחר שלב --</option></select>
             <input id="bc-tasktype" type="text" placeholder="לדוגמה: תפירה, חיתוך, גימור..." data-i18n-ph="ph_task_type" style="font-size:13px"/>
           </div>
           <div class="field" style="margin-top:.75rem;margin-bottom:0">
@@ -2304,7 +2305,7 @@ function renderAtt(){
 function parseBc(v){
   v=(v||'').replace(/\D/g,'');
   const el=document.getElementById('bc-prev');
-  if(v.length<2){el.innerHTML='';return;}
+  if(v.length<2){el.innerHTML='';updateWorkStepSelector('','');return;}
   const c=v.slice(0,2),p=v.slice(2,7),sz=v.slice(7,8),q=v.slice(8,11),col=v.slice(11,13);
   const isTotal=isTotalBc(v);
   const totalQty=isTotal?getTotalQty(c,p):0;
@@ -2321,6 +2322,22 @@ function parseBc(v){
         <span class="bc-seg bc-q">כמות: ${q.padEnd(3,'_')}</span>
         <span class="bc-seg bc-col">צבע: ${COLORS[col]||col||'__'}</span>
       </div>`;
+  if(v.length===13)updateWorkStepSelector(c,p);
+}
+function updateWorkStepSelector(cust,prod){
+  const sel=document.getElementById('bc-workstep');
+  const txt=document.getElementById('bc-tasktype');
+  if(!sel||!txt)return;
+  const product=S.products?.find(x=>x.cust===cust&&x.prod===prod);
+  const steps=product?.workSteps||[];
+  if(steps.length){
+    sel.innerHTML='<option value="">-- בחר שלב --</option>'+steps.map(s=>`<option value="${esc(s)}">${esc(s)}</option>`).join('');
+    sel.style.display='';
+    txt.style.display='none';
+  }else{
+    sel.style.display='none';
+    txt.style.display='';
+  }
 }
 function tryDemo(){
   document.getElementById('bc-inp').value='0710042302503';
@@ -2335,7 +2352,8 @@ async function submitBc(){
   const cust=raw.slice(0,2),prod=raw.slice(2,7),size=raw.slice(7,8),col=raw.slice(11,13);
   const isTotal=isTotalBc(raw);
   const qty=isTotal?getTotalQty(cust,prod):parseInt(raw.slice(8,11))||0;
-  const taskType=(document.getElementById('bc-tasktype').value||'').trim();
+  const wsEl=document.getElementById('bc-workstep');
+  const taskType=(wsEl&&wsEl.style.display!=='none'?wsEl.value:document.getElementById('bc-tasktype').value||'').trim();
   const taskDept=(document.getElementById('bc-dept').value||'').trim();
   const u=S.user;
   const wu=S.workers.find(x=>x.id===u.id);
@@ -2366,6 +2384,7 @@ async function submitBc(){
     tgTask(newTask,true);
     document.getElementById('bc-inp').value='';parseBc('');
     document.getElementById('bc-tasktype').value='';
+    const _ws=document.getElementById('bc-workstep');if(_ws)_ws.value='';
     document.getElementById('bc-dept').value='';
     saveLS();renderScanActive();renderTasks();goPage('tasks');
     showToast('✅ משימה הותחלה');
@@ -5738,6 +5757,7 @@ function openProductModal(id){
         <button type="button" class="btn primary" onclick="addQtyBulk()" style="font-size:12px;padding:5px 12px">+ הוסף הכל</button>
       </div>
     </div>
+    ${renderWorkStepsHtml(p)}
     ${renderStagesHtml(p)}`;
   document.getElementById('prod-modal-wrap').classList.remove('hidden');
   _prodImgs=p?[...(p.images||[])]:[];
@@ -5874,6 +5894,29 @@ const PROD_STAGES=[
   {id:'pack',      label:'🧥 אריזה + ביקורת',       optional:false},
   {id:'shipped',   label:'🚚 יצא ללקוח',            optional:false},
 ];
+function renderWorkStepsHtml(p){
+  const steps=Array.isArray(p?.workSteps)?p.workSteps:[];
+  const rows=steps.map((s,i)=>`<div style="display:flex;gap:6px;align-items:center;margin-bottom:5px" data-ws-row>
+    <input type="text" value="${esc(s)}" class="pm-ws-inp" style="flex:1;font-size:13px;padding:5px 8px;border-radius:6px;border:1px solid var(--brd);background:var(--card);color:var(--txt)" placeholder="שם השלב"/>
+    <button type="button" onclick="this.closest('[data-ws-row]').remove()" style="background:none;border:none;color:var(--red,#dc2626);cursor:pointer;font-size:16px;padding:0 4px">✕</button>
+  </div>`).join('');
+  return `<div class="sec" style="margin-top:14px;margin-bottom:8px">🔧 שלבי עבודה</div>
+  <div id="pm-ws-list">${rows}</div>
+  <button type="button" class="btn" onclick="addWorkStepRow()" style="font-size:12px;margin-top:4px">+ הוסף שלב</button>`;
+}
+function addWorkStepRow(){
+  const list=document.getElementById('pm-ws-list');if(!list)return;
+  const div=document.createElement('div');
+  div.setAttribute('data-ws-row','');
+  div.style.cssText='display:flex;gap:6px;align-items:center;margin-bottom:5px';
+  div.innerHTML=`<input type="text" class="pm-ws-inp" style="flex:1;font-size:13px;padding:5px 8px;border-radius:6px;border:1px solid var(--brd);background:var(--card);color:var(--txt)" placeholder="שם השלב"/>
+    <button type="button" onclick="this.closest('[data-ws-row]').remove()" style="background:none;border:none;color:var(--red,#dc2626);cursor:pointer;font-size:16px;padding:0 4px">✕</button>`;
+  list.appendChild(div);
+  div.querySelector('input').focus();
+}
+function readWorkStepsFromModal(){
+  return [...document.querySelectorAll('#pm-ws-list .pm-ws-inp')].map(i=>i.value.trim()).filter(Boolean);
+}
 function renderStagesHtml(p){
   const log=Array.isArray(p?.stageLog)?p.stageLog:[];
   const skipped=Array.isArray(p?.stageSkipped)?p.stageSkipped:[];
@@ -5978,6 +6021,7 @@ async function saveProduct(){
   });
   closeProdCamera();
   const {stageLog,stageSkipped}=readStagesFromModal();
+  const workSteps=readWorkStepsFromModal();
   if(_editProdId){
     const p=S.products.find(x=>x.id===_editProdId);
     if(p){
@@ -5991,11 +6035,11 @@ async function saveProduct(){
           sendTelegram('📦 TextileOps — מוצר עבר שלב ייצור\n🏷 מוצר: '+name+' ('+cust+'-'+prod+')\n📍 שלב: '+stageName+'\n📅 תאריך: '+s.date+' '+s.time+'\n🕐 עודכן: '+now).catch(()=>{});
         }
       }
-      Object.assign(p,{prod,cust,name,images:_prodImgs,docs:_prodDocs,quantities,stageLog,stageSkipped});
+      Object.assign(p,{prod,cust,name,images:_prodImgs,docs:_prodDocs,quantities,stageLog,stageSkipped,workSteps});
     }
   }else{
     const id='p'+Date.now();
-    S.products.push({id,prod,cust,name,images:_prodImgs,docs:_prodDocs,quantities,stageLog,stageSkipped});
+    S.products.push({id,prod,cust,name,images:_prodImgs,docs:_prodDocs,quantities,stageLog,stageSkipped,workSteps});
   }
   saveLS();
   if(S.fbConnected){
