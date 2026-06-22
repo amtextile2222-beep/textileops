@@ -1528,7 +1528,10 @@ function runDailyReset(){
       w.status='out';w.checkin=null;w.checkout=null;w.sessions=[];
       // אל תכתוב ל-Firebase — listenFb() מקבל נתונים טריים ומטפל באיפוס בצורה בטוחה
     });
+    const tasksToKeep=[];
     S.activeTasks.forEach(t=>{
+      const taskDay=new Date(t.startTime).toISOString().slice(0,10);
+      if(taskDay===today){tasksToKeep.push(t);return;} // התחילה היום — לא לסגור
       const endTime=new Date(lastDate+'T23:59:59');
       const done={...t,endTime,duration:Math.round((endTime-new Date(t.startTime))/1000)};
       S.histTasks.unshift(done);
@@ -1537,7 +1540,7 @@ function runDailyReset(){
         fbSet('histTasks',String(t.id),{...done,startTime:done.startTime instanceof Date?done.startTime.toISOString():done.startTime,endTime:endTime.toISOString()});
       }
     });
-    S.activeTasks=[];
+    S.activeTasks=tasksToKeep;
     S.tgSentAlerts={};
     S.tgAbsentSig='';
     saveLS();
