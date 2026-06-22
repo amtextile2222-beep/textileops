@@ -2341,7 +2341,7 @@ async function submitBc(){
   const wu=S.workers.find(x=>x.id===u.id);
   if(!wu||wu.status!=='in'){alert('לא ניתן להתחיל משימה — יש להירשם כנוכח תחילה (כניסה לעבודה בלשונית נוכחות)');return;}
   // ברקוד שכבר בעבודה אצל עובד אחר באותו שלב — אישור הצטרפות
-  const otherSame=S.activeTasks.find(t=>t.workerId!==u.id&&taskBc(t)===raw&&(t.taskType||'').trim().toLowerCase()===taskType.toLowerCase());
+  const otherSame=S.activeTasks.find(t=>t.workerId!==u.id&&taskBc(t)===raw);
   if(otherSame&&!await showConfirm(T.cfm_join_title||'הצטרפות למשימה',T.cfm_join_msg+otherSame.workerName+(otherSame.taskType?' ('+otherSame.taskType+')':'')+T.cfm_join_msg2,T.cfm_join_ok||'הצטרף',T.cancel||'ביטול'))return;
   // משימה פעילה קיימת — לסגור את כולן או לעבוד במקביל
   const existTasks=S.activeTasks.filter(t=>t.workerId===u.id);
