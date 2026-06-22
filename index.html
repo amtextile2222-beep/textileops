@@ -414,7 +414,7 @@ code{background:var(--bg2);border:0.5px solid var(--b);border-radius:4px;padding
           <div id="bc-prev" style="margin-top:.75rem;min-height:36px"></div>
           <div class="field" style="margin-top:.75rem;margin-bottom:0">
             <label style="font-size:12px;color:var(--txt2);margin-bottom:5px;display:block" data-i18n="lbl_task_type">שלב עבודה</label>
-            <select id="bc-workstep" style="font-size:13px;display:none"><option value="">-- בחר שלב --</option></select>
+            <div id="bc-workstep-wrap" style="display:none;display:flex;flex-wrap:wrap;gap:6px;padding:8px;background:var(--bg2);border-radius:8px;border:1px solid var(--brd)"></div>
             <input id="bc-tasktype" type="text" placeholder="לדוגמה: תפירה, חיתוך, גימור..." data-i18n-ph="ph_task_type" style="font-size:13px"/>
           </div>
           <div class="field" style="margin-top:.75rem;margin-bottom:0">
@@ -2325,17 +2325,20 @@ function parseBc(v){
   if(v.length===13)updateWorkStepSelector(c,p);
 }
 function updateWorkStepSelector(cust,prod){
-  const sel=document.getElementById('bc-workstep');
+  const wrap=document.getElementById('bc-workstep-wrap');
   const txt=document.getElementById('bc-tasktype');
-  if(!sel||!txt)return;
+  if(!wrap||!txt)return;
   const product=S.products?.find(x=>x.cust===cust&&x.prod===prod);
   const steps=product?.workSteps||[];
   if(steps.length){
-    sel.innerHTML='<option value="">-- בחר שלב --</option>'+steps.map(s=>`<option value="${esc(s)}">${esc(s)}</option>`).join('');
-    sel.style.display='';
+    wrap.innerHTML=steps.map((s,i)=>`<label style="display:flex;align-items:center;gap:5px;font-size:13px;cursor:pointer;background:var(--card);border:1px solid var(--brd);border-radius:6px;padding:5px 10px;user-select:none">
+      <input type="checkbox" value="${esc(s)}" class="bc-ws-cb" style="width:auto;cursor:pointer"/>
+      ${esc(s)}
+    </label>`).join('');
+    wrap.style.display='flex';
     txt.style.display='none';
   }else{
-    sel.style.display='none';
+    wrap.style.display='none';
     txt.style.display='';
   }
 }
@@ -2352,8 +2355,9 @@ async function submitBc(){
   const cust=raw.slice(0,2),prod=raw.slice(2,7),size=raw.slice(7,8),col=raw.slice(11,13);
   const isTotal=isTotalBc(raw);
   const qty=isTotal?getTotalQty(cust,prod):parseInt(raw.slice(8,11))||0;
-  const wsEl=document.getElementById('bc-workstep');
-  const taskType=(wsEl&&wsEl.style.display!=='none'?wsEl.value:document.getElementById('bc-tasktype').value||'').trim();
+  const wrap=document.getElementById('bc-workstep-wrap');
+  const checkedSteps=wrap&&wrap.style.display!=='none'?[...wrap.querySelectorAll('.bc-ws-cb:checked')].map(cb=>cb.value):[];
+  const taskType=checkedSteps.length===0?(document.getElementById('bc-tasktype').value||'').trim():checkedSteps[0];
   const taskDept=(document.getElementById('bc-dept').value||'').trim();
   const u=S.user;
   const wu=S.workers.find(x=>x.id===u.id);
@@ -2378,16 +2382,21 @@ async function submitBc(){
     }
   }
   try{
-    const newTask={id:String(Date.now())+Math.random().toString(36).slice(2,6),workerId:u.id,workerName:u.name,dept:taskDept||u.dept,cust,prod,size,qty,col,taskType,bc:raw,isTotal:isTotal||false,startTime:new Date(),elapsed:0};
-    S.activeTasks.unshift(newTask);
-    if(S.fbConnected)await fbSet('activeTasks',newTask.id,{...newTask,startTime:newTask.startTime.toISOString()});
-    tgTask(newTask,true);
+    const stepsToCreate=checkedSteps.length>0?checkedSteps:[taskType];
+    const startTime=new Date();
+    for(const step of stepsToCreate){
+      const newTask={id:String(Date.now())+Math.random().toString(36).slice(2,6),workerId:u.id,workerName:u.name,dept:taskDept||u.dept,cust,prod,size,qty,col,taskType:step,bc:raw,isTotal:isTotal||false,startTime,elapsed:0};
+      S.activeTasks.unshift(newTask);
+      if(S.fbConnected)await fbSet('activeTasks',newTask.id,{...newTask,startTime:newTask.startTime.toISOString()});
+      tgTask(newTask,true);
+    }
     document.getElementById('bc-inp').value='';parseBc('');
     document.getElementById('bc-tasktype').value='';
-    const _ws=document.getElementById('bc-workstep');if(_ws)_ws.value='';
+    const _wsWrap=document.getElementById('bc-workstep-wrap');
+    if(_wsWrap)_wsWrap.querySelectorAll('.bc-ws-cb').forEach(cb=>cb.checked=false);
     document.getElementById('bc-dept').value='';
     saveLS();renderScanActive();renderTasks();goPage('tasks');
-    showToast('✅ משימה הותחלה');
+    showToast(stepsToCreate.length>1?`✅ ${stepsToCreate.length} משימות הותחלו`:'✅ משימה הותחלה');
   }catch(e){showToast('❌ שגיאה בפתיחת משימה: '+e.message,'var(--red-txt)',8000);}
 }
 function fillDeptSelects(){
