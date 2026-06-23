@@ -108,8 +108,11 @@ exports.longTaskMonitor = functions.pubsub.schedule('every 5 minutes').onRun(asy
 
       const workerSnap = await db.collection('workers').doc(t.workerId).get();
       if (!workerSnap.exists) continue;
-      const fcmToken = workerSnap.data().fcmToken;
+      const workerData = workerSnap.data();
+      const fcmToken = workerData.fcmToken;
       if (!fcmToken) continue;
+      const pushPrefs = workerData.pushPrefs || {};
+      if (pushPrefs.task_long === false) continue;
 
       const mins = Math.round(elapsed / 60000);
       await admin.messaging().send({

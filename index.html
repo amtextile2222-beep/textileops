@@ -4030,6 +4030,14 @@ function openModal(action,id){
           <button type="button" class="btn" style="font-size:11px;padding:4px 10px" onclick="closeModal();allowFaceUpdateByAdmin('${w.id}')">📸 ${(w.faceDescriptor||w.faceDescriptors&&Object.keys(w.faceDescriptors).length)?'אשר עדכון פנים לעובד':'אשר רישום פנים לעובד'}</button>
         </div>`:'<div style="font-size:11px;color:var(--txt3);margin-top:6px">שמור עובד תחילה, אחר כך רשום פנים</div>'}
       </div>
+      <div class="field" style="background:var(--bg2);border-radius:var(--r);padding:10px 12px;margin-top:8px" id="mf-push-box">
+        <div style="font-size:12px;font-weight:600;color:var(--txt);margin-bottom:8px">🔔 התראות Push לעובד זה</div>
+        <label style="display:flex;align-items:center;gap:8px;font-size:13px;color:var(--txt);cursor:pointer">
+          <input type="checkbox" id="mf-push-long" ${(w?.pushPrefs?.task_long!==false)?'checked':''} style="width:auto;cursor:pointer"/>
+          ⚠️ התראה על משימה ארוכה
+        </label>
+        ${w?.fcmToken?'<div style="font-size:11px;color:var(--green-txt);margin-top:6px">✅ טלפון רשום לקבלת Push</div>':'<div style="font-size:11px;color:var(--txt3);margin-top:6px">⚪ טלפון לא רשום עדיין</div>'}
+      </div>
       <div class="field" id="mf-perms-box" style="display:${wRole==='manager'?'none':'block'}">
         <label>הרשאות גישה</label>
         <div style="display:grid;grid-template-columns:1fr 1fr;gap:8px;margin-top:6px">
@@ -4267,6 +4275,7 @@ async function confirmModal(){
     if(w){w.name=name;w.dept=dept;w.role=role;w.user=user;w.permissions=perms;
     w.requireFactoryIP=!!document.getElementById('mf-require-ip')?.checked;
     w.faceAuth=!!document.getElementById('mf-face-auth')?.checked;
+    w.pushPrefs={task_long:!!document.getElementById('mf-push-long')?.checked};
     if(pass)w.pass=hashPass(pass);
     if(S.fbConnected)await fbSet('workers',w.id,w);}
   }
@@ -6949,7 +6958,7 @@ function cancelFaceReg(){
 
 /* ── AUTO UPDATE CHECK ── */
 (function(){
-  const CURRENT_VERSION = '20260623-3';
+  const CURRENT_VERSION = '20260623-4';
   const VERSION_URL = 'https://amtextile2222-beep.github.io/textileops/version.json';
   const CHECK_INTERVAL = 5 * 60 * 1000;
 
