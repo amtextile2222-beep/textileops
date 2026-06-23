@@ -412,10 +412,13 @@ code{background:var(--bg2);border:0.5px solid var(--b);border-radius:4px;padding
           <div style="text-align:center;font-size:12px;color:var(--txt3);margin-bottom:.75rem">— <span data-i18n="scan_manual">הזן ידנית</span> / סורק USB —</div>
           <input class="bc-inp" id="bc-inp" maxlength="13" placeholder="הזן 13 ספרות..." oninput="parseBc(this.value)" onkeydown="if(event.key==='Enter')submitBc()"/>
           <div id="bc-prev" style="margin-top:.75rem;min-height:36px"></div>
-          <div class="field" style="margin-top:.75rem;margin-bottom:0">
-            <label style="font-size:12px;color:var(--txt2);margin-bottom:5px;display:block" data-i18n="lbl_task_type">שלב עבודה</label>
-            <div id="bc-workstep-wrap" style="display:none;display:flex;flex-wrap:wrap;gap:6px;padding:8px;background:var(--bg2);border-radius:8px;border:1px solid var(--brd)"></div>
+          <div class="field" id="bc-tasktype-wrap" style="margin-top:.75rem;margin-bottom:0">
+            <label style="font-size:12px;color:var(--txt2);margin-bottom:5px;display:block" data-i18n="lbl_task_type">סוג משימה</label>
             <input id="bc-tasktype" type="text" placeholder="לדוגמה: תפירה, חיתוך, גימור..." data-i18n-ph="ph_task_type" style="font-size:13px"/>
+          </div>
+          <div id="bc-steps-wrap" style="display:none;margin-top:.75rem">
+            <label style="font-size:12px;color:var(--txt2);font-weight:600;display:block;margin-bottom:6px">🔧 בחר שלבי עבודה</label>
+            <div id="bc-steps-list"></div>
           </div>
           <div class="field" style="margin-top:.75rem;margin-bottom:0">
             <label style="font-size:12px;color:var(--txt2);margin-bottom:5px;display:block" data-i18n="lbl_dept">מחלקה</label>
@@ -722,9 +725,13 @@ code{background:var(--bg2);border:0.5px solid var(--b);border-radius:4px;padding
           <input id="mgr-bc-inp" class="bc-inp" maxlength="13" placeholder="או הזן 13 ספרות ידנית..." oninput="parseMgrBc(this.value)"/>
         </div><!-- /field barcode -->
         <div id="mgr-bc-prev" style="margin-bottom:.75rem;min-height:30px"></div>
-        <div class="field">
+        <div class="field" id="mgr-tasktype-wrap">
           <label data-i18n="lbl_task_type">סוג משימה</label>
           <input id="mgr-tasktype" type="text" placeholder="לדוגמה: תפירה, חיתוך, גימור..." data-i18n-ph="ph_task_type" style="font-size:13px"/>
+        </div>
+        <div id="mgr-steps-wrap" style="display:none;margin-bottom:.75rem">
+          <label style="font-size:13px;font-weight:600;display:block;margin-bottom:6px">🔧 בחר שלבי עבודה</label>
+          <div id="mgr-steps-list"></div>
         </div>
         <div class="field">
           <label data-i18n="lbl_dept">מחלקה</label>
@@ -772,9 +779,13 @@ code{background:var(--bg2);border:0.5px solid var(--b);border-radius:4px;padding
         <input id="ts-bc-inp" class="bc-inp" maxlength="13" placeholder="או הזן 13 ספרות ידנית..." oninput="tsParseBc(this.value)"/>
       </div>
       <div id="ts-bc-prev" style="margin-bottom:.75rem;min-height:30px"></div>
-      <div class="field">
+      <div class="field" id="ts-tasktype-wrap">
         <label data-i18n="lbl_task_type">סוג משימה</label>
         <input id="ts-tasktype" type="text" placeholder="לדוגמה: תפירה, חיתוך, גימור..." data-i18n-ph="ph_task_type" style="font-size:13px"/>
+      </div>
+      <div id="ts-steps-wrap" style="display:none;margin-bottom:.75rem">
+        <label style="font-size:13px;font-weight:600;display:block;margin-bottom:6px">🔧 בחר שלבי עבודה</label>
+        <div id="ts-steps-list"></div>
       </div>
       <div class="field">
         <label data-i18n="lbl_dept">מחלקה</label>
@@ -1529,10 +1540,7 @@ function runDailyReset(){
       w.status='out';w.checkin=null;w.checkout=null;w.sessions=[];
       // אל תכתוב ל-Firebase — listenFb() מקבל נתונים טריים ומטפל באיפוס בצורה בטוחה
     });
-    const tasksToKeep=[];
     S.activeTasks.forEach(t=>{
-      const taskDay=new Date(t.startTime).toISOString().slice(0,10);
-      if(taskDay===today){tasksToKeep.push(t);return;} // התחילה היום — לא לסגור
       const endTime=new Date(lastDate+'T23:59:59');
       const done={...t,endTime,duration:Math.round((endTime-new Date(t.startTime))/1000)};
       S.histTasks.unshift(done);
@@ -1541,7 +1549,7 @@ function runDailyReset(){
         fbSet('histTasks',String(t.id),{...done,startTime:done.startTime instanceof Date?done.startTime.toISOString():done.startTime,endTime:endTime.toISOString()});
       }
     });
-    S.activeTasks=tasksToKeep;
+    S.activeTasks=[];
     S.tgSentAlerts={};
     S.tgAbsentSig='';
     saveLS();
@@ -2122,9 +2130,14 @@ async function autoPunchIn(){
 function roundAttTime(now, isIn){
   const rm=S.settings.roundMinutes??5;
   if(!rm)return now;
-  const ms=rm*60*1000;
-  const rounded=new Date(Math.round(now.getTime()/ms)*ms);
-  return rounded;
+  const ref=isIn?(S.settings.shiftStart||'06:30'):(S.settings.shiftEnd||'15:00');
+  const [rh,rm2]=ref.split(':').map(Number);
+  const target=new Date(now);
+  target.setHours(rh,rm2,0,0);
+  const diffMs=now.getTime()-target.getTime();
+  const diffMin=diffMs/60000;
+  if(Math.abs(diffMin)<=rm)return target;
+  return now;
 }
 async function punchIn(){
   if(!S.user)return;
@@ -2300,7 +2313,7 @@ function renderAtt(){
 function parseBc(v){
   v=(v||'').replace(/\D/g,'');
   const el=document.getElementById('bc-prev');
-  if(v.length<2){el.innerHTML='';updateWorkStepSelector('','');return;}
+  if(v.length<2){el.innerHTML='';bcShowTaskTypeField(true);return;}
   const c=v.slice(0,2),p=v.slice(2,7),sz=v.slice(7,8),q=v.slice(8,11),col=v.slice(11,13);
   const isTotal=isTotalBc(v);
   const totalQty=isTotal?getTotalQty(c,p):0;
@@ -2317,25 +2330,23 @@ function parseBc(v){
         <span class="bc-seg bc-q">כמות: ${q.padEnd(3,'_')}</span>
         <span class="bc-seg bc-col">צבע: ${COLORS[col]||col||'__'}</span>
       </div>`;
-  if(v.length===13)updateWorkStepSelector(c,p);
-}
-function updateWorkStepSelector(cust,prod){
-  const wrap=document.getElementById('bc-workstep-wrap');
-  const txt=document.getElementById('bc-tasktype');
-  if(!wrap||!txt)return;
-  const product=S.products?.find(x=>x.cust===cust&&x.prod===prod);
-  const steps=product?.workSteps||[];
-  if(steps.length){
-    wrap.innerHTML=steps.map((s,i)=>`<label style="display:flex;align-items:center;gap:5px;font-size:13px;cursor:pointer;background:var(--card);border:1px solid var(--brd);border-radius:6px;padding:5px 10px;user-select:none">
-      <input type="checkbox" value="${esc(s)}" class="bc-ws-cb" style="width:auto;cursor:pointer"/>
-      ${esc(s)}
-    </label>`).join('');
-    wrap.style.display='flex';
-    txt.style.display='none';
-  }else{
-    wrap.style.display='none';
-    txt.style.display='';
+  if(v.length===13){
+    const prod=S.products.find(x=>x.cust===c&&x.prod===p);
+    const steps=prod?.taskSteps||[];
+    if(steps.length){
+      bcShowTaskTypeField(false);
+      const listEl=document.getElementById('bc-steps-list');
+      if(listEl)listEl.innerHTML=steps.map(s=>`<label style="display:flex;align-items:center;gap:8px;padding:6px 8px;margin-bottom:4px;background:var(--bg2);border-radius:8px;cursor:pointer;font-size:13px"><input type="checkbox" data-step="${esc(s)}" style="width:16px;height:16px"> ${esc(s)}</label>`).join('');
+      return;
+    }
   }
+  bcShowTaskTypeField(true);
+}
+function bcShowTaskTypeField(show){
+  const wrap=document.getElementById('bc-tasktype-wrap');
+  const stepsWrap=document.getElementById('bc-steps-wrap');
+  if(wrap)wrap.style.display=show?'':'none';
+  if(stepsWrap)stepsWrap.style.display=show?'none':'';
 }
 function tryDemo(){
   document.getElementById('bc-inp').value='0710042302503';
@@ -2350,15 +2361,16 @@ async function submitBc(){
   const cust=raw.slice(0,2),prod=raw.slice(2,7),size=raw.slice(7,8),col=raw.slice(11,13);
   const isTotal=isTotalBc(raw);
   const qty=isTotal?getTotalQty(cust,prod):parseInt(raw.slice(8,11))||0;
-  const wrap=document.getElementById('bc-workstep-wrap');
-  const checkedSteps=wrap&&wrap.style.display!=='none'?[...wrap.querySelectorAll('.bc-ws-cb:checked')].map(cb=>cb.value):[];
-  const taskType=checkedSteps.length===0?(document.getElementById('bc-tasktype').value||'').trim():checkedSteps[0];
+  const bcStepsWrap=document.getElementById('bc-steps-wrap');
+  const bcUseSteps=bcStepsWrap&&bcStepsWrap.style.display!=='none';
+  const bcCheckedSteps=bcUseSteps?[...document.querySelectorAll('#bc-steps-list input[type="checkbox"]:checked')].map(cb=>cb.dataset.step):[];
+  const taskType=bcUseSteps?'':((document.getElementById('bc-tasktype').value||'').trim());
   const taskDept=(document.getElementById('bc-dept').value||'').trim();
   const u=S.user;
   const wu=S.workers.find(x=>x.id===u.id);
   if(!wu||wu.status!=='in'){alert('לא ניתן להתחיל משימה — יש להירשם כנוכח תחילה (כניסה לעבודה בלשונית נוכחות)');return;}
   // ברקוד שכבר בעבודה אצל עובד אחר באותו שלב — אישור הצטרפות
-  const otherSame=S.activeTasks.find(t=>t.workerId!==u.id&&taskBc(t)===raw);
+  const otherSame=S.activeTasks.find(t=>t.workerId!==u.id&&taskBc(t)===raw&&(t.taskType||'').trim().toLowerCase()===taskType.toLowerCase());
   if(otherSame&&!await showConfirm(T.cfm_join_title||'הצטרפות למשימה',T.cfm_join_msg+otherSame.workerName+(otherSame.taskType?' ('+otherSame.taskType+')':'')+T.cfm_join_msg2,T.cfm_join_ok||'הצטרף',T.cancel||'ביטול'))return;
   // משימה פעילה קיימת — לסגור את כולן או לעבוד במקביל
   const existTasks=S.activeTasks.filter(t=>t.workerId===u.id);
@@ -2376,22 +2388,20 @@ async function submitBc(){
       S.activeTasks=S.activeTasks.filter(t=>t.workerId!==u.id);
     }
   }
+  if(bcUseSteps&&!bcCheckedSteps.length){showToast('⚠ בחר לפחות שלב עבודה אחד','var(--red-txt)');return;}
   try{
-    const stepsToCreate=checkedSteps.length>0?checkedSteps:[taskType];
-    const startTime=new Date();
-    for(const step of stepsToCreate){
-      const newTask={id:String(Date.now())+Math.random().toString(36).slice(2,6),workerId:u.id,workerName:u.name,dept:taskDept||u.dept,cust,prod,size,qty,col,taskType:step,bc:raw,isTotal:isTotal||false,startTime,elapsed:0};
+    const typesToCreate=bcUseSteps?bcCheckedSteps:[taskType||''];
+    for(const tt of typesToCreate){
+      const newTask={id:String(Date.now())+Math.random().toString(36).slice(2,6),workerId:u.id,workerName:u.name,dept:taskDept||u.dept,cust,prod,size,qty,col,taskType:tt,bc:raw,isTotal:isTotal||false,startTime:new Date(),elapsed:0};
       S.activeTasks.unshift(newTask);
       if(S.fbConnected)await fbSet('activeTasks',newTask.id,{...newTask,startTime:newTask.startTime.toISOString()});
       tgTask(newTask,true);
     }
     document.getElementById('bc-inp').value='';parseBc('');
     document.getElementById('bc-tasktype').value='';
-    const _wsWrap=document.getElementById('bc-workstep-wrap');
-    if(_wsWrap)_wsWrap.querySelectorAll('.bc-ws-cb').forEach(cb=>cb.checked=false);
     document.getElementById('bc-dept').value='';
     saveLS();renderScanActive();renderTasks();goPage('tasks');
-    showToast(stepsToCreate.length>1?`✅ ${stepsToCreate.length} משימות הותחלו`:'✅ משימה הותחלה');
+    showToast('✅ '+(typesToCreate.length>1?typesToCreate.length+' משימות הותחלו':'משימה הותחלה'));
   }catch(e){showToast('❌ שגיאה בפתיחת משימה: '+e.message,'var(--red-txt)',8000);}
 }
 function fillDeptSelects(){
@@ -2499,7 +2509,7 @@ function renderTaskHist(){
       </div>
       <div style="display:flex;align-items:center;gap:6px">
         <span class="badge blue">${fmtM(t.duration||0)}</span>
-        ${S.user?.role==='manager'?`<button class="btn" style="font-size:11px;padding:3px 8px" onclick="openEditTask('${t.id}',true)" title="עריכה">✏️</button><button class="btn" style="font-size:11px;padding:3px 8px;background:var(--green-bg,#d1fae5);color:var(--green-txt,#065f46)" onclick="restoreHistTask('${t.id}')" title="החזר לפעיל">↩️</button><button class="btn" style="font-size:11px;padding:3px 8px;background:var(--red-bg,#fee2e2);color:var(--red-txt,#dc2626)" onclick="deleteHistTask('${t.id}')" title="מחיקה">🗑️</button>`:''}
+        ${(S.user?.role==='manager'||S.user?.role==='supervisor')?`<button class="btn" style="font-size:11px;padding:3px 8px" onclick="openEditTask('${t.id}',true)" title="עריכה">✏️</button><button class="btn" style="font-size:11px;padding:3px 8px;background:var(--red-bg,#fee2e2);color:var(--red-txt,#dc2626)" onclick="deleteHistTask('${t.id}')" title="מחיקה">🗑️</button>`:''}
       </div>
     </div>`;
   }).join('')||'<div style="color:var(--txt3);font-size:12px;padding:.75rem 0;text-align:center">אין היסטוריה עדיין</div>';
@@ -3111,7 +3121,7 @@ function renderMgrTasks(){
 function parseMgrBc(v){
   v=(v||'').replace(/\D/g,'');
   const el=document.getElementById('mgr-bc-prev');if(!el)return;
-  if(v.length<2){el.innerHTML='';return;}
+  if(v.length<2){el.innerHTML='';mgrShowTaskTypeField(true);return;}
   const c=v.slice(0,2),p=v.slice(2,7),sz=v.slice(7,8),q=v.slice(8,11),col=v.slice(11,13);
   const isTotal=isTotalBc(v);const totalQty=isTotal?getTotalQty(c,p):0;
   el.innerHTML=isTotal
@@ -3122,6 +3132,23 @@ function parseMgrBc(v){
         <span class="bc-seg bc-c">לקוח: ${c||'__'}</span><span class="bc-seg bc-p">מוצר: ${p.padEnd(5,'_')}</span>
         <span class="bc-seg" style="background:var(--amber-bg);color:var(--amber-txt)">מידה: ${sz||'_'}</span>
         <span class="bc-seg bc-q">כמות: ${q.padEnd(3,'_')}</span><span class="bc-seg bc-col">צבע: ${COLORS[col]||col||'__'}</span></div>`;
+  if(v.length===13){
+    const prod=S.products.find(x=>x.cust===c&&x.prod===p);
+    const steps=prod?.taskSteps||[];
+    if(steps.length){
+      mgrShowTaskTypeField(false);
+      const listEl=document.getElementById('mgr-steps-list');
+      if(listEl)listEl.innerHTML=steps.map(s=>`<label style="display:flex;align-items:center;gap:8px;padding:6px 8px;margin-bottom:4px;background:var(--bg2);border-radius:8px;cursor:pointer;font-size:13px"><input type="checkbox" data-step="${esc(s)}" style="width:16px;height:16px"> ${esc(s)}</label>`).join('');
+      return;
+    }
+  }
+  mgrShowTaskTypeField(true);
+}
+function mgrShowTaskTypeField(show){
+  const wrap=document.getElementById('mgr-tasktype-wrap');
+  const stepsWrap=document.getElementById('mgr-steps-wrap');
+  if(wrap)wrap.style.display=show?'':'none';
+  if(stepsWrap)stepsWrap.style.display=show?'none':'';
 }
 
 let mgrCamStream=null;let mgrCamInterval=null;
@@ -3268,7 +3295,7 @@ function printWorkerBarcodes(){
       .name{font-size:13px;font-weight:700;margin-top:5px}
       .sub{font-size:11px;color:#666}
       .code{font-size:9px;color:#999;font-family:monospace;margin-top:2px}
-      @media print{@page{margin:0}body{padding:8mm}}
+      @media print{@page{margin:10mm}body{padding:0}}
     </style></head><body>
     <div class="grid">
       ${items.map(w=>`<div class="card">
@@ -3285,7 +3312,11 @@ function printWorkerBarcodes(){
 function tsParseBc(v){
   v=(v||'').replace(/\D/g,'');
   const el=document.getElementById('ts-bc-prev');if(!el)return;
-  if(v.length<2){el.innerHTML='';return;}
+  if(v.length<2){
+    el.innerHTML='';
+    tsShowTaskTypeField(true);
+    return;
+  }
   const c=v.slice(0,2),p=v.slice(2,7),sz=v.slice(7,8),q=v.slice(8,11),col=v.slice(11,13);
   const isTotal=isTotalBc(v);const totalQty=isTotal?getTotalQty(c,p):0;
   el.innerHTML=isTotal
@@ -3296,6 +3327,24 @@ function tsParseBc(v){
         <span class="bc-seg bc-c">לקוח: ${c||'__'}</span><span class="bc-seg bc-p">מוצר: ${p.padEnd(5,'_')}</span>
         <span class="bc-seg" style="background:var(--amber-bg);color:var(--amber-txt)">מידה: ${sz||'_'}</span>
         <span class="bc-seg bc-q">כמות: ${q.padEnd(3,'_')}</span><span class="bc-seg bc-col">צבע: ${COLORS[col]||col||'__'}</span></div>`;
+  // אם המוצר מוגדר עם שלבי עבודה — הצג checkboxes
+  if(v.length===13){
+    const prod=S.products.find(x=>x.cust===c&&x.prod===p);
+    const steps=prod?.taskSteps||[];
+    if(steps.length){
+      tsShowTaskTypeField(false);
+      const listEl=document.getElementById('ts-steps-list');
+      if(listEl)listEl.innerHTML=steps.map((s,i)=>`<label style="display:flex;align-items:center;gap:8px;padding:6px 8px;margin-bottom:4px;background:var(--bg2);border-radius:8px;cursor:pointer;font-size:13px"><input type="checkbox" data-step="${esc(s)}" style="width:16px;height:16px"> ${esc(s)}</label>`).join('');
+      return;
+    }
+  }
+  tsShowTaskTypeField(true);
+}
+function tsShowTaskTypeField(show){
+  const wrap=document.getElementById('ts-tasktype-wrap');
+  const stepsWrap=document.getElementById('ts-steps-wrap');
+  if(wrap)wrap.style.display=show?'':'none';
+  if(stepsWrap)stepsWrap.style.display=show?'none':'';
 }
 async function tsStartCam(){
   const container=document.getElementById('ts-cam-container');
@@ -3342,7 +3391,10 @@ async function tsStartTask(){
   const cust=raw.slice(0,2),prod=raw.slice(2,7),size=raw.slice(7,8),col=raw.slice(11,13);
   const isTotal=isTotalBc(raw);
   const qty=isTotal?getTotalQty(cust,prod):parseInt(raw.slice(8,11))||0;
-  const taskType=(document.getElementById('ts-tasktype').value||'').trim();
+  const stepsWrap=document.getElementById('ts-steps-wrap');
+  const useSteps=stepsWrap&&stepsWrap.style.display!=='none';
+  const checkedSteps=useSteps?[...document.querySelectorAll('#ts-steps-list input[type="checkbox"]:checked')].map(cb=>cb.dataset.step):[];
+  const taskType=useSteps?'':((document.getElementById('ts-tasktype').value||'').trim());
   const taskDept=(document.getElementById('ts-dept').value||'').trim();
   // ברקוד שכבר בעבודה אצל עובד אחר באותו שלב — אישור הצטרפות
   const otherSame=S.activeTasks.find(t=>t.workerId!==w.id&&taskBc(t)===raw&&(t.taskType||'').trim().toLowerCase()===taskType.toLowerCase());
@@ -3366,15 +3418,21 @@ async function tsStartTask(){
       S.activeTasks=S.activeTasks.filter(t=>t.workerId!==w.id);
     }
   }
+  // ולידציה: אם שלבים — חייב לסמן לפחות אחד
+  if(useSteps&&!checkedSteps.length){showToast('⚠ בחר לפחות שלב עבודה אחד','var(--red-txt)');return;}
   try{
-    const task={id:String(Date.now())+Math.random().toString(36).slice(2,6),workerId:w.id,workerName:w.name,dept:taskDept||w.dept,cust,prod,size,qty,col,taskType,bc:raw,isTotal:isTotal||false,startTime:new Date(),elapsed:0};
-    S.activeTasks.push(task);
-    if(S.fbConnected)await fbSet('activeTasks',String(task.id),{...task,startTime:task.startTime.toISOString()});
-    tgTask(task,true);
+    const typesToCreate=useSteps?checkedSteps:[taskType||''];
+    for(const tt of typesToCreate){
+      const task={id:String(Date.now())+Math.random().toString(36).slice(2,6),workerId:w.id,workerName:w.name,dept:taskDept||w.dept,cust,prod,size,qty,col,taskType:tt,bc:raw,isTotal:isTotal||false,startTime:new Date(),elapsed:0};
+      S.activeTasks.push(task);
+      if(S.fbConnected)await fbSet('activeTasks',String(task.id),{...task,startTime:task.startTime.toISOString()});
+      tgTask(task,true);
+    }
     saveLS();renderTasks();goPage('tasks');
-    showToast('✅ משימה הותחלה עבור '+w.name);
+    showToast('✅ '+(typesToCreate.length>1?typesToCreate.length+' משימות הותחלו':' משימה הותחלה')+' עבור '+w.name);
     document.getElementById('ts-bc-inp').value='';document.getElementById('ts-bc-prev').innerHTML='';
     document.getElementById('ts-tasktype').value='';
+    tsShowTaskTypeField(true);
   }catch(e){showToast('❌ שגיאה בפתיחת משימה: '+e.message,'var(--red-txt)',8000);}
 }
 function renderTsScan(){
@@ -3534,7 +3592,11 @@ async function mgrStartTask(){
   const cust=raw.slice(0,2),prod=raw.slice(2,7),size=raw.slice(7,8),col=raw.slice(11,13);
   const isTotal=isTotalBc(raw);
   const qty=isTotal?getTotalQty(cust,prod):parseInt(raw.slice(8,11))||0;
-  const taskType=(document.getElementById('mgr-tasktype').value||'').trim();
+  const mgrStepsWrap=document.getElementById('mgr-steps-wrap');
+  const mgrUseSteps=mgrStepsWrap&&mgrStepsWrap.style.display!=='none';
+  const mgrCheckedSteps=mgrUseSteps?[...document.querySelectorAll('#mgr-steps-list input[type="checkbox"]:checked')].map(cb=>cb.dataset.step):[];
+  if(mgrUseSteps&&!mgrCheckedSteps.length){showToast('⚠ בחר לפחות שלב עבודה אחד','var(--red-txt)');return;}
+  const taskType=mgrUseSteps?'':((document.getElementById('mgr-tasktype').value||'').trim());
   const taskDept=(document.getElementById('mgr-dept').value||'').trim();
   // ברקוד שכבר בעבודה אצל עובד אחר באותו שלב — אישור הצטרפות
   const otherSame=S.activeTasks.find(t=>t.workerId!==empId&&taskBc(t)===raw&&(t.taskType||'').trim().toLowerCase()===taskType.toLowerCase());
@@ -3555,15 +3617,18 @@ async function mgrStartTask(){
       S.activeTasks=S.activeTasks.filter(t=>t.workerId!==empId);
     }
   }
-  const newTask={id:String(Date.now())+Math.random().toString(36).slice(2,6),workerId:empId,workerName:w.name,dept:taskDept||w.dept,cust,prod,size,qty,col,taskType,bc:raw,isTotal:isTotal||false,startTime:new Date(),elapsed:0};
-  S.activeTasks.unshift(newTask);
-  if(S.fbConnected)await fbSet('activeTasks',newTask.id,{...newTask,startTime:newTask.startTime.toISOString()});
-  tgTask(newTask,true);
+  const typesToCreate=mgrUseSteps?mgrCheckedSteps:[taskType||''];
+  for(const tt of typesToCreate){
+    const newTask={id:String(Date.now())+Math.random().toString(36).slice(2,6),workerId:empId,workerName:w.name,dept:taskDept||w.dept,cust,prod,size,qty,col,taskType:tt,bc:raw,isTotal:isTotal||false,startTime:new Date(),elapsed:0};
+    S.activeTasks.unshift(newTask);
+    if(S.fbConnected)await fbSet('activeTasks',newTask.id,{...newTask,startTime:newTask.startTime.toISOString()});
+    tgTask(newTask,true);
+  }
   document.getElementById('mgr-bc-inp').value='';parseMgrBc('');
   document.getElementById('mgr-tasktype').value='';
   document.getElementById('mgr-dept').value='';
   saveLS();renderMgrTasks();
-  showToast('✅ משימה התחילה עבור '+w.name);
+  showToast('✅ '+(typesToCreate.length>1?typesToCreate.length+' משימות התחילו':' משימה התחילה')+' עבור '+w.name);
 }
 async function deleteActiveTask(taskId){
   const t=S.activeTasks.find(x=>x.id===taskId);if(!t)return;
@@ -3735,21 +3800,6 @@ async function deleteHistTask(taskId){
   S.histTasks=S.histTasks.filter(t=>t.id!==taskId);
   if(S.fbConnected){try{await fbDel('histTasks',String(taskId));}catch(e){}}
   saveLS();renderTaskHist();
-}
-async function restoreHistTask(taskId){
-  if(!confirm('להחזיר משימה זו לרשימת הפעילות?'))return;
-  const t=S.histTasks.find(x=>x.id===taskId);if(!t)return;
-  const restored={...t,startTime:new Date(t.startTime),endTime:null,duration:0,elapsed:0};
-  delete restored.endTime;
-  S.histTasks=S.histTasks.filter(x=>x.id!==taskId);
-  S.activeTasks.push(restored);
-  if(S.fbConnected){
-    try{await fbDel('histTasks',String(taskId));}catch(e){}
-    const st=restored.startTime instanceof Date?restored.startTime.toISOString():restored.startTime;
-    await fbSet('activeTasks',String(taskId),{...restored,startTime:st});
-  }
-  saveLS();renderTaskHist();renderMgrTasks();renderTasks();
-  showToast('✅ המשימה הוחזרה לרשימת הפעילות','var(--green-txt)',3000);
 }
 function openEditTask(taskId, isHist){
   const t=isHist?S.histTasks.find(x=>x.id===taskId):S.activeTasks.find(x=>x.id===taskId);
@@ -5520,7 +5570,7 @@ function bcPrint(){
     <style>body{margin:0;font-family:Arial,sans-serif;background:#fff}
     .grid{display:grid;grid-template-columns:repeat(2,1fr);gap:10px;padding:6px 10px}
     .bc-card{border:2px solid #333;border-radius:6px;padding:10px;display:flex;align-items:center;gap:12px;break-inside:avoid}
-    @media print{@page{size:A4 portrait;margin:0}body{padding:8mm}}</style></head><body>
+    @media print{@page{size:A4 portrait;margin:8mm}}</style></head><body>
     ${pages}
     <script>window.onload=()=>window.print()<\/script></body></html>`);
   win.document.close();
@@ -5761,8 +5811,10 @@ function openProductModal(id){
         <button type="button" class="btn primary" onclick="addQtyBulk()" style="font-size:12px;padding:5px 12px">+ הוסף הכל</button>
       </div>
     </div>
-    ${renderWorkStepsHtml(p)}
-    ${renderStagesHtml(p)}`;
+    ${renderStagesHtml(p)}
+    <div class="sec" style="margin-top:14px;margin-bottom:8px">🔧 שלבי עבודה (לסורק)</div>
+    <div id="pm-tasksteps-list" style="margin-bottom:8px">${(p?.taskSteps||[]).map((s,i)=>`<div style="display:flex;align-items:center;gap:6px;margin-bottom:4px"><input type="text" value="${esc(s)}" data-tsi="${i}" style="flex:1;font-size:12px;padding:4px 8px;border-radius:6px;border:1px solid var(--brd);background:var(--card);color:var(--txt)"><button type="button" onclick="this.parentElement.remove()" style="background:none;border:none;color:var(--red);cursor:pointer;font-size:14px">✕</button></div>`).join('')}</div>
+    <button type="button" class="btn" onclick="addTaskStepRow()" style="font-size:12px">+ הוסף שלב עבודה</button>`;
   document.getElementById('prod-modal-wrap').classList.remove('hidden');
   _prodImgs=p?[...(p.images||[])]:[];
   _prodDocs=p?[...(p.docs||[])]:[];
@@ -5795,6 +5847,13 @@ function addQtyBulk(){
       <td><button type="button" onclick="this.closest('tr').remove()" style="background:none;border:none;color:var(--red);cursor:pointer;font-size:14px">✕</button></td>`;
     document.getElementById('pm-qty-body').appendChild(tr);
   }
+}
+function addTaskStepRow(){
+  const i=Date.now();
+  const div=document.createElement('div');
+  div.style.cssText='display:flex;align-items:center;gap:6px;margin-bottom:4px';
+  div.innerHTML=`<input type="text" data-tsi="${i}" style="flex:1;font-size:12px;padding:4px 8px;border-radius:6px;border:1px solid var(--brd);background:var(--card);color:var(--txt)" placeholder="לדוגמה: תפירה"><button type="button" onclick="this.parentElement.remove()" style="background:none;border:none;color:var(--red);cursor:pointer;font-size:14px">✕</button>`;
+  document.getElementById('pm-tasksteps-list').appendChild(div);
 }
 function addQtyRow(){
   const colorOpts=Object.entries(COLORS).map(([k,v])=>`<option value="${k}">${v}</option>`).join('');
@@ -5898,29 +5957,6 @@ const PROD_STAGES=[
   {id:'pack',      label:'🧥 אריזה + ביקורת',       optional:false},
   {id:'shipped',   label:'🚚 יצא ללקוח',            optional:false},
 ];
-function renderWorkStepsHtml(p){
-  const steps=Array.isArray(p?.workSteps)?p.workSteps:[];
-  const rows=steps.map((s,i)=>`<div style="display:flex;gap:6px;align-items:center;margin-bottom:5px" data-ws-row>
-    <input type="text" value="${esc(s)}" class="pm-ws-inp" style="flex:1;font-size:13px;padding:5px 8px;border-radius:6px;border:1px solid var(--brd);background:var(--card);color:var(--txt)" placeholder="שם השלב"/>
-    <button type="button" onclick="this.closest('[data-ws-row]').remove()" style="background:none;border:none;color:var(--red,#dc2626);cursor:pointer;font-size:16px;padding:0 4px">✕</button>
-  </div>`).join('');
-  return `<div class="sec" style="margin-top:14px;margin-bottom:8px">🔧 שלבי עבודה</div>
-  <div id="pm-ws-list">${rows}</div>
-  <button type="button" class="btn" onclick="addWorkStepRow()" style="font-size:12px;margin-top:4px">+ הוסף שלב</button>`;
-}
-function addWorkStepRow(){
-  const list=document.getElementById('pm-ws-list');if(!list)return;
-  const div=document.createElement('div');
-  div.setAttribute('data-ws-row','');
-  div.style.cssText='display:flex;gap:6px;align-items:center;margin-bottom:5px';
-  div.innerHTML=`<input type="text" class="pm-ws-inp" style="flex:1;font-size:13px;padding:5px 8px;border-radius:6px;border:1px solid var(--brd);background:var(--card);color:var(--txt)" placeholder="שם השלב"/>
-    <button type="button" onclick="this.closest('[data-ws-row]').remove()" style="background:none;border:none;color:var(--red,#dc2626);cursor:pointer;font-size:16px;padding:0 4px">✕</button>`;
-  list.appendChild(div);
-  div.querySelector('input').focus();
-}
-function readWorkStepsFromModal(){
-  return [...document.querySelectorAll('#pm-ws-list .pm-ws-inp')].map(i=>i.value.trim()).filter(Boolean);
-}
 function renderStagesHtml(p){
   const log=Array.isArray(p?.stageLog)?p.stageLog:[];
   const skipped=Array.isArray(p?.stageSkipped)?p.stageSkipped:[];
@@ -6025,7 +6061,7 @@ async function saveProduct(){
   });
   closeProdCamera();
   const {stageLog,stageSkipped}=readStagesFromModal();
-  const workSteps=readWorkStepsFromModal();
+  const taskSteps=[...document.querySelectorAll('#pm-tasksteps-list input[type="text"]')].map(i=>i.value.trim()).filter(Boolean);
   if(_editProdId){
     const p=S.products.find(x=>x.id===_editProdId);
     if(p){
@@ -6039,11 +6075,11 @@ async function saveProduct(){
           sendTelegram('📦 TextileOps — מוצר עבר שלב ייצור\n🏷 מוצר: '+name+' ('+cust+'-'+prod+')\n📍 שלב: '+stageName+'\n📅 תאריך: '+s.date+' '+s.time+'\n🕐 עודכן: '+now).catch(()=>{});
         }
       }
-      Object.assign(p,{prod,cust,name,images:_prodImgs,docs:_prodDocs,quantities,stageLog,stageSkipped,workSteps});
+      Object.assign(p,{prod,cust,name,images:_prodImgs,docs:_prodDocs,quantities,stageLog,stageSkipped,taskSteps});
     }
   }else{
     const id='p'+Date.now();
-    S.products.push({id,prod,cust,name,images:_prodImgs,docs:_prodDocs,quantities,stageLog,stageSkipped,workSteps});
+    S.products.push({id,prod,cust,name,images:_prodImgs,docs:_prodDocs,quantities,stageLog,stageSkipped,taskSteps});
   }
   saveLS();
   if(S.fbConnected){
