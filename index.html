@@ -456,6 +456,9 @@ code{background:var(--bg2);border:0.5px solid var(--b);border-radius:4px;padding
 
   <!-- TASKS -->
   <div class="page" id="page-tasks">
+    <div id="worker-send-msg-bar" style="display:none;margin-bottom:10px">
+      <button class="btn full" style="font-size:13px;padding:10px;justify-content:center;gap:8px" onclick="workerSendMsg()">📢 שלח הודעה לאחראי / מנהל</button>
+    </div>
     <div class="g4" style="margin-bottom:1rem">
       <div class="card"><div class="mlbl" data-i18n="tasks_active">פעילות</div><div class="mval" id="tk-act">0</div></div>
       <div class="card"><div class="mlbl" data-i18n="tasks_done">הושלמו</div><div class="mval" id="tk-done">0</div></div>
@@ -823,6 +826,7 @@ code{background:var(--bg2);border:0.5px solid var(--b);border-radius:4px;padding
         <select id="ts-dept" style="font-size:13px"><option value="">-- בחר מחלקה --</option></select>
       </div>
       <button class="btn success full" onclick="tsStartTask()" data-i18n="btn_start_task">▶ התחל משימה לעובד</button>
+      <button class="btn full" style="margin-top:6px;font-size:13px;padding:10px;justify-content:center;gap:8px" onclick="tsSendMsgToWorker()">📢 שלח הודעה לעובד הנבחר</button>
       <div id="ts-start-msg" style="font-size:12px;margin-top:6px;min-height:16px"></div>
     </div>
   </div>
@@ -1889,6 +1893,8 @@ async function doLogin(){
   }
   S.user=w;
   listenWorkerMessages();
+  listenMgrInbox();
+  if(w.role==='worker'||w.role==='helper')document.getElementById('worker-send-msg-bar').style.display='block';
   if(w.role!=='manager')setTimeout(()=>initWorkerFCM(w.id),3000);
   document.getElementById('login-screen').classList.add('hidden');
   document.getElementById('app-screen').classList.remove('hidden');
@@ -3669,6 +3675,75 @@ function listenWorkerMessages(){
     _workerMsgLastTs=data.ts;
     showWorkerMsgPopup(data.msg,data.from||'מנהל');
   });
+}
+// ─── הודעות עובד/אחראי → מנהל ───────────────────────────────
+async function workerSendMsg(){
+  const msg=prompt('הודעה למנהל/אחראי:');
+  if(!msg||!msg.trim())return;
+  if(!S.fbConnected){showToast('⚠ Firebase לא מחובר','var(--red-txt)');return;}
+  try{
+    const{collection,addDoc}=window._fb;
+    await addDoc(collection(db,'mgrInbox'),{fromId:S.user.id,fromName:S.user.name,msg:msg.trim(),ts:Date.now(),read:false});
+    sendPush('📢 הודעה מ'+S.user.name,msg.trim(),'worker_msg').catch(()=>{});
+    showToast('✅ הודעה נשלחה','var(--green-txt)');
+  }catch(e){showToast('❌ שגיאה בשליחה','var(--red-txt)');}
+}
+async function tsSendMsgToWorker(){
+  const empId=document.getElementById('ts-emp-sel').value;
+  if(!empId){showToast('⚠ בחר עובד תחילה','var(--red-txt)');return;}
+  const w=S.workers.find(x=>x.id===empId);
+  if(!w)return;
+  const msg=prompt('הודעה ל'+w.name+':');
+  if(!msg||!msg.trim())return;
+  if(!S.fbConnected){showToast('⚠ Firebase לא מחובר','var(--red-txt)');return;}
+  try{
+    await fbSet('workerMessages',empId,{msg:msg.trim(),from:S.user.name,ts:Date.now(),read:false});
+    if(w.pushPrefs?.manager_msg!==false)sendPushToWorker(empId,'📢 הודעה מ'+S.user.name,msg.trim()).catch(()=>{});
+    showToast('✅ הודעה נשלחה ל'+w.name,'var(--green-txt)');
+  }catch(e){showToast('❌ שגיאה','var(--red-txt)');}
+}
+let _mgrInboxLastTs=0;
+function listenMgrInbox(){
+  if(!S.fbConnected||!db||!S.user)return;
+  if(S.user.role!=='manager'&&S.user.role!=='supervisor')return;
+  const{collection,query,where,onSnapshot,orderBy,limit}=window._fb;
+  const q=query(collection(db,'mgrInbox'),where('read','==',false));
+  onSnapshot(q,snap=>{
+    snap.docChanges().forEach(change=>{
+      if(change.type!=='added')return;
+      const d=change.doc.data();
+      if(d.ts<=_mgrInboxLastTs)return;
+      _mgrInboxLastTs=d.ts;
+      showMgrInboxPopup(d.msg,d.fromName||'עובד',change.doc.id);
+    });
+  });
+}
+function showMgrInboxPopup(msg,fromName,docId){
+  document.getElementById('mgr-inbox-popup')?.remove();
+  const div=document.createElement('div');
+  div.id='mgr-inbox-popup';
+  div.style.cssText='position:fixed;top:0;left:0;right:0;bottom:0;background:rgba(0,0,0,.6);z-index:99999;display:flex;align-items:center;justify-content:center;padding:20px';
+  div.innerHTML=`<div style="background:var(--bg);border-radius:var(--rl);padding:24px;max-width:340px;width:100%;text-align:center;box-shadow:0 8px 32px rgba(0,0,0,.3)">
+    <div style="font-size:36px;margin-bottom:12px">📨</div>
+    <div style="font-size:13px;color:var(--txt3);margin-bottom:8px">הודעה מ${esc(fromName)}</div>
+    <div style="font-size:17px;font-weight:600;color:var(--txt);margin-bottom:20px;line-height:1.5">${esc(msg)}</div>
+    <div style="display:flex;gap:8px">
+      <button class="btn success" style="flex:1;padding:10px;font-size:14px" onclick="markMgrInboxRead('${docId}');document.getElementById('mgr-inbox-popup').remove()">✅ הבנתי</button>
+      <button class="btn primary" style="flex:1;padding:10px;font-size:14px" onclick="replyToWorker('${esc(fromName)}');document.getElementById('mgr-inbox-popup').remove();markMgrInboxRead('${docId}')">↩ השב</button>
+    </div>
+  </div>`;
+  document.body.appendChild(div);
+  playAlertSound();
+}
+function markMgrInboxRead(docId){
+  if(!S.fbConnected||!db)return;
+  const{doc,updateDoc}=window._fb;
+  updateDoc(doc(db,'mgrInbox',docId),{read:true}).catch(()=>{});
+}
+function replyToWorker(workerName){
+  const w=S.workers.find(x=>x.name===workerName);
+  if(!w){showToast('⚠ עובד לא נמצא','var(--red-txt)');return;}
+  mgrSendMsg(w.id,w.name);
 }
 function mgrBulkToggle(){
   window._mgrBulkMode=!window._mgrBulkMode;
@@ -6593,6 +6668,8 @@ function _completeFaceAuth(success){
     const w=S._pendingUser;S._pendingUser=null;
     S.user=w;
     listenWorkerMessages();
+    listenMgrInbox();
+    if(w.role==='worker'||w.role==='helper')document.getElementById('worker-send-msg-bar').style.display='block';
     document.getElementById('app-screen').classList.remove('hidden');
     document.getElementById('top-name').textContent=w.name;
     document.getElementById('top-role').textContent=w.role==='manager'?'מנהל':w.role==='supervisor'?'אחראי':w.role==='helper'?'עוזר':'עובד';
