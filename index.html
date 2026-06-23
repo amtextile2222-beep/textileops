@@ -2332,7 +2332,7 @@ function parseBc(v){
       </div>`;
   if(v.length===13){
     const prod=S.products.find(x=>x.cust===c&&x.prod===p);
-    const steps=prod?.taskSteps||[];
+    const steps=prod?.workSteps||[];
     if(steps.length){
       bcShowTaskTypeField(false);
       const listEl=document.getElementById('bc-steps-list');
@@ -3134,7 +3134,7 @@ function parseMgrBc(v){
         <span class="bc-seg bc-q">כמות: ${q.padEnd(3,'_')}</span><span class="bc-seg bc-col">צבע: ${COLORS[col]||col||'__'}</span></div>`;
   if(v.length===13){
     const prod=S.products.find(x=>x.cust===c&&x.prod===p);
-    const steps=prod?.taskSteps||[];
+    const steps=prod?.workSteps||[];
     if(steps.length){
       mgrShowTaskTypeField(false);
       const listEl=document.getElementById('mgr-steps-list');
@@ -3330,7 +3330,7 @@ function tsParseBc(v){
   // אם המוצר מוגדר עם שלבי עבודה — הצג checkboxes
   if(v.length===13){
     const prod=S.products.find(x=>x.cust===c&&x.prod===p);
-    const steps=prod?.taskSteps||[];
+    const steps=prod?.workSteps||[];
     if(steps.length){
       tsShowTaskTypeField(false);
       const listEl=document.getElementById('ts-steps-list');
@@ -5813,7 +5813,7 @@ function openProductModal(id){
     </div>
     ${renderStagesHtml(p)}
     <div class="sec" style="margin-top:14px;margin-bottom:8px">🔧 שלבי עבודה (לסורק)</div>
-    <div id="pm-tasksteps-list" style="margin-bottom:8px">${(p?.taskSteps||[]).map((s,i)=>`<div style="display:flex;align-items:center;gap:6px;margin-bottom:4px"><input type="text" value="${esc(s)}" data-tsi="${i}" style="flex:1;font-size:12px;padding:4px 8px;border-radius:6px;border:1px solid var(--brd);background:var(--card);color:var(--txt)"><button type="button" onclick="this.parentElement.remove()" style="background:none;border:none;color:var(--red);cursor:pointer;font-size:14px">✕</button></div>`).join('')}</div>
+    <div id="pm-tasksteps-list" style="margin-bottom:8px">${(p?.workSteps||[]).map((s,i)=>`<div style="display:flex;align-items:center;gap:6px;margin-bottom:4px"><input type="text" value="${esc(s)}" data-tsi="${i}" style="flex:1;font-size:12px;padding:4px 8px;border-radius:6px;border:1px solid var(--brd);background:var(--card);color:var(--txt)"><button type="button" onclick="this.parentElement.remove()" style="background:none;border:none;color:var(--red);cursor:pointer;font-size:14px">✕</button></div>`).join('')}</div>
     <button type="button" class="btn" onclick="addTaskStepRow()" style="font-size:12px">+ הוסף שלב עבודה</button>`;
   document.getElementById('prod-modal-wrap').classList.remove('hidden');
   _prodImgs=p?[...(p.images||[])]:[];
@@ -6061,7 +6061,7 @@ async function saveProduct(){
   });
   closeProdCamera();
   const {stageLog,stageSkipped}=readStagesFromModal();
-  const taskSteps=[...document.querySelectorAll('#pm-tasksteps-list input[type="text"]')].map(i=>i.value.trim()).filter(Boolean);
+  const workSteps=[...document.querySelectorAll('#pm-tasksteps-list input[type="text"]')].map(i=>i.value.trim()).filter(Boolean);
   if(_editProdId){
     const p=S.products.find(x=>x.id===_editProdId);
     if(p){
@@ -6075,11 +6075,11 @@ async function saveProduct(){
           sendTelegram('📦 TextileOps — מוצר עבר שלב ייצור\n🏷 מוצר: '+name+' ('+cust+'-'+prod+')\n📍 שלב: '+stageName+'\n📅 תאריך: '+s.date+' '+s.time+'\n🕐 עודכן: '+now).catch(()=>{});
         }
       }
-      Object.assign(p,{prod,cust,name,images:_prodImgs,docs:_prodDocs,quantities,stageLog,stageSkipped,taskSteps});
+      Object.assign(p,{prod,cust,name,images:_prodImgs,docs:_prodDocs,quantities,stageLog,stageSkipped,workSteps});
     }
   }else{
     const id='p'+Date.now();
-    S.products.push({id,prod,cust,name,images:_prodImgs,docs:_prodDocs,quantities,stageLog,stageSkipped,taskSteps});
+    S.products.push({id,prod,cust,name,images:_prodImgs,docs:_prodDocs,quantities,stageLog,stageSkipped,workSteps});
   }
   saveLS();
   if(S.fbConnected){
