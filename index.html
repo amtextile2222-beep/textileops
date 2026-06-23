@@ -3010,6 +3010,7 @@ async function initFCM(){
     onMessage(messaging,payload=>{
       const t=payload.notification?.title||'TextileOps';
       const b=payload.notification?.body||'';
+      playAlertSound();
       showToast('🔔 '+t+(b?'\n'+b:''),'var(--blue-txt)',5000);
     });
   }catch(e){console.error('initFCM error:',e);}
@@ -6948,7 +6949,7 @@ function cancelFaceReg(){
 
 /* ── AUTO UPDATE CHECK ── */
 (function(){
-  const CURRENT_VERSION = '20260623-2';
+  const CURRENT_VERSION = '20260623-3';
   const VERSION_URL = 'https://amtextile2222-beep.github.io/textileops/version.json';
   const CHECK_INTERVAL = 5 * 60 * 1000;
 
