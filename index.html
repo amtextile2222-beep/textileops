@@ -1889,6 +1889,7 @@ async function doLogin(){
   }
   S.user=w;
   listenWorkerMessages();
+  if(w.role!=='manager')setTimeout(()=>initWorkerFCM(w.id),3000);
   document.getElementById('login-screen').classList.add('hidden');
   document.getElementById('app-screen').classList.remove('hidden');
   document.getElementById('top-name').textContent=w.name;
@@ -2951,6 +2952,38 @@ function loadWaSettings(){
   const rp2=document.getElementById('st-round-preview2');if(rp2)rp2.textContent=s.roundMinutes??5;
 }
 /* ── PUSH NOTIFICATIONS (FCM) ── */
+async function initWorkerFCM(workerId){
+  try{
+    if(!('Notification' in window)||!('serviceWorker' in navigator))return;
+    if(!window._fbApp||!window._fbFunctions)return;
+    const pushSnap=await fbGet('appSettings','pushSettings');
+    if(!pushSnap?.vapidKey)return;
+    const perm=Notification.permission==='granted'?'granted':await Notification.requestPermission();
+    if(perm!=='granted')return;
+    const swReg=await navigator.serviceWorker.register('/textileops/firebase-messaging-sw.js');
+    const{getMessaging,getToken,onMessage}=window._fb;
+    const messaging=getMessaging(window._fbApp);
+    const token=await getToken(messaging,{vapidKey:pushSnap.vapidKey,serviceWorkerRegistration:swReg});
+    if(token){
+      const{doc,updateDoc}=window._fb;
+      await updateDoc(doc(db,'workers',workerId),{fcmToken:token});
+      console.log('FCM worker token saved ✅');
+    }
+    onMessage(messaging,payload=>{
+      const t=payload.notification?.title||'TextileOps';
+      const b=payload.notification?.body||'';
+      showToast('🔔 '+t+(b?'\n'+b:''),'var(--blue-txt)',5000);
+    });
+  }catch(e){console.error('initWorkerFCM error:',e);}
+}
+async function sendPushToWorker(workerId,title,body){
+  try{
+    if(!window._fbFunctions)return;
+    const{httpsCallable}=window._fb;
+    const fn=httpsCallable(window._fbFunctions,'sendPushToWorker');
+    await fn({workerId,title,body});
+  }catch(e){console.error('sendPushToWorker error:',e);}
+}
 async function initFCM(){
   try{
     if(!('Notification' in window)||!('serviceWorker' in navigator))return;
@@ -3586,6 +3619,7 @@ async function mgrSendMsg(wId,wName){
   const from=S.user?.name||'מנהל';
   try{
     await fbSet('workerMessages',wId,{msg:msg.trim(),from,ts:Date.now(),read:false});
+    sendPushToWorker(wId,'📢 הודעה מהמנהל',msg.trim()).catch(()=>{});
     showToast('✅ הודעה נשלחה ל'+wName,'var(--green-txt)');
   }catch(e){showToast('❌ שגיאה בשליחה','var(--red-txt)');}
 }
@@ -6914,7 +6948,7 @@ function cancelFaceReg(){
 
 /* ── AUTO UPDATE CHECK ── */
 (function(){
-  const CURRENT_VERSION = '20260623-1';
+  const CURRENT_VERSION = '20260623-2';
   const VERSION_URL = 'https://amtextile2222-beep.github.io/textileops/version.json';
   const CHECK_INTERVAL = 5 * 60 * 1000;
 

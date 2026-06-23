@@ -59,6 +59,77 @@ exports.sendPush = functions.https.onCall(async (data) => {
   }
 });
 
+// שליחת Push לעובד ספציפי
+exports.sendPushToWorker = functions.https.onCall(async (data) => {
+  const { workerId, title, body } = data;
+  try {
+    const workerSnap = await db.collection('workers').doc(workerId).get();
+    if (!workerSnap.exists) return { sent: false, reason: 'worker not found' };
+    const token = workerSnap.data().fcmToken;
+    if (!token) return { sent: false, reason: 'no fcm token' };
+    await admin.messaging().send({
+      token,
+      notification: { title, body },
+      android: { priority: 'high', notification: { sound: 'default', channelId: 'textileops' } },
+      webpush: { notification: { icon: 'https://amtextile2222-beep.github.io/textileops/icon-192.png', requireInteraction: true, vibrate: [200, 100, 200] } }
+    });
+    return { sent: true };
+  } catch (e) {
+    console.error('sendPushToWorker error:', e);
+    return { sent: false, error: e.message };
+  }
+});
+
+// בדיקת משימות ארוכות כל 5 דקות
+exports.longTaskMonitor = functions.pubsub.schedule('every 5 minutes').onRun(async () => {
+  try {
+    const settingsSnap = await db.collection('appSettings').doc('telegramSettings').get();
+    const thresh = settingsSnap.exists ? (settingsSnap.data().thresh || 60) : 60;
+    const threshMs = thresh * 60 * 1000;
+
+    const pushSnap = await db.collection('appSettings').doc('pushSettings').get();
+    const pushEnabled = pushSnap.exists && pushSnap.data().enabled;
+    const alertPrefs = pushSnap.exists ? (pushSnap.data().alertPrefs || {}) : {};
+    if (!pushEnabled || alertPrefs['task_long'] === false) return null;
+
+    const tasksSnap = await db.collection('activeTasks').get();
+    const now = Date.now();
+    for (const doc of tasksSnap.docs) {
+      const t = doc.data();
+      if (!t.startTime || !t.workerId) continue;
+      const start = new Date(t.startTime).getTime();
+      const elapsed = now - start;
+      if (elapsed < threshMs) continue;
+
+      // שלח רק פעם אחת — בדוק אם כבר שלחנו התראה
+      const alertKey = 'longAlert_' + doc.id;
+      const alertSnap = await db.collection('taskAlerts').doc(alertKey).get();
+      if (alertSnap.exists) continue;
+
+      const workerSnap = await db.collection('workers').doc(t.workerId).get();
+      if (!workerSnap.exists) continue;
+      const fcmToken = workerSnap.data().fcmToken;
+      if (!fcmToken) continue;
+
+      const mins = Math.round(elapsed / 60000);
+      await admin.messaging().send({
+        token: fcmToken,
+        notification: {
+          title: '⚠️ משימה ארוכה',
+          body: 'המשימה שלך פעילה כבר ' + mins + ' דקות'
+        },
+        android: { priority: 'high', notification: { sound: 'default', channelId: 'textileops' } },
+        webpush: { notification: { icon: 'https://amtextile2222-beep.github.io/textileops/icon-192.png', requireInteraction: true } }
+      });
+      await db.collection('taskAlerts').doc(alertKey).set({ sent: true, ts: now, taskId: doc.id });
+      console.log('longTaskMonitor: sent alert for task', doc.id);
+    }
+  } catch (e) {
+    console.error('longTaskMonitor error:', e);
+  }
+  return null;
+});
+
 // בדיקת WiFi כל 5 דקות
 exports.wifiMonitor = functions.pubsub.schedule('every 5 minutes').onRun(async () => {
   try {
