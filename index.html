@@ -3589,6 +3589,7 @@ async function tsStartTask(){
       S.activeTasks.push(task);
       if(S.fbConnected)await fbSet('activeTasks',String(task.id),{...task,startTime:task.startTime.toISOString()});
       tgTask(task,true);
+      if(w.pushPrefs?.task_assigned!==false)sendPushToWorker(w.id,'📋 משימה חדשה',`${task.prod}${tt?' · '+tt:''} · ${task.qty} יח'`).catch(()=>{});
     }
     saveLS();renderTasks();goPage('tasks');
     showToast('✅ '+(typesToCreate.length>1?typesToCreate.length+' משימות הותחלו':' משימה הותחלה')+' עבור '+w.name);
@@ -3620,7 +3621,8 @@ async function mgrSendMsg(wId,wName){
   const from=S.user?.name||'מנהל';
   try{
     await fbSet('workerMessages',wId,{msg:msg.trim(),from,ts:Date.now(),read:false});
-    sendPushToWorker(wId,'📢 הודעה מהמנהל',msg.trim()).catch(()=>{});
+    const wData=S.workers.find(x=>x.id===wId);
+    if(wData?.pushPrefs?.manager_msg!==false)sendPushToWorker(wId,'📢 הודעה מהמנהל',msg.trim()).catch(()=>{});
     showToast('✅ הודעה נשלחה ל'+wName,'var(--green-txt)');
   }catch(e){showToast('❌ שגיאה בשליחה','var(--red-txt)');}
 }
@@ -4032,10 +4034,20 @@ function openModal(action,id){
       </div>
       <div class="field" style="background:var(--bg2);border-radius:var(--r);padding:10px 12px;margin-top:8px" id="mf-push-box">
         <div style="font-size:12px;font-weight:600;color:var(--txt);margin-bottom:8px">🔔 התראות Push לעובד זה</div>
-        <label style="display:flex;align-items:center;gap:8px;font-size:13px;color:var(--txt);cursor:pointer">
-          <input type="checkbox" id="mf-push-long" ${(w?.pushPrefs?.task_long!==false)?'checked':''} style="width:auto;cursor:pointer"/>
-          ⚠️ התראה על משימה ארוכה
-        </label>
+        <div style="display:flex;flex-direction:column;gap:8px">
+          <label style="display:flex;align-items:center;gap:8px;font-size:13px;color:var(--txt);cursor:pointer">
+            <input type="checkbox" id="mf-push-long" ${(w?.pushPrefs?.task_long!==false)?'checked':''} style="width:auto;cursor:pointer"/>
+            ⚠️ התראה על משימה ארוכה
+          </label>
+          <label style="display:flex;align-items:center;gap:8px;font-size:13px;color:var(--txt);cursor:pointer">
+            <input type="checkbox" id="mf-push-msg" ${(w?.pushPrefs?.manager_msg!==false)?'checked':''} style="width:auto;cursor:pointer"/>
+            💬 הודעה ממנהל
+          </label>
+          <label style="display:flex;align-items:center;gap:8px;font-size:13px;color:var(--txt);cursor:pointer">
+            <input type="checkbox" id="mf-push-task" ${(w?.pushPrefs?.task_assigned!==false)?'checked':''} style="width:auto;cursor:pointer"/>
+            📋 שיוך משימה חדשה
+          </label>
+        </div>
         ${w?.fcmToken?'<div style="font-size:11px;color:var(--green-txt);margin-top:6px">✅ טלפון רשום לקבלת Push</div>':'<div style="font-size:11px;color:var(--txt3);margin-top:6px">⚪ טלפון לא רשום עדיין</div>'}
       </div>
       <div class="field" id="mf-perms-box" style="display:${wRole==='manager'?'none':'block'}">
@@ -4275,7 +4287,7 @@ async function confirmModal(){
     if(w){w.name=name;w.dept=dept;w.role=role;w.user=user;w.permissions=perms;
     w.requireFactoryIP=!!document.getElementById('mf-require-ip')?.checked;
     w.faceAuth=!!document.getElementById('mf-face-auth')?.checked;
-    w.pushPrefs={task_long:!!document.getElementById('mf-push-long')?.checked};
+    w.pushPrefs={task_long:!!document.getElementById('mf-push-long')?.checked,manager_msg:!!document.getElementById('mf-push-msg')?.checked,task_assigned:!!document.getElementById('mf-push-task')?.checked};
     if(pass)w.pass=hashPass(pass);
     if(S.fbConnected)await fbSet('workers',w.id,w);}
   }
