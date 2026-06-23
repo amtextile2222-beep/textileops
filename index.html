@@ -601,6 +601,37 @@ code{background:var(--bg2);border:0.5px solid var(--b);border-radius:4px;padding
         <button class="btn primary" onclick="testWhatsApp()">🧪 שלח הודעת בדיקה</button>
         <span id="wa-status" style="font-size:12px;color:var(--txt3)"></span>
       </div>
+
+      <!-- PUSH NOTIFICATIONS -->
+      <div style="margin-top:1rem;padding-top:1rem;border-top:1px solid var(--brd)">
+        <div class="sec" style="margin-bottom:8px">🔔 התראות Push (דפדפן / טלפון)</div>
+        <label style="display:flex;align-items:center;gap:8px;margin-bottom:10px;cursor:pointer;font-size:13px">
+          <input type="checkbox" id="push-enabled" onchange="savePushSettings()" style="width:16px;height:16px"/>
+          הפעל התראות Push
+        </label>
+        <div class="field" style="margin-bottom:8px">
+          <label style="font-size:12px">VAPID Public Key <span style="color:var(--txt3)">(Firebase Console → Project Settings → Cloud Messaging → Web Push certificates)</span></label>
+          <input id="push-vapid" type="text" placeholder="BNt7..." dir="ltr" style="font-family:monospace;font-size:11px" oninput="savePushSettings()"/>
+        </div>
+        <div style="margin-bottom:10px">
+          <div style="font-size:12px;font-weight:600;margin-bottom:6px;color:var(--txt2)">אילו התראות לשלוח ב-Push:</div>
+          <div style="display:grid;grid-template-columns:1fr 1fr;gap:4px">
+            <label style="display:flex;align-items:center;gap:6px;font-size:12px;cursor:pointer"><input type="checkbox" id="push-punch_in" onchange="savePushSettings()" style="width:14px;height:14px"> ✅ כניסה לעבודה</label>
+            <label style="display:flex;align-items:center;gap:6px;font-size:12px;cursor:pointer"><input type="checkbox" id="push-punch_out" onchange="savePushSettings()" style="width:14px;height:14px"> 🚪 יציאה מהעבודה</label>
+            <label style="display:flex;align-items:center;gap:6px;font-size:12px;cursor:pointer"><input type="checkbox" id="push-task_start" onchange="savePushSettings()" style="width:14px;height:14px"> 🔧 התחלת משימה</label>
+            <label style="display:flex;align-items:center;gap:6px;font-size:12px;cursor:pointer"><input type="checkbox" id="push-task_end" onchange="savePushSettings()" style="width:14px;height:14px"> ✅ סיום משימה</label>
+            <label style="display:flex;align-items:center;gap:6px;font-size:12px;cursor:pointer"><input type="checkbox" id="push-task_long" onchange="savePushSettings()" style="width:14px;height:14px"> ⚠️ משימה ארוכה</label>
+            <label style="display:flex;align-items:center;gap:6px;font-size:12px;cursor:pointer"><input type="checkbox" id="push-wifi_out" onchange="savePushSettings()" style="width:14px;height:14px"> 📡 ניתוק WiFi</label>
+          </div>
+        </div>
+        <div style="display:flex;align-items:center;gap:10px;flex-wrap:wrap">
+          <button class="btn primary" onclick="savePushSettings();initFCM()">📱 רשום מכשיר זה</button>
+          <button class="btn" onclick="testPush()">🧪 שלח בדיקת Push</button>
+          <span id="push-status" style="font-size:12px;color:var(--txt3)"></span>
+        </div>
+        <div id="push-devices" style="margin-top:8px;font-size:11px;color:var(--txt3)"></div>
+      </div>
+
       <div style="margin-top:1rem;padding-top:1rem;border-top:0.5px solid var(--b);display:flex;align-items:center;gap:12px;flex-wrap:wrap">
         <div>
           <div style="font-size:13px;font-weight:600;margin-bottom:4px">💾 גיבוי ידני</div>
@@ -1124,7 +1155,9 @@ code{background:var(--bg2);border:0.5px solid var(--b);border-radius:4px;padding
 import{initializeApp}from'https://www.gstatic.com/firebasejs/10.12.0/firebase-app.js';
 import{getFirestore,collection,doc,getDoc,setDoc,onSnapshot,query,orderBy,limit,serverTimestamp,deleteDoc,updateDoc,runTransaction}from'https://www.gstatic.com/firebasejs/10.12.0/firebase-firestore.js';
 import{getAuth,signInAnonymously}from'https://www.gstatic.com/firebasejs/10.12.0/firebase-auth.js';
-window._fb={initializeApp,getFirestore,collection,doc,getDoc,setDoc,onSnapshot,query,orderBy,limit,serverTimestamp,deleteDoc,updateDoc,runTransaction,getAuth,signInAnonymously};
+import{getMessaging,getToken,onMessage}from'https://www.gstatic.com/firebasejs/10.12.0/firebase-messaging.js';
+import{getFunctions,httpsCallable}from'https://www.gstatic.com/firebasejs/10.12.0/firebase-functions.js';
+window._fb={initializeApp,getFirestore,collection,doc,getDoc,setDoc,onSnapshot,query,orderBy,limit,serverTimestamp,deleteDoc,updateDoc,runTransaction,getAuth,signInAnonymously,getMessaging,getToken,onMessage,getFunctions,httpsCallable};
 window._fbReady=true;
 document.dispatchEvent(new Event('fbSDKReady'));
 </script>
@@ -1276,15 +1309,18 @@ async function connectFirebase(){
 async function initFb(){
   if(!window._fbReady){await new Promise(res=>document.addEventListener('fbSDKReady',res,{once:true}));}
   if(!fbConfig)throw new Error('אין Firebase Config');
-  const{initializeApp,getFirestore,getAuth,signInAnonymously}=window._fb;
+  const{initializeApp,getFirestore,getAuth,signInAnonymously,getFunctions}=window._fb;
   const app=initializeApp(fbConfig,'txops3');
   // התחברות אנונימית — timeout של 8 שניות למניעת תקיעה
   try{await Promise.race([signInAnonymously(getAuth(app)),new Promise((_,r)=>setTimeout(()=>r(new Error('auth timeout')),8000))]);}catch(e){console.error('Anonymous auth failed:',e);}
   db=getFirestore(app);
+  window._fbApp=app;
+  window._fbFunctions=getFunctions(app);
   S.fbConnected=true;
   setFbStatus('ok','✅ Firebase מחובר');
   listenFb();
   listenWorkerMessages();
+  initFCM();
 }
 
 function listenFb(){
@@ -1918,7 +1954,7 @@ function renderAll(){
   if(id==='mgrtasks')renderMgrTasks();
   if(id==='taskscan')renderTsScan();
   if(id==='attrep')initAttRep();
-  if(id==='alerts'){checkAlerts();renderAlerts();loadWaSettings();}
+  if(id==='alerts'){checkAlerts();renderAlerts();loadWaSettings();loadPushSettings();}
   if(id==='expenses')renderExpenses();
 }
 
@@ -2914,6 +2950,56 @@ function loadWaSettings(){
   const rp=document.getElementById('st-round-preview');if(rp)rp.textContent=s.roundMinutes??5;
   const rp2=document.getElementById('st-round-preview2');if(rp2)rp2.textContent=s.roundMinutes??5;
 }
+/* ── PUSH NOTIFICATIONS (FCM) ── */
+async function initFCM(){
+  try{
+    if(!('Notification' in window)||!('serviceWorker' in navigator))return;
+    if(!window._fbApp||!window._fbFunctions)return;
+    const pushSnap=await fbGet('appSettings','pushSettings');
+    if(!pushSnap?.enabled)return;
+    const vapidKey=pushSnap.vapidKey||'';
+    if(!vapidKey){console.warn('FCM: vapidKey חסר בהגדרות');return;}
+    const perm=Notification.permission==='granted'?'granted':await Notification.requestPermission();
+    if(perm!=='granted')return;
+    const swReg=await navigator.serviceWorker.register('/textileops/firebase-messaging-sw.js');
+    const{getMessaging,getToken,onMessage}=window._fb;
+    const messaging=getMessaging(window._fbApp);
+    const token=await getToken(messaging,{vapidKey,serviceWorkerRegistration:swReg});
+    if(token){
+      // שמור טוקן עם מפתח ייחודי לדפדפן זה
+      const deviceKey='dev_'+btoa(token.slice(-16)).replace(/[^a-zA-Z0-9]/g,'').slice(0,12);
+      const tokens=(pushSnap.tokens||{});
+      tokens[deviceKey]=token;
+      await fbSetMerge('appSettings','pushSettings',{tokens,lastRegistered:new Date().toISOString()});
+      console.log('FCM: טוקן נרשם ✅');
+    }
+    // הודעות בזמן שהאפליקציה פתוחה
+    onMessage(messaging,payload=>{
+      const t=payload.notification?.title||'TextileOps';
+      const b=payload.notification?.body||'';
+      showToast('🔔 '+t+(b?'\n'+b:''),'var(--blue-txt)',5000);
+    });
+  }catch(e){console.error('initFCM error:',e);}
+}
+async function sendPush(title,body,alertType){
+  try{
+    if(!window._fbFunctions)return;
+    const{httpsCallable}=window._fb;
+    const fn=httpsCallable(window._fbFunctions,'sendPush');
+    await fn({title,body,alertType});
+  }catch(e){console.error('sendPush error:',e);}
+}
+async function fbSetMerge(col,docId,data){
+  if(!db)return;
+  const{doc,setDoc}=window._fb;
+  await setDoc(doc(db,col,docId),data,{merge:true});
+}
+async function fbGet(col,docId){
+  if(!db)return null;
+  const{doc,getDoc}=window._fb;
+  const snap=await getDoc(doc(db,col,docId));
+  return snap.exists()?snap.data():null;
+}
 async function sendTelegram(message){
   const token=(S.settings.waToken||document.getElementById('wa-token')?.value||'').trim();
   const chatId=(S.settings.waChatId||document.getElementById('wa-chatid')?.value||'1019589316').trim();
@@ -2925,7 +3011,9 @@ async function sendTelegram(message){
 }
 function tgPunch(name,dept,isIn,time){
   const ts=pad2(time.getHours())+':'+pad2(time.getMinutes());
-  sendTelegram((isIn?'✅ כניסה לעבודה':'🚪 יציאה מהעבודה')+'\n👤 עובד: '+name+'\n🏭 מחלקה: '+dept+'\n🕐 שעה: '+ts).catch(()=>{});
+  const title=isIn?'✅ כניסה לעבודה':'🚪 יציאה מהעבודה';
+  sendTelegram(title+'\n👤 עובד: '+name+'\n🏭 מחלקה: '+dept+'\n🕐 שעה: '+ts).catch(()=>{});
+  sendPush(title,name+' · '+dept+' · '+ts, isIn?'punch_in':'punch_out').catch(()=>{});
 }
 function tgTask(task,isStart,endTime){
   const custName=(S.customerNames&&S.customerNames[task.cust])||task.cust;
@@ -2937,6 +3025,46 @@ function tgTask(task,isStart,endTime){
   msg+='\n🕐 שעה: '+ts;
   if(!isStart&&endTime){const dur=Math.round((endTime-st)/60000);msg+='\n⏱ משך: '+dur+' דק\'';}
   sendTelegram(msg).catch(()=>{});
+  const title=isStart?'🔧 התחלת משימה':'✅ סיום משימה';
+  const pushBody=task.workerName+' · '+task.prod+(task.taskType?' · '+task.taskType:'')+' · '+ts;
+  sendPush(title,pushBody,isStart?'task_start':'task_end').catch(()=>{});
+}
+async function savePushSettings(){
+  const enabled=document.getElementById('push-enabled')?.checked||false;
+  const vapidKey=(document.getElementById('push-vapid')?.value||'').trim();
+  const alertTypes=['punch_in','punch_out','task_start','task_end','task_long','wifi_out'];
+  const alertPrefs={};
+  alertTypes.forEach(t=>{alertPrefs[t]=document.getElementById('push-'+t)?.checked||false;});
+  if(S.fbConnected){
+    await fbSetMerge('appSettings','pushSettings',{enabled,vapidKey,alertPrefs,updatedAt:new Date().toISOString()});
+  }
+  const st=document.getElementById('push-status');
+  if(st){st.textContent='✅ נשמר';st.style.color='var(--green-txt)';setTimeout(()=>st.textContent='',2000);}
+}
+async function loadPushSettings(){
+  if(!S.fbConnected)return;
+  const data=await fbGet('appSettings','pushSettings');
+  if(!data)return;
+  const set=(id,val)=>{const el=document.getElementById(id);if(el)el.checked=!!val;};
+  const setVal=(id,val)=>{const el=document.getElementById(id);if(el)el.value=val||'';};
+  set('push-enabled',data.enabled);
+  setVal('push-vapid',data.vapidKey||'');
+  const prefs=data.alertPrefs||{};
+  ['punch_in','punch_out','task_start','task_end','task_long','wifi_out'].forEach(t=>set('push-'+t,prefs[t]!==false));
+  // הצג מספר מכשירים רשומים
+  const devCount=Object.keys(data.tokens||{}).length;
+  const devEl=document.getElementById('push-devices');
+  if(devEl&&devCount>0)devEl.textContent='📱 '+devCount+' מכשיר'+(devCount>1?'ים':'')+' רשום'+(devCount>1?'ים':'');
+}
+async function testPush(){
+  const st=document.getElementById('push-status');
+  if(st){st.textContent='שולח...';st.style.color='var(--amber-txt)';}
+  try{
+    await sendPush('🧪 בדיקת TextileOps','Push Notifications עובד! ✅','test');
+    if(st){st.textContent='✅ נשלח!';st.style.color='var(--green-txt)';setTimeout(()=>st.textContent='',3000);}
+  }catch(e){
+    if(st){st.textContent='❌ שגיאה: '+e.message;st.style.color='var(--red-txt)';}
+  }
 }
 async function testWhatsApp(){
   saveSettings();
