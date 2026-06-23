@@ -1,4 +1,4 @@
-﻿<!DOCTYPE html>
+<!DOCTYPE html>
 <html lang="he" dir="rtl">
 <head>
 <meta charset="UTF-8"/>
@@ -1653,7 +1653,7 @@ async function sendDailyAttReport(){
     const chatId=(S.settings.waChatId||'').trim();
     if(!token||!chatId)return;
     // בניית CSV
-    const BOM='﻿'; // UTF-8 BOM
+    const BOM='﻿';
     let csv=BOM+'sep=,\n'+'שם,מחלקה,תפקיד,כניסה,יציאה,שעות נטו,סטטוס\n';
     present.forEach(w=>{
       const ci=fmtTime(w.checkin);
