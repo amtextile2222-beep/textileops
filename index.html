@@ -1963,7 +1963,7 @@ async function runDailyReset(){
   const lastDate=localStorage.getItem('txops3_lastdate');
   const today=todayStr();
   if(lastDate&&lastDate!==today){
-    S.workers.forEach(w=>{
+    for(const w of S.workers){
       // בדוק אם ל-session יש תאריך ישן (מ-localStorage) — רק אז כותבים ל-Firebase
       const firstIn=w.sessions?.[0]?.in||w.checkin;
       const sessionDay=firstIn?firstIn.slice(0,10):null;
@@ -1982,7 +1982,7 @@ async function runDailyReset(){
       }
       w.status='out';w.checkin=null;w.checkout=null;w.sessions=[];
       // אל תכתוב ל-Firebase — listenFb() מקבל נתונים טריים ומטפל באיפוס בצורה בטוחה
-    });
+    }
     S.activeTasks.forEach(t=>{
       const endTime=new Date(lastDate+'T23:59:59');
       const done={...t,endTime,duration:Math.round((endTime-new Date(t.startTime))/1000)};
