@@ -1959,7 +1959,7 @@ function migratePasswords(){
 }
 
 // ─── DAILY RESET ─────────────────────────────────────────────
-function runDailyReset(){
+async function runDailyReset(){
   const lastDate=localStorage.getItem('txops3_lastdate');
   const today=todayStr();
   if(lastDate&&lastDate!==today){
@@ -1974,7 +1974,11 @@ function runDailyReset(){
           sessions,checkin:sessions[0]?.in||w.checkin,checkout:null,
           breakStart:w.breakStart||'',breakEnd:w.breakEnd||'',breakActive:!!w.breakActive,netMs:calcNetWork(w)};
         S.attHistory.unshift(rec);
-        if(S.fbConnected)fbSet('attHistory',w.id+'_'+lastDate,rec);
+        if(S.fbConnected){
+          // בדוק אם קיימת רשומה עם checkout — אם כן, אל תדרוס
+          const existRec=await fbGet('attHistory',w.id+'_'+lastDate);
+          if(!existRec||!existRec.checkout){fbSet('attHistory',w.id+'_'+lastDate,rec);}
+        }
       }
       w.status='out';w.checkin=null;w.checkout=null;w.sessions=[];
       // אל תכתוב ל-Firebase — listenFb() מקבל נתונים טריים ומטפל באיפוס בצורה בטוחה
