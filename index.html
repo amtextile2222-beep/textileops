@@ -2295,8 +2295,8 @@ async function doLogin(){
   listenMgrInbox();
   if(w.role==='worker'||w.role==='helper')document.getElementById('worker-send-msg-bar').style.display='block';
   if(w.role!=='manager'){
-    if(Notification.permission==='granted'){initWorkerFCM(w.id);}
-    else if(Notification.permission!=='denied'){document.getElementById('worker-notif-bar').style.display='block';}
+    if(typeof Notification!=='undefined'&&Notification.permission==='granted'){initWorkerFCM(w.id);}
+    else if(typeof Notification!=='undefined'&&Notification.permission!=='denied'){document.getElementById('worker-notif-bar').style.display='block';}
   }
   document.getElementById('login-screen').classList.add('hidden');
   document.getElementById('app-screen').classList.remove('hidden');
