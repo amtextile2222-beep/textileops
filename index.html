@@ -459,6 +459,9 @@ code{background:var(--bg2);border:0.5px solid var(--b);border-radius:4px;padding
     <div id="worker-send-msg-bar" style="display:none;margin-bottom:10px">
       <button class="btn full" style="font-size:13px;padding:10px;justify-content:center;gap:8px" onclick="workerSendMsg()">📢 שלח הודעה לאחראי / מנהל</button>
     </div>
+    <div id="worker-notif-bar" style="display:none;margin-bottom:10px">
+      <button class="btn full" style="font-size:13px;padding:10px;justify-content:center;gap:8px;background:var(--green-bg,#e8f5e9);color:var(--green-txt,#2e7d32)" onclick="workerEnableNotif()">🔔 הפעל התראות Push</button>
+    </div>
     <div class="g4" style="margin-bottom:1rem">
       <div class="card"><div class="mlbl" data-i18n="tasks_active">פעילות</div><div class="mval" id="tk-act">0</div></div>
       <div class="card"><div class="mlbl" data-i18n="tasks_done">הושלמו</div><div class="mval" id="tk-done">0</div></div>
@@ -2291,7 +2294,10 @@ async function doLogin(){
   listenWorkerMessages();
   listenMgrInbox();
   if(w.role==='worker'||w.role==='helper')document.getElementById('worker-send-msg-bar').style.display='block';
-  if(w.role!=='manager')setTimeout(()=>initWorkerFCM(w.id),3000);
+  if(w.role!=='manager'){
+    if(Notification.permission==='granted'){initWorkerFCM(w.id);}
+    else if(Notification.permission!=='denied'){document.getElementById('worker-notif-bar').style.display='block';}
+  }
   document.getElementById('login-screen').classList.add('hidden');
   document.getElementById('app-screen').classList.remove('hidden');
   document.getElementById('top-name').textContent=w.name;
@@ -3355,6 +3361,14 @@ function loadWaSettings(){
   const rp2=document.getElementById('st-round-preview2');if(rp2)rp2.textContent=s.roundMinutes??5;
 }
 /* ── PUSH NOTIFICATIONS (FCM) ── */
+async function workerEnableNotif(){
+  const w=S.user;
+  if(!w)return;
+  document.getElementById('worker-notif-bar').style.display='none';
+  await initWorkerFCM(w.id);
+  if(Notification.permission==='granted')showToast('✅ התראות הופעלו!','var(--green-txt)',3000);
+  else showToast('❌ לא אושרו התראות','var(--red-txt)',3000);
+}
 async function initWorkerFCM(workerId){
   try{
     if(!('Notification' in window)||!('serviceWorker' in navigator))return;
@@ -6679,6 +6693,10 @@ function _completeFaceAuth(success){
     listenWorkerMessages();
     listenMgrInbox();
     if(w.role==='worker'||w.role==='helper')document.getElementById('worker-send-msg-bar').style.display='block';
+    if(w.role!=='manager'){
+      if(Notification.permission==='granted'){initWorkerFCM(w.id);}
+      else if(Notification.permission!=='denied'){document.getElementById('worker-notif-bar').style.display='block';}
+    }
     document.getElementById('app-screen').classList.remove('hidden');
     document.getElementById('top-name').textContent=w.name;
     document.getElementById('top-role').textContent=w.role==='manager'?'מנהל':w.role==='supervisor'?'אחראי':w.role==='helper'?'עוזר':'עובד';
