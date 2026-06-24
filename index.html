@@ -2805,7 +2805,7 @@ async function submitBc(){
   if(!S.user){alert('יש להתחבר תחילה');return;}
   const cust=raw.slice(0,2),prod=raw.slice(2,7),size=raw.slice(7,8),col=raw.slice(11,13);
   const isTotal=isTotalBc(raw);
-  if(isTotal&&productHasDefinedQty(cust,prod)){showToast('⚠ קיים ברקוד עם כמות למוצר זה — השתמש בברקוד הספציפי','var(--red-txt)',6000);return;}
+  if(!isTotal&&parseInt(raw.slice(8,11))===0&&productHasDefinedQty(cust,prod)){showToast('⚠ קיים ברקוד עם כמות למוצר זה — השתמש בברקוד הספציפי','var(--red-txt)',6000);return;}
   const qty=isTotal?getTotalQty(cust,prod):parseInt(raw.slice(8,11))||0;
   const bcStepsWrap=document.getElementById('bc-steps-wrap');
   const bcUseSteps=bcStepsWrap&&bcStepsWrap.style.display!=='none';
@@ -3969,7 +3969,7 @@ async function tsStartTask(){
   if(!w||w.status!=='in'){showToast(T.cfm_worker_not_in||'⚠ העובד לא נמצא בעבודה — וודא שחתם כניסה','var(--red-txt)',5000);return;}
   const cust=raw.slice(0,2),prod=raw.slice(2,7),size=raw.slice(7,8),col=raw.slice(11,13);
   const isTotal=isTotalBc(raw);
-  if(isTotal&&productHasDefinedQty(cust,prod)){showToast('⚠ קיים ברקוד עם כמות למוצר זה — השתמש בברקוד הספציפי','var(--red-txt)',6000);return;}
+  if(!isTotal&&parseInt(raw.slice(8,11))===0&&productHasDefinedQty(cust,prod)){showToast('⚠ קיים ברקוד עם כמות למוצר זה — השתמש בברקוד הספציפי','var(--red-txt)',6000);return;}
   const qty=isTotal?getTotalQty(cust,prod):parseInt(raw.slice(8,11))||0;
   const stepsWrap=document.getElementById('ts-steps-wrap');
   const useSteps=stepsWrap&&stepsWrap.style.display!=='none';
@@ -4243,7 +4243,7 @@ async function mgrStartTask(){
   if(!w||w.status!=='in'){showToast(T.cfm_worker_not_in||'⚠ העובד לא נמצא בעבודה — וודא שחתם כניסה','var(--red-txt)',5000);return;}
   const cust=raw.slice(0,2),prod=raw.slice(2,7),size=raw.slice(7,8),col=raw.slice(11,13);
   const isTotal=isTotalBc(raw);
-  if(isTotal&&productHasDefinedQty(cust,prod)){showToast('⚠ קיים ברקוד עם כמות למוצר זה — השתמש בברקוד הספציפי','var(--red-txt)',6000);return;}
+  if(!isTotal&&parseInt(raw.slice(8,11))===0&&productHasDefinedQty(cust,prod)){showToast('⚠ קיים ברקוד עם כמות למוצר זה — השתמש בברקוד הספציפי','var(--red-txt)',6000);return;}
   const qty=isTotal?getTotalQty(cust,prod):parseInt(raw.slice(8,11))||0;
   const mgrStepsWrap=document.getElementById('mgr-steps-wrap');
   const mgrUseSteps=mgrStepsWrap&&mgrStepsWrap.style.display!=='none';
