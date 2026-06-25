@@ -761,7 +761,8 @@ code{background:var(--bg2);border:0.5px solid var(--b);border-radius:4px;padding
           <button class="btn primary full" onclick="mgrStartCam()" id="mgr-cam-btn" style="font-size:13px;padding:10px;margin-bottom:8px">📷 סרוק עם מצלמה</button>
           <input id="mgr-bc-inp" class="bc-inp" maxlength="13" placeholder="או הזן 13 ספרות ידנית..." oninput="parseMgrBc(this.value)"/>
         </div><!-- /field barcode -->
-        <div id="mgr-bc-prev" style="margin-bottom:.75rem;min-height:30px"></div>
+        <div id="mgr-bc-prev" style="margin-bottom:.5rem;min-height:30px"></div>
+        <div id="mgr-batch-queue" style="margin-bottom:.75rem"></div>
         <div class="field" id="mgr-tasktype-wrap">
           <label data-i18n="lbl_task_type">סוג משימה</label>
           <input id="mgr-tasktype" type="text" placeholder="לדוגמה: תפירה, חיתוך, גימור..." data-i18n-ph="ph_task_type" style="font-size:13px"/>
@@ -774,7 +775,8 @@ code{background:var(--bg2);border:0.5px solid var(--b);border-radius:4px;padding
           <label data-i18n="lbl_dept">מחלקה</label>
           <select id="mgr-dept" style="font-size:13px"><option value="">-- בחר מחלקה --</option></select>
         </div>
-        <button class="btn success full" onclick="mgrStartTask()" data-i18n="btn_start_task">▶ התחל משימה לעובד</button>
+        <button class="btn full" style="margin-bottom:6px;background:#dbeafe;color:#1d4ed8;font-size:13px;padding:10px" onclick="mgrAddToBatch()">➕ הוסף לסל (ברקוד נוסף)</button>
+        <button class="btn success full" onclick="mgrStartTask()" data-i18n="btn_start_task">▶ התחל עבודה</button>
         <div id="mgr-start-msg" style="font-size:12px;margin-top:6px;min-height:16px"></div>
       </div><!-- /card start-task -->
       <div class="card">
@@ -815,7 +817,8 @@ code{background:var(--bg2);border:0.5px solid var(--b);border-radius:4px;padding
         <button class="btn primary full" onclick="tsStartCam()" id="ts-cam-btn" style="font-size:13px;padding:10px;margin-bottom:8px">📷 סרוק עם מצלמה</button>
         <input id="ts-bc-inp" class="bc-inp" maxlength="13" placeholder="או הזן 13 ספרות ידנית..." oninput="tsParseBc(this.value)"/>
       </div>
-      <div id="ts-bc-prev" style="margin-bottom:.75rem;min-height:30px"></div>
+      <div id="ts-bc-prev" style="margin-bottom:.5rem;min-height:30px"></div>
+      <div id="ts-batch-queue" style="margin-bottom:.75rem"></div>
       <div class="field" id="ts-tasktype-wrap">
         <label data-i18n="lbl_task_type">סוג משימה</label>
         <input id="ts-tasktype" type="text" placeholder="לדוגמה: תפירה, חיתוך, גימור..." data-i18n-ph="ph_task_type" style="font-size:13px"/>
@@ -828,7 +831,8 @@ code{background:var(--bg2);border:0.5px solid var(--b);border-radius:4px;padding
         <label data-i18n="lbl_dept">מחלקה</label>
         <select id="ts-dept" style="font-size:13px"><option value="">-- בחר מחלקה --</option></select>
       </div>
-      <button class="btn success full" onclick="tsStartTask()" data-i18n="btn_start_task">▶ התחל משימה לעובד</button>
+      <button class="btn full" style="margin-bottom:6px;background:#dbeafe;color:#1d4ed8;font-size:13px;padding:10px" onclick="tsAddToBatch()">➕ הוסף לסל (ברקוד נוסף)</button>
+      <button class="btn success full" onclick="tsStartTask()" data-i18n="btn_start_task">▶ התחל עבודה</button>
       <button class="btn full" style="margin-top:6px;font-size:13px;padding:10px;justify-content:center;gap:8px" onclick="tsSendMsgToWorker()">📢 שלח הודעה לעובד הנבחר</button>
       <div id="ts-start-msg" style="font-size:12px;margin-top:6px;min-height:16px"></div>
     </div>
@@ -1631,7 +1635,7 @@ let S={
   activeTasks:[],
   histTasks:[],
   alerts:[],
-  settings:{thresh:60,absent:5,waEnabled:false,waToken:'',waChatId:'',waInterval:60,waFrom:'07:00',waTo:'18:00',waLong:true,waAbsent:true,factoryIP:'188.225.231.120',shiftStart:'06:30',shiftEnd:'15:00',roundMinutes:5},
+  settings:{thresh:60,absent:5,waEnabled:false,waToken:'',waChatId:'',waInterval:60,waFrom:'07:00',waTo:'18:00',waLong:true,waAbsent:true,factoryIP:'188.225.231.120',shiftStart:'06:30',shiftEnd:'15:00',roundMinutes:5,endOfDayTime:'15:05'},
   waLastSent:0,
   wifiAlertSent:{},
   tgSentAlerts:{},
@@ -1782,14 +1786,14 @@ function listenFb(){
     if(!snap.metadata.fromCache){
       const today=todayStr();
       const localDate=t=>{const d=t.startTime instanceof Date?t.startTime:new Date(t.startTime);return d.getFullYear()+'-'+pad2(d.getMonth()+1)+'-'+pad2(d.getDate());};
-      const stale=S.activeTasks.filter(t=>localDate(t)<today);
+      const stale=S.activeTasks.filter(t=>localDate(t)<today&&!t.paused);
       stale.forEach(t=>{
         const d=t.startTime instanceof Date?t.startTime:new Date(t.startTime);
-        const endTime=new Date(d.getFullYear(),d.getMonth(),d.getDate(),23,59,59);
-        const done={...t,endTime,duration:Math.round((endTime-d)/1000)};
-        S.histTasks.unshift(done);
-        fbDel('activeTasks',String(t.id));
-        fbSet('histTasks',String(t.id),{...done,startTime:d.toISOString(),endTime:endTime.toISOString()});
+        const pausedAt=new Date(d.getFullYear(),d.getMonth(),d.getDate(),23,59,59);
+        t.paused=true;t.pausedAt=pausedAt.toISOString();
+        t.accumulatedSec=(t.accumulatedSec||0)+calcTaskDurSec(d,pausedAt,t.workerId);
+        t.elapsed=t.accumulatedSec;
+        fbSet('activeTasks',String(t.id),{...t,startTime:d.toISOString()});
       });
       if(stale.length){S.activeTasks=S.activeTasks.filter(t=>!stale.includes(t));saveLS();}
     }
@@ -1983,16 +1987,7 @@ async function runDailyReset(){
       w.status='out';w.checkin=null;w.checkout=null;w.sessions=[];
       // אל תכתוב ל-Firebase — listenFb() מקבל נתונים טריים ומטפל באיפוס בצורה בטוחה
     }
-    S.activeTasks.forEach(t=>{
-      const endTime=new Date(lastDate+'T23:59:59');
-      const done={...t,endTime,duration:Math.round((endTime-new Date(t.startTime))/1000)};
-      S.histTasks.unshift(done);
-      if(S.fbConnected){
-        fbDel('activeTasks',String(t.id));
-        fbSet('histTasks',String(t.id),{...done,startTime:done.startTime instanceof Date?done.startTime.toISOString():done.startTime,endTime:endTime.toISOString()});
-      }
-    });
-    S.activeTasks=[];
+    // משימות נעצרות רק ביציאה — runDailyReset לא סוגר משימות
     S.tgSentAlerts={};
     S.tgAbsentSig='';
     saveLS();
@@ -2013,6 +2008,23 @@ function scheduleMidnightReset(){
   },msUntil);
 }
 scheduleMidnightReset();
+function scheduleEndOfDayAlert(){
+  const time=S.settings.endOfDayTime||'15:05';
+  const[h,m]=time.split(':').map(Number);
+  const now=new Date();
+  let next=new Date(now.getFullYear(),now.getMonth(),now.getDate(),h,m,0);
+  if(next<=now)next.setDate(next.getDate()+1);
+  setTimeout(async()=>{
+    const stillIn=S.workers.filter(w=>w.status==='in');
+    if(stillIn.length>0){
+      const names=stillIn.map(w=>w.name+' ('+w.dept+')').join(', ');
+      const token=localStorage.getItem('txops_tg_token');const chatId=localStorage.getItem('txops_tg_chatid');
+      if(token&&chatId){fetch('https://api.telegram.org/bot'+token+'/sendMessage',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({chat_id:chatId,text:`⚠️ שעת סיום עבודה ${time} — לא חתמו יציאה:\n${names}`})}).catch(()=>{});}
+    }
+    scheduleEndOfDayAlert();
+  },next-now);
+}
+scheduleEndOfDayAlert();
 
 // ─── דוח נוכחות יומי ב-15:15 ──────────────────────────────
 async function sendDailyAttReport(){
@@ -2620,13 +2632,7 @@ async function punchOut(){
   w.sessions[openIdx].out=now.toISOString();
   w.status='out';
   w.checkout=now.toISOString();
-  const myTasks=S.activeTasks.filter(t=>t.workerId===w.id);
-  for(const t of myTasks){
-    const done={...t,endTime:now,duration:Math.round((now-new Date(t.startTime))/1000)};
-    S.histTasks.unshift(done);
-    S.activeTasks=S.activeTasks.filter(x=>x.id!==t.id);
-    if(S.fbConnected){await fbDel('activeTasks',String(t.id));await fbSet('histTasks',String(t.id),{...done,startTime:done.startTime instanceof Date?done.startTime.toISOString():done.startTime,endTime:done.endTime.toISOString()});}
-  }
+  const pausedCount=await pauseWorkerTasks(w.id,now);
   const netMs=calcNetWork(w);
   const rec={workerId:w.id,workerName:w.name,dept:w.dept,date:todayStr(),sessions:w.sessions,checkin:w.sessions[0]?.in||'',checkout:now.toISOString(),breakStart:w.breakStart||'',breakEnd:w.breakEnd||'',breakActive:!!w.breakActive,netMs};
   S.attHistory.unshift(rec);
@@ -2634,7 +2640,7 @@ async function punchOut(){
   tgPunch(w.name,w.dept,false,now);
   saveLS();renderAtt();
   const roundedOut=now.getTime()!==nowRaw.getTime();
-  document.getElementById('att-msg').textContent='🚪 יציאה: '+pad2(now.getHours())+':'+pad2(now.getMinutes())+(roundedOut?' (עוגל)':'')+(myTasks.length?' | '+myTasks.length+' משימות נסגרו':'');
+  document.getElementById('att-msg').textContent='🚪 יציאה: '+pad2(now.getHours())+':'+pad2(now.getMinutes())+(roundedOut?' (עוגל)':'')+(pausedCount?' | '+pausedCount+' משימות הושהו':'');
 }
 function calcNetWorkRaw(checkin,checkout,breakActive,breakStart,breakEnd,refDate){
   if(!checkin)return 0;
@@ -2666,6 +2672,160 @@ function calcActualTaskTime(tasks){
     if(cs!==null)totalMs+=ce-cs;
   });
   return totalMs/1000;
+}
+// ─── BATCH STATE ─────────────────────────────────────────────
+let _tsBatch=[];  // {raw,cust,prod,size,qty,col,isTotal,taskType,taskDept}
+let _mgrBatch=[];
+
+function genBatchId(){return 'b'+Date.now().toString(36)+Math.random().toString(36).slice(2,5);}
+
+function renderTsBatchQueue(){
+  const el=document.getElementById('ts-batch-queue');if(!el)return;
+  if(!_tsBatch.length){el.innerHTML='';return;}
+  el.innerHTML=`<div style="background:var(--card);border:1px solid var(--brd);border-radius:8px;padding:8px;font-size:12px">
+    <div style="font-weight:600;margin-bottom:6px;color:var(--txt)">🛒 סל (${_tsBatch.length} ברקודים):</div>
+    ${_tsBatch.map((b,i)=>`<div style="display:flex;justify-content:space-between;align-items:center;padding:3px 0;border-bottom:1px solid var(--brd)">
+      <span style="color:var(--txt)">${b.prod} · ${b.qty} יח' · ${COLORS[b.col]||b.col}${b.taskType?' · '+b.taskType:''}</span>
+      <button onclick="_tsBatch.splice(${i},1);renderTsBatchQueue()" style="background:none;border:none;cursor:pointer;color:var(--red-txt);font-size:14px;padding:0 4px">✕</button>
+    </div>`).join('')}
+  </div>`;
+}
+function renderMgrBatchQueue(){
+  const el=document.getElementById('mgr-batch-queue');if(!el)return;
+  if(!_mgrBatch.length){el.innerHTML='';return;}
+  el.innerHTML=`<div style="background:var(--card);border:1px solid var(--brd);border-radius:8px;padding:8px;font-size:12px">
+    <div style="font-weight:600;margin-bottom:6px;color:var(--txt)">🛒 סל (${_mgrBatch.length} ברקודים):</div>
+    ${_mgrBatch.map((b,i)=>`<div style="display:flex;justify-content:space-between;align-items:center;padding:3px 0;border-bottom:1px solid var(--brd)">
+      <span style="color:var(--txt)">${b.prod} · ${b.qty} יח' · ${COLORS[b.col]||b.col}${b.taskType?' · '+b.taskType:''}</span>
+      <button onclick="_mgrBatch.splice(${i},1);renderMgrBatchQueue()" style="background:none;border:none;cursor:pointer;color:var(--red-txt);font-size:14px;padding:0 4px">✕</button>
+    </div>`).join('')}
+  </div>`;
+}
+
+// סגירת batch עם חלוקת זמן יחסית לפי כמות
+async function closeBatchProportional(tasks,endTime){
+  const totalQty=tasks.reduce((s,t)=>s+(t.qty||0),0);
+  const baseSec=(tasks[0].accumulatedSec||0)+calcTaskDurSec(tasks[0].startTime,endTime,tasks[0].workerId);
+  for(const t of tasks){
+    const proportion=totalQty>0?(t.qty||0)/totalQty:1/tasks.length;
+    const duration=Math.round(baseSec*proportion);
+    const done={...t,endTime,duration};
+    delete done.paused;delete done.pausedAt;delete done.accumulatedSec;
+    S.histTasks.unshift(done);
+    S.activeTasks=S.activeTasks.filter(x=>x.id!==t.id);
+    if(S.fbConnected){
+      await fbDel('activeTasks',String(t.id));
+      await fbSet('histTasks',String(t.id),{...done,startTime:done.startTime instanceof Date?done.startTime.toISOString():done.startTime,endTime:endTime.toISOString()});
+    }
+  }
+}
+
+// השהיית כל המשימות הפעילות של עובד
+async function pauseWorkerTasks(workerId,pausedAt){
+  const tasks=S.activeTasks.filter(t=>t.workerId===workerId&&!t.paused);
+  for(const t of tasks){
+    const addSec=calcTaskDurSec(t.startTime,pausedAt,t.workerId);
+    t.paused=true;
+    t.pausedAt=pausedAt.toISOString();
+    t.accumulatedSec=(t.accumulatedSec||0)+addSec;
+    t.elapsed=t.accumulatedSec;
+    if(S.fbConnected)await fbSet('activeTasks',String(t.id),{...t,startTime:t.startTime instanceof Date?t.startTime.toISOString():t.startTime});
+  }
+  return tasks.length;
+}
+
+// בדיקת משימות מושהות כשפותחים משימה חדשה לעובד
+async function handlePausedTasks(workerId,newBarcodes){
+  const paused=S.activeTasks.filter(t=>t.workerId===workerId&&t.paused);
+  if(!paused.length)return true;
+  // קבץ לפי batchId
+  const batches={};
+  paused.forEach(t=>{const bid=t.batchId||t.id;if(!batches[bid])batches[bid]=[];batches[bid].push(t);});
+  for(const [bid,bTasks] of Object.entries(batches)){
+    const sameBC=newBarcodes.some(nb=>bTasks.find(t=>t.bc===nb));
+    if(sameBC){
+      // אותו ברקוד — המשך
+      const resumed=await showConfirm('המשך משימה?',
+        `נמצאה משימה מושהית: ${bTasks.map(t=>t.prod).join(', ')} (${fmtM(bTasks[0].accumulatedSec||0)} נצברו)`,
+        '📅 המשך','🆕 התחל חדשה');
+      if(resumed===null)return false;
+      if(resumed){
+        // חידוש — עדכן startTime לעכשיו
+        const now=new Date();
+        for(const t of bTasks){
+          t.paused=false;t.pausedAt=null;t.startTime=now;
+          if(S.fbConnected)await fbSet('activeTasks',String(t.id),{...t,startTime:now.toISOString()});
+        }
+        saveLS();renderTasks();
+        showToast('▶ המשימה חודשה');
+        return false; // לא לפתוח חדשה
+      }else{
+        // חדשה — סגור את המושהות
+        const closeTime=new Date(bTasks[0].pausedAt||new Date());
+        if(bTasks.length>1&&bTasks[0].batchId)await closeBatchProportional(bTasks,closeTime);
+        else{for(const t of bTasks){const dur=(t.accumulatedSec||0);const done={...t,endTime:closeTime,duration:dur};delete done.paused;delete done.pausedAt;delete done.accumulatedSec;S.histTasks.unshift(done);S.activeTasks=S.activeTasks.filter(x=>x.id!==t.id);if(S.fbConnected){await fbDel('activeTasks',String(t.id));await fbSet('histTasks',String(t.id),{...done,startTime:done.startTime instanceof Date?done.startTime.toISOString():done.startTime,endTime:closeTime.toISOString()});}}}
+      }
+    }else{
+      // ברקוד שונה — הושלמה / הועברה
+      const choice=await showConfirm3('מה לעשות עם המשימות המושהות?',
+        `${bTasks.map(t=>t.prod+' ('+fmtM(t.accumulatedSec||0)+')').join(', ')}`,
+        '✅ הושלמו','🔄 הועברו לעובד אחר','⏭ השאר מושהות');
+      if(choice===0){
+        const closeTime=new Date(bTasks[0].pausedAt||new Date());
+        if(bTasks.length>1&&bTasks[0].batchId)await closeBatchProportional(bTasks,closeTime);
+        else{for(const t of bTasks){const dur=(t.accumulatedSec||0);const done={...t,endTime:closeTime,duration:dur};delete done.paused;delete done.pausedAt;delete done.accumulatedSec;S.histTasks.unshift(done);S.activeTasks=S.activeTasks.filter(x=>x.id!==t.id);if(S.fbConnected){await fbDel('activeTasks',String(t.id));await fbSet('histTasks',String(t.id),{...done,startTime:done.startTime instanceof Date?done.startTime.toISOString():done.startTime,endTime:closeTime.toISOString()});}}}
+      }else if(choice===1){
+        const eligible=S.workers.filter(w=>w.status==='in'&&w.id!==workerId);
+        if(!eligible.length){showToast('אין עובדים פנויים להעברה','var(--red-txt)');continue;}
+        const opts=eligible.map((w,i)=>`${i+1}. ${w.name}`).join('\n');
+        const sel=prompt('בחר עובד להעברה:\n'+opts);
+        const idx=parseInt(sel)-1;
+        if(isNaN(idx)||!eligible[idx])continue;
+        const newW=eligible[idx];
+        const now=new Date();
+        for(const t of bTasks){
+          t.workerId=newW.id;t.workerName=newW.name;t.dept=newW.dept;t.paused=false;t.pausedAt=null;t.startTime=now;
+          if(S.fbConnected)await fbSet('activeTasks',String(t.id),{...t,startTime:now.toISOString()});
+        }
+        showToast(`✅ הועבר ל-${newW.name}`);
+      }
+      // choice===2: השאר מושהות — לא עושים כלום
+    }
+  }
+  saveLS();renderTasks();
+  return true;
+}
+
+// showConfirm עם 3 אפשרויות
+function showConfirm3(title,msg,btn1,btn2,btn3){
+  return new Promise(res=>{
+    const ov=document.createElement('div');
+    ov.style.cssText='position:fixed;inset:0;background:rgba(0,0,0,.5);z-index:9999;display:flex;align-items:center;justify-content:center;padding:16px';
+    ov.innerHTML=`<div style="background:var(--card);border-radius:12px;padding:20px;max-width:340px;width:100%;box-shadow:0 8px 32px rgba(0,0,0,.3)">
+      <div style="font-size:15px;font-weight:600;margin-bottom:8px;color:var(--txt)">${esc(title)}</div>
+      <div style="font-size:13px;color:var(--txt2);margin-bottom:16px">${esc(msg)}</div>
+      <div style="display:flex;flex-direction:column;gap:8px">
+        <button class="btn success" onclick="this.closest('div[style*=fixed]').remove();window._c3res(0)">${btn1}</button>
+        <button class="btn" onclick="this.closest('div[style*=fixed]').remove();window._c3res(1)">${btn2}</button>
+        <button class="btn" style="opacity:.7" onclick="this.closest('div[style*=fixed]').remove();window._c3res(2)">${btn3}</button>
+      </div></div>`;
+    window._c3res=res;
+    document.body.appendChild(ov);
+  });
+}
+
+function calcTaskDurSec(startTime,endTime,workerId){
+  const st=startTime instanceof Date?startTime:new Date(startTime);
+  const et=endTime instanceof Date?endTime:(endTime?new Date(endTime):new Date());
+  const w=S.workers.find(x=>x.id===workerId);
+  let ms=et-st;
+  if(w&&w.breakActive&&w.breakStart&&w.breakEnd){
+    const ref=st.toDateString();
+    const bs=new Date(ref+' '+w.breakStart).getTime();
+    const be=new Date(ref+' '+w.breakEnd).getTime();
+    if(be>bs){const os=Math.max(st.getTime(),bs);const oe=Math.min(et.getTime(),be);if(oe>os)ms-=(oe-os);}
+  }
+  return Math.round(Math.max(0,ms)/1000);
 }
 function calcNetWork(w){
   const sessions=w.sessions&&w.sessions.length?w.sessions:
@@ -2909,18 +3069,21 @@ function renderTasks(){
     al.innerHTML=`<div style="text-align:center;padding:3rem 1rem;color:var(--txt3);font-size:14px">${emptyMsg}</div>`;
   }
   else{al.innerHTML=visActive.map(t=>{
-    const over=t.elapsed>thresh;
-    return`<div class="task-card">
+    const over=!t.paused&&t.elapsed>thresh;
+    const pausedDate=t.pausedAt?new Date(t.pausedAt):null;
+    const pausedStr=pausedDate?pad2(pausedDate.getDate())+'/'+pad2(pausedDate.getMonth()+1):null;
+    return`<div class="task-card" style="${t.paused?'opacity:.75;background:var(--hover,#f8f8f8)':''}">
       <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:6px">
         <div><div style="font-size:13px;font-weight:500;color:var(--txt)">${esc(t.workerName)}</div><div style="font-size:11px;color:var(--txt3)">${esc(t.dept)}</div></div>
         <div style="display:flex;align-items:center;gap:6px">
-          <div class="task-tmr ${over?'over':''}" id="tmr-${t.id}">${fmtS(t.elapsed||0)}</div>
+          ${t.paused?`<span class="badge" style="background:#e0e7ff;color:#4338ca;font-size:11px">⏸ ${fmtM(t.accumulatedSec||0)}</span>`:`<div class="task-tmr ${over?'over':''}" id="tmr-${t.id}">${fmtS(t.elapsed||0)}</div>`}
           ${S.user?.role==='manager'?`<button class="btn" style="font-size:11px;padding:3px 8px" onclick="openEditTask('${t.id}')" title="עריכת משימה">✏️</button><button class="btn" style="font-size:11px;padding:3px 8px;color:var(--blue-txt)" onclick="transferTask('${t.id}')" title="העבר לעובד אחר">🔄</button><button class="btn danger" style="font-size:11px;padding:3px 8px;opacity:0.7" onclick="deleteActiveTask('${t.id}')" title="מחק משימה בטעות">🗑</button>`:S.user?.role==='supervisor'?`<button class="btn" style="font-size:11px;padding:3px 8px;color:var(--blue-txt)" onclick="transferTask('${t.id}')" title="העבר לעובד אחר">🔄</button>`:''}
         </div>
       </div>
       <div style="display:flex;gap:4px;flex-wrap:wrap">
         <span class="bc-seg bc-c">לקוח ${t.cust}</span><span class="bc-seg bc-p">${t.prod}</span><span class="bc-seg bc-q">${t.qty} יח'</span><span class="bc-seg bc-col">${COLORS[t.col]||t.col}</span>
         ${t.taskType?`<span class="badge gray">📋 ${esc(t.taskType)}</span>`:''}
+        ${t.paused?`<span class="badge" style="background:#e0e7ff;color:#4338ca">⏸ מושהית${pausedStr?' מ-'+pausedStr:''}</span>`:''}
         ${over?'<span class="badge amber">⚠ ארוכה</span>':''}
       </div>
       ${(()=>{const prev=totalBcSecs(t.bc,t.workerId);const ses=totalBcSessions(t.bc,t.workerId);return prev>0?`<div style="font-size:11px;color:var(--txt3);margin-top:4px">📊 סה"כ על מוצר זה: <b>${fmtM(prev)}</b> (${ses} ${ses===1?'יום':'ימים'} קודמים)</div>`:''})()}
@@ -2959,7 +3122,7 @@ function renderTaskHist(){
       </div>
       <div style="display:flex;align-items:center;gap:6px">
         <span class="badge blue">${fmtM(t.duration||0)}</span>
-        ${(S.user?.role==='manager'||S.user?.role==='supervisor')?`<button class="btn" style="font-size:11px;padding:3px 8px" onclick="openEditTask('${t.id}',true)" title="עריכה">✏️</button><button class="btn" style="font-size:11px;padding:3px 8px;background:var(--red-bg,#fee2e2);color:var(--red-txt,#dc2626)" onclick="deleteHistTask('${t.id}')" title="מחיקה">🗑️</button>`:''}
+        ${(S.user?.role==='manager'||S.user?.role==='supervisor')?`<button class="btn" style="font-size:11px;padding:3px 8px" onclick="openEditTask('${t.id}',true)" title="עריכה">✏️</button><button class="btn" style="font-size:11px;padding:3px 8px;background:#dcfce7;color:#16a34a" onclick="restoreHistTask('${t.id}')" title="החזר למשימות פעילות">♻️</button><button class="btn" style="font-size:11px;padding:3px 8px;background:var(--red-bg,#fee2e2);color:var(--red-txt,#dc2626)" onclick="deleteHistTask('${t.id}')" title="מחיקה">🗑️</button>`:''}
       </div>
     </div>`;
   }).join('')||'<div style="color:var(--txt3);font-size:12px;padding:.75rem 0;text-align:center">אין היסטוריה עדיין</div>';
@@ -2977,7 +3140,8 @@ function renderTaskHist(){
 setInterval(()=>{
   if(document.hidden)return;
   S.activeTasks.forEach(t=>{
-    t.elapsed=Math.round((Date.now()-new Date(t.startTime))/1000);
+    if(t.paused)return;
+    t.elapsed=(t.accumulatedSec||0)+calcTaskDurSec(t.startTime,new Date(),t.workerId);
     const el=document.getElementById('tmr-'+t.id);if(el)el.textContent=fmtS(t.elapsed);
     const thresh=S.settings.thresh*60;
     if(el){el.className='task-tmr'+(t.elapsed>thresh?' over':'');}
@@ -3963,62 +4127,79 @@ function tsStopCam(){
   const c=document.getElementById('ts-cam-container');if(c)c.style.display='none';
   const b=document.getElementById('ts-cam-btn');if(b)b.style.display='flex';
 }
-async function tsStartTask(){
+function tsAddToBatch(){
   const empId=document.getElementById('ts-emp-sel').value;
   const raw=(document.getElementById('ts-bc-inp').value||'').replace(/\D/g,'');
   const T=LANGS[currentLang];
   if(!empId){showToast(T.err_sel_worker||'⚠ בחר עובד','var(--red-txt)');return;}
   if(raw.length!==13){showToast(T.err_barcode_13||'⚠ ברקוד חייב להיות 13 ספרות','var(--red-txt)');return;}
-  const w=S.workers.find(x=>x.id===empId);
-  if(!w||w.status!=='in'){showToast(T.cfm_worker_not_in||'⚠ העובד לא נמצא בעבודה — וודא שחתם כניסה','var(--red-txt)',5000);return;}
   const cust=raw.slice(0,2),prod=raw.slice(2,7),size=raw.slice(7,8),col=raw.slice(11,13);
   const isTotal=isTotalBc(raw);
-  if(!isTotal&&parseInt(raw.slice(8,11))===0&&productHasDefinedQty(cust,prod)){showToast('⚠ קיים ברקוד עם כמות למוצר זה — השתמש בברקוד הספציפי','var(--red-txt)',6000);return;}
   const qty=isTotal?getTotalQty(cust,prod):parseInt(raw.slice(8,11))||0;
   const stepsWrap=document.getElementById('ts-steps-wrap');
   const useSteps=stepsWrap&&stepsWrap.style.display!=='none';
   const checkedSteps=useSteps?[...document.querySelectorAll('#ts-steps-list input[type="checkbox"]:checked')].map(cb=>cb.dataset.step):[];
   const taskType=useSteps?'':((document.getElementById('ts-tasktype').value||'').trim());
   const taskDept=(document.getElementById('ts-dept').value||'').trim();
-  // ברקוד שכבר בעבודה אצל עובד אחר באותו שלב — אישור הצטרפות
-  const otherSame=S.activeTasks.find(t=>t.workerId!==w.id&&taskBc(t)===raw&&(t.taskType||'').trim().toLowerCase()===taskType.toLowerCase());
-  if(otherSame&&!await showConfirm(T.cfm_join_title||'הצטרפות למשימה',T.cfm_join_msg+otherSame.workerName+(otherSame.taskType?' ('+otherSame.taskType+')':'')+T.cfm_join_msg2,T.cfm_join_ok||'הצטרף',T.cancel||'ביטול'))return;
-  // משימה פעילה קיימת לעובד — עבודה במקביל או סגור את כולן
-  const existTasksTs=S.activeTasks.filter(t=>t.workerId===w.id);
-  if(existTasksTs.length>0){
-    const prevTs=existTasksTs[0];
-    const msgTs=existTasksTs.length>1?existTasksTs.length+' משימות פעילות — '+existTasksTs.map(t=>t.prod).join(', ')+T.cfm_existing_msg:'מוצר '+prevTs.prod+T.cfm_existing_msg;
-    const parallelTs=await showConfirm(T.cfm_existing_title+' - '+w.name||'משימה קיימת',msgTs,T.cfm_parallel||'עבודה במקביל',T.cfm_close_old||'סגור ישנה + התחל חדשה');
-    if(parallelTs===null)return;
-    if(!parallelTs){
-      const endTime=new Date();
-      for(const t of existTasksTs){
-        try{
-          const done={...t,endTime,duration:Math.round((endTime-new Date(t.startTime))/1000)};
-          S.histTasks.unshift(done);
-          if(S.fbConnected){await fbDel('activeTasks',String(t.id));await fbSet('histTasks',String(t.id),{...done,startTime:done.startTime instanceof Date?done.startTime.toISOString():done.startTime,endTime:done.endTime.toISOString()});}
-        }catch(e){showToast('⚠ שגיאה בסגירת משימה ישנה: '+e.message,'var(--amber-txt)',6000);}
-      }
-      S.activeTasks=S.activeTasks.filter(t=>t.workerId!==w.id);
+  const types=useSteps?checkedSteps:[taskType||''];
+  types.forEach(tt=>_tsBatch.push({raw,cust,prod,size,qty,col,isTotal,taskType:tt,taskDept}));
+  document.getElementById('ts-bc-inp').value='';
+  document.getElementById('ts-bc-prev').innerHTML='';
+  document.getElementById('ts-tasktype').value='';
+  renderTsBatchQueue();
+  showToast('➕ נוסף לסל');
+}
+async function tsStartTask(){
+  const empId=document.getElementById('ts-emp-sel').value;
+  const raw=(document.getElementById('ts-bc-inp').value||'').replace(/\D/g,'');
+  const T=LANGS[currentLang];
+  if(!empId){showToast(T.err_sel_worker||'⚠ בחר עובד','var(--red-txt)');return;}
+  const w=S.workers.find(x=>x.id===empId);
+  if(!w||w.status!=='in'){showToast(T.cfm_worker_not_in||'⚠ העובד לא נמצא בעבודה — וודא שחתם כניסה','var(--red-txt)',5000);return;}
+  // אם יש ברקוד בשדה — הוסף לסל
+  if(raw.length===13){
+    if(!isTotalBc(raw)&&parseInt(raw.slice(8,11))===0&&productHasDefinedQty(raw.slice(0,2),raw.slice(2,7))){showToast('⚠ קיים ברקוד עם כמות למוצר זה','var(--red-txt)',6000);return;}
+    const cust=raw.slice(0,2),prod=raw.slice(2,7),size=raw.slice(7,8),col=raw.slice(11,13);
+    const isTotal=isTotalBc(raw);const qty=isTotal?getTotalQty(cust,prod):parseInt(raw.slice(8,11))||0;
+    const stepsWrap=document.getElementById('ts-steps-wrap');const useSteps=stepsWrap&&stepsWrap.style.display!=='none';
+    const checkedSteps=useSteps?[...document.querySelectorAll('#ts-steps-list input[type="checkbox"]:checked')].map(cb=>cb.dataset.step):[];
+    const taskType=useSteps?'':((document.getElementById('ts-tasktype').value||'').trim());
+    const taskDept=(document.getElementById('ts-dept').value||'').trim();
+    const types=useSteps?checkedSteps:[taskType||''];
+    types.forEach(tt=>_tsBatch.push({raw,cust,prod,size,qty,col,isTotal,taskType:tt,taskDept}));
+  }
+  if(!_tsBatch.length){showToast(T.err_barcode_13||'⚠ סרוק לפחות ברקוד אחד','var(--red-txt)');return;}
+  // בדיקת משימות מושהות
+  const newBcs=_tsBatch.map(b=>b.raw);
+  const canProceed=await handlePausedTasks(w.id,newBcs);
+  if(!canProceed){_tsBatch=[];renderTsBatchQueue();saveLS();return;}
+  // סגירת משימות פעילות (לא מושהות) אם יש
+  const activeCurrent=S.activeTasks.filter(t=>t.workerId===w.id&&!t.paused);
+  if(activeCurrent.length>0){
+    const endTime=new Date();
+    const batches={};activeCurrent.forEach(t=>{const bid=t.batchId||t.id;if(!batches[bid])batches[bid]=[];batches[bid].push(t);});
+    for(const bTasks of Object.values(batches)){
+      if(bTasks.length>1)await closeBatchProportional(bTasks,endTime);
+      else{const t=bTasks[0];const done={...t,endTime,duration:(t.accumulatedSec||0)+calcTaskDurSec(t.startTime,endTime,t.workerId)};S.histTasks.unshift(done);S.activeTasks=S.activeTasks.filter(x=>x.id!==t.id);if(S.fbConnected){await fbDel('activeTasks',String(t.id));await fbSet('histTasks',String(t.id),{...done,startTime:done.startTime instanceof Date?done.startTime.toISOString():done.startTime,endTime:endTime.toISOString()});}}
     }
   }
-  // ולידציה: אם שלבים — חייב לסמן לפחות אחד
-  if(useSteps&&!checkedSteps.length){showToast('⚠ בחר לפחות שלב עבודה אחד','var(--red-txt)');return;}
   try{
-    const typesToCreate=useSteps?checkedSteps:[taskType||''];
-    for(const tt of typesToCreate){
-      const task={id:String(Date.now())+Math.random().toString(36).slice(2,6),workerId:w.id,workerName:w.name,dept:taskDept||w.dept,cust,prod,size,qty,col,taskType:tt,bc:raw,isTotal:isTotal||false,startTime:new Date(),elapsed:0};
+    const batchId=_tsBatch.length>1?genBatchId():null;
+    const startTime=new Date();
+    for(const b of _tsBatch){
+      const task={id:String(Date.now())+Math.random().toString(36).slice(2,6),workerId:w.id,workerName:w.name,dept:b.taskDept||w.dept,cust:b.cust,prod:b.prod,size:b.size,qty:b.qty,col:b.col,taskType:b.taskType,bc:b.raw,isTotal:b.isTotal||false,startTime,elapsed:0,accumulatedSec:0};
+      if(batchId)task.batchId=batchId;
       S.activeTasks.push(task);
       if(S.fbConnected)await fbSet('activeTasks',String(task.id),{...task,startTime:task.startTime.toISOString()});
       tgTask(task,true);
-      if(w.pushPrefs?.task_assigned!==false)sendPushToWorker(w.id,'📋 משימה חדשה',`${task.prod}${tt?' · '+tt:''} · ${task.qty} יח'`).catch(()=>{});
+      if(w.pushPrefs?.task_assigned!==false)sendPushToWorker(w.id,'📋 משימה חדשה',`${task.prod}${task.taskType?' · '+task.taskType:''} · ${task.qty} יח'`).catch(()=>{});
     }
-    saveLS();renderTasks();goPage('tasks');
-    showToast('✅ '+(typesToCreate.length>1?typesToCreate.length+' משימות הותחלו':' משימה הותחלה')+' עבור '+w.name);
+    showToast('✅ '+_tsBatch.length+' משימות התחילו עבור '+w.name);
+    _tsBatch=[];renderTsBatchQueue();
     document.getElementById('ts-bc-inp').value='';document.getElementById('ts-bc-prev').innerHTML='';
-    document.getElementById('ts-tasktype').value='';
-    tsShowTaskTypeField(true);
-  }catch(e){showToast('❌ שגיאה בפתיחת משימה: '+e.message,'var(--red-txt)',8000);}
+    document.getElementById('ts-tasktype').value='';tsShowTaskTypeField(true);
+    saveLS();renderTasks();goPage('tasks');
+  }catch(e){showToast('❌ שגיאה: '+e.message,'var(--red-txt)',8000);}
 }
 function renderTsScan(){
   const sel=document.getElementById('ts-emp-sel');if(!sel)return;
@@ -4226,7 +4407,7 @@ async function mgrPunchOut(wId){
   w.status='out';w.checkout=now.toISOString();
   const myTasks=S.activeTasks.filter(t=>t.workerId===w.id);
   for(const t of myTasks){
-    const done={...t,endTime:now,duration:Math.round((now-new Date(t.startTime))/1000)};
+    const done={...t,endTime:now,duration:calcTaskDurSec(t.startTime,now,t.workerId)};
     S.histTasks.unshift(done);S.activeTasks=S.activeTasks.filter(x=>x.id!==t.id);
     if(S.fbConnected){await fbDel('activeTasks',String(t.id));await fbSet('histTasks',String(t.id),{...done,startTime:done.startTime instanceof Date?done.startTime.toISOString():done.startTime,endTime:done.endTime.toISOString()});}
   }
@@ -4237,55 +4418,70 @@ async function mgrPunchOut(wId){
   tgPunch(w.name,w.dept,false,now);
   saveLS();renderMgrTasks();renderAtt();
 }
-async function mgrStartTask(){
+function mgrAddToBatch(){
   const empId=document.getElementById('mgr-emp-sel').value;
   const raw=(document.getElementById('mgr-bc-inp').value||'').replace(/\D/g,'');
   const T=LANGS[currentLang];
   if(!empId){showToast(T.err_sel_worker||'⚠ בחר עובד','var(--red-txt)');return;}
   if(raw.length!==13){showToast(T.err_barcode_13||'⚠ ברקוד חייב להיות 13 ספרות','var(--red-txt)');return;}
-  const w=S.workers.find(x=>x.id===empId);
-  if(!w||w.status!=='in'){showToast(T.cfm_worker_not_in||'⚠ העובד לא נמצא בעבודה — וודא שחתם כניסה','var(--red-txt)',5000);return;}
   const cust=raw.slice(0,2),prod=raw.slice(2,7),size=raw.slice(7,8),col=raw.slice(11,13);
-  const isTotal=isTotalBc(raw);
-  if(!isTotal&&parseInt(raw.slice(8,11))===0&&productHasDefinedQty(cust,prod)){showToast('⚠ קיים ברקוד עם כמות למוצר זה — השתמש בברקוד הספציפי','var(--red-txt)',6000);return;}
-  const qty=isTotal?getTotalQty(cust,prod):parseInt(raw.slice(8,11))||0;
-  const mgrStepsWrap=document.getElementById('mgr-steps-wrap');
-  const mgrUseSteps=mgrStepsWrap&&mgrStepsWrap.style.display!=='none';
+  const isTotal=isTotalBc(raw);const qty=isTotal?getTotalQty(cust,prod):parseInt(raw.slice(8,11))||0;
+  const mgrStepsWrap=document.getElementById('mgr-steps-wrap');const mgrUseSteps=mgrStepsWrap&&mgrStepsWrap.style.display!=='none';
   const mgrCheckedSteps=mgrUseSteps?[...document.querySelectorAll('#mgr-steps-list input[type="checkbox"]:checked')].map(cb=>cb.dataset.step):[];
-  if(mgrUseSteps&&!mgrCheckedSteps.length){showToast('⚠ בחר לפחות שלב עבודה אחד','var(--red-txt)');return;}
   const taskType=mgrUseSteps?'':((document.getElementById('mgr-tasktype').value||'').trim());
   const taskDept=(document.getElementById('mgr-dept').value||'').trim();
-  // ברקוד שכבר בעבודה אצל עובד אחר באותו שלב — אישור הצטרפות
-  const otherSame=S.activeTasks.find(t=>t.workerId!==empId&&taskBc(t)===raw&&(t.taskType||'').trim().toLowerCase()===taskType.toLowerCase());
-  if(otherSame&&!await showConfirm(T.cfm_join_title||'הצטרפות למשימה',T.cfm_join_msg+otherSame.workerName+(otherSame.taskType?' ('+otherSame.taskType+')':'')+T.cfm_join_msg2,T.cfm_join_ok||'הצטרף',T.cancel||'ביטול'))return;
-  // משימה פעילה קיימת — לסגור את כולן או לעבוד במקביל
-  const existTasksMgr=S.activeTasks.filter(t=>t.workerId===empId);
-  if(existTasksMgr.length>0){
-    const prev=existTasksMgr[0];
-    const msgMgr=existTasksMgr.length>1?existTasksMgr.length+' משימות פעילות — '+existTasksMgr.map(t=>t.prod).join(', ')+T.cfm_existing_msg:'מוצר '+prev.prod+T.cfm_existing_msg;
-    const parallel=await showConfirm(T.cfm_existing_title+' - '+w.name||'משימה קיימת',msgMgr,T.cfm_parallel||'עבודה במקביל',T.cfm_close_old||'סגור ישנה + התחל חדשה');
-    if(!parallel){
-      const endTime=new Date();
-      for(const t of existTasksMgr){
-        const done={...t,endTime,duration:Math.round((endTime-new Date(t.startTime))/1000)};
-        S.histTasks.unshift(done);
-        if(S.fbConnected){await fbDel('activeTasks',String(t.id));await fbSet('histTasks',String(t.id),{...done,startTime:done.startTime instanceof Date?done.startTime.toISOString():done.startTime,endTime:done.endTime.toISOString()});}
-      }
-      S.activeTasks=S.activeTasks.filter(t=>t.workerId!==empId);
+  const types=mgrUseSteps?mgrCheckedSteps:[taskType||''];
+  types.forEach(tt=>_mgrBatch.push({raw,cust,prod,size,qty,col,isTotal,taskType:tt,taskDept}));
+  document.getElementById('mgr-bc-inp').value='';parseMgrBc('');
+  document.getElementById('mgr-tasktype').value='';document.getElementById('mgr-dept').value='';
+  renderMgrBatchQueue();showToast('➕ נוסף לסל');
+}
+async function mgrStartTask(){
+  const empId=document.getElementById('mgr-emp-sel').value;
+  const raw=(document.getElementById('mgr-bc-inp').value||'').replace(/\D/g,'');
+  const T=LANGS[currentLang];
+  if(!empId){showToast(T.err_sel_worker||'⚠ בחר עובד','var(--red-txt)');return;}
+  const w=S.workers.find(x=>x.id===empId);
+  if(!w||w.status!=='in'){showToast(T.cfm_worker_not_in||'⚠ העובד לא נמצא בעבודה','var(--red-txt)',5000);return;}
+  if(raw.length===13){
+    if(!isTotalBc(raw)&&parseInt(raw.slice(8,11))===0&&productHasDefinedQty(raw.slice(0,2),raw.slice(2,7))){showToast('⚠ קיים ברקוד עם כמות למוצר זה','var(--red-txt)',6000);return;}
+    const cust=raw.slice(0,2),prod=raw.slice(2,7),size=raw.slice(7,8),col=raw.slice(11,13);
+    const isTotal=isTotalBc(raw);const qty=isTotal?getTotalQty(cust,prod):parseInt(raw.slice(8,11))||0;
+    const mgrStepsWrap=document.getElementById('mgr-steps-wrap');const mgrUseSteps=mgrStepsWrap&&mgrStepsWrap.style.display!=='none';
+    const mgrCheckedSteps=mgrUseSteps?[...document.querySelectorAll('#mgr-steps-list input[type="checkbox"]:checked')].map(cb=>cb.dataset.step):[];
+    if(mgrUseSteps&&!mgrCheckedSteps.length){showToast('⚠ בחר לפחות שלב עבודה אחד','var(--red-txt)');return;}
+    const taskType=mgrUseSteps?'':((document.getElementById('mgr-tasktype').value||'').trim());
+    const taskDept=(document.getElementById('mgr-dept').value||'').trim();
+    const types=mgrUseSteps?mgrCheckedSteps:[taskType||''];
+    types.forEach(tt=>_mgrBatch.push({raw,cust,prod,size,qty,col,isTotal,taskType:tt,taskDept}));
+  }
+  if(!_mgrBatch.length){showToast(T.err_barcode_13||'⚠ סרוק לפחות ברקוד אחד','var(--red-txt)');return;}
+  const newBcs=_mgrBatch.map(b=>b.raw);
+  const canProceed=await handlePausedTasks(w.id,newBcs);
+  if(!canProceed){_mgrBatch=[];renderMgrBatchQueue();saveLS();return;}
+  const activeCurrent=S.activeTasks.filter(t=>t.workerId===empId&&!t.paused);
+  if(activeCurrent.length>0){
+    const endTime=new Date();
+    const batches={};activeCurrent.forEach(t=>{const bid=t.batchId||t.id;if(!batches[bid])batches[bid]=[];batches[bid].push(t);});
+    for(const bTasks of Object.values(batches)){
+      if(bTasks.length>1)await closeBatchProportional(bTasks,endTime);
+      else{const t=bTasks[0];const done={...t,endTime,duration:(t.accumulatedSec||0)+calcTaskDurSec(t.startTime,endTime,t.workerId)};S.histTasks.unshift(done);S.activeTasks=S.activeTasks.filter(x=>x.id!==t.id);if(S.fbConnected){await fbDel('activeTasks',String(t.id));await fbSet('histTasks',String(t.id),{...done,startTime:done.startTime instanceof Date?done.startTime.toISOString():done.startTime,endTime:endTime.toISOString()});}}
     }
   }
-  const typesToCreate=mgrUseSteps?mgrCheckedSteps:[taskType||''];
-  for(const tt of typesToCreate){
-    const newTask={id:String(Date.now())+Math.random().toString(36).slice(2,6),workerId:empId,workerName:w.name,dept:taskDept||w.dept,cust,prod,size,qty,col,taskType:tt,bc:raw,isTotal:isTotal||false,startTime:new Date(),elapsed:0};
+  const batchId=_mgrBatch.length>1?genBatchId():null;
+  const startTime=new Date();
+  for(const b of _mgrBatch){
+    const newTask={id:String(Date.now())+Math.random().toString(36).slice(2,6),workerId:empId,workerName:w.name,dept:b.taskDept||w.dept,cust:b.cust,prod:b.prod,size:b.size,qty:b.qty,col:b.col,taskType:b.taskType,bc:b.raw,isTotal:b.isTotal||false,startTime,elapsed:0,accumulatedSec:0};
+    if(batchId)newTask.batchId=batchId;
     S.activeTasks.unshift(newTask);
     if(S.fbConnected)await fbSet('activeTasks',newTask.id,{...newTask,startTime:newTask.startTime.toISOString()});
     tgTask(newTask,true);
   }
+  showToast('✅ '+_mgrBatch.length+' משימות התחילו עבור '+w.name);
+  _mgrBatch=[];renderMgrBatchQueue();
   document.getElementById('mgr-bc-inp').value='';parseMgrBc('');
-  document.getElementById('mgr-tasktype').value='';
-  document.getElementById('mgr-dept').value='';
+  document.getElementById('mgr-tasktype').value='';document.getElementById('mgr-dept').value='';
   saveLS();renderMgrTasks();
-  showToast('✅ '+(typesToCreate.length>1?typesToCreate.length+' משימות התחילו':' משימה התחילה')+' עבור '+w.name);
 }
 async function deleteActiveTask(taskId){
   const t=S.activeTasks.find(x=>x.id===taskId);if(!t)return;
@@ -4457,6 +4653,21 @@ async function deleteHistTask(taskId){
   S.histTasks=S.histTasks.filter(t=>t.id!==taskId);
   if(S.fbConnected){try{await fbDel('histTasks',String(taskId));}catch(e){}}
   saveLS();renderTaskHist();
+}
+async function restoreHistTask(taskId){
+  if(!confirm('להחזיר משימה זו למשימות פעילות?'))return;
+  const t=S.histTasks.find(x=>x.id===taskId);
+  if(!t){showToast('משימה לא נמצאה','var(--red-txt)');return;}
+  const restored={...t,startTime:t.startTime instanceof Date?t.startTime:new Date(t.startTime),elapsed:t.duration||0};
+  delete restored.endTime;delete restored.duration;
+  S.activeTasks.push(restored);
+  S.histTasks=S.histTasks.filter(x=>x.id!==taskId);
+  if(S.fbConnected){
+    try{await fbSet('activeTasks',String(restored.id),{...restored,startTime:restored.startTime.toISOString()});}catch(e){}
+    try{await fbDel('histTasks',String(taskId));}catch(e){}
+  }
+  saveLS();renderTasks();renderTaskHist();
+  showToast('✅ המשימה הוחזרה לפעילות','var(--green-txt,#16a34a)');
 }
 function openEditTask(taskId, isHist){
   const t=isHist?S.histTasks.find(x=>x.id===taskId):S.activeTasks.find(x=>x.id===taskId);
