@@ -3672,7 +3672,7 @@ async function savePushSettings(){
   if(st){st.textContent='✅ נשמר';st.style.color='var(--green-txt)';setTimeout(()=>st.textContent='',2000);}
 }
 async function loadPushSettings(){
-  if(!S.fbConnected)return;
+  if(!S.fbConnected){setTimeout(loadPushSettings,1500);return;}
   const data=await fbGet('appSettings','pushSettings');
   if(!data)return;
   const set=(id,val)=>{const el=document.getElementById(id);if(el)el.checked=!!val;};
