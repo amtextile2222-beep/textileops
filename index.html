@@ -3661,6 +3661,7 @@ function tgTask(task,isStart,endTime){
   sendPush(title,pushBody,isStart?'task_start':'task_end').catch(()=>{});
 }
 async function savePushSettings(){
+  if(window._loadingPushSettings)return;
   const enabled=document.getElementById('push-enabled')?.checked||false;
   const vapidKey=(document.getElementById('push-vapid')?.value||'').trim();
   const alertTypes=['punch_in','punch_out','task_start','task_end','task_long','wifi_out'];
@@ -3678,6 +3679,7 @@ async function loadPushSettings(){
   if(!S.fbConnected){setTimeout(loadPushSettings,1500);return;}
   const data=await fbGet('appSettings','pushSettings');
   if(!data)return;
+  window._loadingPushSettings=true;
   const set=(id,val)=>{const el=document.getElementById(id);if(el)el.checked=!!val;};
   const setVal=(id,val)=>{const el=document.getElementById(id);if(el)el.value=val||'';};
   set('push-enabled',data.enabled);
@@ -3704,6 +3706,7 @@ async function loadPushSettings(){
         </div>`;
       }).join('');
   }
+  window._loadingPushSettings=false;
 }
 async function removeDevice(deviceKey,deviceName){
   if(!confirm('להסיר מכשיר '+(deviceName||deviceKey)+'?'))return;
