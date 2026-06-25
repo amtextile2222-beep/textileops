@@ -38,7 +38,7 @@ exports.sendPush = functions.https.onCall(async (data) => {
     if (alertType && alertPrefs[alertType] === false) return { sent: false, reason: 'alert type disabled' };
 
     const tokens = settings.tokens || {};
-    const tokenList = Object.values(tokens).filter(Boolean);
+    const tokenList = Object.values(tokens).map(t=>typeof t==='string'?t:t?.token).filter(Boolean);
     if (!tokenList.length) return { sent: false, reason: 'no tokens' };
 
     // שלח לכל הטוקנים הרשומים
