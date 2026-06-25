@@ -3684,33 +3684,38 @@ async function loadPushSettings(){
   const data=await fbGet('appSettings','pushSettings');
   if(!data)return;
   window._loadingPushSettings=true;
-  const set=(id,val)=>{const el=document.getElementById(id);if(el)el.checked=!!val;};
-  const setVal=(id,val)=>{const el=document.getElementById(id);if(el)el.value=val||'';};
-  set('push-enabled',data.enabled);
-  setVal('push-vapid',data.vapidKey||'');
-  const prefs=data.alertPrefs||{};
-  ['punch_in','punch_out','task_start','task_end','task_long','wifi_out'].forEach(t=>set('push-'+t,prefs[t]!==false));
-  // הצג מספר מכשירים רשומים
-  const tokens=data.tokens||{};
-  const devCount=Object.keys(tokens).length;
-  const devEl=document.getElementById('push-devices');
-  if(devEl)devEl.textContent=devCount>0?'📱 '+devCount+' מכשיר'+(devCount>1?'ים':'')+' רשום'+(devCount>1?'ים':''):'';
-  // רשימת מכשירים עם כפתור מחיקה
-  const listEl=document.getElementById('push-devices-list');
-  if(listEl){
-    if(devCount===0){listEl.innerHTML='';return;}
-    listEl.innerHTML='<div style="font-size:12px;font-weight:600;margin-bottom:6px;color:var(--txt2)">מכשירים רשומים:</div>'+
-      Object.entries(tokens).map(([key,tok])=>{
-        const name=tok?.name||key;
-        const type=tok?.type||'';
-        const date=tok?.registeredAt?new Date(tok.registeredAt).toLocaleDateString('he-IL'):'';
-        return `<div style="display:flex;align-items:center;justify-content:space-between;padding:6px 8px;margin-bottom:4px;background:var(--card-bg);border-radius:8px;border:0.5px solid var(--b)">
-          <span style="font-size:12px;color:var(--txt2)">${type||'📱'} ${name}${date?' ('+date+')':''}</span>
-          <button class="btn" style="font-size:11px;padding:3px 8px;background:var(--red-bg,#ffebee);color:var(--red-txt,#c62828)" onclick="removeDevice('${key}','${name}')">🗑 הסר</button>
-        </div>`;
-      }).join('');
+  try{
+    const set=(id,val)=>{const el=document.getElementById(id);if(el)el.checked=!!val;};
+    const setVal=(id,val)=>{const el=document.getElementById(id);if(el)el.value=val||'';};
+    set('push-enabled',data.enabled);
+    setVal('push-vapid',data.vapidKey||'');
+    const prefs=data.alertPrefs||{};
+    ['punch_in','punch_out','task_start','task_end','task_long','wifi_out'].forEach(t=>set('push-'+t,prefs[t]!==false));
+    // הצג מספר מכשירים רשומים
+    const tokens=data.tokens||{};
+    const devCount=Object.keys(tokens).length;
+    const devEl=document.getElementById('push-devices');
+    if(devEl)devEl.textContent=devCount>0?'📱 '+devCount+' מכשיר'+(devCount>1?'ים':'')+' רשום'+(devCount>1?'ים':''):'';
+    // רשימת מכשירים עם כפתור מחיקה
+    const listEl=document.getElementById('push-devices-list');
+    if(listEl){
+      if(devCount===0){listEl.innerHTML='';}
+      else{
+        listEl.innerHTML='<div style="font-size:12px;font-weight:600;margin-bottom:6px;color:var(--txt2)">מכשירים רשומים:</div>'+
+          Object.entries(tokens).map(([key,tok])=>{
+            const name=tok?.name||key;
+            const type=tok?.type||'';
+            const date=tok?.registeredAt?new Date(tok.registeredAt).toLocaleDateString('he-IL'):'';
+            return `<div style="display:flex;align-items:center;justify-content:space-between;padding:6px 8px;margin-bottom:4px;background:var(--card-bg);border-radius:8px;border:0.5px solid var(--b)">
+              <span style="font-size:12px;color:var(--txt2)">${type||'📱'} ${name}${date?' ('+date+')':''}</span>
+              <button class="btn" style="font-size:11px;padding:3px 8px;background:var(--red-bg,#ffebee);color:var(--red-txt,#c62828)" onclick="removeDevice('${key}','${name}')">🗑 הסר</button>
+            </div>`;
+          }).join('');
+      }
+    }
+  }finally{
+    window._loadingPushSettings=false;
   }
-  window._loadingPushSettings=false;
 }
 async function removeDevice(deviceKey,deviceName){
   if(!confirm('להסיר מכשיר '+(deviceName||deviceKey)+'?'))return;
