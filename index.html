@@ -3559,16 +3559,20 @@ async function initWorkerFCM(workerId){
     const messaging=getMessaging(window._fbApp);
     const token=await getToken(messaging,{vapidKey:pushSnap.vapidKey,serviceWorkerRegistration:swReg});
     if(token){
-      const{doc,updateDoc}=window._fb;
-      await updateDoc(doc(db,'workers',workerId),{fcmToken:token});
+      const{doc,setDoc}=window._fb;
+      await setDoc(doc(db,'workers',workerId),{fcmToken:token},{merge:true});
       console.log('FCM worker token saved ✅');
+      showToast('✅ התראות הופעלו!','var(--green-txt)',3000);
+    }else{
+      console.warn('FCM: getToken returned null');
+      showToast('❌ לא הצלחנו לקבל טוקן','var(--red-txt)',3000);
     }
     onMessage(messaging,payload=>{
       const t=payload.notification?.title||'TextileOps';
       const b=payload.notification?.body||'';
       showToast('🔔 '+t+(b?'\n'+b:''),'var(--blue-txt)',5000);
     });
-  }catch(e){console.error('initWorkerFCM error:',e);}
+  }catch(e){console.error('initWorkerFCM error:',e);showToast('❌ שגיאה: '+e.message,'var(--red-txt)',5000);}
 }
 async function sendPushToWorker(workerId,title,body){
   try{
