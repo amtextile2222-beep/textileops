@@ -2314,7 +2314,7 @@ async function doLogin(){
   if(w.role==='worker'||w.role==='helper')document.getElementById('worker-send-msg-bar').style.display='block';
   if(w.role!=='manager'){
     if(typeof Notification!=='undefined'&&Notification.permission==='granted'){initWorkerFCM(w.id);}
-    else if(typeof Notification!=='undefined'&&Notification.permission!=='denied'){document.getElementById('worker-notif-bar').style.display='block';}
+    else if(typeof Notification!=='undefined'&&Notification.permission==='default'){document.getElementById('worker-notif-bar').style.display='block';}
   }
   document.getElementById('login-screen').classList.add('hidden');
   document.getElementById('app-screen').classList.remove('hidden');
@@ -6947,7 +6947,7 @@ function _completeFaceAuth(success){
     if(w.role==='worker'||w.role==='helper')document.getElementById('worker-send-msg-bar').style.display='block';
     if(w.role!=='manager'){
       if(typeof Notification!=='undefined'&&Notification.permission==='granted'){initWorkerFCM(w.id);}
-      else if(typeof Notification!=='undefined'&&Notification.permission!=='denied'){document.getElementById('worker-notif-bar').style.display='block';}
+      else if(typeof Notification!=='undefined'&&Notification.permission==='default'){document.getElementById('worker-notif-bar').style.display='block';}
     }
     document.getElementById('app-screen').classList.remove('hidden');
     document.getElementById('top-name').textContent=w.name;
