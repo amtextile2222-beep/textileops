@@ -3546,6 +3546,8 @@ async function workerEnableNotif(){
 async function initWorkerFCM(workerId){
   try{
     if(!('Notification' in window)||!('serviceWorker' in navigator))return;
+    // המתן ל-Firebase עד 5 שניות
+    for(let i=0;i<10;i++){if(window._fbApp&&window._fbFunctions)break;await new Promise(r=>setTimeout(r,500));}
     if(!window._fbApp||!window._fbFunctions)return;
     const pushSnap=await fbGet('appSettings','pushSettings');
     if(!pushSnap?.vapidKey)return;
