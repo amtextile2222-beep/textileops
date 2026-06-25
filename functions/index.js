@@ -71,6 +71,7 @@ exports.sendPushToWorker = functions.https.onCall(async (data) => {
       token,
       notification: { title, body },
       android: { priority: 'high', notification: { sound: 'default', channelId: 'textileops' } },
+      apns: { payload: { aps: { sound: 'default', badge: 1, contentAvailable: true } }, headers: { 'apns-priority': '10', 'apns-push-type': 'alert' } },
       webpush: { notification: { icon: 'https://amtextile2222-beep.github.io/textileops/icon-192.png', requireInteraction: true, vibrate: [200, 100, 200] } }
     });
     return { sent: true };
