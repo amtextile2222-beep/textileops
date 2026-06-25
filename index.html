@@ -3664,7 +3664,9 @@ async function savePushSettings(){
   const alertPrefs={};
   alertTypes.forEach(t=>{alertPrefs[t]=document.getElementById('push-'+t)?.checked||false;});
   if(S.fbConnected){
-    await fbSetMerge('appSettings','pushSettings',{enabled,vapidKey,alertPrefs,updatedAt:new Date().toISOString()});
+    const updateData={enabled,alertPrefs,updatedAt:new Date().toISOString()};
+    if(vapidKey)updateData.vapidKey=vapidKey;
+    await fbSetMerge('appSettings','pushSettings',updateData);
   }
   const st=document.getElementById('push-status');
   if(st){st.textContent='✅ נשמר';st.style.color='var(--green-txt)';setTimeout(()=>st.textContent='',2000);}
