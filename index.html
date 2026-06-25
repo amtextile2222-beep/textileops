@@ -3546,13 +3546,14 @@ async function workerEnableNotif(){
 async function initWorkerFCM(workerId){
   try{
     if(!('Notification' in window)||!('serviceWorker' in navigator))return;
+    // בקש הרשאה קודם — חייב להיות ישירות מ-user gesture
+    const perm=Notification.permission==='granted'?'granted':await Notification.requestPermission();
+    if(perm!=='granted')return;
     // המתן ל-Firebase עד 5 שניות
     for(let i=0;i<10;i++){if(window._fbApp&&window._fbFunctions)break;await new Promise(r=>setTimeout(r,500));}
     if(!window._fbApp||!window._fbFunctions)return;
     const pushSnap=await fbGet('appSettings','pushSettings');
     if(!pushSnap?.vapidKey)return;
-    const perm=Notification.permission==='granted'?'granted':await Notification.requestPermission();
-    if(perm!=='granted')return;
     const swReg=await navigator.serviceWorker.register('/textileops/firebase-messaging-sw.js');
     const{getMessaging,getToken,onMessage}=window._fb;
     const messaging=getMessaging(window._fbApp);
