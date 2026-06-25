@@ -637,6 +637,7 @@ code{background:var(--bg2);border:0.5px solid var(--b);border-radius:4px;padding
           <span id="push-status" style="font-size:12px;color:var(--txt3)"></span>
         </div>
         <div id="push-devices" style="margin-top:8px;font-size:11px;color:var(--txt3)"></div>
+        <div id="push-devices-list" style="margin-top:8px"></div>
       </div>
 
       <div style="margin-top:1rem;padding-top:1rem;border-top:0.5px solid var(--b);display:flex;align-items:center;gap:12px;flex-wrap:wrap">
@@ -3676,9 +3677,32 @@ async function loadPushSettings(){
   const prefs=data.alertPrefs||{};
   ['punch_in','punch_out','task_start','task_end','task_long','wifi_out'].forEach(t=>set('push-'+t,prefs[t]!==false));
   // הצג מספר מכשירים רשומים
-  const devCount=Object.keys(data.tokens||{}).length;
+  const tokens=data.tokens||{};
+  const devCount=Object.keys(tokens).length;
   const devEl=document.getElementById('push-devices');
-  if(devEl&&devCount>0)devEl.textContent='📱 '+devCount+' מכשיר'+(devCount>1?'ים':'')+' רשום'+(devCount>1?'ים':'');
+  if(devEl)devEl.textContent=devCount>0?'📱 '+devCount+' מכשיר'+(devCount>1?'ים':'')+' רשום'+(devCount>1?'ים':''):'';
+  // רשימת מכשירים עם כפתור מחיקה
+  const listEl=document.getElementById('push-devices-list');
+  if(listEl){
+    if(devCount===0){listEl.innerHTML='';return;}
+    listEl.innerHTML='<div style="font-size:12px;font-weight:600;margin-bottom:6px;color:var(--txt2)">מכשירים רשומים:</div>'+
+      Object.entries(tokens).map(([key,tok])=>
+        `<div style="display:flex;align-items:center;justify-content:space-between;padding:6px 8px;margin-bottom:4px;background:var(--card-bg);border-radius:8px;border:0.5px solid var(--b)">
+          <span style="font-size:11px;font-family:monospace;color:var(--txt2)">📱 ${key}</span>
+          <button class="btn" style="font-size:11px;padding:3px 8px;background:var(--red-bg,#ffebee);color:var(--red-txt,#c62828)" onclick="removeDevice('${key}')">🗑 הסר</button>
+        </div>`
+      ).join('');
+  }
+}
+async function removeDevice(deviceKey){
+  if(!confirm('להסיר מכשיר '+deviceKey+'?'))return;
+  const data=await fbGet('appSettings','pushSettings');
+  if(!data)return;
+  const tokens=data.tokens||{};
+  delete tokens[deviceKey];
+  await fbSetMerge('appSettings','pushSettings',{tokens});
+  showToast('✅ מכשיר הוסר','var(--green-txt)');
+  loadPushSettings();
 }
 async function testPush(){
   const st=document.getElementById('push-status');
