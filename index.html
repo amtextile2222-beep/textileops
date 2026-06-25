@@ -556,6 +556,7 @@ code{background:var(--bg2);border:0.5px solid var(--b);border-radius:4px;padding
         <div class="sec">הגדרות</div>
         <div class="field"><label data-i18n="al_thresh_label">התראה על משימה ארוכה (דקות)</label><input type="number" id="al-thresh" value="60" min="5" onchange="saveSettings()"/></div>
         <div class="field"><label data-i18n="al_absent_label">התראה על היעדרות (מספר עובדים)</label><input type="number" id="al-absent" value="5" min="1" onchange="saveSettings()"/></div>
+        <div class="field"><label>⏰ התראה על אי-יציאה — שעת סיום יום</label><input type="time" id="al-endofday" value="15:05" onchange="saveSettings()"/></div>
         <button class="btn primary" onclick="checkAlerts();renderAlerts()">🔄 רענן</button>
       </div>
       <div class="card">
@@ -3487,6 +3488,7 @@ function saveSettings(){
   S.settings.shiftStart=document.getElementById('st-shift-start')?.value||'06:30';
   S.settings.shiftEnd=document.getElementById('st-shift-end')?.value||'15:00';
   S.settings.roundMinutes=parseInt(document.getElementById('st-round-min')?.value)||5;
+  S.settings.endOfDayTime=document.getElementById('al-endofday')?.value||'15:05';
   const rp=document.getElementById('st-round-preview');if(rp)rp.textContent=S.settings.roundMinutes;
   const rp2=document.getElementById('st-round-preview2');if(rp2)rp2.textContent=S.settings.roundMinutes;
   saveLS();
@@ -3527,6 +3529,9 @@ function loadWaSettings(){
   set('st-round-min',s.roundMinutes??5);
   const rp=document.getElementById('st-round-preview');if(rp)rp.textContent=s.roundMinutes??5;
   const rp2=document.getElementById('st-round-preview2');if(rp2)rp2.textContent=s.roundMinutes??5;
+  set('al-thresh',s.thresh||60);
+  set('al-absent',s.absent||5);
+  set('al-endofday',s.endOfDayTime||'15:05');
 }
 /* ── PUSH NOTIFICATIONS (FCM) ── */
 async function workerEnableNotif(){
