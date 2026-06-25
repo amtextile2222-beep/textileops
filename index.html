@@ -613,26 +613,27 @@ code{background:var(--bg2);border:0.5px solid var(--b);border-radius:4px;padding
       <div style="margin-top:1rem;padding-top:1rem;border-top:1px solid var(--brd)">
         <div class="sec" style="margin-bottom:8px">🔔 התראות Push (דפדפן / טלפון)</div>
         <label style="display:flex;align-items:center;gap:8px;margin-bottom:10px;cursor:pointer;font-size:13px">
-          <input type="checkbox" id="push-enabled" onchange="savePushSettings()" style="width:16px;height:16px"/>
+          <input type="checkbox" id="push-enabled" style="width:16px;height:16px"/>
           הפעל התראות Push
         </label>
         <div class="field" style="margin-bottom:8px">
           <label style="font-size:12px">VAPID Public Key <span style="color:var(--txt3)">(Firebase Console → Project Settings → Cloud Messaging → Web Push certificates)</span></label>
-          <input id="push-vapid" type="text" placeholder="BNt7..." dir="ltr" style="font-family:monospace;font-size:11px" oninput="savePushSettings()"/>
+          <input id="push-vapid" type="text" placeholder="BNt7..." dir="ltr" style="font-family:monospace;font-size:11px"/>
         </div>
         <div style="margin-bottom:10px">
           <div style="font-size:12px;font-weight:600;margin-bottom:6px;color:var(--txt2)">אילו התראות לשלוח ב-Push:</div>
           <div style="display:grid;grid-template-columns:1fr 1fr;gap:4px">
-            <label style="display:flex;align-items:center;gap:6px;font-size:12px;cursor:pointer"><input type="checkbox" id="push-punch_in" onchange="savePushSettings()" style="width:14px;height:14px"> ✅ כניסה לעבודה</label>
-            <label style="display:flex;align-items:center;gap:6px;font-size:12px;cursor:pointer"><input type="checkbox" id="push-punch_out" onchange="savePushSettings()" style="width:14px;height:14px"> 🚪 יציאה מהעבודה</label>
-            <label style="display:flex;align-items:center;gap:6px;font-size:12px;cursor:pointer"><input type="checkbox" id="push-task_start" onchange="savePushSettings()" style="width:14px;height:14px"> 🔧 התחלת משימה</label>
-            <label style="display:flex;align-items:center;gap:6px;font-size:12px;cursor:pointer"><input type="checkbox" id="push-task_end" onchange="savePushSettings()" style="width:14px;height:14px"> ✅ סיום משימה</label>
-            <label style="display:flex;align-items:center;gap:6px;font-size:12px;cursor:pointer"><input type="checkbox" id="push-task_long" onchange="savePushSettings()" style="width:14px;height:14px"> ⚠️ משימה ארוכה</label>
-            <label style="display:flex;align-items:center;gap:6px;font-size:12px;cursor:pointer"><input type="checkbox" id="push-wifi_out" onchange="savePushSettings()" style="width:14px;height:14px"> 📡 ניתוק WiFi</label>
+            <label style="display:flex;align-items:center;gap:6px;font-size:12px;cursor:pointer"><input type="checkbox" id="push-punch_in" style="width:14px;height:14px"> ✅ כניסה לעבודה</label>
+            <label style="display:flex;align-items:center;gap:6px;font-size:12px;cursor:pointer"><input type="checkbox" id="push-punch_out" style="width:14px;height:14px"> 🚪 יציאה מהעבודה</label>
+            <label style="display:flex;align-items:center;gap:6px;font-size:12px;cursor:pointer"><input type="checkbox" id="push-task_start" style="width:14px;height:14px"> 🔧 התחלת משימה</label>
+            <label style="display:flex;align-items:center;gap:6px;font-size:12px;cursor:pointer"><input type="checkbox" id="push-task_end" style="width:14px;height:14px"> ✅ סיום משימה</label>
+            <label style="display:flex;align-items:center;gap:6px;font-size:12px;cursor:pointer"><input type="checkbox" id="push-task_long" style="width:14px;height:14px"> ⚠️ משימה ארוכה</label>
+            <label style="display:flex;align-items:center;gap:6px;font-size:12px;cursor:pointer"><input type="checkbox" id="push-wifi_out" style="width:14px;height:14px"> 📡 ניתוק WiFi</label>
           </div>
         </div>
         <div style="display:flex;align-items:center;gap:10px;flex-wrap:wrap">
-          <button class="btn primary" onclick="savePushSettings();initFCM()">📱 רשום מכשיר זה</button>
+          <button class="btn primary" onclick="savePushSettings()">💾 שמור הגדרות Push</button>
+          <button class="btn primary" onclick="initFCM()">📱 רשום מכשיר זה</button>
           <button class="btn" onclick="testPush()">🧪 שלח בדיקת Push</button>
           <span id="push-status" style="font-size:12px;color:var(--txt3)"></span>
         </div>
