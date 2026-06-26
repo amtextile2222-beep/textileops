@@ -2403,10 +2403,39 @@ function _buildContext(){
   const present=S.workers.filter(w=>w.checkin&&w.checkin.slice(0,10)===today&&w.role!=='manager');
   const absent=S.workers.filter(w=>w.role!=='manager'&&(!w.checkin||w.checkin.slice(0,10)!==today));
   const active=S.activeTasks||[];
+  // היסטוריה — 7 ימים אחרונים
+  const now=new Date();
+  const weekAgo=new Date(now-7*24*60*60*1000);
+  const weekStr=weekAgo.toISOString().slice(0,10);
+  const weeklyHours={};
+  (S.attHistory||[]).filter(r=>r.date>=weekStr).forEach(r=>{
+    const w=S.workers.find(x=>x.id===r.workerId);if(!w||w.role==='manager')return;
+    const hrs=((r.totalMinutes||r.netMinutes||0)/60).toFixed(1);
+    if(!weeklyHours[w.name])weeklyHours[w.name]=0;
+    weeklyHours[w.name]+=parseFloat(hrs);
+  });
+  const weekSummary=Object.entries(weeklyHours).map(([n,h])=>`${n}: ${h.toFixed(1)}ש'`).join(', ')||'אין נתונים';
+  // היסטוריית משימות — 7 ימים
+  const histTasks=(S.histTasks||[]).filter(t=>{
+    const d=t.startTime?t.startTime.slice(0,10):'';return d>=weekStr;
+  });
+  const tasksByWorker={};
+  histTasks.forEach(t=>{
+    const w=S.workers.find(x=>x.id===t.workerId);if(!w)return;
+    if(!tasksByWorker[w.name])tasksByWorker[w.name]=0;
+    tasksByWorker[w.name]++;
+  });
+  const taskSummary=Object.entries(tasksByWorker).map(([n,c])=>`${n}: ${c} משימות`).join(', ')||'אין נתונים';
   return`נתוני מפעל TextileOps לתאריך ${today}:
+
+=== היום ===
 נוכחים (${present.length}): ${present.map(w=>w.name+(w.status==='in'?' [בעבודה]':' [יצא]')).join(', ')||'אין'}
 נעדרים (${absent.length}): ${absent.map(w=>w.name).join(', ')||'אין'}
-משימות פעילות (${active.length}): ${active.map(t=>{const w=S.workers.find(x=>x.id===t.workerId);return(w?.name||'?')+' — '+t.barcode;}).join(', ')||'אין'}`;
+משימות פעילות (${active.length}): ${active.map(t=>{const w=S.workers.find(x=>x.id===t.workerId);return(w?.name||'?')+' — '+t.barcode;}).join(', ')||'אין'}
+
+=== 7 ימים אחרונים ===
+שעות עבודה לעובד: ${weekSummary}
+משימות שהושלמו לעובד: ${taskSummary}`;
 }
 async function sendAIMsg(){
   const input=document.getElementById('ai-chat-input');
