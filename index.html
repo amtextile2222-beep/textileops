@@ -2427,7 +2427,7 @@ function _buildContext(){
   const weekSummary=Object.entries(weeklyHours).map(([n,h])=>`${n}: ${h.toFixed(1)}ש'`).join(', ')||'אין נתונים';
   // היסטוריית משימות — 7 ימים
   const histTasks=(S.histTasks||[]).filter(t=>{
-    const d=t.startTime?t.startTime.slice(0,10):'';return d>=weekStr;
+    const d=t.startTime?String(t.startTime).slice(0,10):'';return d>=weekStr;
   });
   const tasksByWorker={};
   histTasks.forEach(t=>{
