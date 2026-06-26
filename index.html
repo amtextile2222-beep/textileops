@@ -2443,19 +2443,37 @@ async function sendAIMsg(){
   if(!q)return;
   input.value='';
   _aiAddMsg(q,'user');
-  const loading=_aiAddMsg('⏳ חושב...','ai');
+  const bubble=_aiAddMsg('⏳ חושב...','ai');
   try{
     const ctx=_buildContext();
-    const res=await fetch(`${AI_URL}/api/v1/workspace/${AI_SLUG}/chat`,{
+    const res=await fetch(`${AI_URL}/api/v1/workspace/${AI_SLUG}/stream-chat`,{
       method:'POST',
       headers:{'Content-Type':'application/json','Authorization':'Bearer '+AI_KEY},
       body:JSON.stringify({message:'חשוב: ענה תמיד בעברית בלבד, ללא קשר לשפת השאלה.\n\n'+ctx+'\n\nשאלה: '+q,mode:'chat'})
     });
-    const data=await res.json();
-    const reply=typeof data.textResponse==='string'?data.textResponse:data.response||data.text||data.message||JSON.stringify(data);
-    loading.textContent=reply||'אין תגובה';
+    const reader=res.body.getReader();
+    const decoder=new TextDecoder();
+    let full='';
+    bubble.textContent='';
+    while(true){
+      const{done,value}=await reader.read();
+      if(done)break;
+      const lines=decoder.decode(value).split('\n');
+      for(const line of lines){
+        if(!line.startsWith('data:'))continue;
+        try{
+          const obj=JSON.parse(line.slice(5).trim());
+          if(obj.textResponse&&obj.type==='textResponseChunk'){
+            full+=obj.textResponse;
+            bubble.textContent=full;
+            document.getElementById('ai-chat-msgs').scrollTop=9999;
+          }
+        }catch(e){}
+      }
+    }
+    if(!full)bubble.textContent='לא התקבלה תשובה';
   }catch(e){
-    loading.textContent='⛔ שגיאת חיבור ל-AI';
+    bubble.textContent='⛔ שגיאת חיבור ל-AI';
   }
 }
 function doLogout(){
