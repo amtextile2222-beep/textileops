@@ -2423,7 +2423,8 @@ async function sendAIMsg(){
       body:JSON.stringify({message:ctx+'\n\nשאלה: '+q,mode:'chat'})
     });
     const data=await res.json();
-    loading.textContent=data.textResponse||'אין תגובה';
+    const reply=typeof data.textResponse==='string'?data.textResponse:data.response||data.text||data.message||JSON.stringify(data);
+    loading.textContent=reply||'אין תגובה';
   }catch(e){
     loading.textContent='⛔ שגיאת חיבור ל-AI';
   }
