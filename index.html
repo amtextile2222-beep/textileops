@@ -2386,12 +2386,12 @@ async function saveAIUrl(){
   setTimeout(()=>document.getElementById('ai-url-status').textContent='',3000);
 }
 async function loadAIUrl(){
-  if(S.fbConnected){
-    try{
-      const d=await fbGet('appSettings','aiSettings');
-      if(d?.tunnelUrl){AI_URL=d.tunnelUrl;localStorage.setItem('ai_url',d.tunnelUrl);}
-    }catch(e){}
-  }
+  try{
+    const res=await fetch('https://firestore.googleapis.com/v1/projects/textileops-aef4a/databases/(default)/documents/appSettings/aiSettings');
+    const data=await res.json();
+    const url=data?.fields?.tunnelUrl?.stringValue;
+    if(url){AI_URL=url;localStorage.setItem('ai_url',url);}
+  }catch(e){}
 }
 function openAIChat(){
   const p=document.getElementById('ai-chat-panel');
