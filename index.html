@@ -2454,6 +2454,7 @@ async function sendAIMsg(){
   input.value='';
   _aiAddMsg(q,'user');
   const bubble=_aiAddMsg('⏳ חושב...','ai');
+  await loadAIUrl();
   try{
     const ctx=_buildContext();
     const res=await fetch(`${AI_URL}/api/v1/workspace/${AI_SLUG}/stream-chat`,{
