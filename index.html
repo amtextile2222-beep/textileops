@@ -1755,6 +1755,7 @@ async function initFb(){
   listenFb();
   listenWorkerMessages();
   initFCM();
+  loadAIUrl();
 }
 
 function listenFb(){
@@ -2375,13 +2376,22 @@ async function doLogin(){
 let AI_URL=localStorage.getItem('ai_url')||'https://respond-encryption-sri-tray.trycloudflare.com';
 const AI_KEY='78RV43P-K4Z4K46-N70FT4X-J7CTM6F';
 const AI_SLUG='432787ca-6831-47cf-8eb8-847fbf66d0b2';
-function saveAIUrl(){
+async function saveAIUrl(){
   const v=document.getElementById('ai-url-input').value.trim().replace(/\/$/,'');
   if(!v){document.getElementById('ai-url-status').textContent='הזן כתובת תחילה';return;}
   AI_URL=v;
   localStorage.setItem('ai_url',v);
+  if(S.fbConnected)await fbSetMerge('appSettings','aiSettings',{tunnelUrl:v,updatedAt:new Date().toISOString()});
   document.getElementById('ai-url-status').textContent='✅ נשמר!';
   setTimeout(()=>document.getElementById('ai-url-status').textContent='',3000);
+}
+async function loadAIUrl(){
+  if(S.fbConnected){
+    try{
+      const d=await fbGet('appSettings','aiSettings');
+      if(d?.tunnelUrl){AI_URL=d.tunnelUrl;localStorage.setItem('ai_url',d.tunnelUrl);}
+    }catch(e){}
+  }
 }
 function openAIChat(){
   const p=document.getElementById('ai-chat-panel');
