@@ -2484,7 +2484,8 @@ async function sendAIMsg(){
     }
     if(!full)bubble.textContent='לא התקבלה תשובה';
   }catch(e){
-    bubble.textContent='⛔ שגיאת חיבור ל-AI';
+    console.error('AI error:',e,'URL:',AI_URL);
+    bubble.textContent='⛔ שגיאת חיבור ל-AI: '+e.message;
   }
 }
 function doLogout(){
