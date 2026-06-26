@@ -1936,6 +1936,12 @@ function sha256(str){
   return[a,b,c,d,e,f,g,h].map(x=>(x>>>0).toString(16).padStart(8,'0')).join('');
 }
 function hashPass(p){return'$h:'+sha256(p);}
+async function getDeviceId(){
+  try{
+    const raw=[navigator.userAgent,screen.width,screen.height,screen.colorDepth,navigator.language,navigator.hardwareConcurrency,navigator.platform,Intl.DateTimeFormat().resolvedOptions().timeZone].join('|');
+    return'$d:'+sha256(raw);
+  }catch(e){return null;}
+}
 
 // ─── TOAST הודעה גלויה תמיד ───────────────────────────────
 function showToast(txt,color='var(--green-txt)',dur=3500){
@@ -2297,6 +2303,18 @@ async function doLogin(){
   if(w.requireFactoryIP){
     const allowed=await checkFactoryIP(w);
     if(!allowed)return;
+  }
+  if(w.deviceBinding&&w.role!=='manager'){
+    const devId=await getDeviceId();
+    if(!devId){document.getElementById('l-err').textContent='⛔ לא ניתן לזהות את המכשיר — גישה נדחית';return;}
+    if(!w.deviceId){
+      w.deviceId=devId;
+      if(S.fbConnected)await fbSet('workers',w.id,w);
+      saveLS();
+    } else if(w.deviceId!==devId){
+      document.getElementById('l-err').textContent='⛔ מכשיר לא מורשה — פנה למנהל';
+      return;
+    }
   }
   if(w.faceAuth && !(w.faceDescriptor||w.faceDescriptors&&Object.keys(w.faceDescriptors).length)){
     // פנים לא רשומים עדיין — בקש רישום ראשוני
@@ -4595,6 +4613,8 @@ function renderAdmin(){
       <div style="flex:1"><div style="font-size:13px;font-weight:500">${esc(w.name)}</div>
       <div style="font-size:11px;color:var(--txt3)">${esc(w.dept)} · ${w.role==='manager'?'מנהל':w.role==='supervisor'?'אחראי':w.role==='helper'?'עוזר':'עובד'} · @${esc(w.user)}</div></div>
       ${w.requireFactoryIP?`<span title="חייב WiFi מפעל" style="font-size:16px">🏭</span>`:''}
+      ${w.deviceBinding?`<span title="${w.deviceId?'מכשיר רשום ונעול':'נעילת מכשיר — טרם נרשם'}" style="font-size:16px">${w.deviceId?'📱🔒':'📱⚪'}</span>`:''}
+      ${w.deviceBinding&&w.deviceId?`<button class="btn warn" style="font-size:11px;padding:4px 8px" title="אפס מכשיר — יאפשר כניסה ממכשיר חדש" onclick="resetDeviceBinding('${w.id}')">🔄</button>`:''}
       ${w.faceAuth?`<span title="${(w.faceDescriptor||w.faceDescriptors&&Object.keys(w.faceDescriptors).length)?'זיהוי פנים פעיל':'זיהוי פנים — פנים לא רשומים'}" style="font-size:16px">${(w.faceDescriptor||w.faceDescriptors&&Object.keys(w.faceDescriptors).length)?'🟢':'🟡'}</span>`:''}
       ${w.faceAuth?`<button class="btn ${w.faceUpdateAllowed?'success':''}\" style="font-size:11px;padding:4px 8px" title="${w.faceUpdateAllowed?'עדכון פנים מאושר — לחץ לביטול':'אפשר לעובד לעדכן פנים מהטלפון'}" onclick="toggleFaceUpdate('${w.id}')">${w.faceUpdateAllowed?'📸✅':'📸'}</button>`:''}
       <button class="btn" style="font-size:11px;padding:4px 8px" onclick="openModal('edit-worker','${w.id}')">✏</button>
@@ -4778,6 +4798,13 @@ function openModal(action,id){
         </label>
         <div style="font-size:11px;color:var(--txt3);margin-top:4px">IP מפעל: ${S.settings.factoryIP||'188.225.231.120'}</div>
       </div>
+      <div class="field" style="background:var(--bg2);border-radius:var(--r);padding:10px 12px;margin-bottom:8px">
+        <label style="display:flex;align-items:center;gap:10px;cursor:pointer;font-size:13px;color:var(--txt)">
+          <input type="checkbox" id="mf-device-binding" ${w?.deviceBinding?'checked':''} style="width:auto;cursor:pointer"/>
+          📱 נעילת מכשיר — כניסה ממכשיר קבוע בלבד
+        </label>
+        ${w?.deviceId?`<div style="font-size:11px;color:var(--green-txt);margin-top:4px">✅ מכשיר רשום</div>`:(w?'<div style="font-size:11px;color:var(--txt3);margin-top:4px">⚪ מכשיר לא רשום עדיין — יירשם בכניסה הראשונה</div>':'')}
+      </div>
       <div class="field" style="background:var(--bg2);border-radius:var(--r);padding:10px 12px">
         <label style="display:flex;align-items:center;gap:10px;cursor:pointer;font-size:13px;color:var(--txt)">
           <input type="checkbox" id="mf-face-auth" ${w?.faceAuth?'checked':''} style="width:auto;cursor:pointer"/>
@@ -4823,6 +4850,14 @@ async function allowFaceUpdateByAdmin(id){
   if(S.fbConnected)await fbSet('workers',w.id,w);
   saveLS();renderAdmin();
   alert('✅ '+w.name+' יכול עכשיו לעדכן פנים מהטלפון שלו\nהעובד יראה כפתור "עדכן פנים" במסך הכניסה');
+}
+async function resetDeviceBinding(id){
+  const w=S.workers.find(x=>x.id===id);if(!w)return;
+  if(!confirm('לאפס מכשיר של '+w.name+'?\nבכניסה הבאה יירשם מכשיר חדש.'))return;
+  delete w.deviceId;
+  if(S.fbConnected)await fbSet('workers',w.id,w);
+  saveLS();renderAdmin();
+  showToast('✅ מכשיר '+w.name+' אופס — יכול להיכנס ממכשיר חדש');
 }
 async function toggleFaceUpdate(id){
   const w=S.workers.find(x=>x.id===id);if(!w)return;
@@ -5042,6 +5077,7 @@ async function confirmModal(){
     const w=S.workers.find(x=>x.id===id);
     if(w){w.name=name;w.dept=dept;w.role=role;w.user=user;w.permissions=perms;
     w.requireFactoryIP=!!document.getElementById('mf-require-ip')?.checked;
+    w.deviceBinding=!!document.getElementById('mf-device-binding')?.checked;
     w.faceAuth=!!document.getElementById('mf-face-auth')?.checked;
     w.pushPrefs={task_long:!!document.getElementById('mf-push-long')?.checked,manager_msg:!!document.getElementById('mf-push-msg')?.checked,task_assigned:!!document.getElementById('mf-push-task')?.checked};
     if(pass)w.pass=hashPass(pass);
