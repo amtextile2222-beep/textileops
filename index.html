@@ -1985,10 +1985,11 @@ function sha256(str){
   return[a,b,c,d,e,f,g,h].map(x=>(x>>>0).toString(16).padStart(8,'0')).join('');
 }
 function hashPass(p){return'$h:'+sha256(p);}
-async function getDeviceId(){
+function getDeviceId(){
   try{
-    const raw=[navigator.userAgent,screen.width,screen.height,screen.colorDepth,navigator.language,navigator.hardwareConcurrency,navigator.platform,Intl.DateTimeFormat().resolvedOptions().timeZone].join('|');
-    return'$d:'+sha256(raw);
+    let id=localStorage.getItem('txops_device_uuid');
+    if(!id){id='$d:'+crypto.randomUUID();localStorage.setItem('txops_device_uuid',id);}
+    return id;
   }catch(e){return null;}
 }
 
@@ -2356,7 +2357,7 @@ async function doLogin(){
     if(!allowed)return;
   }
   if(w.deviceBinding&&w.role!=='manager'){
-    const devId=await getDeviceId();
+    const devId=getDeviceId();
     if(!devId){document.getElementById('l-err').textContent='⛔ לא ניתן לזהות את המכשיר — גישה נדחית';return;}
     if(!w.deviceId){
       w.deviceId=devId;
