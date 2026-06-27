@@ -312,7 +312,7 @@ code{background:var(--bg2);border:0.5px solid var(--b);border-radius:4px;padding
 
   <!-- AI CHAT PANEL -->
   <div id="ai-chat-panel" style="display:none;position:fixed;bottom:20px;left:20px;z-index:9500;width:340px;max-width:95vw;background:var(--bg);border:1px solid var(--b2);border-radius:var(--rl);box-shadow:0 8px 32px rgba(0,0,0,.2);flex-direction:column;overflow:hidden">
-    <div style="background:var(--blue-bg);padding:10px 14px;display:flex;align-items:center;justify-content:space-between">
+    <div id="ai-chat-header" style="background:var(--blue-bg);padding:10px 14px;display:flex;align-items:center;justify-content:space-between;cursor:move;user-select:none">
       <div style="font-size:14px;font-weight:600;color:var(--blue-txt)">🤖 עוזר AI</div>
       <button onclick="closeAIChat()" style="background:none;border:none;cursor:pointer;font-size:18px;color:var(--blue-txt)">✕</button>
     </div>
@@ -2421,6 +2421,24 @@ function openAIChat(){
   const p=document.getElementById('ai-chat-panel');
   p.style.display='flex';
   document.getElementById('ai-chat-input').focus();
+  const h=document.getElementById('ai-chat-header');
+  if(h&&!h._dragInit){
+    h._dragInit=true;
+    let ox=0,oy=0;
+    h.addEventListener('mousedown',e=>{
+      if(e.target.tagName==='BUTTON')return;
+      ox=e.clientX-p.getBoundingClientRect().left;
+      oy=e.clientY-p.getBoundingClientRect().top;
+      const onMove=e=>{
+        p.style.left=Math.max(0,Math.min(window.innerWidth-p.offsetWidth,e.clientX-ox))+'px';
+        p.style.top=Math.max(0,Math.min(window.innerHeight-p.offsetHeight,e.clientY-oy))+'px';
+        p.style.bottom='auto';
+      };
+      const onUp=()=>{document.removeEventListener('mousemove',onMove);document.removeEventListener('mouseup',onUp);};
+      document.addEventListener('mousemove',onMove);
+      document.addEventListener('mouseup',onUp);
+    });
+  }
 }
 function closeAIChat(){document.getElementById('ai-chat-panel').style.display='none';}
 function _aiAddMsg(text,role){
