@@ -1990,8 +1990,9 @@ function getDeviceId(){
     let id=localStorage.getItem('txops_device_uuid');
     if(!id){
       let uuid;
-      if(crypto.randomUUID){uuid=crypto.randomUUID();}
-      else{uuid='xxxxxxxx-xxxx-4xxx-yxxx-xxxxxxxxxxxx'.replace(/[xy]/g,c=>{const r=crypto.getRandomValues(new Uint8Array(1))[0]%16;return(c==='x'?r:(r&0x3|0x8)).toString(16);});}
+      if(crypto&&crypto.randomUUID){uuid=crypto.randomUUID();}
+      else if(crypto&&crypto.getRandomValues){uuid='xxxxxxxx-xxxx-4xxx-yxxx-xxxxxxxxxxxx'.replace(/[xy]/g,c=>{const r=crypto.getRandomValues(new Uint8Array(1))[0]%16;return(c==='x'?r:(r&0x3|0x8)).toString(16);});}
+      else{uuid='xxxxxxxx-xxxx-4xxx-yxxx-xxxxxxxxxxxx'.replace(/[xy]/g,c=>{const r=Math.random()*16|0;return(c==='x'?r:(r&0x3|0x8)).toString(16);});}
       id='$d:'+uuid;
       localStorage.setItem('txops_device_uuid',id);
     }
