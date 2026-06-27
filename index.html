@@ -4632,12 +4632,7 @@ async function mgrPunchOut(wId){
   const now=new Date();
   w.sessions[openIdx].out=now.toISOString();
   w.status='out';w.checkout=now.toISOString();
-  const myTasks=S.activeTasks.filter(t=>t.workerId===w.id);
-  for(const t of myTasks){
-    const done={...t,endTime:now,duration:calcTaskDurSec(t.startTime,now,t.workerId)};
-    S.histTasks.unshift(done);S.activeTasks=S.activeTasks.filter(x=>x.id!==t.id);
-    if(S.fbConnected){await fbDel('activeTasks',String(t.id));await fbSet('histTasks',String(t.id),{...done,startTime:done.startTime instanceof Date?done.startTime.toISOString():done.startTime,endTime:done.endTime.toISOString()});}
-  }
+  await pauseWorkerTasks(w.id,now);
   const netMs=calcNetWork(w);
   const rec={workerId:w.id,workerName:w.name,dept:w.dept,date:todayStr(),sessions:w.sessions,checkin:w.sessions[0]?.in||'',checkout:now.toISOString(),breakStart:w.breakStart||'',breakEnd:w.breakEnd||'',breakActive:!!w.breakActive,netMs};
   S.attHistory.unshift(rec);
