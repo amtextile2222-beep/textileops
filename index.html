@@ -1985,10 +1985,18 @@ function sha256(str){
   return[a,b,c,d,e,f,g,h].map(x=>(x>>>0).toString(16).padStart(8,'0')).join('');
 }
 function hashPass(p){return'$h:'+sha256(p);}
-async function getDeviceId(){
+function getDeviceId(){
   try{
-    const raw=[navigator.userAgent,screen.width,screen.height,screen.colorDepth,navigator.language,navigator.hardwareConcurrency,navigator.platform,Intl.DateTimeFormat().resolvedOptions().timeZone].join('|');
-    return'$d:'+sha256(raw);
+    let id=localStorage.getItem('txops_device_uuid');
+    if(!id){
+      let uuid;
+      if(crypto&&crypto.randomUUID){uuid=crypto.randomUUID();}
+      else if(crypto&&crypto.getRandomValues){uuid='xxxxxxxx-xxxx-4xxx-yxxx-xxxxxxxxxxxx'.replace(/[xy]/g,c=>{const r=crypto.getRandomValues(new Uint8Array(1))[0]%16;return(c==='x'?r:(r&0x3|0x8)).toString(16);});}
+      else{uuid='xxxxxxxx-xxxx-4xxx-yxxx-xxxxxxxxxxxx'.replace(/[xy]/g,c=>{const r=Math.random()*16|0;return(c==='x'?r:(r&0x3|0x8)).toString(16);});}
+      id='$d:'+uuid;
+      localStorage.setItem('txops_device_uuid',id);
+    }
+    return id;
   }catch(e){return null;}
 }
 
@@ -2356,7 +2364,7 @@ async function doLogin(){
     if(!allowed)return;
   }
   if(w.deviceBinding&&w.role!=='manager'){
-    const devId=await getDeviceId();
+    const devId=getDeviceId();
     if(!devId){document.getElementById('l-err').textContent='⛔ לא ניתן לזהות את המכשיר — גישה נדחית';return;}
     if(!w.deviceId){
       w.deviceId=devId;
@@ -7167,12 +7175,19 @@ function _startFaceUpdateAfterFail(){
   _startFaceFirstRegister();
 }
 
-function _completeFaceAuth(success){
+async function _completeFaceAuth(success){
   clearInterval(_faceAuthLoop);_faceAuthLoop=null;
   if(_faceAuthStream){_faceAuthStream.getTracks().forEach(t=>t.stop());_faceAuthStream=null;}
   document.getElementById('face-auth-screen').classList.add('hidden');
   if(success){
-    const w=S._pendingUser;S._pendingUser=null;
+    const w=S._pendingUser;
+    if(w&&w.deviceBinding&&w.role!=='manager'){
+      const devId=getDeviceId();
+      if(!devId){S._pendingUser=null;document.getElementById('login-screen').classList.remove('hidden');document.getElementById('l-err').textContent='⛔ לא ניתן לזהות את המכשיר — גישה נדחית';return;}
+      if(!w.deviceId){w.deviceId=devId;if(S.fbConnected)await fbSet('workers',w.id,w);saveLS();}
+      else if(w.deviceId!==devId){S._pendingUser=null;document.getElementById('login-screen').classList.remove('hidden');document.getElementById('l-err').textContent='⛔ מכשיר לא מורשה — פנה למנהל';return;}
+    }
+    S._pendingUser=null;
     S.user=w;
     listenWorkerMessages();
     listenMgrInbox();
