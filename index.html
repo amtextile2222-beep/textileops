@@ -270,6 +270,11 @@ code{background:var(--bg2);border:0.5px solid var(--b);border-radius:4px;padding
   </div>
 </div>
 
+<div id="update-banner" class="hidden" style="background:var(--blue-bg);border-bottom:1.5px solid var(--blue-txt);padding:8px 1rem;display:flex;align-items:center;justify-content:space-between;gap:10px;position:sticky;top:0;z-index:200">
+  <span id="update-banner-txt" style="font-size:13px;font-weight:600;color:var(--blue-txt)">🔄 גרסה חדשה זמינה</span>
+  <button onclick="doAppUpdate()" style="background:var(--blue-txt);color:#fff;border:none;border-radius:var(--r);padding:6px 14px;font-size:13px;font-weight:600;cursor:pointer;font-family:inherit">עדכן עכשיו</button>
+</div>
+
 <div id="app-screen" class="hidden">
   <div class="topbar">
     <div class="logo">✂️ TextileOps</div>
@@ -1333,6 +1338,8 @@ const LANGS={
     exp_from:'מ-',
     exp_to:'עד-',
     exp_show_all:'הכל',
+    update_available:'🔄 גרסה חדשה זמינה',
+    update_btn:'עדכן עכשיו',
   },
   ar:{
     login_title:'تسجيل الدخول',
@@ -1463,6 +1470,8 @@ const LANGS={
     exp_from:'من',
     exp_to:'إلى',
     exp_show_all:'الكل',
+    update_available:'🔄 يتوفر إصدار جديد',
+    update_btn:'تحديث الآن',
   },
   en:{
     login_title:'Login',
@@ -1579,6 +1588,8 @@ const LANGS={
     exp_from:'From',
     exp_to:'To',
     exp_show_all:'All',
+    update_available:'🔄 New version available',
+    update_btn:'Update now',
   }
 };
 
@@ -7528,34 +7539,31 @@ function cancelFaceReg(){
 }
 
 /* ── AUTO UPDATE CHECK ── */
+function doAppUpdate(){window.location.href=window.location.pathname+'?t='+Date.now();}
 (function(){
-  const CURRENT_VERSION = '20260623-4';
-  const VERSION_URL = 'https://amtextile2222-beep.github.io/textileops/version.json';
-  const CHECK_INTERVAL = 5 * 60 * 1000;
+  const CHECK_INTERVAL=10*60*1000;
+  let currentSize=null;
 
   function showUpdateBanner(){
-    if(document.getElementById('update-banner'))return;
-    const isAr=typeof currentLang!=='undefined'&&currentLang==='ar';
-    const txt=isAr?'🔄 يوجد تحديث جديد — اضغط للتحديث':'🔄 יש גרסה חדשה — לחץ לעדכון';
-    const banner=document.createElement('div');
-    banner.id='update-banner';
-    banner.style.cssText='position:fixed;top:0;left:0;right:0;z-index:99999;background:#1d4ed8;color:#fff;text-align:center;padding:10px 16px;font-size:15px;font-weight:600;cursor:pointer;box-shadow:0 2px 8px rgba(0,0,0,.3)';
-    banner.textContent=txt;
-    banner.onclick=()=>window.location.reload(true);
-    document.body.appendChild(banner);
+    const b=document.getElementById('update-banner');if(!b)return;
+    const T=typeof LANGS!=='undefined'&&typeof currentLang!=='undefined'?LANGS[currentLang]:{};
+    document.getElementById('update-banner-txt').textContent=T.update_available||'🔄 גרסה חדשה זמינה';
+    b.querySelector('button').textContent=T.update_btn||'עדכן עכשיו';
+    b.classList.remove('hidden');
   }
 
   async function checkVersion(){
     if(document.hidden)return;
     try{
-      const res=await fetch(VERSION_URL+'?t='+Date.now(),{cache:'no-store'});
+      const res=await fetch(location.pathname+'?t='+Date.now(),{cache:'no-store'});
       if(!res.ok)return;
-      const data=await res.json();
-      if(data.v&&data.v!==CURRENT_VERSION)showUpdateBanner();
+      const text=await res.text();
+      if(currentSize===null){currentSize=text.length;return;}
+      if(text.length!==currentSize)showUpdateBanner();
     }catch(e){}
   }
 
-  setInterval(checkVersion,CHECK_INTERVAL);
+  setTimeout(()=>{checkVersion();setInterval(checkVersion,CHECK_INTERVAL);},30000);
 })();
 </script>
 </body>
