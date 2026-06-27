@@ -1826,6 +1826,17 @@ function listenFb(){
         fbSet('activeTasks',String(t.id),{...t,startTime:d.toISOString()});
       });
       if(stale.length){S.activeTasks=S.activeTasks.filter(t=>!stale.includes(t));saveLS();}
+      // עובד שסטטוסו 'out' ויש לו משימה פעילה היום — השהה אוטומטית
+      S.activeTasks.filter(t=>!t.paused).forEach(t=>{
+        const w=S.workers.find(x=>x.id===t.workerId);
+        if(w&&w.status==='out'){
+          const pausedAt=w.checkout?new Date(w.checkout):new Date();
+          t.paused=true;t.pausedAt=pausedAt.toISOString();
+          t.accumulatedSec=(t.accumulatedSec||0)+calcTaskDurSec(t.startTime,pausedAt,t.workerId);
+          t.elapsed=t.accumulatedSec;
+          fbSet('activeTasks',String(t.id),{...t,startTime:t.startTime instanceof Date?t.startTime.toISOString():t.startTime});
+        }
+      });
     }
     renderAll();
   });
