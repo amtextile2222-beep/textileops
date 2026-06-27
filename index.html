@@ -1988,7 +1988,13 @@ function hashPass(p){return'$h:'+sha256(p);}
 function getDeviceId(){
   try{
     let id=localStorage.getItem('txops_device_uuid');
-    if(!id){id='$d:'+crypto.randomUUID();localStorage.setItem('txops_device_uuid',id);}
+    if(!id){
+      let uuid;
+      if(crypto.randomUUID){uuid=crypto.randomUUID();}
+      else{uuid='xxxxxxxx-xxxx-4xxx-yxxx-xxxxxxxxxxxx'.replace(/[xy]/g,c=>{const r=crypto.getRandomValues(new Uint8Array(1))[0]%16;return(c==='x'?r:(r&0x3|0x8)).toString(16);});}
+      id='$d:'+uuid;
+      localStorage.setItem('txops_device_uuid',id);
+    }
     return id;
   }catch(e){return null;}
 }
