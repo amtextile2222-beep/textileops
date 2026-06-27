@@ -21,6 +21,8 @@
   --red:#A32D2D;--red-bg:#fcebeb;--red-txt:#A32D2D;
   --amber:#854F0B;--amber-bg:#faeeda;--amber-txt:#854F0B;
   --r:8px;--rl:12px;
+  --brd:rgba(0,0,0,.18);--card:var(--bg);--primary:var(--blue-txt);
+  --border:rgba(0,0,0,.18);--danger:var(--red-txt);--card-bg:var(--bg2);
 }
 @media(prefers-color-scheme:dark){
 :root{
@@ -588,7 +590,7 @@ code{background:var(--bg2);border:0.5px solid var(--b);border-radius:4px;padding
       </div>
     </div>
     <div class="card" style="margin-top:1rem">
-      <div class="sec">📲 התראות WhatsApp אוטומטיות</div>
+      <div class="sec">📲 התראות Telegram אוטומטיות</div>
       <div class="g2" style="gap:12px">
         <div>
           <div class="field"><label>Telegram Bot Token</label><input id="wa-token" type="text" placeholder="123456:AAG..." oninput="saveSettings()" dir="ltr" style="font-family:monospace;font-size:12px"/></div>
@@ -710,16 +712,16 @@ code{background:var(--bg2);border:0.5px solid var(--b);border-radius:4px;padding
         </div>
         <div id="adm-colors" style="max-height:220px;overflow-y:auto"></div>
       </div>
-      <div class="card" style="margin-top:1rem">
-        <div class="sec">🤖 הגדרות עוזר AI</div>
-        <div class="field">
-          <label style="font-size:12px;color:var(--txt2)">כתובת Cloudflare Tunnel</label>
-          <input id="ai-url-input" type="text" placeholder="https://xxxx.trycloudflare.com" style="font-size:12px;direction:ltr"/>
-          <div style="font-size:11px;color:var(--txt3);margin-top:4px">עדכן כאן כשמפעיל מחדש את ה-Tunnel</div>
-        </div>
-        <button class="btn primary" style="font-size:12px" onclick="saveAIUrl()">💾 שמור כתובת</button>
-        <div id="ai-url-status" style="font-size:11px;margin-top:6px;color:var(--green-txt)"></div>
+    </div>
+    <div class="card" style="margin-top:1rem">
+      <div class="sec">🤖 הגדרות עוזר AI</div>
+      <div class="field">
+        <label style="font-size:12px;color:var(--txt2)">כתובת Cloudflare Tunnel</label>
+        <input id="ai-url-input" type="text" placeholder="https://xxxx.trycloudflare.com" style="font-size:12px;direction:ltr"/>
+        <div style="font-size:11px;color:var(--txt3);margin-top:4px">עדכן כאן כשמפעיל מחדש את ה-Tunnel</div>
       </div>
+      <button class="btn primary" style="font-size:12px" onclick="saveAIUrl()">💾 שמור כתובת</button>
+      <div id="ai-url-status" style="font-size:11px;margin-top:6px;color:var(--green-txt)"></div>
     </div>
   </div>
 
@@ -3548,7 +3550,7 @@ function buildStageReport(){
     return`<tr>
       <td><span class="bc-seg bc-c">${p.cust}</span> <span class="bc-seg bc-p">${p.prod}</span></td>
       <td style="font-size:13px">${esc(p.name||'—')}</td>
-      <td>${lastStage?esc(lastStage.name):'טרם התחיל'}</td>
+      <td>${lastStage?esc(lastStage.label):'טרם התחיל'}</td>
       <td>${lastDate}</td>
       <td style="min-width:120px">
         <div style="background:var(--bg2);border-radius:4px;height:8px;overflow:hidden">
@@ -3974,7 +3976,7 @@ function renderDash(){
         const pct=totalS?Math.round(log.length/totalS*100):0;
         return`<div class="row" style="margin-bottom:8px"><div style="flex:1">
           <div style="font-size:13px;font-weight:500">${esc(p.name||p.prod)}</div>
-          <div style="font-size:11px;color:var(--txt3)">${lastStage?esc(lastStage.name):'טרם התחיל'}</div>
+          <div style="font-size:11px;color:var(--txt3)">${lastStage?esc(lastStage.label):'טרם התחיל'}</div>
           <div style="background:var(--bg2);border-radius:3px;height:5px;margin-top:4px;overflow:hidden"><div style="background:var(--blue);width:${pct}%;height:100%"></div></div>
         </div><span style="font-size:11px;color:var(--txt3);margin-right:8px">${pct}%</span></div>`;
       }).join('');
