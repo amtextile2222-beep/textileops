@@ -288,12 +288,12 @@ code{background:var(--bg2);border:0.5px solid var(--b);border-radius:4px;padding
       <button class="nb" onclick="goPage('alerts')" id="nb-alerts">🔔 <span id="al-cnt" class="cnt hidden">0</span><span data-i18n="nav_alerts">התראות</span></button>
       <button class="nb hidden" onclick="goPage('admin')" id="nb-admin">⚙️ <span data-i18n="nav_admin">ניהול</span></button>
       <button class="nb hidden" onclick="goPage('mgrtasks')" id="nb-mgrtasks">👔 <span data-i18n="nav_mgrtasks">ניהול משימות</span></button>
-      <button class="nb hidden" onclick="goPage('taskscan')" id="nb-taskscan">📷 סורק משימות</button>
+      <button class="nb hidden" onclick="goPage('taskscan')" id="nb-taskscan">📷 <span data-i18n="nav_taskscan">סורק משימות</span></button>
       <button class="nb hidden" onclick="goPage('setup')" id="nb-setup">🔗 <span data-i18n="nav_setup">Firebase</span></button>
-      <button class="nb hidden" onclick="goPage('costs')" id="nb-costs">💰 עלויות</button>
+      <button class="nb hidden" onclick="goPage('costs')" id="nb-costs">💰 <span data-i18n="nav_costs">עלויות</span></button>
       <button class="nb hidden" onclick="goPage('expenses')" id="nb-expenses">💸 <span data-i18n="nav_expenses">הוצאות</span></button>
-      <button class="nb hidden" onclick="goPage('products')" id="nb-products">👗 מוצרים</button>
-      <button class="nb hidden" onclick="goPage('barcodes')" id="nb-barcodes">🏷️ ברקודים</button>
+      <button class="nb hidden" onclick="goPage('products')" id="nb-products">👗 <span data-i18n="nav_products">מוצרים</span></button>
+      <button class="nb hidden" onclick="goPage('barcodes')" id="nb-barcodes">🏷️ <span data-i18n="nav_barcodes">ברקודים</span></button>
     </div>
     <div style="display:flex;align-items:center;gap:8px">
       <div class="lang-switcher">
@@ -330,17 +330,17 @@ code{background:var(--bg2);border:0.5px solid var(--b);border-radius:4px;padding
   <div class="page active" id="page-dash">
     <div class="g4">
       <div class="card"><div class="mlbl" data-i18n="dash_active">עובדים פעילים</div><div class="mval" id="d-active">—</div><div class="msub" id="d-total-sub"></div></div>
-      <div class="card"><div class="mlbl" data-i18n="dash_tasks">משימות פעילות</div><div class="mval" id="d-tasks">—</div><div class="msub">בזמן אמת</div></div>
-      <div class="card"><div class="mlbl" data-i18n="dash_done">הושלמו היום</div><div class="mval" id="d-done">—</div><div class="msub">משימות</div></div>
+      <div class="card"><div class="mlbl" data-i18n="dash_tasks">משימות פעילות</div><div class="mval" id="d-tasks">—</div><div class="msub" data-i18n="dash_realtime">בזמן אמת</div></div>
+      <div class="card"><div class="mlbl" data-i18n="dash_done">הושלמו היום</div><div class="mval" id="d-done">—</div><div class="msub" data-i18n="dash_tasks_sub">משימות</div></div>
       <div class="card"><div class="mlbl" data-i18n="dash_goal">יעד יומי</div><div class="mval" id="d-goal">—</div><div class="pbar"><div class="pfill" id="d-goal-bar" style="width:0%"></div></div></div>
     </div>
     <!-- שיפור 5: התראה ויזואלית — עובדים שלא נכנסו -->
     <div id="d-absent-alert" style="display:none;background:var(--red-bg);border:1px solid var(--red-txt);border-radius:var(--rl);padding:10px 14px;margin-bottom:1rem;font-size:13px;color:var(--red-txt)"></div>
     <!-- שיפורים 2+3+4 -->
     <div class="g3" style="margin-bottom:1rem">
-      <div class="card"><div class="mlbl">⏱ ממוצע זמן משימה</div><div class="mval" id="d-avg-time">—</div><div class="msub" id="d-avg-sub"></div></div>
-      <div class="card"><div class="mlbl">🏆 הכי פרודוקטיבי היום</div><div class="mval" style="font-size:16px" id="d-top-worker">—</div><div class="msub" id="d-top-sub"></div></div>
-      <div class="card"><div class="mlbl">📦 מוצרים בייצור</div><div class="mval" id="d-prods-active">—</div><div class="msub" id="d-prods-sub"></div></div>
+      <div class="card"><div class="mlbl" data-i18n="dash_avg_title">⏱ ממוצע זמן משימה</div><div class="mval" id="d-avg-time">—</div><div class="msub" id="d-avg-sub"></div></div>
+      <div class="card"><div class="mlbl" data-i18n="dash_top_worker">🏆 הכי פרודוקטיבי היום</div><div class="mval" style="font-size:16px" id="d-top-worker">—</div><div class="msub" id="d-top-sub"></div></div>
+      <div class="card"><div class="mlbl" data-i18n="dash_prods_title">📦 מוצרים בייצור</div><div class="mval" id="d-prods-active">—</div><div class="msub" id="d-prods-sub"></div></div>
     </div>
     <div class="g2">
       <div class="card"><div class="sec" data-i18n="dash_depts">מחלקות</div><div id="d-depts"></div></div>
@@ -1225,7 +1225,28 @@ const LANGS={
     nav_alerts:'התראות',
     nav_admin:'ניהול',
     nav_mgrtasks:'ניהול משימות',
+    nav_taskscan:'סורק משימות',
+    nav_costs:'עלויות',
+    nav_products:'מוצרים',
+    nav_barcodes:'ברקודים',
     nav_setup:'Firebase',
+    dash_realtime:'בזמן אמת',
+    dash_tasks_sub:'משימות',
+    dash_avg_title:'⏱ ממוצע זמן משימה',
+    dash_top_worker:'🏆 הכי פרודוקטיבי היום',
+    dash_prods_title:'📦 מוצרים בייצור',
+    dash_of:'מתוך',
+    dash_workers_lbl:'עובדים',
+    dash_products_lbl:'מוצרים',
+    dash_tasks_today:'משימות היום',
+    dash_not_in_warn:'עובדים עדיין לא נכנסו',
+    dash_no_activity:'אין פעילות היום עדיין',
+    dash_same_yesterday:'כמו אתמול',
+    dash_than_yesterday:'מאתמול',
+    dash_min:"דק'",
+    status_in_progress:'בתהליך',
+    status_not_started:'טרם התחיל',
+    dash_no_active_tasks:'אין משימות פעילות',
     dash_active:'עובדים פעילים',
     dash_tasks:'משימות פעילות',
     dash_done:'הושלמו היום',
@@ -1357,7 +1378,28 @@ const LANGS={
     nav_alerts:'التنبيهات',
     nav_admin:'الإدارة',
     nav_mgrtasks:'إدارة المهام',
+    nav_taskscan:'ماسح المهام',
+    nav_costs:'التكاليف',
+    nav_products:'المنتجات',
+    nav_barcodes:'الباركودات',
     nav_setup:'Firebase',
+    dash_realtime:'الوقت الفعلي',
+    dash_tasks_sub:'مهام',
+    dash_avg_title:'⏱ متوسط وقت المهمة',
+    dash_top_worker:'🏆 الأكثر إنتاجية اليوم',
+    dash_prods_title:'📦 المنتجات في الإنتاج',
+    dash_of:'من أصل',
+    dash_workers_lbl:'عمال',
+    dash_products_lbl:'منتج',
+    dash_tasks_today:'مهام اليوم',
+    dash_not_in_warn:'عمال لم يحضروا بعد',
+    dash_no_activity:'لا نشاط اليوم بعد',
+    dash_same_yesterday:'مثل الأمس',
+    dash_than_yesterday:'عن الأمس',
+    dash_min:'د',
+    status_in_progress:'قيد التنفيذ',
+    status_not_started:'لم يبدأ',
+    dash_no_active_tasks:'لا توجد مهام نشطة',
     dash_active:'العمال النشطون',
     dash_tasks:'المهام النشطة',
     dash_done:'أُنجز اليوم',
@@ -1629,7 +1671,7 @@ const ALL_WORKER_PAGE_IDS=WORKER_PAGES.map(p=>p.id);
 const ALL_SUPERVISOR_PAGE_IDS=[...ALL_WORKER_PAGE_IDS,...SUPERVISOR_EXTRA_PAGES.map(p=>p.id)];
 const pad2=n=>String(n).padStart(2,'0');
 const fmtS=s=>pad2(Math.floor(s/3600))+':'+pad2(Math.floor(s/60)%60)+':'+pad2(s%60);
-const fmtM=s=>Math.round(s/60)+" דק'";
+const fmtM=s=>Math.round(s/60)+' '+(window.T?.dash_min||"דק'");
 const todayStr=()=>{const d=new Date();return d.getFullYear()+'-'+pad2(d.getMonth()+1)+'-'+pad2(d.getDate());};
 const esc=s=>String(s??'').replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;');
 // ברקוד מלא של משימה (תאימות למשימות ישנות בלי שדה bc)
@@ -3246,12 +3288,12 @@ function renderScanActive(){
   // עובד רגיל רואה רק את המשימות שלו
   const isMgr=S.user?.role==='manager'||S.user?.role==='supervisor';
   const vis=isMgr?S.activeTasks:S.activeTasks.filter(t=>t.workerId===S.user?.id);
-  if(!vis.length){el.innerHTML='<div style="text-align:center;padding:2rem;color:var(--txt3)">📭 אין משימות פעילות</div>';return;}
+  if(!vis.length){el.innerHTML=`<div style="text-align:center;padding:2rem;color:var(--txt3)">📭 ${T.dash_no_active_tasks}</div>`;return;}
   el.innerHTML=vis.slice(0,8).map(t=>`
     <div class="task-card">
       <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:6px">
         <div><div style="font-size:13px;font-weight:500;color:var(--txt)">${esc(t.workerName)}</div><div style="font-size:11px;color:var(--txt3)">${esc(t.dept)}</div></div>
-        <span class="badge green"><span class="pulse"></span> פעיל</span>
+        <span class="badge green"><span class="pulse"></span> ${T.active}</span>
       </div>
       <div style="display:flex;gap:4px;flex-wrap:wrap">
         <span class="bc-seg bc-c">${t.cust}</span><span class="bc-seg bc-p">${t.prod}</span><span class="bc-seg bc-q">${t.qty}</span><span class="bc-seg bc-col">${COLORS[t.col]||t.col}</span>
@@ -3534,7 +3576,7 @@ function buildRep(){
     <td>${t.qty}</td><td>${COLORS[t.col]||t.col}</td>
     <td>${stStr}</td><td>${etStr}</td>
     <td>${t.done?fmtM(t.duration||0):'<span class="badge amber">'+fmtS(t.elapsed||0)+'</span>'}</td>
-    <td><span class="badge ${t.done?'green':'blue'}">${t.done?'הושלם':'פעיל'}</span></td></tr>`;
+    <td><span class="badge ${t.done?'green':'blue'}">${t.done?T.completed:T.active}</span></td></tr>`;
   }).join('');
   // update filters
   const wOpts=[...new Set(all.map(t=>t.workerName))];
@@ -3606,7 +3648,7 @@ function buildStageReport(){
         </div>
         <div style="font-size:10px;color:var(--txt3);margin-top:2px">${doneStages}/${totalStages} שלבים (${pct}%)</div>
       </td>
-      <td><span class="badge ${isDone?'green':doneStages>0?'blue':'red'}">${isDone?'הושלם':doneStages>0?'בתהליך':'טרם התחיל'}</span></td>
+      <td><span class="badge ${isDone?'green':doneStages>0?'blue':'red'}">${isDone?T.completed:doneStages>0?T.status_in_progress:T.status_not_started}</span></td>
     </tr>`;
   }).join('');
   el.innerHTML=`<div class="tbl-wrap"><table>
@@ -3971,7 +4013,7 @@ function renderDash(){
   const inW=S.workers.filter(w=>w.status==='in');
   document.getElementById('d-active').textContent=inW.length;
   const today=todayStr();
-  document.getElementById('d-total-sub').textContent='מתוך '+S.workers.filter(w=>w.role!=='manager').length+' עובדים';
+  document.getElementById('d-total-sub').textContent=T.dash_of+' '+S.workers.filter(w=>w.role!=='manager').length+' '+T.dash_workers_lbl;
   document.getElementById('d-tasks').textContent=S.activeTasks.length;
   // משימות שהושלמו היום
   const doneToday=S.histTasks.filter(t=>{try{return new Date(t.endTime||t.startTime).toISOString().slice(0,10)===today;}catch(e){return false;}});
@@ -4005,12 +4047,12 @@ function renderDash(){
   const doneYest=S.histTasks.filter(t=>{try{return new Date(t.endTime||t.startTime).toISOString().slice(0,10)===yesterday&&t.duration>0;}catch(e){return false;}});
   const avgYest=doneYest.length?Math.round(doneYest.reduce((s,t)=>s+(t.duration||0),0)/doneYest.length/60):0;
   const avgDiff=avgYest&&avgToday?avgToday-avgYest:0;
-  document.getElementById('d-avg-time').textContent=avgToday?avgToday+' דק\'':'—';
-  document.getElementById('d-avg-sub').textContent=avgYest?(avgDiff===0?'כמו אתמול':avgDiff>0?'▲ '+avgDiff+' דק\' מאתמול':'▼ '+Math.abs(avgDiff)+' דק\' מאתמול'):'';
+  document.getElementById('d-avg-time').textContent=avgToday?avgToday+' '+T.dash_min:'—';
+  document.getElementById('d-avg-sub').textContent=avgYest?(avgDiff===0?T.dash_same_yesterday:avgDiff>0?'▲ '+avgDiff+' '+T.dash_min+' '+T.dash_than_yesterday:'▼ '+Math.abs(avgDiff)+' '+T.dash_min+' '+T.dash_than_yesterday):'';
   // 3 — מוצרים בייצור
   const prodsInProg=(S.products||[]).filter(p=>{const log=p.stageLog||[];if(!log.length)return false;return log[log.length-1].id!==PROD_STAGES[PROD_STAGES.length-1].id;});
   document.getElementById('d-prods-active').textContent=prodsInProg.length;
-  document.getElementById('d-prods-sub').textContent='מתוך '+(S.products||[]).length+' מוצרים';
+  document.getElementById('d-prods-sub').textContent=T.dash_of+' '+(S.products||[]).length+' '+T.dash_products_lbl;
   const stagesEl=document.getElementById('d-prods-stages');
   const stagesCard=document.getElementById('d-prods-stages-card');
   if(stagesEl){
@@ -4024,7 +4066,7 @@ function renderDash(){
         const pct=totalS?Math.round(log.length/totalS*100):0;
         return`<div class="row" style="margin-bottom:8px"><div style="flex:1">
           <div style="font-size:13px;font-weight:500">${esc(p.name||p.prod)}</div>
-          <div style="font-size:11px;color:var(--txt3)">${lastStage?esc(lastStage.label):'טרם התחיל'}</div>
+          <div style="font-size:11px;color:var(--txt3)">${lastStage?esc(lastStage.label):T.status_not_started}</div>
           <div style="background:var(--bg2);border-radius:3px;height:5px;margin-top:4px;overflow:hidden"><div style="background:var(--blue);width:${pct}%;height:100%"></div></div>
         </div><span style="font-size:11px;color:var(--txt3);margin-right:8px">${pct}%</span></div>`;
       }).join('');
@@ -4035,14 +4077,14 @@ function renderDash(){
   doneToday.forEach(t=>{workerCount[t.workerName]=(workerCount[t.workerName]||0)+1;});
   const topEntry=Object.entries(workerCount).sort((a,b)=>b[1]-a[1])[0];
   document.getElementById('d-top-worker').textContent=topEntry?topEntry[0]:'—';
-  document.getElementById('d-top-sub').textContent=topEntry?topEntry[1]+' משימות היום':'';
+  document.getElementById('d-top-sub').textContent=topEntry?topEntry[1]+' '+T.dash_tasks_today:'';
   // 5 — התראה ויזואלית: עובדים שלא נכנסו אחרי 09:00
   const alertEl=document.getElementById('d-absent-alert');
   if(alertEl){
     const hour=new Date().getHours();
     if(hour>=9){
       const notIn=S.workers.filter(w=>w.role!=='manager'&&w.status!=='in');
-      if(notIn.length){alertEl.style.display='';alertEl.innerHTML='⚠️ '+notIn.length+' עובדים עדיין לא נכנסו: '+notIn.map(w=>esc(w.name)).join(', ');}
+      if(notIn.length){alertEl.style.display='';alertEl.innerHTML='⚠️ '+notIn.length+' '+T.dash_not_in_warn+': '+notIn.map(w=>esc(w.name)).join(', ');}
       else{alertEl.style.display='none';}
     }else{alertEl.style.display='none';}
   }
@@ -4051,10 +4093,10 @@ function renderDash(){
   document.getElementById('d-recent').innerHTML=recent.length?recent.map(t=>`
     <div class="row">
       <div style="flex:1"><span style="font-size:13px;font-weight:500">${esc(t.workerName)}</span>
-      <span class="badge ${t.endTime?'green':'blue'}" style="margin-right:6px">${t.endTime?'הושלם':'פעיל'}</span>
+      <span class="badge ${t.endTime?'green':'blue'}" style="margin-right:6px">${t.endTime?T.completed:T.active}</span>
       <div style="font-size:11px;color:var(--txt3)">לקוח ${t.cust} · מוצר ${t.prod} · ${t.qty===0?'<span style="color:#d97706;font-weight:700">⏳ כמות פתוחה</span>':t.qty+' יח\''}${t.isTotal?' · <span style="color:#059669;font-weight:700">📦 כל הכמות</span>':' · '+(COLORS[t.col]||t.col)}</div></div>
       <span style="font-size:12px;color:var(--txt2)">${t.endTime?fmtM(t.duration||0):fmtS(t.elapsed||0)}</span>
-    </div>`).join(''):'<div style="color:var(--txt3);font-size:13px;padding:.5rem 0">אין פעילות היום עדיין</div>';
+    </div>`).join(''):`<div style="color:var(--txt3);font-size:13px;padding:.5rem 0">${T.dash_no_activity}</div>`;
 }
 
 // ─── MANAGER TASKS ──────────────────────────────────────────
