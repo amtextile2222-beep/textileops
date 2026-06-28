@@ -3332,6 +3332,7 @@ function renderScanActive(){
 
 // ─── TASKS ──────────────────────────────────────────────────
 function renderTasks(){
+  const T=LANGS[currentLang];
   // עובד רגיל רואה רק את המשימות שלו; מנהל/אחראי רואים הכל
   const isMgr=S.user?.role==='manager'||S.user?.role==='supervisor';
   const visActive=isMgr?S.activeTasks:S.activeTasks.filter(t=>t.workerId===S.user?.id);
@@ -3348,7 +3349,6 @@ function renderTasks(){
   const thresh=S.settings.thresh*60;
   const al=document.getElementById('tk-active-list');
   if(!visActive.length){
-    const T=LANGS[currentLang];
     const emptyMsg=isMgr?'📷 '+(T.scan_to_start||'סרוק ברקוד להתחלת משימה'):'⏳ '+(T.no_task_worker||'אין משימה פעילה כרגע — המתן עד שהאחראי יפתח לך משימה');
     al.innerHTML=`<div style="text-align:center;padding:3rem 1rem;color:var(--txt3);font-size:14px">${emptyMsg}</div>`;
   }
