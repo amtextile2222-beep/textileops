@@ -370,7 +370,7 @@ code{background:var(--bg2);border:0.5px solid var(--b);border-radius:4px;padding
         <div id="att-face-update-box" class="hidden" style="width:100%">
           <button class="btn warn" style="width:100%;justify-content:center;font-size:13px" onclick="workerUpdateFace()">📸 עדכן פנים — מנהל אישר</button>
         </div>
-        <button class="btn" style="width:100%;justify-content:center;font-size:13px" onclick="openMsgToMgr()">📩 שלח הודעה למנהל</button>
+        <button class="btn" style="width:100%;justify-content:center;font-size:13px" onclick="openMsgToMgr()">📩 <span data-i18n="btn_send_msg_mgr">שלח הודעה למנהל</span></button>
         <div id="msg-to-mgr-box" class="hidden" style="width:100%;display:flex;flex-direction:column;gap:6px">
           <textarea id="msg-to-mgr-txt" placeholder="כתוב הודעה למנהל... (אופציונלי אם שולח תמונה)" rows="3" style="width:100%;border-radius:var(--r);border:1px solid var(--b2);background:var(--bg2);color:var(--txt);font-size:13px;padding:8px;resize:none;font-family:inherit;box-sizing:border-box"></textarea>
           <label style="display:flex;align-items:center;gap:8px;cursor:pointer;background:var(--bg2);border:1px dashed var(--b2);border-radius:var(--r);padding:8px 10px;font-size:13px;color:var(--txt2)">
@@ -809,12 +809,12 @@ code{background:var(--bg2);border:0.5px solid var(--b);border-radius:4px;padding
           <label data-i18n="lbl_dept">מחלקה</label>
           <select id="mgr-dept" style="font-size:13px"><option value="">-- בחר מחלקה --</option></select>
         </div>
-        <button class="btn full" style="margin-bottom:6px;background:#dbeafe;color:#1d4ed8;font-size:13px;padding:10px" onclick="mgrAddToBatch()">➕ הוסף לסל (ברקוד נוסף)</button>
+        <button class="btn full" style="margin-bottom:6px;background:#dbeafe;color:#1d4ed8;font-size:13px;padding:10px" onclick="mgrAddToBatch()" data-i18n="btn_add_batch">➕ הוסף לסל (ברקוד נוסף)</button>
         <button class="btn success full" onclick="mgrStartTask()" data-i18n="btn_start_task">▶ התחל עבודה</button>
         <div id="mgr-start-msg" style="font-size:12px;margin-top:6px;min-height:16px"></div>
       </div><!-- /card start-task -->
       <div class="card">
-        <div class="sec">⏹ סיום משימה לעובד</div>
+        <div class="sec" data-i18n="task_end_sec_lbl">⏹ סיום משימה לעובד</div>
         <div id="mgr-active-tasks-list"></div>
       </div>
     </div>
@@ -831,13 +831,13 @@ code{background:var(--bg2);border:0.5px solid var(--b);border-radius:4px;padding
       <div class="field"><label data-i18n="th_worker">עובד</label>
         <div style="display:flex;gap:6px;align-items:center">
           <select id="ts-emp-sel" style="font-size:13px;flex:1"><option value="">בחר עובד...</option></select>
-          <button class="btn primary" onclick="tsStartWorkerCam()" id="ts-emp-cam-btn" style="font-size:13px;padding:8px 12px;flex-shrink:0" title="סרוק ברקוד עובד">📷 עובד</button>
+          <button class="btn primary" onclick="tsStartWorkerCam()" id="ts-emp-cam-btn" style="font-size:13px;padding:8px 12px;flex-shrink:0" title="סרוק ברקוד עובד" data-i18n="btn_scan_worker">📷 עובד</button>
         </div>
         <div id="ts-emp-cam-container" style="display:none;margin-top:8px;position:relative">
           <video id="ts-emp-cam-video" style="width:100%;border-radius:var(--rl);background:#000;max-height:200px;object-fit:cover" autoplay muted playsinline></video>
           <div style="position:absolute;inset:0;border:3px solid var(--green);border-radius:var(--rl);pointer-events:none;opacity:.6"></div>
-          <button class="btn danger" onclick="tsStopWorkerCam()" style="position:absolute;top:8px;left:8px;padding:4px 10px;font-size:12px">✕ סגור</button>
-          <div id="ts-emp-cam-status" style="position:absolute;bottom:8px;right:0;left:0;text-align:center;font-size:12px;color:#fff;background:rgba(0,0,0,.5);padding:4px">מחפש ברקוד עובד...</div>
+          <button class="btn danger" onclick="tsStopWorkerCam()" style="position:absolute;top:8px;left:8px;padding:4px 10px;font-size:12px" data-i18n="btn_close">✕ סגור</button>
+          <div id="ts-emp-cam-status" style="position:absolute;bottom:8px;right:0;left:0;text-align:center;font-size:12px;color:#fff;background:rgba(0,0,0,.5);padding:4px" data-i18n="scan_searching_worker">מחפש ברקוד עובד...</div>
         </div>
       </div>
       <div class="field"><label data-i18n="lbl_task_barcode13">ברקוד משימה (13 ספרות)</label>
@@ -845,11 +845,11 @@ code{background:var(--bg2);border:0.5px solid var(--b);border-radius:4px;padding
           <video id="ts-cam-video" style="width:100%;border-radius:var(--rl);background:#000;max-height:220px;object-fit:cover" autoplay muted playsinline></video>
           <div style="position:absolute;inset:0;border:3px solid var(--blue-txt);border-radius:var(--rl);pointer-events:none;opacity:.6"></div>
           <div style="position:absolute;top:50%;left:50%;transform:translate(-50%,-50%);width:60%;height:2px;background:var(--blue-txt);opacity:.8"></div>
-          <button class="btn danger" onclick="tsStopCam()" style="position:absolute;top:8px;left:8px;padding:4px 10px;font-size:12px">✕ סגור</button>
-          <div id="ts-cam-status" style="position:absolute;bottom:8px;right:0;left:0;text-align:center;font-size:12px;color:#fff;background:rgba(0,0,0,.5);padding:4px">מכוון מצלמה...</div>
+          <button class="btn danger" onclick="tsStopCam()" style="position:absolute;top:8px;left:8px;padding:4px 10px;font-size:12px" data-i18n="btn_close">✕ סגור</button>
+          <div id="ts-cam-status" style="position:absolute;bottom:8px;right:0;left:0;text-align:center;font-size:12px;color:#fff;background:rgba(0,0,0,.5);padding:4px" data-i18n="scan_aiming">מכוון מצלמה...</div>
         </div>
-        <button class="btn primary full" onclick="tsStartCam()" id="ts-cam-btn" style="font-size:13px;padding:10px;margin-bottom:8px">📷 סרוק עם מצלמה</button>
-        <input id="ts-bc-inp" class="bc-inp" maxlength="13" placeholder="או הזן 13 ספרות ידנית..." oninput="tsParseBc(this.value)"/>
+        <button class="btn primary full" onclick="tsStartCam()" id="ts-cam-btn" style="font-size:13px;padding:10px;margin-bottom:8px">📷 <span data-i18n="scan_cam">סרוק עם מצלמה</span></button>
+        <input id="ts-bc-inp" class="bc-inp" maxlength="13" placeholder="או הזן 13 ספרות ידנית..." data-i18n-ph="ts_inp_ph" oninput="tsParseBc(this.value)"/>
       </div>
       <div id="ts-bc-prev" style="margin-bottom:.5rem;min-height:30px"></div>
       <div id="ts-batch-queue" style="margin-bottom:.75rem"></div>
@@ -858,16 +858,16 @@ code{background:var(--bg2);border:0.5px solid var(--b);border-radius:4px;padding
         <input id="ts-tasktype" type="text" placeholder="לדוגמה: תפירה, חיתוך, גימור..." data-i18n-ph="ph_task_type" style="font-size:13px"/>
       </div>
       <div id="ts-steps-wrap" style="display:none;margin-bottom:.75rem">
-        <label style="font-size:13px;font-weight:600;display:block;margin-bottom:6px">🔧 בחר שלבי עבודה</label>
+        <label style="font-size:13px;font-weight:600;display:block;margin-bottom:6px" data-i18n="btn_select_steps">🔧 בחר שלבי עבודה</label>
         <div id="ts-steps-list"></div>
       </div>
       <div class="field">
         <label data-i18n="lbl_dept">מחלקה</label>
-        <select id="ts-dept" style="font-size:13px"><option value="">-- בחר מחלקה --</option></select>
+        <select id="ts-dept" style="font-size:13px"><option value="" data-i18n="sel_dept">-- בחר מחלקה --</option></select>
       </div>
-      <button class="btn full" style="margin-bottom:6px;background:#dbeafe;color:#1d4ed8;font-size:13px;padding:10px" onclick="tsAddToBatch()">➕ הוסף לסל (ברקוד נוסף)</button>
+      <button class="btn full" style="margin-bottom:6px;background:#dbeafe;color:#1d4ed8;font-size:13px;padding:10px" onclick="tsAddToBatch()" data-i18n="btn_add_batch">➕ הוסף לסל (ברקוד נוסף)</button>
       <button class="btn success full" onclick="tsStartTask()" data-i18n="btn_start_task">▶ התחל עבודה</button>
-      <button class="btn full" style="margin-top:6px;font-size:13px;padding:10px;justify-content:center;gap:8px" onclick="tsSendMsgToWorker()">📢 שלח הודעה לעובד הנבחר</button>
+      <button class="btn full" style="margin-top:6px;font-size:13px;padding:10px;justify-content:center;gap:8px" onclick="tsSendMsgToWorker()">📢 <span data-i18n="btn_send_msg_worker">שלח הודעה לעובד הנבחר</span></button>
       <div id="ts-start-msg" style="font-size:12px;margin-top:6px;min-height:16px"></div>
     </div>
   </div>
@@ -1247,6 +1247,24 @@ const LANGS={
     status_in_progress:'בתהליך',
     status_not_started:'טרם התחיל',
     dash_no_active_tasks:'אין משימות פעילות',
+    btn_close:'✕ סגור',
+    btn_scan_worker:'📷 עובד',
+    scan_searching_worker:'מחפש ברקוד עובד...',
+    scan_aiming:'מכוון מצלמה...',
+    scan_searching:'מחפש ברקוד...',
+    btn_add_batch:'➕ הוסף לסל (ברקוד נוסף)',
+    btn_send_msg_worker:'שלח הודעה לעובד הנבחר',
+    btn_send_msg_mgr:'שלח הודעה למנהל',
+    ts_inp_ph:'או הזן 13 ספרות ידנית...',
+    bc_inp_ph:'הזן 13 ספרות...',
+    btn_select_steps:'🔧 בחר שלבי עבודה',
+    task_end_sec_lbl:'⏹ סיום משימה לעובד',
+    btn_end_task:'⏹ סיים',
+    resume_title:'המשך משימה?',
+    resume_yes:'📅 המשך',
+    resume_new:'🆕 התחל חדשה',
+    task_paused:'מושהית',
+    tasks_paused_msg:'משימות הושהו',
     dash_active:'עובדים פעילים',
     dash_tasks:'משימות פעילות',
     dash_done:'הושלמו היום',
@@ -1400,6 +1418,24 @@ const LANGS={
     status_in_progress:'قيد التنفيذ',
     status_not_started:'لم يبدأ',
     dash_no_active_tasks:'لا توجد مهام نشطة',
+    btn_close:'✕ إغلاق',
+    btn_scan_worker:'📷 عامل',
+    scan_searching_worker:'يبحث عن باركود العامل...',
+    scan_aiming:'توجيه الكاميرا...',
+    scan_searching:'يبحث عن الباركود...',
+    btn_add_batch:'➕ أضف للسلة (باركود إضافي)',
+    btn_send_msg_worker:'إرسال رسالة للعامل المحدد',
+    btn_send_msg_mgr:'إرسال رسالة للمدير',
+    ts_inp_ph:'أو أدخل 13 رقماً يدوياً...',
+    bc_inp_ph:'أدخل 13 رقماً...',
+    btn_select_steps:'🔧 اختر مراحل العمل',
+    task_end_sec_lbl:'⏹ إنهاء مهمة للعامل',
+    btn_end_task:'⏹ إنهاء',
+    resume_title:'استئناف المهمة؟',
+    resume_yes:'📅 استئناف',
+    resume_new:'🆕 بدء جديدة',
+    task_paused:'معلقة',
+    tasks_paused_msg:'مهام معلقة',
     dash_active:'العمال النشطون',
     dash_tasks:'المهام النشطة',
     dash_done:'أُنجز اليوم',
@@ -2027,18 +2063,10 @@ function sha256(str){
   return[a,b,c,d,e,f,g,h].map(x=>(x>>>0).toString(16).padStart(8,'0')).join('');
 }
 function hashPass(p){return'$h:'+sha256(p);}
-function getDeviceId(){
+async function getDeviceId(){
   try{
-    let id=localStorage.getItem('txops_device_uuid');
-    if(!id){
-      let uuid;
-      if(crypto&&crypto.randomUUID){uuid=crypto.randomUUID();}
-      else if(crypto&&crypto.getRandomValues){uuid='xxxxxxxx-xxxx-4xxx-yxxx-xxxxxxxxxxxx'.replace(/[xy]/g,c=>{const r=crypto.getRandomValues(new Uint8Array(1))[0]%16;return(c==='x'?r:(r&0x3|0x8)).toString(16);});}
-      else{uuid='xxxxxxxx-xxxx-4xxx-yxxx-xxxxxxxxxxxx'.replace(/[xy]/g,c=>{const r=Math.random()*16|0;return(c==='x'?r:(r&0x3|0x8)).toString(16);});}
-      id='$d:'+uuid;
-      localStorage.setItem('txops_device_uuid',id);
-    }
-    return id;
+    const raw=[navigator.userAgent,screen.width,screen.height,screen.colorDepth,navigator.language,navigator.hardwareConcurrency,navigator.platform,Intl.DateTimeFormat().resolvedOptions().timeZone].join('|');
+    return'$d:'+sha256(raw);
   }catch(e){return null;}
 }
 
@@ -2406,7 +2434,7 @@ async function doLogin(){
     if(!allowed)return;
   }
   if(w.deviceBinding&&w.role!=='manager'){
-    const devId=getDeviceId();
+    const devId=await getDeviceId();
     if(!devId){document.getElementById('l-err').textContent='⛔ לא ניתן לזהות את המכשיר — גישה נדחית';return;}
     if(!w.deviceId){
       w.deviceId=devId;
@@ -2896,7 +2924,7 @@ async function punchOut(){
   tgPunch(w.name,w.dept,false,now);
   saveLS();renderAtt();
   const roundedOut=now.getTime()!==nowRaw.getTime();
-  document.getElementById('att-msg').textContent='🚪 יציאה: '+pad2(now.getHours())+':'+pad2(now.getMinutes())+(roundedOut?' (עוגל)':'')+(pausedCount?' | '+pausedCount+' משימות הושהו':'');
+  document.getElementById('att-msg').textContent='🚪 '+T.att_out+': '+pad2(now.getHours())+':'+pad2(now.getMinutes())+(roundedOut?' (עוגל)':'')+(pausedCount?' | '+pausedCount+' '+T.tasks_paused_msg:'');
 }
 function calcNetWorkRaw(checkin,checkout,breakActive,breakStart,breakEnd,refDate){
   if(!checkin)return 0;
@@ -3001,9 +3029,9 @@ async function handlePausedTasks(workerId,newBarcodes){
     const sameBC=newBarcodes.some(nb=>bTasks.find(t=>t.bc===nb));
     if(sameBC){
       // אותו ברקוד — המשך
-      const resumed=await showConfirm('המשך משימה?',
+      const resumed=await showConfirm(T.resume_title,
         `נמצאה משימה מושהית: ${bTasks.map(t=>t.prod).join(', ')} (${fmtM(bTasks[0].accumulatedSec||0)} נצברו)`,
-        '📅 המשך','🆕 התחל חדשה');
+        T.resume_yes,T.resume_new);
       if(resumed===null)return false;
       if(resumed){
         // חידוש — עדכן startTime לעכשיו
@@ -3339,7 +3367,7 @@ function renderTasks(){
       <div style="display:flex;gap:4px;flex-wrap:wrap">
         <span class="bc-seg bc-c">לקוח ${t.cust}</span><span class="bc-seg bc-p">${t.prod}</span><span class="bc-seg bc-q">${t.qty} יח'</span><span class="bc-seg bc-col">${COLORS[t.col]||t.col}</span>
         ${t.taskType?`<span class="badge gray">📋 ${esc(t.taskType)}</span>`:''}
-        ${t.paused?`<span class="badge" style="background:#e0e7ff;color:#4338ca">⏸ מושהית${pausedStr?' מ-'+pausedStr:''}</span>`:''}
+        ${t.paused?`<span class="badge" style="background:#e0e7ff;color:#4338ca">⏸ ${T.task_paused}${pausedStr?' '+pausedStr:''}</span>`:''}
         ${over?'<span class="badge amber">⚠ ארוכה</span>':''}
       </div>
       ${(()=>{const prev=totalBcSecs(t.bc,t.workerId);const ses=totalBcSessions(t.bc,t.workerId);return prev>0?`<div style="font-size:11px;color:var(--txt3);margin-top:4px">📊 סה"כ על מוצר זה: <b>${fmtM(prev)}</b> (${ses} ${ses===1?'יום':'ימים'} קודמים)</div>`:''})()}
@@ -4152,7 +4180,7 @@ function renderMgrTasks(){
         <div style="display:flex;gap:4px">
           <button class="btn" style="font-size:11px;padding:4px 10px" onclick="openEditTask('${t.id}')">✏️ ערוך</button>
           <button class="btn" style="font-size:11px;padding:4px 10px;color:var(--blue-txt)" onclick="transferTask('${t.id}')">🔄 העבר</button>
-          <button class="btn danger" style="font-size:11px;padding:4px 10px" onclick="mgrEndTask('${t.id}')">⏹ סיים</button>
+          <button class="btn danger" style="font-size:11px;padding:4px 10px" onclick="mgrEndTask('${t.id}')">${T.btn_end_task}</button>
           <button class="btn danger" style="font-size:11px;padding:4px 8px;opacity:0.7" onclick="deleteActiveTask('${t.id}')" title="מחק משימה שנפתחה בטעות">🗑</button>
         </div>
       </div>`).join('');}
@@ -4215,7 +4243,7 @@ async function mgrStartCam(){
     video.srcObject=mgrCamStream;
     container.style.display='block';
     btn.style.display='none';
-    status.textContent='מחפש ברקוד...';
+    status.textContent=T.scan_searching;
     await video.play();
     mgrStartDecoding(video,status);
   }catch(e){
@@ -4259,7 +4287,7 @@ async function tsStartWorkerCam(){
   try{
     tsEmpCamStream=await navigator.mediaDevices.getUserMedia({video:{facingMode:'environment',width:{ideal:1920},height:{ideal:1080}}});
     video.srcObject=tsEmpCamStream;container.style.display='block';btn.style.display='none';
-    status.textContent='מחפש ברקוד עובד...';await video.play();
+    status.textContent=T.scan_searching_worker;await video.play();
     const canvas=document.createElement('canvas');const ctx=canvas.getContext('2d');
     tsEmpCamInterval=setInterval(async()=>{
       if(!tsEmpCamStream||video.readyState<2)return;
@@ -4407,7 +4435,7 @@ async function tsStartCam(){
   try{
     tsCamStream=await navigator.mediaDevices.getUserMedia({video:{facingMode:'environment',width:{ideal:1920},height:{ideal:1080}}});
     video.srcObject=tsCamStream;container.style.display='block';btn.style.display='none';
-    status.textContent='מחפש ברקוד...';await video.play();
+    status.textContent=T.scan_searching;await video.play();
     const canvas=document.createElement('canvas');const ctx=canvas.getContext('2d');
     tsCamInterval=setInterval(async()=>{
       if(!tsCamStream||video.readyState<2)return;
@@ -5367,7 +5395,7 @@ async function startCam(){
     video.srcObject=camStream;
     container.style.display='block';
     btn.style.display='none';
-    status.textContent='מחפש ברקוד...';
+    status.textContent=T.scan_searching;
     await video.play();
     startDecoding(video,status);
   }catch(e){
@@ -7217,19 +7245,12 @@ function _startFaceUpdateAfterFail(){
   _startFaceFirstRegister();
 }
 
-async function _completeFaceAuth(success){
+function _completeFaceAuth(success){
   clearInterval(_faceAuthLoop);_faceAuthLoop=null;
   if(_faceAuthStream){_faceAuthStream.getTracks().forEach(t=>t.stop());_faceAuthStream=null;}
   document.getElementById('face-auth-screen').classList.add('hidden');
   if(success){
-    const w=S._pendingUser;
-    if(w&&w.deviceBinding&&w.role!=='manager'){
-      const devId=getDeviceId();
-      if(!devId){S._pendingUser=null;document.getElementById('login-screen').classList.remove('hidden');document.getElementById('l-err').textContent='⛔ לא ניתן לזהות את המכשיר — גישה נדחית';return;}
-      if(!w.deviceId){w.deviceId=devId;if(S.fbConnected)await fbSet('workers',w.id,w);saveLS();}
-      else if(w.deviceId!==devId){S._pendingUser=null;document.getElementById('login-screen').classList.remove('hidden');document.getElementById('l-err').textContent='⛔ מכשיר לא מורשה — פנה למנהל';return;}
-    }
-    S._pendingUser=null;
+    const w=S._pendingUser;S._pendingUser=null;
     S.user=w;
     listenWorkerMessages();
     listenMgrInbox();
