@@ -1,0 +1,288 @@
+<!DOCTYPE html>
+<html lang="ar" dir="rtl">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>عرض تقديمي — TextileOps</title>
+<style>
+*{box-sizing:border-box;margin:0;padding:0}
+body{font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',Tahoma,Arial,sans-serif;direction:rtl;background:#f5f5f3;min-height:100vh;display:flex;flex-direction:column;align-items:center;justify-content:center;padding:20px}
+.page-title{font-size:20px;font-weight:600;color:#1a1a18;margin-bottom:6px;text-align:center}
+.page-sub{font-size:13px;color:#6b6b67;margin-bottom:20px;text-align:center}
+.slide-title{font-size:15px;font-weight:500;color:#1a1a18;text-align:center;margin-bottom:8px;min-height:22px}
+.dot-row{display:flex;gap:6px;justify-content:center;margin-bottom:12px}
+.dot{width:8px;height:8px;border-radius:50%;background:#d3d1c7;transition:background .2s}
+.dot.on{background:#185FA5}
+.phone{width:300px;height:560px;border:2.5px solid #888780;border-radius:32px;background:#fff;overflow:hidden;position:relative;margin:0 auto;box-shadow:0 4px 24px rgba(0,0,0,.12)}
+.phone-top{height:28px;background:#f5f5f3;display:flex;align-items:center;justify-content:center;border-bottom:0.5px solid rgba(0,0,0,.1)}
+.phone-dot{width:8px;height:8px;border-radius:50%;background:#b4b2a9}
+.screen{height:532px;overflow:hidden;position:relative}
+.slide{position:absolute;inset:0;display:flex;flex-direction:column;opacity:0;transform:translateX(-20px);transition:opacity .35s,transform .35s;pointer-events:none}
+.slide.active{opacity:1;transform:translateX(0);pointer-events:auto}
+.slide.prev{opacity:0;transform:translateX(20px)}
+.topbar{background:#185FA5;color:#fff;padding:8px 12px;display:flex;align-items:center;gap:8px;font-size:12px;font-weight:500;flex-shrink:0}
+.topbar .logo{font-size:14px;font-weight:700;margin-right:auto}
+.body{flex:1;overflow:hidden;background:#f5f5f3;padding:10px}
+.card{background:#fff;border:0.5px solid rgba(0,0,0,.1);border-radius:10px;padding:10px;margin-bottom:8px}
+.big-num{font-size:22px;font-weight:500;color:#1a1a18}
+.lbl{font-size:10px;color:#a0a09c;margin-bottom:2px}
+.btn-grn{background:#0F6E56;color:#fff;border:none;border-radius:8px;padding:9px 0;width:100%;font-size:12px;font-weight:500;cursor:default}
+.btn-red{background:#A32D2D;color:#fff;border:none;border-radius:8px;padding:9px 0;width:100%;font-size:12px;font-weight:500;cursor:default;margin-top:6px}
+.badge{display:inline-block;padding:2px 7px;border-radius:99px;font-size:10px;font-weight:500}
+.badge.grn{background:#e1f5ee;color:#0F6E56}
+.badge.blue{background:#e6f1fb;color:#185FA5}
+.badge.pause{background:#e0e7ff;color:#4338ca}
+.face-grid{display:grid;grid-template-columns:repeat(5,1fr);gap:4px;margin-top:6px}
+.face-box{background:#fff;border:0.5px solid rgba(0,0,0,.12);border-radius:6px;padding:6px 2px;text-align:center;font-size:9px;color:#6b6b67}
+.face-box .ic{font-size:18px;display:block}
+.face-box.done{border-color:#0F6E56;background:#e1f5ee}
+.scan-box{background:#fff;border:1.5px dashed #b4b2a9;border-radius:10px;height:90px;display:flex;flex-direction:column;align-items:center;justify-content:center;gap:4px;font-size:11px;color:#6b6b67;margin:8px 0}
+.scan-line{width:80%;height:2px;background:#185FA5;animation:scanMove 1.5s ease-in-out infinite alternate}
+@keyframes scanMove{from{transform:translateY(-20px)}to{transform:translateY(20px)}}
+@keyframes faceAnim{0%,100%{opacity:.4}50%{opacity:1}}
+.task-row{display:flex;justify-content:space-between;align-items:center;padding:6px 0;border-bottom:0.5px solid rgba(0,0,0,.08);font-size:11px}
+.task-row:last-child{border-bottom:none}
+.msg-box{background:#f5f5f3;border:0.5px solid rgba(0,0,0,.1);border-radius:8px;padding:8px;margin-bottom:8px;font-size:11px;color:#444}
+.msg-input{border:0.5px solid #b4b2a9;border-radius:6px;padding:6px 8px;font-size:11px;width:100%;background:#fff;color:#1a1a18}
+.progress-bar{height:3px;background:rgba(0,0,0,.1);border-radius:99px;margin-top:4px;overflow:hidden}
+.progress-fill{height:100%;background:#185FA5;border-radius:99px}
+.grid2{display:grid;grid-template-columns:1fr 1fr;gap:6px;margin-bottom:8px}
+.controls{display:flex;align-items:center;justify-content:space-between;padding:12px 0;max-width:300px;margin:0 auto}
+.ctrl-btn{background:#fff;border:0.5px solid #888780;border-radius:8px;padding:8px 20px;font-size:14px;color:#1a1a18;cursor:pointer;font-family:inherit;transition:background .15s}
+.ctrl-btn:hover:not(:disabled){background:#f5f5f3}
+.ctrl-btn:disabled{opacity:.3;cursor:default}
+.step-label{font-size:12px;color:#6b6b67;text-align:center;min-width:60px}
+</style>
+</head>
+<body>
+
+<div class="page-title">TextileOps ✂️</div>
+<div class="page-sub">دليل الاستخدام — عرض تقديمي تفاعلي</div>
+
+<div class="slide-title" id="slide-title">تسجيل الدخول</div>
+<div class="dot-row" id="dots"></div>
+
+<div class="phone">
+  <div class="phone-top"><div class="phone-dot"></div></div>
+  <div class="screen" id="screen">
+
+    <!-- Slide 0: Login -->
+    <div class="slide active" id="s0">
+      <div class="topbar"><span class="logo">TextileOps ✂️</span></div>
+      <div class="body" style="display:flex;flex-direction:column;gap:8px;padding-top:20px">
+        <div style="text-align:center;font-size:28px;margin-bottom:8px">✂️</div>
+        <div style="font-size:14px;font-weight:600;text-align:center;color:#1a1a18;margin-bottom:12px">تسجيل الدخول</div>
+        <div style="font-size:10px;color:#a0a09c;margin-bottom:2px">اسم المستخدم</div>
+        <div style="border:0.5px solid #b4b2a9;border-radius:6px;padding:8px 10px;font-size:11px;background:#fff;color:#6b6b67">فاطمة</div>
+        <div style="font-size:10px;color:#a0a09c;margin-bottom:2px;margin-top:4px">كلمة المرور</div>
+        <div style="border:0.5px solid #b4b2a9;border-radius:6px;padding:8px 10px;font-size:11px;background:#fff;color:#6b6b67">••••••</div>
+        <button class="btn-grn" style="margin-top:12px">دخول</button>
+        <div style="font-size:10px;color:#a0a09c;text-align:center;margin-top:6px">📶 يجب الاتصال بـ WiFi المصنع</div>
+      </div>
+    </div>
+
+    <!-- Slide 1: Face register -->
+    <div class="slide" id="s1">
+      <div class="topbar"><span class="logo">TextileOps ✂️</span></div>
+      <div class="body">
+        <div style="font-size:12px;font-weight:600;color:#1a1a18;margin-bottom:4px">تسجيل الوجه — مرة واحدة فقط 📸</div>
+        <div style="font-size:10px;color:#a0a09c;margin-bottom:8px">التق 5 صور بوضعيات مختلفة</div>
+        <div style="background:#fff;border:1.5px dashed #b4b2a9;border-radius:10px;height:110px;display:flex;align-items:center;justify-content:center;margin-bottom:8px;position:relative;overflow:hidden">
+          <span style="font-size:44px">😐</span>
+          <div style="position:absolute;inset:0;border:2.5px solid #185FA5;border-radius:10px;animation:faceAnim 2s ease-in-out infinite"></div>
+        </div>
+        <div class="face-grid">
+          <div class="face-box done"><span class="ic">😐</span><span style="color:#0F6E56;font-size:9px">✓ للأمام</span></div>
+          <div class="face-box done"><span class="ic">😏</span><span style="color:#0F6E56;font-size:9px">✓ يمين</span></div>
+          <div class="face-box done"><span class="ic">😒</span><span style="color:#0F6E56;font-size:9px">✓ يسار</span></div>
+          <div class="face-box"><span class="ic">🙂</span><span style="font-size:9px">للأعلى</span></div>
+          <div class="face-box"><span class="ic">😌</span><span style="font-size:9px">للأسفل</span></div>
+        </div>
+        <div class="progress-bar" style="margin-top:8px"><div class="progress-fill" style="width:60%"></div></div>
+        <div style="font-size:10px;color:#a0a09c;text-align:center;margin-top:4px">3 / 5 صور</div>
+      </div>
+    </div>
+
+    <!-- Slide 2: Attendance -->
+    <div class="slide" id="s2">
+      <div class="topbar"><span class="logo">TextileOps ✂️</span><span style="font-size:10px">الحضور</span></div>
+      <div class="body">
+        <div class="card">
+          <div class="lbl">الحالة الآن</div>
+          <span class="badge blue">خارج المصنع</span>
+        </div>
+        <button class="btn-grn">✅ تسجيل الحضور</button>
+        <button class="btn-red">🚪 تسجيل الانصراف</button>
+        <div class="card" style="margin-top:8px">
+          <div style="display:flex;justify-content:space-between;font-size:11px">
+            <span style="color:#a0a09c">وقت الدخول</span>
+            <span style="color:#1a1a18;font-weight:500">08:01</span>
+          </div>
+          <div style="display:flex;justify-content:space-between;font-size:11px;margin-top:4px">
+            <span style="color:#a0a09c">ساعات العمل</span>
+            <span style="color:#1a1a18;font-weight:500">4:23</span>
+          </div>
+        </div>
+        <div style="font-size:10px;color:#a0a09c;text-align:center;margin-top:6px">📱 الجهاز مرتبط بهاتفك فقط</div>
+      </div>
+    </div>
+
+    <!-- Slide 3: Tasks -->
+    <div class="slide" id="s3">
+      <div class="topbar"><span class="logo">TextileOps ✂️</span><span style="font-size:10px">المهام</span></div>
+      <div class="body">
+        <div class="grid2">
+          <div class="card" style="text-align:center"><div class="lbl">نشطة</div><div class="big-num">2</div></div>
+          <div class="card" style="text-align:center"><div class="lbl">مكتملة</div><div class="big-num">25</div></div>
+        </div>
+        <div style="font-size:11px;font-weight:500;color:#1a1a18;margin-bottom:6px">مهامي الآن</div>
+        <div class="card">
+          <div class="task-row">
+            <div>
+              <div style="font-size:11px;font-weight:500;color:#1a1a18">فاطمة</div>
+              <div style="font-size:10px;color:#a0a09c">لقوط 01 · 09358 · 178 يح'</div>
+            </div>
+            <div style="text-align:left">
+              <span class="badge pause">⏸ معلقة</span>
+              <div style="font-size:10px;color:#a0a09c;margin-top:2px">474 دق'</div>
+            </div>
+          </div>
+          <div class="task-row">
+            <div>
+              <div style="font-size:11px;font-weight:500;color:#1a1a18">فاطمة</div>
+              <div style="font-size:10px;color:#a0a09c">لقوط 01 · 14580 · 244 يح'</div>
+            </div>
+            <div style="text-align:left">
+              <span class="badge pause">⏸ معلقة</span>
+              <div style="font-size:10px;color:#a0a09c;margin-top:2px">339 دق'</div>
+            </div>
+          </div>
+        </div>
+        <div style="font-size:10px;color:#a0a09c;text-align:center;margin-top:6px">🔒 للاطلاع فقط — لا يمكن التعديل</div>
+      </div>
+    </div>
+
+    <!-- Slide 4: Scanner -->
+    <div class="slide" id="s4">
+      <div class="topbar"><span class="logo">TextileOps ✂️</span><span style="font-size:10px">مسح المهام</span></div>
+      <div class="body">
+        <div style="font-size:11px;font-weight:500;color:#1a1a18;margin-bottom:6px">مسح باركود المهمة 📷</div>
+        <div class="scan-box">
+          <div class="scan-line"></div>
+          <div style="font-size:10px;color:#a0a09c;margin-top:4px">يبحث عن الباركود...</div>
+        </div>
+        <div class="card">
+          <div style="font-size:10px;color:#a0a09c;margin-bottom:4px">نتيجة المسح</div>
+          <div style="display:flex;justify-content:space-between;align-items:center">
+            <div>
+              <div style="font-size:11px;font-weight:500;color:#1a1a18">09358 · لقوط 01</div>
+              <div style="font-size:10px;color:#a0a09c">178 يح' · كوي</div>
+            </div>
+            <span class="badge grn">✓ وجدت</span>
+          </div>
+        </div>
+        <button class="btn-grn" style="margin-top:4px">▶ ابدأ المهمة</button>
+        <div style="display:grid;grid-template-columns:1fr 1fr;gap:6px;margin-top:6px">
+          <button style="background:#fff;border:0.5px solid #b4b2a9;border-radius:8px;padding:7px;font-size:10px;color:#6b6b67;cursor:default">⏸ إيقاف مؤقت</button>
+          <button style="background:#fcebeb;border:0.5px solid #f7c1c1;border-radius:8px;padding:7px;font-size:10px;color:#A32D2D;cursor:default">⏹ إنهاء</button>
+        </div>
+      </div>
+    </div>
+
+    <!-- Slide 5: Message -->
+    <div class="slide" id="s5">
+      <div class="topbar"><span class="logo">TextileOps ✂️</span><span style="font-size:10px">رسالة للمدير</span></div>
+      <div class="body">
+        <div style="font-size:11px;font-weight:500;color:#1a1a18;margin-bottom:8px">📢 إرسال رسالة للمدير / المسؤول</div>
+        <div class="msg-box">
+          <div style="font-size:10px;color:#a0a09c;margin-bottom:3px">رسالة الإدارة</div>
+          <div>مرحباً، أنتهيت من المهمة الأولى وأحتاج مهمة جديدة.</div>
+        </div>
+        <textarea class="msg-input" rows="3" placeholder="اكتب رسالتك هنا..." style="resize:none;cursor:default"></textarea>
+        <button class="btn-grn" style="margin-top:8px">📤 إرسال</button>
+        <div style="font-size:10px;color:#a0a09c;text-align:center;margin-top:6px">سيصلك الرد داخل التطبيق</div>
+      </div>
+    </div>
+
+  </div>
+</div>
+
+<div class="dot-row" id="dots2"></div>
+<div style="display:flex;gap:12px;justify-content:center;padding:12px 0;max-width:320px;margin:0 auto">
+  <button id="prevBtn" style="flex:1;height:56px;font-size:22px;background:#fff;border:1.5px solid #888780;border-radius:12px;cursor:pointer;-webkit-tap-highlight-color:rgba(0,0,0,.1)">→</button>
+  <div id="stepLabel" style="flex:0 0 70px;display:flex;align-items:center;justify-content:center;font-size:13px;color:#6b6b67">1 / 6</div>
+  <button id="nextBtn" style="flex:1;height:56px;font-size:22px;background:#185FA5;color:#fff;border:none;border-radius:12px;cursor:pointer;-webkit-tap-highlight-color:rgba(0,0,0,.1)">←</button>
+</div>
+
+<script>
+const titles=['تسجيل الدخول','تسجيل الوجه (مرة واحدة)','تسجيل الحضور','مهامي','مسح الباركود','إرسال رسالة للمدير'];
+let cur=0;
+const total=6;
+const slides=document.querySelectorAll('.slide');
+
+function buildDots(){
+  ['dots','dots2'].forEach(id=>{
+    const el=document.getElementById(id);
+    el.innerHTML='';
+    for(let i=0;i<total;i++){
+      const d=document.createElement('div');
+      d.className='dot'+(i===0?' on':'');
+      d.onclick=()=>{cur=i;update();};
+      d.style.cursor='pointer';
+      d.id=id+'-d'+i;
+      el.appendChild(d);
+    }
+  });
+}
+
+function update(){
+  slides.forEach((s,i)=>{
+    s.classList.remove('active','prev');
+    if(i===cur)s.classList.add('active');
+    else if(i<cur)s.classList.add('prev');
+  });
+  document.getElementById('stepLabel').textContent=(cur+1)+' / '+total;
+  document.getElementById('slide-title').textContent=titles[cur];
+  const pb=document.getElementById('prevBtn');
+  const nb=document.getElementById('nextBtn');
+  pb.style.opacity=cur===0?'0.3':'1';
+  nb.style.opacity=cur===total-1?'0.3':'1';
+  for(let i=0;i<total;i++){
+    ['dots','dots2'].forEach(id=>{
+      const d=document.getElementById(id+'-d'+i);
+      if(d)d.className='dot'+(i===cur?' on':'');
+    });
+  }
+}
+
+function move(dir){
+  const next=cur+dir;
+  if(next<0||next>=total)return;
+  cur=next;update();
+}
+
+document.getElementById('prevBtn').addEventListener('touchend',function(e){e.preventDefault();move(-1);});
+document.getElementById('nextBtn').addEventListener('touchend',function(e){e.preventDefault();move(1);});
+document.getElementById('prevBtn').addEventListener('click',function(){move(-1);});
+document.getElementById('nextBtn').addEventListener('click',function(){move(1);});
+
+document.addEventListener('keydown',e=>{
+  if(e.key==='ArrowLeft')move(1);
+  if(e.key==='ArrowRight')move(-1);
+});
+
+let tx=0,ty=0;
+const sc=document.getElementById('screen');
+sc.addEventListener('touchstart',e=>{tx=e.touches[0].clientX;ty=e.touches[0].clientY;},{passive:true});
+sc.addEventListener('touchend',e=>{
+  const dx=e.changedTouches[0].clientX-tx;
+  const dy=Math.abs(e.changedTouches[0].clientY-ty);
+  if(dy>40)return;
+  if(Math.abs(dx)>30){dx<0?move(1):move(-1);}
+},{passive:true});
+
+buildDots();
+update();
+</script>
+</body>
+</html>
