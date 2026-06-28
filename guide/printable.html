@@ -1,0 +1,308 @@
+<!DOCTYPE html>
+<html lang="ar" dir="rtl">
+<head>
+<meta charset="UTF-8">
+<title>دليل استخدام TextileOps</title>
+<style>
+  * { margin: 0; padding: 0; box-sizing: border-box; }
+
+  body {
+    font-family: 'Segoe UI', Tahoma, Arial, sans-serif;
+    direction: rtl;
+    background: #fff;
+    color: #222;
+    font-size: 14px;
+    padding: 30px;
+  }
+
+  .page {
+    max-width: 750px;
+    margin: 0 auto;
+  }
+
+  /* Header */
+  .header {
+    background: #1a56db;
+    color: white;
+    border-radius: 12px;
+    padding: 20px 24px;
+    margin-bottom: 24px;
+    display: flex;
+    align-items: center;
+    gap: 16px;
+  }
+  .header-logo {
+    font-size: 42px;
+  }
+  .header h1 {
+    font-size: 24px;
+    font-weight: 700;
+    margin-bottom: 4px;
+  }
+  .header p {
+    font-size: 13px;
+    opacity: 0.85;
+  }
+
+  /* Link box */
+  .link-box {
+    background: #eff6ff;
+    border: 2px solid #1a56db;
+    border-radius: 10px;
+    padding: 14px 20px;
+    margin-bottom: 24px;
+    text-align: center;
+  }
+  .link-box .label {
+    font-size: 12px;
+    color: #555;
+    margin-bottom: 4px;
+  }
+  .link-box .url {
+    font-size: 16px;
+    font-weight: 700;
+    color: #1a56db;
+    direction: ltr;
+    unicode-bidi: embed;
+  }
+
+  /* Sections */
+  .section {
+    background: #f8fafc;
+    border-right: 4px solid #1a56db;
+    border-radius: 8px;
+    padding: 16px 20px;
+    margin-bottom: 16px;
+  }
+  .section-title {
+    font-size: 16px;
+    font-weight: 700;
+    color: #1a56db;
+    margin-bottom: 12px;
+    display: flex;
+    align-items: center;
+    gap: 8px;
+  }
+  .section ul {
+    list-style: none;
+    padding: 0;
+  }
+  .section ul li {
+    padding: 5px 0;
+    border-bottom: 1px solid #e5e7eb;
+    display: flex;
+    align-items: flex-start;
+    gap: 8px;
+  }
+  .section ul li:last-child {
+    border-bottom: none;
+  }
+  .bullet {
+    color: #1a56db;
+    font-weight: bold;
+    flex-shrink: 0;
+  }
+
+  /* Face photos grid */
+  .photos-grid {
+    display: grid;
+    grid-template-columns: repeat(5, 1fr);
+    gap: 10px;
+    margin-top: 12px;
+  }
+  .photo-item {
+    background: white;
+    border: 2px solid #d1d5db;
+    border-radius: 8px;
+    padding: 10px 6px;
+    text-align: center;
+    font-size: 11px;
+    color: #444;
+  }
+  .photo-item .icon { font-size: 26px; margin-bottom: 4px; }
+
+  /* Warning box */
+  .warning {
+    background: #fff7ed;
+    border: 2px solid #f59e0b;
+    border-radius: 10px;
+    padding: 16px 20px;
+    margin-bottom: 16px;
+  }
+  .warning-title {
+    font-size: 15px;
+    font-weight: 700;
+    color: #b45309;
+    margin-bottom: 10px;
+  }
+  .warning ul {
+    list-style: none;
+  }
+  .warning ul li {
+    padding: 5px 0;
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    font-size: 13px;
+  }
+
+  /* Footer */
+  .footer {
+    text-align: center;
+    font-size: 11px;
+    color: #888;
+    margin-top: 24px;
+    padding-top: 16px;
+    border-top: 1px solid #e5e7eb;
+  }
+
+  /* Install steps */
+  .install-steps {
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+    gap: 12px;
+    margin-top: 10px;
+  }
+  .install-box {
+    background: white;
+    border: 1px solid #d1d5db;
+    border-radius: 8px;
+    padding: 12px;
+  }
+  .install-box .device { font-weight: 700; margin-bottom: 6px; font-size: 13px; }
+  .install-box ol { padding-right: 18px; font-size: 12px; }
+  .install-box ol li { padding: 2px 0; }
+
+  @media print {
+    body { padding: 15px; }
+    .section, .warning { break-inside: avoid; }
+  }
+</style>
+</head>
+<body>
+<div class="page">
+
+  <!-- Header -->
+  <div class="header">
+    <div class="header-logo">✂️</div>
+    <div>
+      <h1>دليل استخدام تطبيق TextileOps</h1>
+      <p>نظام إدارة الحضور والمهام — للعمال</p>
+    </div>
+  </div>
+
+  <!-- Link + QR -->
+  <div class="link-box" style="display:flex;align-items:center;gap:20px;text-align:right">
+    <div style="flex:1">
+      <div class="label">📱 رابط التطبيق — افتحه من هاتفك أو امسح الكود</div>
+      <div class="url">https://amtextile2222-beep.github.io/textileops/</div>
+    </div>
+    <div id="qr-code" style="flex-shrink:0;background:#fff;padding:6px;border-radius:8px;border:1px solid #d1d5db"></div>
+  </div>
+  <script src="https://cdn.jsdelivr.net/npm/qrcodejs@1.0.0/qrcode.min.js"></script>
+  <script>
+    new QRCode(document.getElementById('qr-code'),{
+      text:'https://amtextile2222-beep.github.io/textileops/',
+      width:100,height:100,
+      colorDark:'#000',colorLight:'#fff',
+      correctLevel:QRCode.CorrectLevel.H
+    });
+  </script>
+
+  <!-- Section 1: Attendance -->
+  <div class="section">
+    <div class="section-title">1️⃣ الحضور والانصراف</div>
+    <ul>
+      <li><span class="bullet">✅</span> عند وصولك للعمل → اضغط <strong>"حضور"</strong></li>
+      <li><span class="bullet">🚪</span> عند مغادرتك → اضغط <strong>"انصراف"</strong></li>
+      <li><span class="bullet">⚠️</span> لا تنسى تسجيل الحضور كل يوم</li>
+    </ul>
+  </div>
+
+  <!-- Section 2: Tasks -->
+  <div class="section">
+    <div class="section-title">2️⃣ مهامي</div>
+    <ul>
+      <li><span class="bullet">👁️</span> يمكنك رؤية المهام المخصصة لك فقط</li>
+      <li><span class="bullet">📋</span> اضغط على المهمة لرؤية التفاصيل</li>
+      <li><span class="bullet">🔒</span> لا يمكن تعديل المهام — فقط للاطلاع</li>
+    </ul>
+  </div>
+
+  <!-- Section 3: Scanner -->
+  <div class="section">
+    <div class="section-title">3️⃣ مسح المهام 📷</div>
+    <ul>
+      <li><span class="bullet">1.</span> اضغط على أيقونة المسح الضوئي</li>
+      <li><span class="bullet">2.</span> وجّه الكاميرا نحو الباركود على المهمة</li>
+      <li><span class="bullet">3.</span> سيظهر لك تفاصيل المهمة مباشرة</li>
+    </ul>
+  </div>
+
+  <!-- Section 4: Message -->
+  <div class="section">
+    <div class="section-title">4️⃣ إرسال رسالة للمدير 💬</div>
+    <ul>
+      <li><span class="bullet">1.</span> من قائمة الحضور اضغط <strong>"إرسال رسالة"</strong></li>
+      <li><span class="bullet">2.</span> اكتب رسالتك وأرسلها</li>
+      <li><span class="bullet">3.</span> سيصلك رد من المدير في التطبيق</li>
+    </ul>
+  </div>
+
+  <!-- Section 5: Face -->
+  <div class="section">
+    <div class="section-title">5️⃣ تسجيل الوجه — عند أول دخول فقط 📸</div>
+    <p style="font-size:13px; color:#444; margin-bottom:12px;">
+      سيطلب منك التطبيق التقاط <strong>5 صور لوجهك</strong> بوضعيات مختلفة لضمان دقة التعرف مستقبلاً:
+    </p>
+    <div class="photos-grid">
+      <div class="photo-item"><div class="icon">😐</div>مباشرة للأمام</div>
+      <div class="photo-item"><div class="icon">😏</div>إمالة لليمين</div>
+      <div class="photo-item"><div class="icon">😒</div>إمالة لليسار</div>
+      <div class="photo-item"><div class="icon">🙂</div>إمالة للأعلى</div>
+      <div class="photo-item"><div class="icon">😌</div>إمالة للأسفل</div>
+    </div>
+  </div>
+
+  <!-- Section 6: Shortcut -->
+  <div class="section">
+    <div class="section-title">6️⃣ إضافة التطبيق على شاشتك الرئيسية 📌</div>
+    <div class="install-steps">
+      <div class="install-box">
+        <div class="device">🍎 iPhone (Safari)</div>
+        <ol>
+          <li>افتح الرابط في Safari</li>
+          <li>اضغط زر المشاركة 📤</li>
+          <li>اختر "إضافة إلى الشاشة الرئيسية"</li>
+        </ol>
+      </div>
+      <div class="install-box">
+        <div class="device">🤖 Android (Chrome)</div>
+        <ol>
+          <li>افتح الرابط في Chrome</li>
+          <li>اضغط النقاط الثلاث ⋮</li>
+          <li>اختر "إضافة إلى الشاشة الرئيسية"</li>
+        </ol>
+      </div>
+    </div>
+  </div>
+
+  <!-- Warning -->
+  <div class="warning">
+    <div class="warning-title">⚠️ شروط الدخول — مهم جداً</div>
+    <ul>
+      <li>📶 يجب أن تكون متصلاً بـ <strong>WiFi المصنع</strong> عند تسجيل الحضور</li>
+      <li>📱 التطبيق مرتبط بهاتفك فقط — <strong>لا يعمل من هاتف آخر</strong></li>
+      <li>🤳 عند كل دخول سيطلب منك <strong>التحقق بالوجه</strong></li>
+      <li>🔄 في حال تغيير الهاتف — <strong>أخبر المدير أولاً</strong></li>
+    </ul>
+  </div>
+
+  <!-- Footer -->
+  <div class="footer">
+    لأي مشكلة تواصل مع المدير مباشرة &nbsp;|&nbsp; TextileOps © 2026
+  </div>
+
+</div>
+</body>
+</html>
