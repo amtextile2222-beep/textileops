@@ -2429,6 +2429,7 @@ async function doLogin(){
     return;
   }
   loginAttempts=0;
+  if(w.disabled){document.getElementById('l-err').textContent='⛔ הגישה הושעתה זמנית — פנה למנהל';return;}
   if(w.requireFactoryIP){
     const allowed=await checkFactoryIP(w);
     if(!allowed)return;
@@ -4873,6 +4874,7 @@ function renderAdmin(){
       <div style="flex:1"><div style="font-size:13px;font-weight:500">${esc(w.name)}</div>
       <div style="font-size:11px;color:var(--txt3)">${esc(w.dept)} · ${w.role==='manager'?'מנהל':w.role==='supervisor'?'אחראי':w.role==='helper'?'עוזר':'עובד'} · @${esc(w.user)}</div></div>
       ${w.requireFactoryIP?`<span title="חייב WiFi מפעל" style="font-size:16px">🏭</span>`:''}
+      ${w.disabled?`<span title="גישה מושעית" style="font-size:16px">🚫</span>`:''}
       ${w.deviceBinding?`<span title="${w.deviceId?'מכשיר רשום ונעול':'נעילת מכשיר — טרם נרשם'}" style="font-size:16px">${w.deviceId?'📱🔒':'📱⚪'}</span>`:''}
       ${w.deviceBinding&&w.deviceId?`<button class="btn warn" style="font-size:11px;padding:4px 8px" title="אפס מכשיר — יאפשר כניסה ממכשיר חדש" onclick="resetDeviceBinding('${w.id}')">🔄</button>`:''}
       ${w.faceAuth?`<span title="${(w.faceDescriptor||w.faceDescriptors&&Object.keys(w.faceDescriptors).length)?'זיהוי פנים פעיל':'זיהוי פנים — פנים לא רשומים'}" style="font-size:16px">${(w.faceDescriptor||w.faceDescriptors&&Object.keys(w.faceDescriptors).length)?'🟢':'🟡'}</span>`:''}
@@ -5057,6 +5059,13 @@ function openModal(action,id){
           🏭 חייב WiFi מפעל בכניסה
         </label>
         <div style="font-size:11px;color:var(--txt3);margin-top:4px">IP מפעל: ${S.settings.factoryIP||'188.225.231.120'}</div>
+      </div>
+      <div class="field" style="background:var(--bg2);border-radius:var(--r);padding:10px 12px;margin-bottom:8px;${w?.disabled?'border:2px solid var(--red-txt)':''}">
+        <label style="display:flex;align-items:center;gap:10px;cursor:pointer;font-size:13px;color:var(--txt)">
+          <input type="checkbox" id="mf-disabled" ${w?.disabled?'checked':''} style="width:auto;cursor:pointer"/>
+          🚫 השעיית גישה זמנית
+        </label>
+        <div style="font-size:11px;color:var(--txt3);margin-top:4px">העובד לא יוכל להיכנס עד שתבטל</div>
       </div>
       <div class="field" style="background:var(--bg2);border-radius:var(--r);padding:10px 12px;margin-bottom:8px">
         <label style="display:flex;align-items:center;gap:10px;cursor:pointer;font-size:13px;color:var(--txt)">
@@ -5336,6 +5345,7 @@ async function confirmModal(){
     const id=S.modalAction.split(':')[1];
     const w=S.workers.find(x=>x.id===id);
     if(w){w.name=name;w.dept=dept;w.role=role;w.user=user;w.permissions=perms;
+    w.disabled=!!document.getElementById('mf-disabled')?.checked;
     w.requireFactoryIP=!!document.getElementById('mf-require-ip')?.checked;
     w.deviceBinding=!!document.getElementById('mf-device-binding')?.checked;
     w.faceAuth=!!document.getElementById('mf-face-auth')?.checked;
