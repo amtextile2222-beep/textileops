@@ -3026,7 +3026,7 @@ async function handlePausedTasks(workerId,newBarcodes){
   const batches={};
   paused.forEach(t=>{const bid=t.batchId||t.id;if(!batches[bid])batches[bid]=[];batches[bid].push(t);});
   for(const [bid,bTasks] of Object.entries(batches)){
-    const sameBC=newBarcodes.some(nb=>bTasks.find(t=>t.bc===nb));
+    const sameBC=newBarcodes.some(nb=>bTasks.find(t=>taskBc(t)===nb));
     if(sameBC){
       // אותו ברקוד — המשך
       const resumed=await showConfirm(T.resume_title,
