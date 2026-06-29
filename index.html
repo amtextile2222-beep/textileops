@@ -4280,6 +4280,7 @@ function mgrStartDecoding(video,status){
 let tsCamStream=null;let tsCamInterval=null;
 let tsEmpCamStream=null;let tsEmpCamInterval=null;
 async function tsStartWorkerCam(){
+  const T=LANGS[currentLang];
   const container=document.getElementById('ts-emp-cam-container');
   const video=document.getElementById('ts-emp-cam-video');
   const status=document.getElementById('ts-emp-cam-status');
@@ -4428,6 +4429,7 @@ function tsShowTaskTypeField(show){
   if(stepsWrap)stepsWrap.style.display=show?'none':'';
 }
 async function tsStartCam(){
+  const T=LANGS[currentLang];
   const container=document.getElementById('ts-cam-container');
   const video=document.getElementById('ts-cam-video');
   const status=document.getElementById('ts-cam-status');
