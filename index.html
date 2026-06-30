@@ -727,6 +727,12 @@ code{background:var(--bg2);border:0.5px solid var(--b);border-radius:4px;padding
       </div>
       <button class="btn primary" style="font-size:12px" onclick="saveAIUrl()">💾 שמור כתובת</button>
       <div id="ai-url-status" style="font-size:11px;margin-top:6px;color:var(--green-txt)"></div>
+      <div class="field" style="margin-top:10px">
+        <label style="display:flex;align-items:center;gap:8px;cursor:pointer;font-size:13px">
+          <input type="checkbox" id="ai-supervisor-toggle" onchange="saveAISupervisor()" style="width:16px;height:16px">
+          הצג עוזר AI לאחראים
+        </label>
+      </div>
     </div>
   </div>
 
@@ -2350,8 +2356,7 @@ migrateBreaks();
 function applyPerms(w){
   const fb=document.getElementById('floating-msg-btn');
   if(fb)fb.style.display=w.role==='manager'?'none':'flex';
-  const aiBtn=document.getElementById('ai-chat-btn');
-  if(aiBtn)w.role==='manager'?aiBtn.classList.remove('hidden'):aiBtn.classList.add('hidden');
+  updateAIBtnVisibility();
   if(w.role==='manager'){
     [...ALL_SUPERVISOR_PAGE_IDS,'admin','setup','costs','products'].forEach(p=>document.getElementById('nb-'+p)?.classList.remove('hidden'));
   } else {
@@ -2487,12 +2492,27 @@ async function saveAIUrl(){
   document.getElementById('ai-url-status').textContent='✅ נשמר!';
   setTimeout(()=>document.getElementById('ai-url-status').textContent='',3000);
 }
+async function saveAISupervisor(){
+  const v=document.getElementById('ai-supervisor-toggle').checked;
+  if(S.fbConnected)await fbSetMerge('appSettings','aiSettings',{supervisorAccess:v,updatedAt:new Date().toISOString()});
+  localStorage.setItem('ai_supervisor',v?'1':'0');
+  updateAIBtnVisibility();
+}
+function updateAIBtnVisibility(){
+  const w=S.workers.find(x=>x.id===S.user?.id);if(!w)return;
+  const aiBtn=document.getElementById('ai-chat-btn');if(!aiBtn)return;
+  const supervisorAllowed=localStorage.getItem('ai_supervisor')==='1';
+  const show=w.role==='manager'||(w.role==='supervisor'&&supervisorAllowed);
+  show?aiBtn.classList.remove('hidden'):aiBtn.classList.add('hidden');
+}
 async function loadAIUrl(){
   try{
     const res=await fetch('https://firestore.googleapis.com/v1/projects/textileops-aef4a/databases/(default)/documents/appSettings/aiSettings');
     const data=await res.json();
     const url=data?.fields?.tunnelUrl?.stringValue;
     if(url){AI_URL=url;localStorage.setItem('ai_url',url);}
+    const sup=data?.fields?.supervisorAccess?.booleanValue;
+    if(sup!==undefined){localStorage.setItem('ai_supervisor',sup?'1':'0');const cb=document.getElementById('ai-supervisor-toggle');if(cb)cb.checked=sup;}
   }catch(e){}
 }
 function openAIChat(){
