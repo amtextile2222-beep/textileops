@@ -2507,11 +2507,10 @@ function updateAIBtnVisibility(){
 }
 async function loadAIUrl(){
   try{
-    const res=await fetch('https://firestore.googleapis.com/v1/projects/textileops-aef4a/databases/(default)/documents/appSettings/aiSettings');
-    const data=await res.json();
-    const url=data?.fields?.tunnelUrl?.stringValue;
+    const data=await fbGet('appSettings','aiSettings');
+    const url=data?.tunnelUrl;
     if(url){AI_URL=url;localStorage.setItem('ai_url',url);}
-    const sup=data?.fields?.supervisorAccess?.booleanValue;
+    const sup=data?.supervisorAccess;
     if(sup!==undefined){localStorage.setItem('ai_supervisor',sup?'1':'0');const cb=document.getElementById('ai-supervisor-toggle');if(cb)cb.checked=sup;}
   }catch(e){}
 }
