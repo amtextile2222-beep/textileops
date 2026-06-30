@@ -3040,6 +3040,7 @@ async function pauseWorkerTasks(workerId,pausedAt){
 
 // בדיקת משימות מושהות כשפותחים משימה חדשה לעובד
 async function handlePausedTasks(workerId,newBarcodes){
+  const T=LANGS[currentLang];
   const paused=S.activeTasks.filter(t=>t.workerId===workerId&&t.paused);
   if(!paused.length)return true;
   // קבץ לפי batchId
