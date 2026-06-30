@@ -3311,6 +3311,7 @@ function totalBcSessions(bc, workerId){
 }
 
 function renderScanActive(){
+  const T=LANGS[currentLang];
   fillDeptSelects();
   const el=document.getElementById('scan-active');if(!el)return;
   // עובד רגיל רואה רק את המשימות שלו
