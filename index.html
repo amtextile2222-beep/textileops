@@ -2600,7 +2600,7 @@ async function sendAIMsg(){
     const res=await fetch(`${AI_URL}/api/v1/workspace/${AI_SLUG}/stream-chat`,{
       method:'POST',
       headers:{'Content-Type':'application/json','Authorization':'Bearer '+AI_KEY},
-      body:JSON.stringify({message:'חשוב: ענה תמיד בעברית בלבד, ללא קשר לשפת השאלה.\n\n'+ctx+'\n\nשאלה: '+q,mode:'chat'})
+      body:JSON.stringify({message:'חשוב: ענה תמיד באותה שפה שבה נשאלת השאלה (עברית/ערבית/אנגלית).\n\n'+ctx+'\n\nשאלה: '+q,mode:'chat'})
     });
     const reader=res.body.getReader();
     const decoder=new TextDecoder();
