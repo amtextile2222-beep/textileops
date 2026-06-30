@@ -1918,8 +1918,8 @@ function listenFb(){
       // עובד שסטטוסו 'out' ויש לו משימה פעילה היום — השהה אוטומטית
       S.activeTasks.filter(t=>!t.paused).forEach(t=>{
         const w=S.workers.find(x=>x.id===t.workerId);
-        if(w&&w.status==='out'&&w.checkout&&new Date(w.checkout)>new Date(t.startTime)){
-          const pausedAt=new Date(w.checkout);
+        if(w&&w.status==='out'){
+          const pausedAt=w.checkout?new Date(w.checkout):new Date();
           t.paused=true;t.pausedAt=pausedAt.toISOString();
           t.accumulatedSec=(t.accumulatedSec||0)+calcTaskDurSec(t.startTime,pausedAt,t.workerId);
           t.elapsed=t.accumulatedSec;
@@ -2429,7 +2429,6 @@ async function doLogin(){
     return;
   }
   loginAttempts=0;
-  if(w.disabled){document.getElementById('l-err').textContent='⛔ הגישה הושעתה זמנית — פנה למנהל';return;}
   if(w.requireFactoryIP){
     const allowed=await checkFactoryIP(w);
     if(!allowed)return;
@@ -3027,7 +3026,7 @@ async function handlePausedTasks(workerId,newBarcodes){
   const batches={};
   paused.forEach(t=>{const bid=t.batchId||t.id;if(!batches[bid])batches[bid]=[];batches[bid].push(t);});
   for(const [bid,bTasks] of Object.entries(batches)){
-    const sameBC=newBarcodes.some(nb=>bTasks.find(t=>taskBc(t)===nb));
+    const sameBC=newBarcodes.some(nb=>bTasks.find(t=>t.bc===nb));
     if(sameBC){
       // אותו ברקוד — המשך
       const resumed=await showConfirm(T.resume_title,
@@ -4235,6 +4234,7 @@ function mgrShowTaskTypeField(show){
 
 let mgrCamStream=null;let mgrCamInterval=null;
 async function mgrStartCam(){
+  const T=LANGS[currentLang];
   const container=document.getElementById('mgr-cam-container');
   const video=document.getElementById('mgr-cam-video');
   const status=document.getElementById('mgr-cam-status');
@@ -4874,7 +4874,6 @@ function renderAdmin(){
       <div style="flex:1"><div style="font-size:13px;font-weight:500">${esc(w.name)}</div>
       <div style="font-size:11px;color:var(--txt3)">${esc(w.dept)} · ${w.role==='manager'?'מנהל':w.role==='supervisor'?'אחראי':w.role==='helper'?'עוזר':'עובד'} · @${esc(w.user)}</div></div>
       ${w.requireFactoryIP?`<span title="חייב WiFi מפעל" style="font-size:16px">🏭</span>`:''}
-      ${w.disabled?`<span title="גישה מושעית" style="font-size:16px">🚫</span>`:''}
       ${w.deviceBinding?`<span title="${w.deviceId?'מכשיר רשום ונעול':'נעילת מכשיר — טרם נרשם'}" style="font-size:16px">${w.deviceId?'📱🔒':'📱⚪'}</span>`:''}
       ${w.deviceBinding&&w.deviceId?`<button class="btn warn" style="font-size:11px;padding:4px 8px" title="אפס מכשיר — יאפשר כניסה ממכשיר חדש" onclick="resetDeviceBinding('${w.id}')">🔄</button>`:''}
       ${w.faceAuth?`<span title="${(w.faceDescriptor||w.faceDescriptors&&Object.keys(w.faceDescriptors).length)?'זיהוי פנים פעיל':'זיהוי פנים — פנים לא רשומים'}" style="font-size:16px">${(w.faceDescriptor||w.faceDescriptors&&Object.keys(w.faceDescriptors).length)?'🟢':'🟡'}</span>`:''}
@@ -5059,13 +5058,6 @@ function openModal(action,id){
           🏭 חייב WiFi מפעל בכניסה
         </label>
         <div style="font-size:11px;color:var(--txt3);margin-top:4px">IP מפעל: ${S.settings.factoryIP||'188.225.231.120'}</div>
-      </div>
-      <div class="field" style="background:var(--bg2);border-radius:var(--r);padding:10px 12px;margin-bottom:8px;${w?.disabled?'border:2px solid var(--red-txt)':''}">
-        <label style="display:flex;align-items:center;gap:10px;cursor:pointer;font-size:13px;color:var(--txt)">
-          <input type="checkbox" id="mf-disabled" ${w?.disabled?'checked':''} style="width:auto;cursor:pointer"/>
-          🚫 השעיית גישה זמנית
-        </label>
-        <div style="font-size:11px;color:var(--txt3);margin-top:4px">העובד לא יוכל להיכנס עד שתבטל</div>
       </div>
       <div class="field" style="background:var(--bg2);border-radius:var(--r);padding:10px 12px;margin-bottom:8px">
         <label style="display:flex;align-items:center;gap:10px;cursor:pointer;font-size:13px;color:var(--txt)">
@@ -5345,7 +5337,6 @@ async function confirmModal(){
     const id=S.modalAction.split(':')[1];
     const w=S.workers.find(x=>x.id===id);
     if(w){w.name=name;w.dept=dept;w.role=role;w.user=user;w.permissions=perms;
-    w.disabled=!!document.getElementById('mf-disabled')?.checked;
     w.requireFactoryIP=!!document.getElementById('mf-require-ip')?.checked;
     w.deviceBinding=!!document.getElementById('mf-device-binding')?.checked;
     w.faceAuth=!!document.getElementById('mf-face-auth')?.checked;
@@ -5398,6 +5389,7 @@ document.addEventListener('visibilitychange',()=>{
 let camStream=null;let camInterval=null;
 
 async function startCam(){
+  const T=LANGS[currentLang];
   const container=document.getElementById('cam-container');
   const video=document.getElementById('cam-video');
   const status=document.getElementById('cam-status');
