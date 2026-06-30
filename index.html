@@ -2481,8 +2481,6 @@ async function doLogin(){
 }
 // ─── AI CHAT ────────────────────────────────────────────────
 let AI_URL=localStorage.getItem('ai_url')||'https://respond-encryption-sri-tray.trycloudflare.com';
-const AI_KEY='78RV43P-K4Z4K46-N70FT4X-J7CTM6F';
-const AI_SLUG='432787ca-6831-47cf-8eb8-847fbf66d0b2';
 async function saveAIUrl(){
   const v=document.getElementById('ai-url-input').value.trim().replace(/\/$/,'');
   if(!v){document.getElementById('ai-url-status').textContent='הזן כתובת תחילה';return;}
@@ -2593,38 +2591,17 @@ async function sendAIMsg(){
   input.value='';
   _aiAddMsg(q,'user');
   const bubble=_aiAddMsg('⏳ חושב...','ai');
-  await loadAIUrl();
   try{
     const ctx=_buildContext();
-    const res=await fetch(`${AI_URL}/api/v1/workspace/${AI_SLUG}/stream-chat`,{
-      method:'POST',
-      headers:{'Content-Type':'application/json','Authorization':'Bearer '+AI_KEY},
-      body:JSON.stringify({message:'חשוב: ענה תמיד באותה שפה שבה נשאלת השאלה (עברית/ערבית/אנגלית).\n\n'+ctx+'\n\nשאלה: '+q,mode:'chat'})
-    });
-    const reader=res.body.getReader();
-    const decoder=new TextDecoder();
-    let full='';
-    bubble.textContent='';
-    while(true){
-      const{done,value}=await reader.read();
-      if(done)break;
-      const lines=decoder.decode(value).split('\n');
-      for(const line of lines){
-        if(!line.startsWith('data:'))continue;
-        try{
-          const obj=JSON.parse(line.slice(5).trim());
-          if(obj.textResponse&&obj.type==='textResponseChunk'){
-            full+=obj.textResponse;
-            bubble.textContent=full;
-            document.getElementById('ai-chat-msgs').scrollTop=9999;
-          }
-        }catch(e){}
-      }
-    }
-    if(!full)bubble.textContent='לא התקבלה תשובה';
+    const message='חשוב: ענה תמיד באותה שפה שבה נשאלת השאלה (עברית/ערבית/אנגלית).\n\n'+ctx+'\n\nשאלה: '+q;
+    const{httpsCallable}=window._fb;
+    const fn=httpsCallable(window._fbFunctions,'aiChat');
+    const result=await fn({message});
+    bubble.textContent=result?.data?.textResponse||'לא התקבלה תשובה';
+    document.getElementById('ai-chat-msgs').scrollTop=9999;
   }catch(e){
-    console.error('AI error:',e,'URL:',AI_URL);
-    bubble.textContent='⛔ שגיאת חיבור ל-AI: '+e.message;
+    console.error('AI error:',e);
+    bubble.textContent='⛔ שגיאת חיבור ל-AI: '+(e.message||'');
   }
 }
 function doLogout(){

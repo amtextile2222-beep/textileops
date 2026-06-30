@@ -81,6 +81,30 @@ exports.sendPushToWorker = functions.https.onCall(async (data) => {
   }
 });
 
+// עוזר AI — proxy מאובטח ל-AnythingLLM (המפתח לא נחשף ללקוח)
+const AI_KEY = '78RV43P-K4Z4K46-N70FT4X-J7CTM6F';
+const AI_SLUG = '432787ca-6831-47cf-8eb8-847fbf66d0b2';
+exports.aiChat = functions.https.onCall(async (data, context) => {
+  if (!context.auth) throw new functions.https.HttpsError('unauthenticated', 'יש להתחבר תחילה');
+  const message = String(data && data.message || '').slice(0, 8000);
+  if (!message) throw new functions.https.HttpsError('invalid-argument', 'הודעה ריקה');
+  try {
+    const settingsSnap = await db.collection('appSettings').doc('aiSettings').get();
+    const aiUrl = (settingsSnap.exists ? settingsSnap.data().tunnelUrl : '') || '';
+    if (!aiUrl) throw new functions.https.HttpsError('failed-precondition', 'כתובת שרת AI לא מוגדרת');
+    const res = await fetch(`${aiUrl.replace(/\/$/, '')}/api/v1/workspace/${AI_SLUG}/chat`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json', 'Authorization': 'Bearer ' + AI_KEY },
+      body: JSON.stringify({ message, mode: 'chat' })
+    });
+    const json = await res.json();
+    return { textResponse: json.textResponse || json.error || 'לא התקבלה תשובה' };
+  } catch (e) {
+    console.error('aiChat error:', e);
+    throw new functions.https.HttpsError('internal', e.message || 'שגיאת AI');
+  }
+});
+
 // בדיקת משימות ארוכות כל 5 דקות
 exports.longTaskMonitor = functions.pubsub.schedule('every 5 minutes').onRun(async () => {
   try {
