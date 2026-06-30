@@ -189,8 +189,38 @@ body{font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',Tahoma,Arial,sans-s
       </div>
     </div>
 
-    <!-- Slide 5: Message -->
+    <!-- Slide 5: Camera Permission -->
     <div class="slide" id="s5">
+      <div class="topbar" style="background:#dc2626"><span class="logo">TextileOps ✂️</span><span style="font-size:10px">مشكلة الكاميرا</span></div>
+      <div class="body">
+        <div style="background:#fef2f2;border:1.5px solid #fca5a5;border-radius:8px;padding:10px;text-align:center;margin-bottom:10px">
+          <div style="font-size:22px;margin-bottom:4px">📵</div>
+          <div style="font-size:11px;font-weight:600;color:#dc2626">لا يمكن الوصول إلى الكاميرا</div>
+          <div style="font-size:10px;color:#a0a09c;margin-top:2px">يظهر عند المسح أو تسجيل الوجه</div>
+        </div>
+        <div class="card">
+          <div style="font-size:10px;font-weight:600;color:#1a1a18;margin-bottom:6px">🤖 Android / Chrome</div>
+          <div style="font-size:10px;color:#444;line-height:1.7">
+            ١. اضغط 🔒 بجانب الرابط<br>
+            ٢. اختر <strong>الأذونات</strong><br>
+            ٣. الكاميرا ← <strong>سماح</strong><br>
+            ٤. أعد تحميل الصفحة 🔄
+          </div>
+        </div>
+        <div class="card" style="margin-top:6px">
+          <div style="font-size:10px;font-weight:600;color:#1a1a18;margin-bottom:6px">🍎 iPhone / Safari</div>
+          <div style="font-size:10px;color:#444;line-height:1.7">
+            ١. الإعدادات ← الخصوصية ← الكاميرا<br>
+            ٢. فعّل <strong>Safari</strong><br>
+            <span style="color:#a0a09c">أو: الإعدادات ← Safari ← الكاميرا ← سماح</span>
+          </div>
+        </div>
+        <div style="font-size:10px;color:#a0a09c;text-align:center;margin-top:8px">إذا استمرت المشكلة — أخبر المدير</div>
+      </div>
+    </div>
+
+    <!-- Slide 6: Message -->
+    <div class="slide" id="s6">
       <div class="topbar"><span class="logo">TextileOps ✂️</span><span style="font-size:10px">رسالة للمدير</span></div>
       <div class="body">
         <div style="font-size:11px;font-weight:500;color:#1a1a18;margin-bottom:8px">📢 إرسال رسالة للمدير / المسؤول</div>
@@ -215,9 +245,9 @@ body{font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',Tahoma,Arial,sans-s
 </div>
 
 <script>
-const titles=['تسجيل الدخول','تسجيل الوجه (مرة واحدة)','تسجيل الحضور','مهامي','مسح الباركود','إرسال رسالة للمدير'];
+const titles=['تسجيل الدخول','تسجيل الوجه (مرة واحدة)','تسجيل الحضور','مهامي','مسح الباركود','إذا انقطعت الكاميرا 📵','إرسال رسالة للمدير'];
 let cur=0;
-const total=6;
+const total=7;
 const slides=document.querySelectorAll('.slide');
 
 function buildDots(){
