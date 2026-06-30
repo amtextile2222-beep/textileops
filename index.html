@@ -4040,6 +4040,7 @@ function waInWorkingHours(){
 
 // ─── DASHBOARD ──────────────────────────────────────────────
 function renderDash(){
+  const T=LANGS[currentLang];
   const inW=S.workers.filter(w=>w.status==='in');
   document.getElementById('d-active').textContent=inW.length;
   const today=todayStr();
@@ -5297,6 +5298,9 @@ async function confirmModal(){
     if(etVal){
       // יש זמן סיום — העבר להיסטוריה
       const endTime=new Date(etVal);
+      if(endTime.getTime()-Date.now()>3600000){
+        if(!await showConfirm('⚠ זמן סיום עתידי','זמן הסיום שהזנת (' +pad2(endTime.getHours())+':'+pad2(endTime.getMinutes())+ ') רחוק מהשעה הנוכחית ביותר משעה. להמשיך בכל זאת?','כן, שמור','בטל'))return;
+      }
       const done={...t,endTime,duration:Math.round((endTime-new Date(t.startTime))/1000)};
       S.histTasks.unshift(done);
       S.activeTasks=S.activeTasks.filter(x=>x.id!==t.id);
@@ -5320,7 +5324,13 @@ async function confirmModal(){
     const stVal=document.getElementById('mf-t-start')?.value;
     if(stVal)t.startTime=new Date(stVal);
     const etVal=document.getElementById('mf-t-end')?.value;
-    if(etVal){t.endTime=new Date(etVal);t.duration=Math.round((t.endTime-new Date(t.startTime))/1000);}
+    if(etVal){
+      const newEnd=new Date(etVal);
+      if(newEnd.getTime()-Date.now()>3600000){
+        if(!await showConfirm('⚠ זמן סיום עתידי','זמן הסיום שהזנת (' +pad2(newEnd.getHours())+':'+pad2(newEnd.getMinutes())+ ') רחוק מהשעה הנוכחית ביותר משעה. להמשיך בכל זאת?','כן, שמור','בטל'))return;
+      }
+      t.endTime=newEnd;t.duration=Math.round((t.endTime-new Date(t.startTime))/1000);
+    }
     if(S.fbConnected)await fbSet('histTasks',t.id,{...t,startTime:t.startTime instanceof Date?t.startTime.toISOString():t.startTime,endTime:t.endTime instanceof Date?t.endTime.toISOString():t.endTime});
     saveLS();closeModal();renderTasks();renderMgrTasks();buildRep();return;
   }
