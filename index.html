@@ -2926,6 +2926,7 @@ async function punchIn(){
 }
 async function punchOut(){
   if(!S.user)return;
+  const T=LANGS[currentLang];
   const w=S.workers.find(x=>x.id===S.user.id);
   if(!w)return;
   if(!w.sessions)w.sessions=[];
@@ -3598,6 +3599,7 @@ function buildAttDayTable(uid,fromD,toD,T){
 }
 // ─── REPORTS ────────────────────────────────────────────────
 function buildRep(){
+  const T=LANGS[currentLang];
   const wf=document.getElementById('rf-w').value;
   const cf=document.getElementById('rf-c').value;
   const pf=document.getElementById('rf-p').value;
@@ -3675,6 +3677,7 @@ function buildSummaryReport(fl){
   </table>`;
 }
 function buildStageReport(){
+  const T=LANGS[currentLang];
   const el=document.getElementById('rp-stages-body');if(!el)return;
   const prods=S.products||[];
   if(!prods.length){el.innerHTML='<div style="color:var(--txt3);font-size:13px;padding:8px">אין מוצרים</div>';return;}
@@ -4152,6 +4155,7 @@ function renderDash(){
 // ─── MANAGER TASKS ──────────────────────────────────────────
 function renderMgrTasks(){
   if(S.user?.role!=='manager')return;
+  const T=LANGS[currentLang];
   fillDeptSelects();
   // נוכחות עובדים
   const al=document.getElementById('mgr-att-list');
@@ -5655,12 +5659,12 @@ function previewExpensePhoto(input){
   if(!prev)return;
   const f=input.files[0];
   if(!f){prev.innerHTML='';return;}
-  compressImage(f,400,0.6).then(b64=>{
+  compressImageFile(f,400,0.6).then(b64=>{
     prev.innerHTML=`<img src="${b64}" style="max-width:100%;max-height:140px;border-radius:8px;border:1px solid var(--border)"/>`;
   }).catch(()=>{prev.innerHTML='';});
 }
 
-function compressImage(file,maxPx,quality){
+function compressImageFile(file,maxPx,quality){
   return new Promise((resolve,reject)=>{
     const reader=new FileReader();
     reader.onload=e=>{
@@ -5693,7 +5697,7 @@ async function submitExpense(){
   if(!desc){if(msgEl){msgEl.style.color='var(--danger)';msgEl.textContent=T.exp_err_desc;} return;}
   const photoFile=document.getElementById('exp-photo')?.files[0];
   let photo='';
-  if(photoFile){try{photo=await compressImage(photoFile,800,0.5);}catch(e){}}
+  if(photoFile){try{photo=await compressImageFile(photoFile,800,0.5);}catch(e){}}
   const id='exp_'+Date.now()+'_'+S.user.id;
   const now=new Date();
   const time=pad2(now.getHours())+':'+pad2(now.getMinutes());
@@ -5735,8 +5739,8 @@ function renderExpenses(){
     <div style="border:1px solid var(--border);border-radius:8px;padding:10px 12px;margin-bottom:8px;display:flex;justify-content:space-between;align-items:flex-start;gap:8px">
       <div style="flex:1;min-width:0">
         <div style="font-weight:700;font-size:16px;color:var(--primary)">₪${Number(e.amount).toFixed(2)}</div>
-        <div style="font-size:13px;color:var(--txt2);margin-top:2px;word-break:break-word">${e.desc}</div>
-        <div style="font-size:12px;color:var(--txt3);margin-top:3px">👤 ${e.workerName||''} — ${e.dept||''}</div>
+        <div style="font-size:13px;color:var(--txt2);margin-top:2px;word-break:break-word">${esc(e.desc)}</div>
+        <div style="font-size:12px;color:var(--txt3);margin-top:3px">👤 ${esc(e.workerName||'')} — ${esc(e.dept||'')}</div>
         <div style="font-size:11px;color:var(--txt3);margin-top:2px">📅 ${e.date||''}${e.time?' ⏰ '+e.time:''}</div>
       </div>
       <div style="display:flex;flex-direction:column;gap:5px;align-items:flex-end;flex-shrink:0">
