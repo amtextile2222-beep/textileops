@@ -81,20 +81,21 @@ exports.sendPushToWorker = functions.https.onCall(async (data) => {
   }
 });
 
-// עוזר AI — proxy מאובטח ל-AnythingLLM (המפתח לא נחשף ללקוח)
-const AI_KEY = '78RV43P-K4Z4K46-N70FT4X-J7CTM6F';
-const AI_SLUG = '432787ca-6831-47cf-8eb8-847fbf66d0b2';
+// עוזר AI — proxy מאובטח ל-AnythingLLM (רץ עכשיו על שרת Railway קבוע, לא על Tunnel מקומי)
+// כתובת/מפתח/slug מגיעים מ-`firebase functions:config:set anythingllm.*` — לא מקודדים בקובץ הזה
 exports.aiChat = functions.https.onCall(async (data, context) => {
   if (!context.auth) throw new functions.https.HttpsError('unauthenticated', 'יש להתחבר תחילה');
   const message = String(data && data.message || '').slice(0, 8000);
   if (!message) throw new functions.https.HttpsError('invalid-argument', 'הודעה ריקה');
   try {
-    const settingsSnap = await db.collection('appSettings').doc('aiSettings').get();
-    const aiUrl = (settingsSnap.exists ? settingsSnap.data().tunnelUrl : '') || '';
-    if (!aiUrl) throw new functions.https.HttpsError('failed-precondition', 'כתובת שרת AI לא מוגדרת');
-    const res = await fetch(`${aiUrl.replace(/\/$/, '')}/api/v1/workspace/${AI_SLUG}/chat`, {
+    const cfg = functions.config().anythingllm || {};
+    const aiUrl = cfg.url || '';
+    const aiKey = cfg.key || '';
+    const aiSlug = cfg.slug || '';
+    if (!aiUrl || !aiKey || !aiSlug) throw new functions.https.HttpsError('failed-precondition', 'הגדרות שרת AI חסרות');
+    const res = await fetch(`${aiUrl.replace(/\/$/, '')}/api/v1/workspace/${aiSlug}/chat`, {
       method: 'POST',
-      headers: { 'Content-Type': 'application/json', 'Authorization': 'Bearer ' + AI_KEY },
+      headers: { 'Content-Type': 'application/json', 'Authorization': 'Bearer ' + aiKey },
       body: JSON.stringify({ message, mode: 'chat' })
     });
     const json = await res.json();
