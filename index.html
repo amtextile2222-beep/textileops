@@ -2406,6 +2406,7 @@ function onUserInput(u){
 }
 async function doLogin(){
   if(loginLocked){document.getElementById('l-err').textContent='חשבון נעול ל-30 שניות עקב ניסיונות כושלים';return;}
+  if(await checkVersion()){document.getElementById('l-err').textContent='🔄 יש גרסה חדשה — לחץ "עדכן עכשיו" למעלה ונסה שוב';return;}
   const u=document.getElementById('l-user').value.trim();
   const p=document.getElementById('l-pass').value.trim();
   // אם יש עובד עם זיהוי פנים מוגדר — מדלג על סיסמה
@@ -7663,30 +7664,32 @@ function cancelFaceReg(){
 
 /* ── AUTO UPDATE CHECK ── */
 function doAppUpdate(){window.location.href=window.location.pathname+'?t='+Date.now();}
+let _appVerSize=null;
+let _appVerStale=false;
+function showUpdateBanner(){
+  const b=document.getElementById('update-banner');if(!b)return;
+  const T=typeof LANGS!=='undefined'&&typeof currentLang!=='undefined'?LANGS[currentLang]:{};
+  document.getElementById('update-banner-txt').textContent=T.update_available||'🔄 גרסה חדשה זמינה';
+  b.querySelector('button').textContent=T.update_btn||'עדכן עכשיו';
+  b.classList.remove('hidden');
+}
+// בודק אם יש גרסה חדשה בשרת. מחזיר true אם זוהתה גרסה ישנה (stale) בטאב הזה.
+async function checkVersion(){
+  try{
+    const res=await fetch(location.pathname+'?t='+Date.now(),{cache:'no-store'});
+    if(!res.ok)return _appVerStale;
+    const text=await res.text();
+    if(_appVerSize===null){_appVerSize=text.length;return false;}
+    if(text.length!==_appVerSize){_appVerStale=true;showUpdateBanner();}
+    return _appVerStale;
+  }catch(e){return _appVerStale;}
+}
 (function(){
-  const CHECK_INTERVAL=10*60*1000;
-  let currentSize=null;
-
-  function showUpdateBanner(){
-    const b=document.getElementById('update-banner');if(!b)return;
-    const T=typeof LANGS!=='undefined'&&typeof currentLang!=='undefined'?LANGS[currentLang]:{};
-    document.getElementById('update-banner-txt').textContent=T.update_available||'🔄 גרסה חדשה זמינה';
-    b.querySelector('button').textContent=T.update_btn||'עדכן עכשיו';
-    b.classList.remove('hidden');
-  }
-
-  async function checkVersion(){
-    if(document.hidden)return;
-    try{
-      const res=await fetch(location.pathname+'?t='+Date.now(),{cache:'no-store'});
-      if(!res.ok)return;
-      const text=await res.text();
-      if(currentSize===null){currentSize=text.length;return;}
-      if(text.length!==currentSize)showUpdateBanner();
-    }catch(e){}
-  }
-
-  setTimeout(()=>{checkVersion();setInterval(checkVersion,CHECK_INTERVAL);},30000);
+  const CHECK_INTERVAL=5*60*1000;
+  setTimeout(()=>{
+    if(!document.hidden)checkVersion();
+    setInterval(()=>{if(!document.hidden)checkVersion();},CHECK_INTERVAL);
+  },2000);
 })();
 </script>
 </body>
