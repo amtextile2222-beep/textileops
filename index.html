@@ -2889,6 +2889,7 @@ function roundAttTime(now, isIn){
 }
 async function punchIn(){
   if(!S.user)return;
+  if(await checkVersion()){document.getElementById('att-msg').textContent='🔄 יש גרסה חדשה — לחץ "עדכן עכשיו" למעלה ונסה שוב';return;}
   const w=S.workers.find(x=>x.id===S.user.id);
   if(!w)return;
   if(!w.sessions)w.sessions=[];
@@ -2909,6 +2910,7 @@ async function punchIn(){
 }
 async function punchOut(){
   if(!S.user)return;
+  if(await checkVersion()){document.getElementById('att-msg').textContent='🔄 יש גרסה חדשה — לחץ "עדכן עכשיו" למעלה ונסה שוב';return;}
   const T=LANGS[currentLang];
   const w=S.workers.find(x=>x.id===S.user.id);
   if(!w)return;
@@ -4500,6 +4502,7 @@ async function tsStartTask(){
   const empId=document.getElementById('ts-emp-sel').value;
   const raw=(document.getElementById('ts-bc-inp').value||'').replace(/\D/g,'');
   const T=LANGS[currentLang];
+  if(await checkVersion()){showToast('🔄 יש גרסה חדשה — לחץ "עדכן עכשיו" למעלה ונסה שוב','var(--red-txt)',6000);return;}
   if(!empId){showToast(T.err_sel_worker||'⚠ בחר עובד','var(--red-txt)');return;}
   const w=S.workers.find(x=>x.id===empId);
   if(!w||w.status!=='in'){showToast(T.cfm_worker_not_in||'⚠ העובד לא נמצא בעבודה — וודא שחתם כניסה','var(--red-txt)',5000);return;}
@@ -4782,6 +4785,7 @@ async function mgrStartTask(){
   const empId=document.getElementById('mgr-emp-sel').value;
   const raw=(document.getElementById('mgr-bc-inp').value||'').replace(/\D/g,'');
   const T=LANGS[currentLang];
+  if(await checkVersion()){showToast('🔄 יש גרסה חדשה — לחץ "עדכן עכשיו" למעלה ונסה שוב','var(--red-txt)',6000);return;}
   if(!empId){showToast(T.err_sel_worker||'⚠ בחר עובד','var(--red-txt)');return;}
   const w=S.workers.find(x=>x.id===empId);
   if(!w||w.status!=='in'){showToast(T.cfm_worker_not_in||'⚠ העובד לא נמצא בעבודה','var(--red-txt)',5000);return;}
