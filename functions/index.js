@@ -93,16 +93,24 @@ exports.aiChat = functions.https.onCall(async (data, context) => {
     const aiKey = cfg.key || '';
     const aiSlug = cfg.slug || '';
     if (!aiUrl || !aiKey || !aiSlug) throw new functions.https.HttpsError('failed-precondition', 'הגדרות שרת AI חסרות');
-    const res = await fetch(`${aiUrl.replace(/\/$/, '')}/api/v1/workspace/${aiSlug}/chat`, {
+    // /chat (לא-סטרימינג) מחזיר textResponse ריק בהתקנה הזו — משתמשים ב-/stream-chat
+    // ומרכיבים את הטקסט מה-chunks בצד השרת (בלי לחשוף streaming ללקוח)
+    const res = await fetch(`${aiUrl.replace(/\/$/, '')}/api/v1/workspace/${aiSlug}/stream-chat`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json', 'Authorization': 'Bearer ' + aiKey },
       body: JSON.stringify({ message, mode: 'chat' })
     });
     const raw = await res.text();
-    console.log('aiChat raw response:', res.status, raw.slice(0, 1500));
-    let json = {};
-    try { json = JSON.parse(raw); } catch (e) {}
-    return { textResponse: json.textResponse || json.error || 'לא התקבלה תשובה' };
+    let full = '';
+    for (const line of raw.split('\n')) {
+      if (!line.startsWith('data:')) continue;
+      try {
+        const obj = JSON.parse(line.slice(5).trim());
+        if (obj.textResponse && obj.type === 'textResponseChunk') full += obj.textResponse;
+      } catch (e) {}
+    }
+    console.log('aiChat stream length:', full.length, 'raw sample:', raw.slice(0, 300));
+    return { textResponse: full || 'לא התקבלה תשובה' };
   } catch (e) {
     console.error('aiChat error:', e);
     throw new functions.https.HttpsError('internal', e.message || 'שגיאת AI');
