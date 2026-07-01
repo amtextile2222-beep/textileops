@@ -2128,13 +2128,17 @@ async function runDailyReset(){
         }
       }
       w.status='out';w.checkin=null;w.checkout=null;w.sessions=[];
-      // אל תכתוב ל-Firebase — listenFb() מקבל נתונים טריים ומטפל באיפוס בצורה בטוחה
+      // אל תכתוב ל-Firebase — הטאב עומד להיטען מחדש; הנתונים הטריים יגיעו מהשרת אחרי הרענון
     }
-    // משימות נעצרות רק ביציאה — runDailyReset לא סוגר משימות
+    // יום חדש התגלה — רענון מלא של הדף במקום איפוס-בזיכרון.
+    // זה מבטיח שהטאב תמיד טוען את הגרסה העדכנית ביותר, ומונע מצב של טאב פתוח
+    // מאתמול שממשיך לרוץ עם קוד ישן וגם עם נתוני localStorage ישנים.
     S.tgSentAlerts={};
     S.tgAbsentSig='';
     saveLS();
-    renderAll();
+    localStorage.setItem('txops3_lastdate',today);
+    window.location.href=window.location.pathname+'?t='+Date.now();
+    return;
   }
   localStorage.setItem('txops3_lastdate',today);
 }
