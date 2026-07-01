@@ -109,7 +109,6 @@ exports.aiChat = functions.https.onCall(async (data, context) => {
         if (obj.textResponse && obj.type === 'textResponseChunk') full += obj.textResponse;
       } catch (e) {}
     }
-    console.log('aiChat stream length:', full.length, 'raw sample:', raw.slice(0, 300));
     return { textResponse: full || 'לא התקבלה תשובה' };
   } catch (e) {
     console.error('aiChat error:', e);
