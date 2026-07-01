@@ -98,7 +98,10 @@ exports.aiChat = functions.https.onCall(async (data, context) => {
       headers: { 'Content-Type': 'application/json', 'Authorization': 'Bearer ' + aiKey },
       body: JSON.stringify({ message, mode: 'chat' })
     });
-    const json = await res.json();
+    const raw = await res.text();
+    console.log('aiChat raw response:', res.status, raw.slice(0, 1500));
+    let json = {};
+    try { json = JSON.parse(raw); } catch (e) {}
     return { textResponse: json.textResponse || json.error || 'לא התקבלה תשובה' };
   } catch (e) {
     console.error('aiChat error:', e);
