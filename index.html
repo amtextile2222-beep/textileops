@@ -2564,7 +2564,7 @@ function _buildContext(){
   const weeklyHours={};
   (S.attHistory||[]).filter(r=>r.date>=weekStr).forEach(r=>{
     const w=S.workers.find(x=>x.id===r.workerId);if(!w||w.role==='manager')return;
-    const hrs=((r.totalMinutes||r.netMinutes||0)/60).toFixed(1);
+    const hrs=((r.netMs||0)/3600000).toFixed(1);
     if(!weeklyHours[w.name])weeklyHours[w.name]=0;
     weeklyHours[w.name]+=parseFloat(hrs);
   });
@@ -2585,7 +2585,7 @@ function _buildContext(){
 === היום ===
 נוכחים (${present.length}): ${present.map(w=>w.name+(w.status==='in'?' [בעבודה]':' [יצא]')).join(', ')||'אין'}
 נעדרים (${absent.length}): ${absent.map(w=>w.name).join(', ')||'אין'}
-משימות פעילות (${active.length}): ${active.map(t=>{const w=S.workers.find(x=>x.id===t.workerId);return(w?.name||'?')+' — '+t.barcode;}).join(', ')||'אין'}
+משימות פעילות (${active.length}): ${active.map(t=>{const w=S.workers.find(x=>x.id===t.workerId);return(w?.name||'?')+' — '+taskBc(t);}).join(', ')||'אין'}
 
 === 7 ימים אחרונים ===
 שעות עבודה לעובד: ${weekSummary}
