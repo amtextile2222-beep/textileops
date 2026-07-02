@@ -599,8 +599,7 @@ code{background:var(--bg2);border:0.5px solid var(--b);border-radius:4px;padding
       <div class="sec">📲 התראות Telegram אוטומטיות</div>
       <div class="g2" style="gap:12px">
         <div>
-          <div class="field"><label>Telegram Bot Token</label><input id="wa-token" type="text" placeholder="123456:AAG..." oninput="saveSettings()" dir="ltr" style="font-family:monospace;font-size:12px"/></div>
-          <div class="field"><label>Chat ID</label><input id="wa-chatid" type="text" placeholder="1019589316" oninput="saveSettings()" dir="ltr" style="font-family:monospace"/></div>
+          <div class="field" style="background:var(--green-bg);border-radius:var(--r);padding:9px"><div style="font-size:12px;color:var(--green-txt)">🔒 Token ו-Chat ID שמורים בצד השרת (Cloud Functions) — לא נגישים מהדפדפן. לשינוי: firebase functions:config:set telegram.token / telegram.chatid</div></div>
           <div class="field" style="margin-top:12px;padding-top:12px;border-top:0.5px solid var(--b)">
             <label>🏭 IP קבוע של המפעל</label>
             <input id="factory-ip" type="text" placeholder="188.225.231.120" oninput="saveSettings()" dir="ltr" style="font-family:monospace"/>
@@ -1760,7 +1759,7 @@ let S={
   activeTasks:[],
   histTasks:[],
   alerts:[],
-  settings:{thresh:60,absent:5,waEnabled:false,waToken:'',waChatId:'',waInterval:60,waFrom:'07:00',waTo:'18:00',waLong:true,waAbsent:true,factoryIP:'188.225.231.120',shiftStart:'06:30',shiftEnd:'15:00',roundMinutes:5,endOfDayTime:'15:05'},
+  settings:{thresh:60,absent:5,waEnabled:false,waInterval:60,waFrom:'07:00',waTo:'18:00',waLong:true,waAbsent:true,factoryIP:'188.225.231.120',shiftStart:'06:30',shiftEnd:'15:00',roundMinutes:5,endOfDayTime:'15:05'},
   waLastSent:0,
   wifiAlertSent:{},
   tgSentAlerts:{},
@@ -1960,8 +1959,6 @@ function listenFb(){
       if(d.id==='customColors'){S.customColors=data;Object.assign(COLORS,data);saveLS();}
       if(d.id==='depts'&&data.list&&data.list.length){S.depts=data.list;saveLS();fillDeptSelects();}
       if(d.id==='telegramSettings'){
-        S.settings.waToken=data.waToken||S.settings.waToken;
-        S.settings.waChatId=data.waChatId||S.settings.waChatId;
         S.settings.factoryIP=data.factoryIP||S.settings.factoryIP;
         if(data.waEnabled!==undefined)S.settings.waEnabled=data.waEnabled;
         if(data.waInterval!==undefined)S.settings.waInterval=data.waInterval;
@@ -1978,7 +1975,6 @@ function listenFb(){
         const missingFields=data.waInterval===undefined||!data.waFrom||!data.shiftStart;
         if(missingFields&&S.user?.role==='manager'){
           fbSet('appSettings','telegramSettings',{
-            waToken:S.settings.waToken,waChatId:S.settings.waChatId,
             factoryIP:S.settings.factoryIP,waEnabled:S.settings.waEnabled,
             waInterval:S.settings.waInterval,waFrom:S.settings.waFrom,
             waTo:S.settings.waTo,waLong:S.settings.waLong,waAbsent:S.settings.waAbsent,
@@ -2165,8 +2161,7 @@ function scheduleEndOfDayAlert(){
     const stillIn=S.workers.filter(w=>w.status==='in');
     if(stillIn.length>0){
       const names=stillIn.map(w=>w.name+' ('+w.dept+')').join(', ');
-      const token=localStorage.getItem('txops_tg_token');const chatId=localStorage.getItem('txops_tg_chatid');
-      if(token&&chatId){fetch('https://api.telegram.org/bot'+token+'/sendMessage',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({chat_id:chatId,text:`⚠️ שעת סיום עבודה ${time} — לא חתמו יציאה:\n${names}`})}).catch(()=>{});}
+      sendTelegram(`⚠️ שעת סיום עבודה ${time} — לא חתמו יציאה:\n${names}`).catch(()=>{});
     }
     scheduleEndOfDayAlert();
   },next-now);
@@ -2207,9 +2202,6 @@ async function sendDailyAttReport(){
   await sendTelegram(msg);
   // שלח קובץ CSV להדפסה
   try{
-    const token=(S.settings.waToken||'').trim();
-    const chatId=(S.settings.waChatId||'').trim();
-    if(!token||!chatId)return;
     // בניית CSV
     const BOM='﻿';
     let csv=BOM+'sep=,\n'+'שם,מחלקה,תפקיד,כניסה,יציאה,שעות נטו,סטטוס\n';
@@ -2225,11 +2217,8 @@ async function sendDailyAttReport(){
       csv+='"'+w.name+'","'+w.dept+'","'+role+'","--","--","","נעדר"\n';
     });
     const blob=new Blob([csv],{type:'text/csv;charset=utf-8'});
-    const fd=new FormData();
-    fd.append('chat_id',chatId);
-    fd.append('document',blob,'נוכחות_'+today+'.csv');
-    fd.append('caption','📎 קובץ נוכחות להדפסה — '+today);
-    fetch('https://api.telegram.org/bot'+token+'/sendDocument',{method:'POST',body:fd});
+    const b64=await blobToB64(blob);
+    tgCall({kind:'document',dataB64:b64,filename:'נוכחות_'+today+'.csv',caption:'📎 קובץ נוכחות להדפסה — '+today});
   }catch(e){}
 }
 // נעילה אטומית ב-Firestore Transaction — מונע דוח כפול גם כששני מכשירים יורים באותה שנייה
@@ -2785,16 +2774,13 @@ async function sendMsgModal(){
   const w=S.user;
   const now=new Date().toLocaleTimeString('he-IL',{hour:'2-digit',minute:'2-digit'});
   const caption='💬 הודעה מעובד\n👤 '+w.name+' ('+w.dept+')\n🕐 שעה: '+now+(txt?'\n\n'+txt:'');
-  const token=(S.settings.waToken||'').trim();
-  const chatId=(S.settings.waChatId||'').trim();
-  if(!token||!chatId){st.style.color='var(--red-txt)';st.textContent='שגיאה — הגדרות טלגרם חסרות';return;}
   st.style.color='var(--txt2)';st.textContent='שולח...';
   let ok=false;
   try{
     if(imgFile){
-      const fd=new FormData();fd.append('chat_id',chatId);fd.append('photo',imgFile,'image.jpg');fd.append('caption',caption);
-      const res=await fetch('https://api.telegram.org/bot'+token+'/sendPhoto',{method:'POST',body:fd});
-      ok=(await res.json()).ok;
+      const small=await compressImageFile(imgFile,1000,0.6).catch(()=>null);
+      const b64=small?String(small).split(',')[1]:await blobToB64(imgFile);
+      ok=await tgCall({kind:'photo',dataB64:b64,caption});
     }else{ok=await sendTelegram(caption);}
   }catch(e){ok=false;}
   if(ok){st.style.color='var(--green-txt)';st.textContent='✅ ההודעה נשלחה למנהל';setTimeout(closeMsgModal,2000);}
@@ -2830,19 +2816,13 @@ async function sendMsgToMgr(){
   const w=S.user;
   const now=new Date().toLocaleTimeString('he-IL',{hour:'2-digit',minute:'2-digit'});
   const caption='💬 הודעה מעובד\n👤 '+w.name+' ('+w.dept+')\n🕐 שעה: '+now+(txt?'\n\n'+txt:'');
-  const token=(S.settings.waToken||'').trim();
-  const chatId=(S.settings.waChatId||'').trim();
-  if(!token||!chatId){st.style.color='var(--red-txt)';st.textContent='שגיאה — הגדרות טלגרם חסרות';return;}
   st.style.color='var(--txt2)';st.textContent='שולח...';
   let ok=false;
   try{
     if(imgFile){
-      const fd=new FormData();
-      fd.append('chat_id',chatId);
-      fd.append('photo',imgFile,'image.jpg');
-      fd.append('caption',caption);
-      const res=await fetch('https://api.telegram.org/bot'+token+'/sendPhoto',{method:'POST',body:fd});
-      ok=(await res.json()).ok;
+      const small=await compressImageFile(imgFile,1000,0.6).catch(()=>null);
+      const b64=small?String(small).split(',')[1]:await blobToB64(imgFile);
+      ok=await tgCall({kind:'photo',dataB64:b64,caption});
     } else {
       ok=await sendTelegram(caption);
     }
@@ -3770,8 +3750,6 @@ function saveSettings(){
   S.settings.thresh=parseInt(document.getElementById('al-thresh').value)||60;
   S.settings.absent=parseInt(document.getElementById('al-absent').value)||5;
   S.settings.waEnabled=document.getElementById('wa-enabled')?.checked||false;
-  S.settings.waToken=document.getElementById('wa-token')?.value||'';
-  S.settings.waChatId=document.getElementById('wa-chatid')?.value||'';
   S.settings.waInterval=parseInt(document.getElementById('wa-interval')?.value)||60;
   S.settings.waFrom=document.getElementById('wa-from')?.value||'07:00';
   S.settings.waTo=document.getElementById('wa-to')?.value||'18:00';
@@ -3788,8 +3766,6 @@ function saveSettings(){
   // שמור הגדרות טלגרם + IP ב-Firebase כדי שכל מכשיר יקבל אותם
   if(S.fbConnected){
     fbSet('appSettings','telegramSettings',{
-      waToken:S.settings.waToken,
-      waChatId:S.settings.waChatId,
       factoryIP:S.settings.factoryIP,
       waEnabled:S.settings.waEnabled,
       waInterval:S.settings.waInterval,
@@ -3809,8 +3785,6 @@ function loadWaSettings(){
   const s=S.settings;
   const set=(id,v)=>{const el=document.getElementById(id);if(!el)return;if(el.type==='checkbox')el.checked=v;else el.value=v;};
   set('wa-enabled',s.waEnabled||false);
-  set('wa-token',s.waToken||'');
-  set('wa-chatid',s.waChatId||'1019589316');
   set('wa-interval',s.waInterval||60);
   set('wa-from',s.waFrom||'07:00');
   set('wa-to',s.waTo||'18:00');
@@ -3927,14 +3901,26 @@ async function fbGet(col,docId){
   const snap=await getDoc(doc(db,col,docId));
   return snap.exists()?snap.data():null;
 }
-async function sendTelegram(message){
-  const token=(S.settings.waToken||document.getElementById('wa-token')?.value||'').trim();
-  const chatId=(S.settings.waChatId||document.getElementById('wa-chatid')?.value||'1019589316').trim();
-  if(!token||!chatId)return false;
+// שליחת טלגרם — דרך Cloud Function tgSend; ה-token בצד השרת בלבד (הוסר מהלקוח ומ-Firestore)
+async function tgCall(payload){
+  if(!S.fbConnected||!window._fbFunctions)return false;
   try{
-    const res=await fetch(`https://api.telegram.org/bot${token}/sendMessage`,{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({chat_id:chatId,text:message})});
-    return res.ok;
-  }catch(e){return false;}
+    const{httpsCallable}=window._fb;
+    const fn=httpsCallable(window._fbFunctions,'tgSend');
+    const res=await fn(payload);
+    return !!(res&&res.data&&res.data.ok);
+  }catch(e){console.error('tgCall:',e.message);return false;}
+}
+function blobToB64(blob){
+  return new Promise((resolve,reject)=>{
+    const r=new FileReader();
+    r.onload=()=>resolve(String(r.result).split(',')[1]||'');
+    r.onerror=reject;
+    r.readAsDataURL(blob);
+  });
+}
+async function sendTelegram(message){
+  return tgCall({kind:'message',text:message});
 }
 function tgPunch(name,dept,isIn,time){
   const ts=pad2(time.getHours())+':'+pad2(time.getMinutes());
@@ -7149,18 +7135,14 @@ let _faceRegWorkerId=null;
 let _faceRegSamples=[];
 let _faceRegSnaps=[];
 async function sendFaceRegPhotos(workerName,snaps){
-  const token=(S.settings.waToken||'').trim();
-  const chatId=(S.settings.waChatId||'').trim();
-  if(!token||!chatId||!snaps.length)return;
+  if(!snaps.length)return;
   const now=new Date().toLocaleTimeString('he-IL',{hour:'2-digit',minute:'2-digit'});
   for(let i=0;i<snaps.length;i++){
     try{
-      const res=await fetch(snaps[i]);const blob=await res.blob();
-      const fd=new FormData();
-      fd.append('chat_id',chatId);
-      fd.append('photo',blob,'face'+(i+1)+'.jpg');
-      fd.append('caption',i===0?'📸 רישום פנים — '+workerName+' | '+now+'\nדגימה '+(i+1)+'/'+snaps.length:'דגימה '+(i+1)+'/'+snaps.length);
-      await fetch('https://api.telegram.org/bot'+token+'/sendPhoto',{method:'POST',body:fd});
+      // snaps הם dataURL מ-canvas — החלק אחרי הפסיק הוא כבר base64
+      const b64=String(snaps[i]).split(',')[1]||'';
+      if(!b64)continue;
+      await tgCall({kind:'photo',dataB64:b64,caption:i===0?'📸 רישום פנים — '+workerName+' | '+now+'\nדגימה '+(i+1)+'/'+snaps.length:'דגימה '+(i+1)+'/'+snaps.length});
     }catch(e){}
   }
 }
@@ -7261,15 +7243,9 @@ async function _onFaceAuthFailed(){
   // שלח תמונה + כיתוב לטלגרם (async — לא חוסם את הכפתור)
   if(photoBlob){
     try{
-      const token=(document.getElementById('wa-token')?.value||S.settings.waToken||'').trim();
-      const chatId=(document.getElementById('wa-chatid')?.value||S.settings.waChatId||'').trim();
-      if(token&&chatId){
-        const fd=new FormData();
-        fd.append('chat_id',chatId);
-        fd.append('photo',photoBlob,'alert.jpg');
-        fd.append('caption',caption);
-        fetch(`https://api.telegram.org/bot${token}/sendPhoto`,{method:'POST',body:fd});
-      }else{sendTelegram(caption);}
+      const b64=await blobToB64(photoBlob);
+      const ok=await tgCall({kind:'photo',dataB64:b64,caption});
+      if(!ok)sendTelegram(caption);
     }catch(e){sendTelegram(caption);}
   }else{sendTelegram(caption);}
 }
@@ -7398,14 +7374,9 @@ async function _captureAndLogin(){
       snapCanvas.getContext('2d').drawImage(v2,0,0);
       snapCanvas.toBlob(async blob=>{
         if(!blob)return;
-        const token=(S.settings.waToken||'').trim();
-        const chatId=(S.settings.waChatId||'').trim();
-        if(!token||!chatId)return;
         const now=new Date().toLocaleTimeString('he-IL',{hour:'2-digit',minute:'2-digit'});
-        const fd=new FormData();
-        fd.append('chat_id',chatId);fd.append('photo',blob,'face.jpg');
-        fd.append('caption','📸 TextileOps — רישום פנים ראשוני\n👤 עובד: '+w.name+'\n🕐 שעה: '+now);
-        fetch('https://api.telegram.org/bot'+token+'/sendPhoto',{method:'POST',body:fd});
+        const b64=await blobToB64(blob);
+        tgCall({kind:'photo',dataB64:b64,caption:'📸 TextileOps — רישום פנים ראשוני\n👤 עובד: '+w.name+'\n🕐 שעה: '+now});
       },'image/jpeg',0.8);
     }catch(e){}
     document.getElementById('face-reg-screen').classList.add('hidden');

@@ -5,6 +5,12 @@ const https = require('https');
 admin.initializeApp();
 const db = admin.firestore();
 
+// הגדרות טלגרם — מ-functions:config:set telegram.token/chatid (לא ב-Firestore, לא בקוד לקוח)
+function tgCfg() {
+  const c = functions.config().telegram || {};
+  return { token: c.token || '', chatId: c.chatid || '' };
+}
+
 // שולח הודעה לטלגרם
 function sendTelegram(token, chatId, text) {
   return new Promise((resolve, reject) => {
@@ -25,7 +31,8 @@ function sendTelegram(token, chatId, text) {
 }
 
 // שליחת Push Notification
-exports.sendPush = functions.https.onCall(async (data) => {
+exports.sendPush = functions.https.onCall(async (data, context) => {
+  if (!context.auth) throw new functions.https.HttpsError('unauthenticated', 'יש להתחבר תחילה');
   const { title, body, alertType } = data;
   try {
     const settingsSnap = await db.collection('appSettings').doc('pushSettings').get();
@@ -60,7 +67,8 @@ exports.sendPush = functions.https.onCall(async (data) => {
 });
 
 // שליחת Push לעובד ספציפי
-exports.sendPushToWorker = functions.https.onCall(async (data) => {
+exports.sendPushToWorker = functions.https.onCall(async (data, context) => {
+  if (!context.auth) throw new functions.https.HttpsError('unauthenticated', 'יש להתחבר תחילה');
   const { workerId, title, body } = data;
   try {
     const workerSnap = await db.collection('workers').doc(workerId).get();
@@ -78,6 +86,44 @@ exports.sendPushToWorker = functions.https.onCall(async (data) => {
   } catch (e) {
     console.error('sendPushToWorker error:', e);
     return { sent: false, error: e.message };
+  }
+});
+
+// שליחת טלגרם מהלקוח — ה-token נשאר בצד השרת בלבד
+// kind: 'message' {text} | 'photo' {dataB64, caption} | 'document' {dataB64, filename, caption}
+exports.tgSend = functions.https.onCall(async (data, context) => {
+  if (!context.auth) throw new functions.https.HttpsError('unauthenticated', 'יש להתחבר תחילה');
+  const { token, chatId } = tgCfg();
+  if (!token || !chatId) throw new functions.https.HttpsError('failed-precondition', 'הגדרות טלגרם חסרות בשרת');
+  const kind = data && data.kind;
+  try {
+    if (kind === 'message') {
+      const text = String(data.text || '').slice(0, 4000);
+      if (!text) throw new functions.https.HttpsError('invalid-argument', 'טקסט ריק');
+      await sendTelegram(token, chatId, text);
+      return { ok: true };
+    }
+    if (kind === 'photo' || kind === 'document') {
+      const b64 = String(data.dataB64 || '');
+      if (!b64 || b64.length > 9000000) throw new functions.https.HttpsError('invalid-argument', 'קובץ חסר או גדול מדי');
+      const buf = Buffer.from(b64, 'base64');
+      const fd = new FormData();
+      fd.append('chat_id', chatId);
+      if (data.caption) fd.append('caption', String(data.caption).slice(0, 1000));
+      if (kind === 'photo') {
+        fd.append('photo', new Blob([buf], { type: 'image/jpeg' }), 'image.jpg');
+      } else {
+        fd.append('document', new Blob([buf]), String(data.filename || 'file.csv'));
+      }
+      const res = await fetch(`https://api.telegram.org/bot${token}/send${kind === 'photo' ? 'Photo' : 'Document'}`, { method: 'POST', body: fd });
+      const j = await res.json().catch(() => ({}));
+      return { ok: !!j.ok };
+    }
+    throw new functions.https.HttpsError('invalid-argument', 'סוג שליחה לא מוכר');
+  } catch (e) {
+    if (e instanceof functions.https.HttpsError) throw e;
+    console.error('tgSend error:', e);
+    throw new functions.https.HttpsError('internal', e.message || 'שגיאת טלגרם');
   }
 });
 
@@ -176,7 +222,8 @@ exports.wifiMonitor = functions.pubsub.schedule('every 5 minutes').onRun(async (
     const settingsSnap = await db.collection('appSettings').doc('telegramSettings').get();
     if (!settingsSnap.exists) return null;
     const settings = settingsSnap.data();
-    const { waToken, waChatId, factoryIP, waEnabled } = settings;
+    const { factoryIP, waEnabled } = settings;
+    const { token: waToken, chatId: waChatId } = tgCfg();
     if (!waEnabled || !waToken || !waChatId || !factoryIP) return null;
 
     // קרא את כל העובדים שבפנים
