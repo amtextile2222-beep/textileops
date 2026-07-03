@@ -1,8 +1,52 @@
 rules_version = '2';
 service cloud.firestore {
   match /databases/{database}/documents {
-    match /{document=**} {
-      allow read, write: if request.auth != null;
+    // שלב 2 אבטחה: גישה רק עם Custom Token שהונפק ע"י Cloud Function login
+    // (טוקן אנונימי אין לו role claim — נחסם)
+    function hasRole() {
+      return request.auth != null
+        && ('role' in request.auth.token)
+        && request.auth.token.role in ['manager', 'supervisor', 'worker', 'helper'];
+    }
+    function isMgr() {
+      return request.auth != null
+        && ('role' in request.auth.token)
+        && request.auth.token.role == 'manager';
+    }
+
+    // סודות כניסה (hash סיסמה, תבניות פנים, מזהה מכשיר) — אין גישת לקוח בכלל,
+    // רק Cloud Functions דרך Admin SDK
+    match /credentials/{id} {
+      allow read, write: if false;
+    }
+
+    // הגדרות רגישות (עלויות/שכר) — מנהל בלבד
+    match /adminSettings/{docId} {
+      allow read, write: if isMgr();
+    }
+
+    // עובדים: קריאה לכל מחובר; יצירה/מחיקה למנהל; עדכון מותר לכולם (חתימות
+    // נוכחות/משימות כותבות לעובדים אחרים) אבל בלי לשנות שדות אבטחה/תפקיד
+    match /workers/{id} {
+      allow read: if hasRole();
+      allow create, delete: if isMgr();
+      allow update: if isMgr() || (hasRole()
+        && request.resource.data.get('role', '') == resource.data.get('role', '')
+        && request.resource.data.get('user', '') == resource.data.get('user', '')
+        && request.resource.data.get('deviceBinding', false) == resource.data.get('deviceBinding', false)
+        && request.resource.data.get('faceAuth', false) == resource.data.get('faceAuth', false)
+        && request.resource.data.get('requireFactoryIP', false) == resource.data.get('requireFactoryIP', false)
+        && request.resource.data.get('disabled', false) == resource.data.get('disabled', false)
+        && request.resource.data.get('faceUpdateAllowed', false) == resource.data.get('faceUpdateAllowed', false)
+        && request.resource.data.get('permissions', []) == resource.data.get('permissions', []));
+    }
+
+    // שאר האוספים — כל משתמש מחובר עם role
+    match /{collection}/{docId} {
+      allow read, write: if hasRole()
+        && collection != 'credentials'
+        && collection != 'adminSettings'
+        && collection != 'workers';
     }
   }
 }

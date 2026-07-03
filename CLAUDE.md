@@ -7,7 +7,7 @@
 - **כל האפליקציה היא קובץ אחד: `index.html`** (~5,000 שורות) — HTML + CSS + JS באותו קובץ. אין build, אין framework.
 - **פריסה:** push ל-`main` ← GitHub Pages מפרסם אוטומטית תוך 2-3 דקות ל-https://amtextile2222-beep.github.io/textileops/
 - **בסיס נתונים:** Firebase Firestore (פרויקט `textileops-aef4a`), סנכרון בזמן אמת בין מכשירים דרך `onSnapshot`. יש גם עותק מקומי ב-localStorage (`txops_v3`) לעבודה לא מקוונת.
-- **אימות Firebase:** האפליקציה מתחברת אנונימית (`signInAnonymously`) ב-`initFb()`. ה-Security Rules דורשים `request.auth != null` — אל תסיר את ההתחברות האנונימית, בלעדיה שום דבר לא נטען.
+- **אימות Firebase (שלב 2 — 03/07/2026):** אין יותר התחברות אנונימית. `doLogin()` קורא ל-Cloud Function `login` (מאמתת סיסמה/פנים/מכשיר/IP בצד שרת) שמחזירה **Custom Token עם `role` claim**; הלקוח נכנס עם `signInWithCustomToken`. ה-Rules דורשים `role` בטוקן — בלי כניסה דרך הפונקציה שום דבר לא נטען. ה-listeners (`startDataListeners`) מתחילים רק אחרי כניסה.
 
 ## חובה לפני כל commit
 
@@ -23,11 +23,13 @@
 
 | אוסף Firestore | מה יש בו |
 |---|---|
-| `workers` | עובדים: id, name, dept, role, user, pass (SHA-256 עם קידומת `$h:`), sessions, faceDescriptors, requireFactoryIP |
+| `workers` | עובדים: id, name, dept, role, user, sessions, requireFactoryIP, faceRegistered/deviceRegistered (מירורים לתצוגה בלבד) |
+| `credentials` | **סודות כניסה — אין גישת לקוח בכלל**: pass (SHA-256 `$h:`), faceDescriptors, deviceId. נכתב רק דרך Cloud Functions (`login`, `updateCredentials`) |
+| `adminSettings` | costs (שכר/עלויות) — קריאה/כתיבה למנהל בלבד |
 | `activeTasks` / `histTasks` | משימות ייצור (פעילות / היסטוריה). שדה `bc` = ברקוד 13 ספרות |
 | `attHistory` | נוכחות יומית, מפתח מסמך: `workerId_YYYY-MM-DD` |
 | `products` | מוצרים: תמונות, מסמכים, כמויות, שלבי ייצור (stageLog/stageSkipped — תמיד מערכים!) |
-| `appSettings` | costs, customerNames, customColors, telegramSettings, dailyReport (נעילה), punchOutAlert (נעילה) |
+| `appSettings` | customerNames, customColors, telegramSettings, dailyReport (נעילה), punchOutAlert (נעילה). costs עבר ל-adminSettings |
 
 ## תפקידים (role)
 
@@ -53,10 +55,12 @@
 
 ## אבטחה
 
-- כניסת חירום: 5 לחיצות על הלוגו ✂️ במסך הכניסה, קוד מוגן hash.
-- עובדים עם `requireFactoryIP` נבדקים מול IP המפעל (188.225.231.120) בכניסה + ניטור כל 5 דקות.
-- זיהוי פנים: face-api.js, דסקריפטורים נשמרים כ-object (לא array) ב-`faceDescriptors`.
-- כל אירוע חריג (קוד חירום שגוי, זיהוי פנים נכשל, יציאה מ-WiFi) שולח התראת טלגרם.
+- כניסת חירום: 5 לחיצות על הלוגו ✂️ במסך הכניסה. הקוד מאומת ב-Cloud Function (`app.emergencyhash` ב-functions:config); fallback מקומי כשאין רשת.
+- עובדים עם `requireFactoryIP` נבדקים מול IP המפעל (188.225.231.120) **בצד שרת** בפונקציית login + ניטור כל 5 דקות (wifiMonitor).
+- זיהוי פנים: face-api.js בלקוח מפיק descriptor; **ההשוואה בשרת** (euclidean < 0.55 ב-login CF). דסקריפטורים שמורים ב-`credentials` בלבד.
+- נעילת מכשיר: UUID ב-localStorage (`txops_device_uuid`), נבדק ונרשם בצד שרת ב-login.
+- כל אירוע חריג (קוד חירום שגוי, זיהוי פנים נכשל, כניסה מחוץ ל-WiFi, מכשיר לא מורשה) שולח התראת טלגרם **מהשרת**.
+- נעילת ניסיונות בשרת: 5 כשלונות ← דקה חסימה (בנוסף לנעילה המקומית בלקוח).
 
 ## סגנון תקשורת עם הלקוח
 

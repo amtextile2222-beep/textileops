@@ -1205,10 +1205,10 @@ code{background:var(--bg2);border:0.5px solid var(--b);border-radius:4px;padding
 <script type="module">
 import{initializeApp}from'https://www.gstatic.com/firebasejs/10.12.0/firebase-app.js';
 import{getFirestore,collection,doc,getDoc,setDoc,onSnapshot,query,where,orderBy,limit,serverTimestamp,deleteDoc,updateDoc,addDoc,runTransaction}from'https://www.gstatic.com/firebasejs/10.12.0/firebase-firestore.js';
-import{getAuth,signInAnonymously}from'https://www.gstatic.com/firebasejs/10.12.0/firebase-auth.js';
+import{getAuth,signInAnonymously,signInWithCustomToken,onAuthStateChanged}from'https://www.gstatic.com/firebasejs/10.12.0/firebase-auth.js';
 import{getMessaging,getToken,onMessage}from'https://www.gstatic.com/firebasejs/10.12.0/firebase-messaging.js';
 import{getFunctions,httpsCallable}from'https://www.gstatic.com/firebasejs/10.12.0/firebase-functions.js';
-window._fb={initializeApp,getFirestore,collection,doc,getDoc,setDoc,onSnapshot,query,where,orderBy,limit,serverTimestamp,deleteDoc,updateDoc,addDoc,runTransaction,getAuth,signInAnonymously,getMessaging,getToken,onMessage,getFunctions,httpsCallable};
+window._fb={initializeApp,getFirestore,collection,doc,getDoc,setDoc,onSnapshot,query,where,orderBy,limit,serverTimestamp,deleteDoc,updateDoc,addDoc,runTransaction,getAuth,signInAnonymously,signInWithCustomToken,onAuthStateChanged,getMessaging,getToken,onMessage,getFunctions,httpsCallable};
 window._fbReady=true;
 document.dispatchEvent(new Event('fbSDKReady'));
 </script>
@@ -1840,19 +1840,36 @@ async function connectFirebase(){
 async function initFb(){
   if(!window._fbReady){await new Promise(res=>document.addEventListener('fbSDKReady',res,{once:true}));}
   if(!fbConfig)throw new Error('אין Firebase Config');
-  const{initializeApp,getFirestore,getAuth,signInAnonymously,getFunctions}=window._fb;
+  const{initializeApp,getFirestore,getFunctions}=window._fb;
   const app=initializeApp(fbConfig,'txops3');
-  // התחברות אנונימית — timeout של 8 שניות למניעת תקיעה
-  try{await Promise.race([signInAnonymously(getAuth(app)),new Promise((_,r)=>setTimeout(()=>r(new Error('auth timeout')),8000))]);}catch(e){console.error('Anonymous auth failed:',e);}
   db=getFirestore(app);
   window._fbApp=app;
   window._fbFunctions=getFunctions(app);
+  // שלב 2 אבטחה: אין יותר התחברות אנונימית — טוקן אמיתי (עם role) מתקבל
+  // רק אחרי אימות בשרת ב-doLogin; ה-listeners מתחילים אחרי הכניסה
   S.fbConnected=true;
   setFbStatus('ok','✅ Firebase מחובר');
-  listenFb();
-  listenWorkerMessages();
-  initFCM();
-  loadAIUrl();
+}
+
+// listeners של נתונים — רק אחרי כניסה מאומתת (יש טוקן עם role)
+let _listenersStarted=false;
+let _adminListenerStarted=false;
+function startDataListeners(){
+  if(!_listenersStarted){
+    _listenersStarted=true;
+    listenFb();
+  }
+  // הגדרות רגישות (עלויות) — קריאה מותרת רק למנהל ב-Rules
+  if(!_adminListenerStarted&&S.user?.role==='manager'&&db){
+    _adminListenerStarted=true;
+    const{collection,onSnapshot}=window._fb;
+    onSnapshot(collection(db,'adminSettings'),snap=>{
+      snap.docs.forEach(d=>{
+        if(d.id==='costs'){S.costs={...S.costs,...d.data()};saveLS();}
+      });
+      renderAll();
+    },err=>{console.warn('adminSettings listener:',err.message);});
+  }
 }
 
 function listenFb(){
@@ -1950,11 +1967,10 @@ function listenFb(){
     S.products=snap.docs.map(d=>({id:d.id,...d.data()}));
     saveLS();renderProducts();
   });
-  // app settings (costs, customerNames, customColors)
+  // app settings (customerNames, customColors) — עלויות עברו ל-adminSettings (מנהל בלבד)
   onSnapshot(collection(db,'appSettings'),snap=>{
     snap.docs.forEach(d=>{
       const data=d.data();
-      if(d.id==='costs'){S.costs={...S.costs,...data};saveLS();}
       if(d.id==='customerNames'){S.customerNames=data;saveLS();}
       if(d.id==='customColors'){S.customColors=data;Object.assign(COLORS,data);saveLS();}
       if(d.id==='depts'&&data.list&&data.list.length){S.depts=data.list;saveLS();fillDeptSelects();}
@@ -2067,9 +2083,15 @@ function sha256(str){
 }
 function hashPass(p){return'$h:'+sha256(p);}
 async function getDeviceId(){
+  // UUID קבוע ב-localStorage — fingerprint ישן נכשל ב-iOS (כל האייפונים קיבלו אותו hash)
   try{
-    const raw=[navigator.userAgent,screen.width,screen.height,screen.colorDepth,navigator.language,navigator.hardwareConcurrency,navigator.platform,Intl.DateTimeFormat().resolvedOptions().timeZone].join('|');
-    return'$d:'+sha256(raw);
+    let id=localStorage.getItem('txops_device_uuid');
+    if(id)return id;
+    if(window.crypto&&crypto.randomUUID)id='$u:'+crypto.randomUUID();
+    else if(window.crypto&&crypto.getRandomValues){const a=new Uint8Array(16);crypto.getRandomValues(a);id='$u:'+Array.from(a).map(b=>b.toString(16).padStart(2,'0')).join('');}
+    else id='$u:'+Date.now().toString(36)+Math.random().toString(36).slice(2);
+    localStorage.setItem('txops_device_uuid',id);
+    return id;
   }catch(e){return null;}
 }
 
@@ -2094,10 +2116,13 @@ function showConfirm(title,msg,okText='אישור',cancelText='ביטול'){
 }
 function _cfmClose(val){if(_cfmResolve){_cfmResolve(val);_cfmResolve=null;}document.getElementById('cfm-wrap').classList.add('hidden');}
 
-// מיגרציה: מצפין סיסמאות קיימות בטקסט רגיל
+// שלב 2 אבטחה: סודות (hash סיסמה/תבניות פנים/מזהה מכשיר) כבר לא נשמרים בדפדפן —
+// ניקוי עותקים ישנים מ-localStorage כדי שלא ייכתבו בטעות חזרה ל-Firestore
 function migratePasswords(){
   let changed=false;
-  S.workers.forEach(w=>{if(w.pass&&!w.pass.startsWith('$h:')){w.pass=hashPass(w.pass);changed=true;}});
+  S.workers.forEach(w=>{
+    ['pass','faceDescriptor','faceDescriptors','deviceId'].forEach(k=>{if(w[k]!==undefined){delete w[k];changed=true;}});
+  });
   if(changed)saveLS();
 }
 
@@ -2368,32 +2393,93 @@ function applyPerms(w){
 let loginAttempts=0;let loginLocked=false;let loginLockTimer=null;
 // כניסת חירום — למנהלים בלבד, מוגן ב-hash
 const _EMRG_H='$h:f434da0ecb3e3968e92503d17e29177511eb65394ff0d232f51a5f33a6ce9613';
-function emergencyLogin(){
-  const code=document.getElementById('l-emergency').value.trim();
-  if(hashPass(code)!==_EMRG_H){
-    document.getElementById('l-err').textContent='קוד חירום שגוי';
-    const now=new Date().toLocaleTimeString('he-IL',{hour:'2-digit',minute:'2-digit'});
-    sendTelegram('🚨 TextileOps — קוד חירום שגוי!\n🕐 שעה: '+now+'\nמישהו הזין קוד חירום לא נכון. ייתכן ניסיון פריצה!');
-    return;
+// ─── שלב 2 אבטחה: כל האימות עובר דרך Cloud Function login ───
+async function loginCall(payload){
+  const{httpsCallable}=window._fb;
+  const fn=httpsCallable(window._fbFunctions,'login');
+  const res=await fn(payload);
+  return(res&&res.data)||{};
+}
+async function fbSignInWithToken(token){
+  const{getAuth,signInWithCustomToken}=window._fb;
+  await signInWithCustomToken(getAuth(window._fbApp),token);
+}
+function _loginErrCode(e){
+  const m=String((e&&e.message)||'').trim();
+  return['wrong','missing-pass','disabled','locked','ip','device','device-unknown','face-mismatch','no-face-update','emergency-wrong'].includes(m)?m:'network';
+}
+function _loginErrMsg(code){
+  return{
+    'wrong':'שם משתמש או סיסמה שגויים',
+    'missing-pass':'נא למלא שם משתמש וסיסמה',
+    'disabled':'⛔ הגישה הושעתה זמנית — פנה למנהל',
+    'locked':'יותר מדי ניסיונות — נסה שוב בעוד דקה',
+    'ip':'⛔ כניסה נחסמה — חייב להיות מחובר ל-WiFi המפעל',
+    'device':'⛔ מכשיר לא מורשה — פנה למנהל',
+    'device-unknown':'⛔ לא ניתן לזהות את המכשיר — גישה נדחית',
+    'face-mismatch':'זיהוי פנים נכשל',
+    'no-face-update':'אין אישור לעדכון פנים — פנה למנהל',
+    'emergency-wrong':'קוד חירום שגוי'
+  }[code]||'שגיאת חיבור לשרת — נסה שוב';
+}
+// סיום כניסה מוצלחת — משותף לסיסמה/פנים/חירום
+function finishLogin(w,autoPunch){
+  S.user=w;
+  if(w.role!=='manager'){
+    // עותקי עלויות ישנים לא נשארים במכשירי עובדים
+    S.costs={workerRates:{},workerUnitRates:{},fixedDaily:0,fixedMonthly:0,workDaysMonth:22,fixedAnnual:0,workDaysYear:250,variableExpenses:[]};
+    saveLS();
   }
-  // מחפש את המנהל הראשי ברשימה
-  const mgr=S.workers.find(w=>w.role==='manager')||S.workers[0];
-  if(!mgr){document.getElementById('l-err').textContent='אין מנהלים מוגדרים במערכת';return;}
-  const emergencyUser={...mgr,role:'manager'};
-  S.user=emergencyUser;
+  startDataListeners();
+  listenWorkerMessages();
+  listenMgrInbox();
+  loadAIUrl();
+  if(w.role==='worker'||w.role==='helper')document.getElementById('worker-send-msg-bar').style.display='block';
+  if(w.role!=='manager'){
+    if(typeof Notification!=='undefined'&&Notification.permission==='granted'){initWorkerFCM(w.id);}
+    else if(typeof Notification!=='undefined'&&Notification.permission==='default'){setTimeout(()=>initWorkerFCM(w.id),2000);}
+  }else{
+    initFCM();
+  }
   document.getElementById('login-screen').classList.add('hidden');
   document.getElementById('app-screen').classList.remove('hidden');
-  document.getElementById('top-name').textContent=mgr.name;
-  document.getElementById('top-role').textContent='מנהל';
-  document.getElementById('top-av').textContent=mgr.name.split(' ').map(n=>n[0]).join('');
-  applyPerms(emergencyUser);
+  document.getElementById('top-name').textContent=w.name;
+  document.getElementById('top-role').textContent=w.role==='manager'?'מנהל':w.role==='supervisor'?'אחראי':w.role==='helper'?'עוזר':'עובד';
+  document.getElementById('top-av').textContent=w.name.split(' ').map(n=>n[0]||'').join('');
+  applyPerms(w);
+  setTimeout(loadWaSettings,100);
   document.getElementById('l-err').textContent='';
-  const now2=new Date().toLocaleTimeString('he-IL',{hour:'2-digit',minute:'2-digit'});
-  sendTelegram('✅ TextileOps — כניסת חירום בוצעה\n🕐 שעה: '+now2+'\nנכנס דרך קוד חירום כמנהל.');
-  goPage('admin');
+  const firstPage=(w.permissions&&w.permissions.length)?w.permissions[0]:'dash';
+  goPage(w.role==='manager'?'dash':firstPage);
+  if(autoPunch)setTimeout(autoPunchIn,300);
+}
+async function emergencyLogin(){
+  const code=document.getElementById('l-emergency').value.trim();
+  if(!code)return;
+  document.getElementById('l-err').textContent='בודק...';
+  try{
+    const res=await loginCall({emergencyCode:code});
+    await fbSignInWithToken(res.token);
+    document.getElementById('l-emergency').value='';
+    finishLogin(res.worker,false);
+    goPage('admin');
+  }catch(e){
+    const c=_loginErrCode(e);
+    if(c==='network'&&hashPass(code)===_EMRG_H){
+      // אין קשר לשרת — כניסת חירום מקומית (נתונים מקומיים בלבד, בלי Firestore)
+      const mgr=S.workers.find(w=>w.role==='manager')||S.workers[0];
+      if(!mgr){document.getElementById('l-err').textContent='אין חיבור לשרת ואין נתונים מקומיים';return;}
+      document.getElementById('l-emergency').value='';
+      finishLogin({...mgr,role:'manager'},false);
+      goPage('admin');
+      return;
+    }
+    document.getElementById('l-err').textContent=_loginErrMsg(c);
+  }
 }
 function onUserInput(u){
-  const w=S.workers.find(x=>x.user===u.trim()&&x.faceAuth&&(x.faceDescriptor||x.faceDescriptors&&Object.keys(x.faceDescriptors).length));
+  // רמז מקומי בלבד (מה-cache): לעובד עם פנים רשומות מוסתר שדה הסיסמה. ההכרעה האמיתית בשרת.
+  const w=S.workers.find(x=>x.user===u.trim()&&x.faceAuth&&(x.faceRegistered||x.faceDescriptor||x.faceDescriptors&&Object.keys(x.faceDescriptors).length));
   document.getElementById('l-pass-wrap').style.display=w?'none':'';
   document.getElementById('l-face-hint').style.display=w?'block':'none';
 }
@@ -2402,78 +2488,46 @@ async function doLogin(){
   if(await checkVersion()){document.getElementById('l-err').textContent='🔄 יש גרסה חדשה — לחץ "עדכן עכשיו" למעלה ונסה שוב';return;}
   const u=document.getElementById('l-user').value.trim();
   const p=document.getElementById('l-pass').value.trim();
-  // אם יש עובד עם זיהוי פנים מוגדר — מדלג על סיסמה
-  const wFace=S.workers.find(x=>x.user===u&&x.faceAuth&&(x.faceDescriptor||x.faceDescriptors&&Object.keys(x.faceDescriptors).length));
-  if(wFace){
-    if(wFace.requireFactoryIP){const allowed=await checkFactoryIP(wFace);if(!allowed)return;}
-    S._pendingUser=wFace;
-    startFaceAuth();
-    return;
-  }
-  if(!u||!p){document.getElementById('l-err').textContent='נא למלא שם משתמש וסיסמה';return;}
-  const ph=hashPass(p);
-  // ניסיון עם hash — אם לא, ניסיון עם טקסט רגיל (מעבר מגרסה ישנה) ושדרוג אוטומטי
-  let w=S.workers.find(x=>x.user===u&&x.pass===ph);
-  if(!w){const wp=S.workers.find(x=>x.user===u&&x.pass===p);if(wp){wp.pass=ph;saveLS();w=wp;}}
-  if(!w){
-    loginAttempts++;
-    if(loginAttempts>=5){
-      loginLocked=true;
-      document.getElementById('l-err').textContent='יותר מדי ניסיונות — חשבון נעול ל-30 שניות';
-      document.getElementById('l-user').disabled=true;
-      document.getElementById('l-pass').disabled=true;
-      loginLockTimer=setTimeout(()=>{loginLocked=false;loginAttempts=0;document.getElementById('l-user').disabled=false;document.getElementById('l-pass').disabled=false;document.getElementById('l-err').textContent='';},30000);
-    } else {
-      document.getElementById('l-err').textContent='שם משתמש או סיסמה שגויים ('+loginAttempts+'/5)';
-    }
-    return;
-  }
-  loginAttempts=0;
-  if(w.disabled){document.getElementById('l-err').textContent='⛔ הגישה הושעתה זמנית — פנה למנהל';return;}
-  if(w.requireFactoryIP){
-    const allowed=await checkFactoryIP(w);
-    if(!allowed)return;
-  }
-  if(w.deviceBinding&&w.role!=='manager'){
-    const devId=await getDeviceId();
-    if(!devId){document.getElementById('l-err').textContent='⛔ לא ניתן לזהות את המכשיר — גישה נדחית';return;}
-    if(!w.deviceId){
-      w.deviceId=devId;
-      if(S.fbConnected)await fbSet('workers',w.id,w);
-      saveLS();
-    } else if(w.deviceId!==devId){
-      document.getElementById('l-err').textContent='⛔ מכשיר לא מורשה — פנה למנהל';
+  if(!u){document.getElementById('l-err').textContent='נא למלא שם משתמש וסיסמה';return;}
+  if(!S.fbConnected||!window._fbFunctions){document.getElementById('l-err').textContent='⛔ אין חיבור לשרת — בדוק אינטרנט ונסה שוב';return;}
+  document.getElementById('l-err').textContent='מאמת...';
+  const devId=await getDeviceId();
+  try{
+    // האימות כולו בצד השרת: סיסמה, השעיה, WiFi מפעל, נעילת מכשיר, נעילת ניסיונות
+    const res=await loginCall({user:u,pass:p||undefined,deviceId:devId||undefined});
+    if(res.needFace){
+      // לעובד הזה נדרש זיהוי פנים — השרת יאמת את הפנים ויחזיר טוקן
+      S._pendingUser={user:u,name:res.name,faceUpdateAllowed:!!res.faceUpdateAllowed};
+      startFaceAuth();
       return;
     }
+    loginAttempts=0;
+    await fbSignInWithToken(res.token);
+    if(res.needFaceRegister){
+      // סיסמה אומתה אך פנים טרם נרשמו — רישום ראשוני ואז כניסה
+      S._pendingUser={...res.worker,_authed:true};
+      _startFaceFirstRegister();
+      return;
+    }
+    finishLogin(res.worker,false);
+  }catch(e){
+    const c=_loginErrCode(e);
+    if(c==='wrong'){
+      loginAttempts++;
+      if(loginAttempts>=5){
+        loginLocked=true;
+        document.getElementById('l-err').textContent='יותר מדי ניסיונות — חשבון נעול ל-30 שניות';
+        document.getElementById('l-user').disabled=true;
+        document.getElementById('l-pass').disabled=true;
+        loginLockTimer=setTimeout(()=>{loginLocked=false;loginAttempts=0;document.getElementById('l-user').disabled=false;document.getElementById('l-pass').disabled=false;document.getElementById('l-err').textContent='';},30000);
+      } else {
+        document.getElementById('l-err').textContent='שם משתמש או סיסמה שגויים ('+loginAttempts+'/5)';
+      }
+      return;
+    }
+    console.error('login error:',e);
+    document.getElementById('l-err').textContent=_loginErrMsg(c);
   }
-  if(w.faceAuth && !(w.faceDescriptor||w.faceDescriptors&&Object.keys(w.faceDescriptors).length)){
-    // פנים לא רשומים עדיין — בקש רישום ראשוני
-    S._pendingUser=w;
-    _startFaceFirstRegister();
-    return;
-  }
-  if(w.faceAuth && (w.faceDescriptor||w.faceDescriptors&&Object.keys(w.faceDescriptors).length)){
-    S._pendingUser=w;
-    startFaceAuth();
-    return;
-  }
-  S.user=w;
-  listenWorkerMessages();
-  listenMgrInbox();
-  if(w.role==='worker'||w.role==='helper')document.getElementById('worker-send-msg-bar').style.display='block';
-  if(w.role!=='manager'){
-    if(typeof Notification!=='undefined'&&Notification.permission==='granted'){initWorkerFCM(w.id);}
-    else if(typeof Notification!=='undefined'&&Notification.permission==='default'){setTimeout(()=>initWorkerFCM(w.id),2000);}
-  }
-  document.getElementById('login-screen').classList.add('hidden');
-  document.getElementById('app-screen').classList.remove('hidden');
-  document.getElementById('top-name').textContent=w.name;
-  document.getElementById('top-role').textContent=w.role==='manager'?'מנהל':w.role==='supervisor'?'אחראי':w.role==='helper'?'עוזר':'עובד';
-  document.getElementById('top-av').textContent=w.name.split(' ').map(n=>n[0]).join('');
-  applyPerms(w);
-  setTimeout(loadWaSettings,100);
-  const firstPage=(w.permissions&&w.permissions.length)?w.permissions[0]:'dash';
-  goPage(w.role==='manager'?'dash':firstPage);
 }
 // ─── AI CHAT ────────────────────────────────────────────────
 let AI_URL=localStorage.getItem('ai_url')||'https://respond-encryption-sri-tray.trycloudflare.com';
@@ -2493,7 +2547,7 @@ async function saveAISupervisor(){
   updateAIBtnVisibility();
 }
 function updateAIBtnVisibility(){
-  const w=S.workers.find(x=>x.id===S.user?.id);if(!w)return;
+  const w=S.workers.find(x=>x.id===S.user?.id)||S.user;if(!w)return;
   const aiBtn=document.getElementById('ai-chat-btn');if(!aiBtn)return;
   const supervisorAllowed=localStorage.getItem('ai_supervisor')==='1';
   const show=w.role==='manager'||(w.role==='supervisor'&&supervisorAllowed);
@@ -4875,9 +4929,9 @@ function renderAdmin(){
       <div style="font-size:11px;color:var(--txt3)">${esc(w.dept)} · ${w.role==='manager'?'מנהל':w.role==='supervisor'?'אחראי':w.role==='helper'?'עוזר':'עובד'} · @${esc(w.user)}</div></div>
       ${w.requireFactoryIP?`<span title="חייב WiFi מפעל" style="font-size:16px">🏭</span>`:''}
       ${w.disabled?`<span title="גישה מושעית" style="font-size:16px">🚫</span>`:''}
-      ${w.deviceBinding?`<span title="${w.deviceId?'מכשיר רשום ונעול':'נעילת מכשיר — טרם נרשם'}" style="font-size:16px">${w.deviceId?'📱🔒':'📱⚪'}</span>`:''}
-      ${w.deviceBinding&&w.deviceId?`<button class="btn warn" style="font-size:11px;padding:4px 8px" title="אפס מכשיר — יאפשר כניסה ממכשיר חדש" onclick="resetDeviceBinding('${w.id}')">🔄</button>`:''}
-      ${w.faceAuth?`<span title="${(w.faceDescriptor||w.faceDescriptors&&Object.keys(w.faceDescriptors).length)?'זיהוי פנים פעיל':'זיהוי פנים — פנים לא רשומים'}" style="font-size:16px">${(w.faceDescriptor||w.faceDescriptors&&Object.keys(w.faceDescriptors).length)?'🟢':'🟡'}</span>`:''}
+      ${w.deviceBinding?`<span title="${(w.deviceRegistered||w.deviceId)?'מכשיר רשום ונעול':'נעילת מכשיר — טרם נרשם'}" style="font-size:16px">${(w.deviceRegistered||w.deviceId)?'📱🔒':'📱⚪'}</span>`:''}
+      ${w.deviceBinding&&(w.deviceRegistered||w.deviceId)?`<button class="btn warn" style="font-size:11px;padding:4px 8px" title="אפס מכשיר — יאפשר כניסה ממכשיר חדש" onclick="resetDeviceBinding('${w.id}')">🔄</button>`:''}
+      ${w.faceAuth?`<span title="${(w.faceRegistered||w.faceDescriptor||w.faceDescriptors&&Object.keys(w.faceDescriptors).length)?'זיהוי פנים פעיל':'זיהוי פנים — פנים לא רשומים'}" style="font-size:16px">${(w.faceRegistered||w.faceDescriptor||w.faceDescriptors&&Object.keys(w.faceDescriptors).length)?'🟢':'🟡'}</span>`:''}
       ${w.faceAuth?`<button class="btn ${w.faceUpdateAllowed?'success':''}\" style="font-size:11px;padding:4px 8px" title="${w.faceUpdateAllowed?'עדכון פנים מאושר — לחץ לביטול':'אפשר לעובד לעדכן פנים מהטלפון'}" onclick="toggleFaceUpdate('${w.id}')">${w.faceUpdateAllowed?'📸✅':'📸'}</button>`:''}
       <button class="btn" style="font-size:11px;padding:4px 8px" onclick="openModal('edit-worker','${w.id}')">✏</button>
       <button class="btn warn" style="font-size:11px;padding:4px 8px" onclick="resetPass('${w.id}')">🔑</button>
@@ -5072,7 +5126,7 @@ function openModal(action,id){
           <input type="checkbox" id="mf-device-binding" ${w?.deviceBinding?'checked':''} style="width:auto;cursor:pointer"/>
           📱 נעילת מכשיר — כניסה ממכשיר קבוע בלבד
         </label>
-        ${w?.deviceId?`<div style="font-size:11px;color:var(--green-txt);margin-top:4px">✅ מכשיר רשום</div>`:(w?'<div style="font-size:11px;color:var(--txt3);margin-top:4px">⚪ מכשיר לא רשום עדיין — יירשם בכניסה הראשונה</div>':'')}
+        ${(w?.deviceRegistered||w?.deviceId)?`<div style="font-size:11px;color:var(--green-txt);margin-top:4px">✅ מכשיר רשום</div>`:(w?'<div style="font-size:11px;color:var(--txt3);margin-top:4px">⚪ מכשיר לא רשום עדיין — יירשם בכניסה הראשונה</div>':'')}
       </div>
       <div class="field" style="background:var(--bg2);border-radius:var(--r);padding:10px 12px">
         <label style="display:flex;align-items:center;gap:10px;cursor:pointer;font-size:13px;color:var(--txt)">
@@ -5080,8 +5134,8 @@ function openModal(action,id){
           דרוש זיהוי פנים בכניסה
         </label>
         ${w?`<div style="margin-top:8px;display:flex;align-items:center;gap:8px">
-          <span style="font-size:12px;color:var(--txt3)">${(w.faceDescriptor||w.faceDescriptors&&Object.keys(w.faceDescriptors).length)?'✅ פנים רשומים':'⚠️ פנים לא רשומים'}</span>
-          <button type="button" class="btn" style="font-size:11px;padding:4px 10px" onclick="closeModal();allowFaceUpdateByAdmin('${w.id}')">📸 ${(w.faceDescriptor||w.faceDescriptors&&Object.keys(w.faceDescriptors).length)?'אשר עדכון פנים לעובד':'אשר רישום פנים לעובד'}</button>
+          <span style="font-size:12px;color:var(--txt3)">${(w.faceRegistered||w.faceDescriptor||w.faceDescriptors&&Object.keys(w.faceDescriptors).length)?'✅ פנים רשומים':'⚠️ פנים לא רשומים'}</span>
+          <button type="button" class="btn" style="font-size:11px;padding:4px 10px" onclick="closeModal();allowFaceUpdateByAdmin('${w.id}')">📸 ${(w.faceRegistered||w.faceDescriptor||w.faceDescriptors&&Object.keys(w.faceDescriptors).length)?'אשר עדכון פנים לעובד':'אשר רישום פנים לעובד'}</button>
         </div>`:'<div style="font-size:11px;color:var(--txt3);margin-top:6px">שמור עובד תחילה, אחר כך רשום פנים</div>'}
       </div>
       <div class="field" style="background:var(--bg2);border-radius:var(--r);padding:10px 12px;margin-top:8px" id="mf-push-box">
@@ -5123,10 +5177,13 @@ async function allowFaceUpdateByAdmin(id){
 async function resetDeviceBinding(id){
   const w=S.workers.find(x=>x.id===id);if(!w)return;
   if(!confirm('לאפס מכשיר של '+w.name+'?\nבכניסה הבאה יירשם מכשיר חדש.'))return;
-  delete w.deviceId;
-  if(S.fbConnected)await fbSet('workers',w.id,w);
-  saveLS();renderAdmin();
-  showToast('✅ מכשיר '+w.name+' אופס — יכול להיכנס ממכשיר חדש');
+  try{
+    const{httpsCallable}=window._fb;
+    await httpsCallable(window._fbFunctions,'updateCredentials')({action:'resetDevice',targetId:id});
+    w.deviceRegistered=false;delete w.deviceId;
+    saveLS();renderAdmin();
+    showToast('✅ מכשיר '+w.name+' אופס — יכול להיכנס ממכשיר חדש');
+  }catch(e){alert('שגיאה באיפוס מכשיר: '+e.message);}
 }
 async function toggleFaceUpdate(id){
   const w=S.workers.find(x=>x.id===id);if(!w)return;
@@ -5186,14 +5243,16 @@ async function _workerCaptureFace(){
 }
 async function _workerFaceRegDone(){
   const video=document.getElementById('face-reg-video');
-  // 5 דגימות — שמור וסגור הרשאה
+  // 5 דגימות — שמירה ב-credentials דרך Cloud Function
   const w=S.workers.find(x=>x.id===_faceRegWorkerId);
   if(w){
-    w.faceDescriptors=Object.fromEntries(_faceRegSamples.map((s,i)=>[i,s]));
-    w.faceUpdateAllowed=false;
-    if(S.fbConnected)await fbSet('workers',w.id,w);
-    saveLS();
-    sendFaceRegPhotos(w.name,[..._faceRegSnaps]);
+    try{
+      const{httpsCallable}=window._fb;
+      await httpsCallable(window._fbFunctions,'updateCredentials')({action:'registerFace',targetId:w.id,descriptors:_faceRegSamples.slice()});
+      w.faceRegistered=true;w.faceUpdateAllowed=false;
+      saveLS();
+      sendFaceRegPhotos(w.name,[..._faceRegSnaps]);
+    }catch(e){alert('שגיאה בשמירת פנים: '+e.message);}
   }
   _faceRegSamples=[];_faceRegSnaps=[];
   if(_faceRegStream){_faceRegStream.getTracks().forEach(t=>t.stop());_faceRegStream=null;}
@@ -5205,14 +5264,19 @@ async function _workerFaceRegDone(){
   alert('✅ פנים עודכנו בהצלחה!');
   renderAtt();
 }
+// שלב 2 אבטחה: סיסמאות נשמרות רק ב-credentials דרך Cloud Function — לא בדפדפן ולא ב-workers
+async function _setWorkerPassword(id,pass){
+  const{httpsCallable}=window._fb;
+  await httpsCallable(window._fbFunctions,'updateCredentials')({action:'setPassword',targetId:id,newPass:pass});
+}
 async function resetPass(id){
   const w=S.workers.find(x=>x.id===id);if(!w)return;
   const newPass=prompt(`איפוס סיסמה עבור ${w.name}\nהזן סיסמה חדשה:`);
   if(!newPass||!newPass.trim()){return;}
-  w.pass=hashPass(newPass.trim()); // מוצפן תמיד
-  if(S.fbConnected)await fbSet('workers',w.id,w);
-  saveLS();
-  alert(`✅ סיסמה עודכנה עבור ${w.name}`);
+  try{
+    await _setWorkerPassword(w.id,newPass.trim());
+    alert(`✅ סיסמה עודכנה עבור ${w.name}`);
+  }catch(e){alert('שגיאה בעדכון סיסמה: '+e.message);}
 }
 async function confirmModal(){
   // edit-att
@@ -5347,9 +5411,11 @@ async function confirmModal(){
   const perms=role==='manager'?ALL_SUPERVISOR_PAGE_IDS:[...ALL_WORKER_PAGE_IDS,...SUPERVISOR_EXTRA_PAGES.map(p=>p.id)].filter(id=>document.getElementById('mf-perm-'+id)?.checked);
   if(S.modalAction==='add-worker'){
     if(!pass){alert('סיסמה חובה לעובד חדש');return;}
-    const nw={id:'w'+Date.now(),name,dept,role,user,pass:hashPass(pass),status:'out',checkin:null,permissions:perms,faceAuth:false,breakStart:'13:00',breakEnd:'13:45',breakActive:true};
+    if(!S.fbConnected){alert('אין חיבור לשרת — לא ניתן להוסיף עובד');return;}
+    const nw={id:'w'+Date.now(),name,dept,role,user,status:'out',checkin:null,permissions:perms,faceAuth:false,breakStart:'13:00',breakEnd:'13:45',breakActive:true};
     S.workers.push(nw);
-    if(S.fbConnected)await fbSet('workers',nw.id,nw);
+    await fbSet('workers',nw.id,nw);
+    try{await _setWorkerPassword(nw.id,pass);}catch(e){alert('העובד נוצר אך שמירת הסיסמה נכשלה: '+e.message);}
   } else if(S.modalAction?.startsWith('edit-worker:')){
     const id=S.modalAction.split(':')[1];
     const w=S.workers.find(x=>x.id===id);
@@ -5359,7 +5425,7 @@ async function confirmModal(){
     w.deviceBinding=!!document.getElementById('mf-device-binding')?.checked;
     w.faceAuth=!!document.getElementById('mf-face-auth')?.checked;
     w.pushPrefs={task_long:!!document.getElementById('mf-push-long')?.checked,manager_msg:!!document.getElementById('mf-push-msg')?.checked,task_assigned:!!document.getElementById('mf-push-task')?.checked};
-    if(pass)w.pass=hashPass(pass);
+    if(pass){try{await _setWorkerPassword(w.id,pass);}catch(e){alert('שמירת הסיסמה נכשלה: '+e.message);}}
     if(S.fbConnected)await fbSet('workers',w.id,w);}
   }
   saveLS();closeModal();renderAdmin();
@@ -5766,7 +5832,7 @@ function saveCostSettings(){
   S.costs.fixedAnnual=parseFloat(document.getElementById('cost-fixed-annual').value)||0;
   S.costs.workDaysYear=parseInt(document.getElementById('cost-workdays-year').value)||250;
   saveLS();
-  if(S.fbConnected)fbSet('appSettings','costs',S.costs);
+  if(S.fbConnected)fbSet('adminSettings','costs',S.costs);
   const btn=event.target;
   btn.textContent='✅ נשמר';btn.classList.add('success');
   setTimeout(()=>{btn.textContent='💾 שמור הגדרות';btn.classList.remove('success');},1500);
@@ -7103,28 +7169,7 @@ setInterval(async()=>{
 },5*60*1000);
 
 // ─── FACTORY IP CHECK ────────────────────────────────────────
-async function checkFactoryIP(w){
-  const factoryIP=(S.settings.factoryIP||'188.225.231.120').trim();
-  document.getElementById('l-err').textContent='בודק מיקום...';
-  try{
-    const res=await fetch('https://api.ipify.org?format=json');
-    const data=await res.json();
-    const userIP=data.ip||'';
-    if(userIP===factoryIP){
-      document.getElementById('l-err').textContent='';
-      return true;
-    }else{
-      document.getElementById('l-err').textContent='⛔ כניסה נחסמה — חייב להיות מחובר ל-WiFi המפעל';
-      const now=new Date().toLocaleTimeString('he-IL',{hour:'2-digit',minute:'2-digit'});
-      await sendTelegram('⛔ TextileOps — ניסיון כניסה מחוץ למפעל\n👤 עובד: '+w.name+'\n🌐 IP: '+userIP+'\n🕐 שעה: '+now+'\nהעובד ניסה להיכנס מרשת שאינה רשת המפעל.');
-      return false;
-    }
-  }catch(e){
-    // אם לא הצלחנו לבדוק — מאפשר כניסה (לא לחסום בגלל תקלת רשת)
-    document.getElementById('l-err').textContent='';
-    return true;
-  }
-}
+// checkFactoryIP הוסר — בדיקת ה-IP עברה ל-Cloud Function login (בצד שרת, לא ניתנת לעקיפה)
 
 // ─── FACE AUTH ───────────────────────────────────────────────
 let _faceModelsLoaded=false;
@@ -7186,51 +7231,67 @@ async function startFaceAuth(){
 }
 
 async function _runFaceAuthLoop(){
+  // שלב 2 אבטחה: ההשוואה מתבצעת בשרת — הלקוח שולח descriptor חי ומקבל טוקן רק אם יש התאמה
   const video=document.getElementById('face-auth-video');
   const opts=new faceapi.TinyFaceDetectorOptions({inputSize:224,scoreThreshold:0.5});
-  let successStreak=0;
   let failCount=0;
+  let busy=false;
   _faceAuthLoop=setInterval(async()=>{
-    if(video.readyState<2)return;
-    const det=await faceapi.detectSingleFace(video,opts).withFaceLandmarks(true).withFaceDescriptor();
-    if(!det){successStreak=0;document.getElementById('face-auth-status').textContent='לא זוהו פנים — קרב/י למצלמה';return;}
-    const fd=S._pendingUser.faceDescriptors;
-    const rawList=fd?Object.values(fd):[S._pendingUser.faceDescriptor];
-    const storedList=rawList.filter(Boolean).map(d=>new Float32Array(Object.values(d)));
-    const dist=Math.min(...storedList.map(s=>faceapi.euclideanDistance(det.descriptor,s)));
-    if(dist<0.55){
-      successStreak++;
-      failCount=0;
-      document.getElementById('face-auth-status').textContent='מאמת... ('+successStreak+'/3)';
-      if(successStreak>=3)_completeFaceAuth(true);
-    }else{
-      successStreak=0;
-      failCount++;
-      document.getElementById('face-auth-status').textContent='לא זוהית — ניסיון '+failCount+'/3';
-      if(failCount>=3){
-        clearInterval(_faceAuthLoop);_faceAuthLoop=null;
-        _onFaceAuthFailed();
+    if(busy||video.readyState<2||!S._pendingUser)return;
+    busy=true;
+    try{
+      const det=await faceapi.detectSingleFace(video,opts).withFaceLandmarks(true).withFaceDescriptor();
+      if(!det){document.getElementById('face-auth-status').textContent='לא זוהו פנים — קרב/י למצלמה';return;}
+      document.getElementById('face-auth-status').textContent='מאמת...';
+      const devId=await getDeviceId();
+      try{
+        const res=await loginCall({user:S._pendingUser.user,faceDescriptor:Array.from(det.descriptor),deviceId:devId||undefined});
+        if(res&&res.token){
+          await fbSignInWithToken(res.token);
+          _stopFaceAuthUI();
+          const w=res.worker;S._pendingUser=null;
+          finishLogin(w,true);
+        }
+      }catch(e){
+        const c=_loginErrCode(e);
+        if(c==='face-mismatch'){
+          failCount++;
+          document.getElementById('face-auth-status').textContent='לא זוהית — ניסיון '+failCount+'/3';
+          if(failCount>=3){
+            clearInterval(_faceAuthLoop);_faceAuthLoop=null;
+            _onFaceAuthFailed();
+          }
+        }else{
+          _stopFaceAuthUI();
+          S._pendingUser=null;
+          document.getElementById('login-screen').classList.remove('hidden');
+          document.getElementById('l-err').textContent=_loginErrMsg(c);
+        }
       }
-    }
-  },600);
+    }finally{busy=false;}
+  },900);
+}
+function _stopFaceAuthUI(){
+  clearInterval(_faceAuthLoop);_faceAuthLoop=null;
+  if(_faceAuthStream){_faceAuthStream.getTracks().forEach(t=>t.stop());_faceAuthStream=null;}
+  document.getElementById('face-auth-screen').classList.add('hidden');
 }
 
 async function _onFaceAuthFailed(){
   // צלם תמונה לפני שסוגרים את המצלמה
-  let photoBlob=null;
+  let photoB64='';
   try{
     const video=document.getElementById('face-auth-video');
     const c=document.createElement('canvas');
     c.width=video.videoWidth||320;c.height=video.videoHeight||240;
     c.getContext('2d').drawImage(video,0,0,c.width,c.height);
-    photoBlob=await new Promise(r=>c.toBlob(r,'image/jpeg',0.8));
+    const blob=await new Promise(r=>c.toBlob(r,'image/jpeg',0.8));
+    if(blob)photoB64=await blobToB64(blob);
   }catch(e){}
   if(_faceAuthStream){_faceAuthStream.getTracks().forEach(t=>t.stop());_faceAuthStream=null;}
   document.getElementById('face-auth-screen').classList.add('hidden');
   document.getElementById('login-screen').classList.remove('hidden');
   const failedWorker=S._pendingUser;
-  const name=failedWorker?.name||'עובד לא ידוע';
-  const now=new Date().toLocaleTimeString('he-IL',{hour:'2-digit',minute:'2-digit'});
   // אם יש אישור עדכון — שמור את העובד ב-_pendingUser לכפתור
   if(failedWorker?.faceUpdateAllowed){
     // לא מנקים S._pendingUser — הכפתור ישתמש בו
@@ -7239,15 +7300,8 @@ async function _onFaceAuthFailed(){
     S._pendingUser=null;
     document.getElementById('l-err').textContent='זיהוי פנים נכשל 3 פעמים — נשלחה התראה למנהל';
   }
-  const caption='⚠️ TextileOps — זיהוי פנים נכשל\n👤 עובד: '+name+'\n🕐 שעה: '+now+'\nהעובד ניסה להיכנס 3 פעמים ולא זוהה.\nבדוק ואשר כניסה ידנית אם נדרש.';
-  // שלח תמונה + כיתוב לטלגרם (async — לא חוסם את הכפתור)
-  if(photoBlob){
-    try{
-      const b64=await blobToB64(photoBlob);
-      const ok=await tgCall({kind:'photo',dataB64:b64,caption});
-      if(!ok)sendTelegram(caption);
-    }catch(e){sendTelegram(caption);}
-  }else{sendTelegram(caption);}
+  // התראה + תמונה למנהל דרך פונקציית ה-login בשרת (עוד אין טוקן בשלב זה)
+  try{loginCall({user:failedWorker?.user||'',faceFailAlert:true,photoB64});}catch(e){}
 }
 
 function _startFaceUpdateAfterFail(){
@@ -7255,36 +7309,6 @@ function _startFaceUpdateAfterFail(){
   if(!w||!w.faceUpdateAllowed)return;
   document.getElementById('l-err').textContent='';
   _startFaceFirstRegister();
-}
-
-function _completeFaceAuth(success){
-  clearInterval(_faceAuthLoop);_faceAuthLoop=null;
-  if(_faceAuthStream){_faceAuthStream.getTracks().forEach(t=>t.stop());_faceAuthStream=null;}
-  document.getElementById('face-auth-screen').classList.add('hidden');
-  if(success){
-    const w=S._pendingUser;S._pendingUser=null;
-    S.user=w;
-    listenWorkerMessages();
-    listenMgrInbox();
-    if(w.role==='worker'||w.role==='helper')document.getElementById('worker-send-msg-bar').style.display='block';
-    if(w.role!=='manager'){
-      if(typeof Notification!=='undefined'&&Notification.permission==='granted'){initWorkerFCM(w.id);}
-      else if(typeof Notification!=='undefined'&&Notification.permission==='default'){setTimeout(()=>initWorkerFCM(w.id),2000);}
-    }
-    document.getElementById('app-screen').classList.remove('hidden');
-    document.getElementById('top-name').textContent=w.name;
-    document.getElementById('top-role').textContent=w.role==='manager'?'מנהל':w.role==='supervisor'?'אחראי':w.role==='helper'?'עוזר':'עובד';
-    document.getElementById('top-av').textContent=w.name.split(' ').map(n=>n[0]).join('');
-    applyPerms(w);
-    setTimeout(loadWaSettings,100);
-    const firstPage=(w.permissions&&w.permissions.length)?w.permissions[0]:'dash';
-    goPage(w.role==='manager'?'dash':firstPage);
-    setTimeout(autoPunchIn,300);
-  }else{
-    S._pendingUser=null;
-    document.getElementById('login-screen').classList.remove('hidden');
-    document.getElementById('l-err').textContent='זיהוי פנים נכשל — נסה שוב';
-  }
 }
 
 function cancelFaceAuth(){
@@ -7351,7 +7375,7 @@ async function _captureAndLogin(){
     btnEl.disabled=false;
     return;
   }
-  // 5 דגימות הושלמו — שמור וכנס
+  // 5 דגימות הושלמו — שמירה בצד השרת (credentials) וכניסה
   try{
     const w=S._pendingUser;
     if(!w){
@@ -7361,11 +7385,22 @@ async function _captureAndLogin(){
       _faceRegSamples=[];
       return;
     }
-    w.faceDescriptors=Object.fromEntries(_faceRegSamples.map((s,i)=>[i,s]));
-    w.faceUpdateAllowed=false;
+    const samples=_faceRegSamples.slice();
+    let worker=null;
+    if(w._authed){
+      // כבר מחוברים (סיסמה אומתה) — שמירת הפנים דרך updateCredentials
+      const{httpsCallable}=window._fb;
+      await httpsCallable(window._fbFunctions,'updateCredentials')({action:'registerFace',targetId:w.id,descriptors:samples});
+      worker={...w,faceRegistered:true,faceUpdateAllowed:false};
+      delete worker._authed;
+    }else{
+      // רישום מחדש שאושר ע"י המנהל אחרי כשל זיהוי — דרך login (עוד אין טוקן)
+      const devId=await getDeviceId();
+      const res=await loginCall({user:w.user,registerDescriptors:samples,deviceId:devId||undefined});
+      await fbSignInWithToken(res.token);
+      worker=res.worker;
+    }
     _faceRegSamples=[];
-    if(S.fbConnected)await fbSet('workers',w.id,w);
-    saveLS();
     // שלח תמונה למנהל בטלגרם (לא חוסם)
     try{
       const snapCanvas=document.createElement('canvas');
@@ -7376,7 +7411,7 @@ async function _captureAndLogin(){
         if(!blob)return;
         const now=new Date().toLocaleTimeString('he-IL',{hour:'2-digit',minute:'2-digit'});
         const b64=await blobToB64(blob);
-        tgCall({kind:'photo',dataB64:b64,caption:'📸 TextileOps — רישום פנים ראשוני\n👤 עובד: '+w.name+'\n🕐 שעה: '+now});
+        tgCall({kind:'photo',dataB64:b64,caption:'📸 TextileOps — רישום פנים ראשוני\n👤 עובד: '+worker.name+'\n🕐 שעה: '+now});
       },'image/jpeg',0.8);
     }catch(e){}
     document.getElementById('face-reg-screen').classList.add('hidden');
@@ -7384,16 +7419,8 @@ async function _captureAndLogin(){
     if(cancelBtn)cancelBtn.style.display='';
     document.getElementById('face-reg-btn').textContent='📸 צלם דגימה 1/5';
     document.getElementById('face-reg-btn').onclick=captureFaceDescriptor;
-    S.user=w;S._pendingUser=null;
-    document.getElementById('app-screen').classList.remove('hidden');
-    document.getElementById('top-name').textContent=w.name;
-    document.getElementById('top-role').textContent=w.role==='manager'?'מנהל':w.role==='supervisor'?'אחראי':w.role==='helper'?'עוזר':'עובד';
-    document.getElementById('top-av').textContent=w.name.split(' ').map(n=>n[0]||'').join('');
-    applyPerms(w);
-    setTimeout(loadWaSettings,100);
-    const firstPage=(w.permissions&&w.permissions.length)?w.permissions[0]:'dash';
-    goPage(w.role==='manager'?'dash':firstPage);
-    setTimeout(autoPunchIn,300);
+    S._pendingUser=null;
+    finishLogin(worker,true);
   }catch(err){
     document.getElementById('face-reg-status').textContent='שגיאה: '+err.message+' — נסה שוב';
     document.getElementById('face-reg-btn').textContent='📸 צלם דגימה 1/5';
@@ -7619,10 +7646,13 @@ async function faceRegConfirm(){
   const video=document.getElementById('face-reg-video');
   const w=S.workers.find(x=>x.id===_faceRegWorkerId);
   if(w){
-    w.faceDescriptors=Object.fromEntries(_faceRegSamples.map((s,i)=>[i,s]));
-    if(S.fbConnected)await fbSet('workers',w.id,w);
-    saveLS();
-    sendFaceRegPhotos(w.name,[..._faceRegSnaps]);
+    try{
+      const{httpsCallable}=window._fb;
+      await httpsCallable(window._fbFunctions,'updateCredentials')({action:'registerFace',targetId:w.id,descriptors:_faceRegSamples.slice()});
+      w.faceRegistered=true;
+      saveLS();
+      sendFaceRegPhotos(w.name,[..._faceRegSnaps]);
+    }catch(e){alert('שגיאה בשמירת פנים: '+e.message);}
   }
   _faceRegSamples=[];_faceRegSnaps=[];
   cancelFaceReg();

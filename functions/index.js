@@ -1,9 +1,42 @@
 const functions = require('firebase-functions');
 const admin = require('firebase-admin');
 const https = require('https');
+const crypto = require('crypto');
 
 admin.initializeApp();
 const db = admin.firestore();
+const FieldValue = admin.firestore.FieldValue;
+
+function hashPass(p) { return '$h:' + crypto.createHash('sha256').update(String(p), 'utf8').digest('hex'); }
+function ilTime() { return new Date().toLocaleTimeString('he-IL', { hour: '2-digit', minute: '2-digit', timeZone: 'Asia/Jerusalem' }); }
+function callerRole(context) { return (context.auth && context.auth.token && context.auth.token.role) || ''; }
+
+// כתובת ה-IP האמיתית של הלקוח — האיבר הלפני-אחרון ב-x-forwarded-for
+// (הראשונים ניתנים לזיוף ע"י הלקוח; האחרון הוא ה-LB של גוגל)
+function callerIp(context) {
+  try {
+    const req = context.rawRequest;
+    const xff = String(req.headers['x-forwarded-for'] || '');
+    const parts = xff.split(',').map(s => s.trim()).filter(Boolean);
+    if (parts.length >= 2) return parts[parts.length - 2];
+    if (parts.length === 1) return parts[0];
+    return (req.socket && req.socket.remoteAddress) || '';
+  } catch (e) { return ''; }
+}
+
+function euclidean(a, b) {
+  let s = 0;
+  const n = Math.min(a.length, b.length);
+  for (let i = 0; i < n; i++) { const d = a[i] - b[i]; s += d * d; }
+  return Math.sqrt(s);
+}
+
+// רשימת תבניות הפנים השמורות — faceDescriptors (מפת דגימות) או faceDescriptor בודד ישן
+function storedDescriptors(src) {
+  if (!src) return [];
+  const raw = src.faceDescriptors ? Object.values(src.faceDescriptors) : (src.faceDescriptor ? [src.faceDescriptor] : []);
+  return raw.filter(Boolean).map(d => Object.values(d).map(Number));
+}
 
 // הגדרות טלגרם — מ-functions:config:set telegram.token/chatid (לא ב-Firestore, לא בקוד לקוח)
 function tgCfg() {
@@ -30,9 +63,213 @@ function sendTelegram(token, chatId, text) {
   });
 }
 
+// ─── LOGIN — אימות בצד שרת + Custom Token עם role claim (שלב 2 אבטחה) ───
+// קלט: {user, pass?} | {user, faceDescriptor?} | {user, registerDescriptors?} | {emergencyCode} | {user, faceFailAlert, photoB64?}
+// פלט הצלחה: {token, worker, needFaceRegister?} | {needFace:true, name, faceUpdateAllowed}
+// קודי שגיאה (ב-message): wrong | disabled | locked | ip | device | device-unknown | face-mismatch | no-face-update | emergency-wrong
+async function regFail(credRef, creds) {
+  try { await credRef.set({ failCount: (creds.failCount || 0) + 1, lastFail: Date.now() }, { merge: true }); } catch (e) {}
+}
+function sanitizeWorker(w) {
+  const out = { ...w };
+  delete out.pass; delete out.faceDescriptor; delete out.faceDescriptors; delete out.deviceId;
+  return out;
+}
+exports.login = functions.https.onCall(async (data, context) => {
+  const d = data || {};
+  const { token: tgToken, chatId: tgChatId } = tgCfg();
+  const tg = text => (tgToken && tgChatId) ? sendTelegram(tgToken, tgChatId, text).catch(() => {}) : Promise.resolve();
+
+  // ── כניסת חירום ──
+  if (d.emergencyCode !== undefined) {
+    const cfgHash = (functions.config().app || {}).emergencyhash || '';
+    const emRef = db.collection('credentials').doc('_emergency');
+    const emSnap = await emRef.get();
+    const em = emSnap.exists ? emSnap.data() : {};
+    if ((em.failCount || 0) >= 5 && Date.now() - (em.lastFail || 0) < 10 * 60 * 1000) {
+      throw new functions.https.HttpsError('resource-exhausted', 'locked');
+    }
+    if (!cfgHash || hashPass(String(d.emergencyCode)) !== cfgHash) {
+      await regFail(emRef, em);
+      await tg('🚨 TextileOps — קוד חירום שגוי!\n🕐 שעה: ' + ilTime() + '\nמישהו הזין קוד חירום לא נכון. ייתכן ניסיון פריצה!');
+      throw new functions.https.HttpsError('permission-denied', 'emergency-wrong');
+    }
+    await emRef.set({ failCount: 0 }, { merge: true });
+    const mq = await db.collection('workers').where('role', '==', 'manager').limit(1).get();
+    const mgr = mq.empty ? { id: 'emergency', name: 'מנהל חירום', role: 'manager' } : { id: mq.docs[0].id, ...mq.docs[0].data() };
+    const token = await admin.auth().createCustomToken(mgr.id, { role: 'manager' });
+    await tg('✅ TextileOps — כניסת חירום בוצעה\n🕐 שעה: ' + ilTime() + '\nנכנס דרך קוד חירום כמנהל.');
+    return { token, worker: sanitizeWorker({ ...mgr, role: 'manager' }) };
+  }
+
+  const user = String(d.user || '').trim();
+  if (!user) throw new functions.https.HttpsError('invalid-argument', 'wrong');
+  const q = await db.collection('workers').where('user', '==', user).limit(1).get();
+  if (q.empty) throw new functions.https.HttpsError('permission-denied', 'wrong');
+  const wDoc = q.docs[0];
+  const w = { id: wDoc.id, ...wDoc.data() };
+  const credRef = db.collection('credentials').doc(w.id);
+  const credSnap = await credRef.get();
+  const creds = credSnap.exists ? credSnap.data() : {};
+
+  // ── התראת כשל זיהוי פנים (לא מחזירה טוקן; נשלחת אחרי 3 כשלונות) ──
+  if (d.faceFailAlert) {
+    const caption = '⚠️ TextileOps — זיהוי פנים נכשל\n👤 עובד: ' + (w.name || user) + '\n🕐 שעה: ' + ilTime() + '\nהעובד ניסה להיכנס 3 פעמים ולא זוהה.\nבדוק ואשר כניסה ידנית אם נדרש.';
+    const b64 = String(d.photoB64 || '');
+    if (b64 && b64.length < 9000000 && tgToken && tgChatId) {
+      try {
+        const fd = new FormData();
+        fd.append('chat_id', tgChatId);
+        fd.append('caption', caption);
+        fd.append('photo', new Blob([Buffer.from(b64, 'base64')], { type: 'image/jpeg' }), 'face.jpg');
+        await fetch(`https://api.telegram.org/bot${tgToken}/sendPhoto`, { method: 'POST', body: fd });
+      } catch (e) { await tg(caption); }
+    } else { await tg(caption); }
+    return { ok: true };
+  }
+
+  // ── נעילה זמנית אחרי 5 כשלונות ──
+  if ((creds.failCount || 0) >= 5 && Date.now() - (creds.lastFail || 0) < 60 * 1000) {
+    throw new functions.https.HttpsError('resource-exhausted', 'locked');
+  }
+  if (w.disabled) throw new functions.https.HttpsError('permission-denied', 'disabled');
+
+  // ── בדיקת רשת המפעל (IP בצד שרת — לא ניתן לעקיפה מהלקוח) ──
+  if (w.requireFactoryIP) {
+    const tgSet = await db.collection('appSettings').doc('telegramSettings').get();
+    const factoryIP = (tgSet.exists && tgSet.data().factoryIP) || '';
+    const ip = callerIp(context);
+    if (factoryIP && ip && ip !== factoryIP) {
+      await tg('⛔ TextileOps — ניסיון כניסה מחוץ למפעל\n👤 עובד: ' + w.name + '\n🌐 IP: ' + ip + '\n🕐 שעה: ' + ilTime() + '\nהעובד ניסה להיכנס מרשת שאינה רשת המפעל.');
+      throw new functions.https.HttpsError('permission-denied', 'ip');
+    }
+  }
+
+  // תבניות פנים: קודם credentials, אחרת שדות ישנים בworkers (טרום-מיגרציה)
+  const faceSrc = storedDescriptors(creds).length ? creds : w;
+  const hasFace = !!w.faceAuth && storedDescriptors(faceSrc).length > 0;
+  let needFaceRegister = false;
+
+  if (Array.isArray(d.faceDescriptor) && d.faceDescriptor.length >= 64) {
+    // ── אימות פנים בצד שרת ──
+    if (!hasFace) throw new functions.https.HttpsError('failed-precondition', 'wrong');
+    const live = d.faceDescriptor.map(Number);
+    const dist = Math.min(...storedDescriptors(faceSrc).map(s => euclidean(live, s)));
+    if (!(dist < 0.55)) {
+      await regFail(credRef, creds);
+      throw new functions.https.HttpsError('permission-denied', 'face-mismatch');
+    }
+  } else if (Array.isArray(d.registerDescriptors) && d.registerDescriptors.length) {
+    // ── רישום פנים מחדש בכניסה — רק אם המנהל אישר מראש ──
+    if (!w.faceUpdateAllowed) throw new functions.https.HttpsError('permission-denied', 'no-face-update');
+    await credRef.set({ faceDescriptors: Object.fromEntries(d.registerDescriptors.map((s, i) => [i, s.map(Number)])), faceDescriptor: FieldValue.delete() }, { merge: true });
+    await wDoc.ref.set({ faceUpdateAllowed: false, faceRegistered: true, faceDescriptor: FieldValue.delete(), faceDescriptors: FieldValue.delete() }, { merge: true });
+  } else if (d.pass !== undefined && String(d.pass).length) {
+    // ── אימות סיסמה ──
+    const stored = creds.pass !== undefined ? creds.pass : (w.pass || '');
+    const p = String(d.pass);
+    if (stored === hashPass(p)) { /* ok */ }
+    else if (stored && !String(stored).startsWith('$h:') && stored === p) {
+      // סיסמה ישנה בטקסט רגיל — שדרוג ל-hash
+      await credRef.set({ pass: hashPass(p) }, { merge: true });
+    } else {
+      await regFail(credRef, creds);
+      throw new functions.https.HttpsError('permission-denied', 'wrong');
+    }
+    // עובד עם פנים רשומות — סיסמה לבדה לא מספיקה, נדרש זיהוי פנים
+    if (w.faceAuth && hasFace) return { needFace: true, name: w.name, faceUpdateAllowed: !!w.faceUpdateAllowed };
+    if (w.faceAuth && !hasFace) needFaceRegister = true;
+  } else {
+    // אין סיסמה — אם יש זיהוי פנים רשום, הלקוח יפתח מצלמה
+    if (hasFace) return { needFace: true, name: w.name, faceUpdateAllowed: !!w.faceUpdateAllowed };
+    throw new functions.https.HttpsError('invalid-argument', 'missing-pass');
+  }
+
+  // ── נעילת מכשיר (בצד שרת) ──
+  if (w.deviceBinding && w.role !== 'manager') {
+    const dev = String(d.deviceId || '');
+    if (!dev) throw new functions.https.HttpsError('failed-precondition', 'device-unknown');
+    if (!creds.deviceId) {
+      await credRef.set({ deviceId: dev }, { merge: true });
+      await wDoc.ref.set({ deviceRegistered: true }, { merge: true });
+    } else if (creds.deviceId !== dev) {
+      await tg('⛔ TextileOps — ניסיון כניסה ממכשיר לא מורשה\n👤 עובד: ' + w.name + '\n🕐 שעה: ' + ilTime());
+      throw new functions.https.HttpsError('permission-denied', 'device');
+    }
+  }
+
+  await credRef.set({ failCount: 0 }, { merge: true });
+  const role = w.role || 'worker';
+  const token = await admin.auth().createCustomToken(w.id, { role });
+  return { token, worker: sanitizeWorker(w), needFaceRegister };
+});
+
+// ─── ניהול סודות כניסה — סיסמה/מכשיר/פנים (credentials חסומה לגמרי ללקוח) ───
+exports.updateCredentials = functions.https.onCall(async (data, context) => {
+  const role = callerRole(context);
+  if (!role) throw new functions.https.HttpsError('unauthenticated', 'יש להתחבר תחילה');
+  const d = data || {};
+  const targetId = String(d.targetId || '');
+  if (!targetId || targetId === '_emergency') throw new functions.https.HttpsError('invalid-argument', 'עובד לא תקין');
+  if (d.action === 'setPassword') {
+    if (role !== 'manager') throw new functions.https.HttpsError('permission-denied', 'מנהל בלבד');
+    const p = String(d.newPass || '').trim();
+    if (!p) throw new functions.https.HttpsError('invalid-argument', 'סיסמה ריקה');
+    await db.collection('credentials').doc(targetId).set({ pass: hashPass(p) }, { merge: true });
+    return { ok: true };
+  }
+  if (d.action === 'resetDevice') {
+    if (role !== 'manager') throw new functions.https.HttpsError('permission-denied', 'מנהל בלבד');
+    await db.collection('credentials').doc(targetId).set({ deviceId: FieldValue.delete() }, { merge: true });
+    await db.collection('workers').doc(targetId).set({ deviceRegistered: false }, { merge: true });
+    return { ok: true };
+  }
+  if (d.action === 'registerFace') {
+    if (role !== 'manager' && context.auth.uid !== targetId) throw new functions.https.HttpsError('permission-denied', 'אין הרשאה');
+    const samples = d.descriptors;
+    if (!Array.isArray(samples) || !samples.length || !samples.every(s => Array.isArray(s))) throw new functions.https.HttpsError('invalid-argument', 'דגימות חסרות');
+    await db.collection('credentials').doc(targetId).set({ faceDescriptors: Object.fromEntries(samples.map((s, i) => [i, s.map(Number)])), faceDescriptor: FieldValue.delete() }, { merge: true });
+    await db.collection('workers').doc(targetId).set({ faceRegistered: true, faceUpdateAllowed: false, faceDescriptor: FieldValue.delete(), faceDescriptors: FieldValue.delete() }, { merge: true });
+    return { ok: true };
+  }
+  throw new functions.https.HttpsError('invalid-argument', 'פעולה לא מוכרת');
+});
+
+// ─── מיגרציה חד-פעמית לשלב 2 — מוגנת במפתח מ-config (app.migratekey) ───
+// מעביר hashes/תבניות פנים ל-credentials, מאפס deviceId (מעבר לזיהוי UUID),
+// מוסיף שדות מירור (faceRegistered/deviceRegistered), ומעביר costs ל-adminSettings
+exports.migratePhase2 = functions.https.onCall(async (data, context) => {
+  const key = (functions.config().app || {}).migratekey || '';
+  if (!key || String(data && data.key) !== key) throw new functions.https.HttpsError('permission-denied', 'מפתח שגוי');
+  const snap = await db.collection('workers').get();
+  let migrated = 0;
+  for (const doc of snap.docs) {
+    const w = doc.data();
+    const creds = {};
+    if (w.pass !== undefined) creds.pass = w.pass;
+    if (w.faceDescriptor !== undefined) creds.faceDescriptor = w.faceDescriptor;
+    if (w.faceDescriptors !== undefined) creds.faceDescriptors = w.faceDescriptors;
+    if (Object.keys(creds).length) await db.collection('credentials').doc(doc.id).set(creds, { merge: true });
+    await doc.ref.update({
+      pass: FieldValue.delete(), faceDescriptor: FieldValue.delete(), faceDescriptors: FieldValue.delete(), deviceId: FieldValue.delete(),
+      faceRegistered: !!(w.faceDescriptor || (w.faceDescriptors && Object.keys(w.faceDescriptors).length)),
+      deviceRegistered: false
+    });
+    migrated++;
+  }
+  const costs = await db.collection('appSettings').doc('costs').get();
+  let costsMoved = false;
+  if (costs.exists) {
+    await db.collection('adminSettings').doc('costs').set(costs.data());
+    await costs.ref.delete();
+    costsMoved = true;
+  }
+  return { ok: true, workers: migrated, costsMoved };
+});
+
 // שליחת Push Notification
 exports.sendPush = functions.https.onCall(async (data, context) => {
-  if (!context.auth) throw new functions.https.HttpsError('unauthenticated', 'יש להתחבר תחילה');
+  if (!callerRole(context)) throw new functions.https.HttpsError('unauthenticated', 'יש להתחבר תחילה');
   const { title, body, alertType } = data;
   try {
     const settingsSnap = await db.collection('appSettings').doc('pushSettings').get();
@@ -68,7 +305,7 @@ exports.sendPush = functions.https.onCall(async (data, context) => {
 
 // שליחת Push לעובד ספציפי
 exports.sendPushToWorker = functions.https.onCall(async (data, context) => {
-  if (!context.auth) throw new functions.https.HttpsError('unauthenticated', 'יש להתחבר תחילה');
+  if (!callerRole(context)) throw new functions.https.HttpsError('unauthenticated', 'יש להתחבר תחילה');
   const { workerId, title, body } = data;
   try {
     const workerSnap = await db.collection('workers').doc(workerId).get();
@@ -92,7 +329,7 @@ exports.sendPushToWorker = functions.https.onCall(async (data, context) => {
 // שליחת טלגרם מהלקוח — ה-token נשאר בצד השרת בלבד
 // kind: 'message' {text} | 'photo' {dataB64, caption} | 'document' {dataB64, filename, caption}
 exports.tgSend = functions.https.onCall(async (data, context) => {
-  if (!context.auth) throw new functions.https.HttpsError('unauthenticated', 'יש להתחבר תחילה');
+  if (!callerRole(context)) throw new functions.https.HttpsError('unauthenticated', 'יש להתחבר תחילה');
   const { token, chatId } = tgCfg();
   if (!token || !chatId) throw new functions.https.HttpsError('failed-precondition', 'הגדרות טלגרם חסרות בשרת');
   const kind = data && data.kind;
@@ -130,7 +367,19 @@ exports.tgSend = functions.https.onCall(async (data, context) => {
 // עוזר AI — proxy מאובטח ל-AnythingLLM (רץ עכשיו על שרת Railway קבוע, לא על Tunnel מקומי)
 // כתובת/מפתח/slug מגיעים מ-`firebase functions:config:set anythingllm.*` — לא מקודדים בקובץ הזה
 exports.aiChat = functions.https.onCall(async (data, context) => {
-  if (!context.auth) throw new functions.https.HttpsError('unauthenticated', 'יש להתחבר תחילה');
+  const role = callerRole(context);
+  if (!role) throw new functions.https.HttpsError('unauthenticated', 'יש להתחבר תחילה');
+  if (role !== 'manager') {
+    // אחראי מורשה רק אם המנהל הפעיל זאת בהגדרות
+    let supervisorAllowed = false;
+    if (role === 'supervisor') {
+      try {
+        const ai = await db.collection('appSettings').doc('aiSettings').get();
+        supervisorAllowed = !!(ai.exists && ai.data().supervisorAccess);
+      } catch (e) {}
+    }
+    if (!supervisorAllowed) throw new functions.https.HttpsError('permission-denied', 'עוזר AI זמין למנהל בלבד');
+  }
   const message = String(data && data.message || '').slice(0, 8000);
   if (!message) throw new functions.https.HttpsError('invalid-argument', 'הודעה ריקה');
   try {
