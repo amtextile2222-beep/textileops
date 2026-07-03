@@ -1204,11 +1204,11 @@ code{background:var(--bg2);border:0.5px solid var(--b);border-radius:4px;padding
 <!-- FIREBASE SDK -->
 <script type="module">
 import{initializeApp}from'https://www.gstatic.com/firebasejs/10.12.0/firebase-app.js';
-import{getFirestore,collection,doc,getDoc,setDoc,onSnapshot,query,where,orderBy,limit,serverTimestamp,deleteDoc,updateDoc,addDoc,runTransaction}from'https://www.gstatic.com/firebasejs/10.12.0/firebase-firestore.js';
+import{getFirestore,collection,doc,getDoc,getDocs,setDoc,onSnapshot,query,where,orderBy,limit,serverTimestamp,deleteDoc,updateDoc,addDoc,runTransaction}from'https://www.gstatic.com/firebasejs/10.12.0/firebase-firestore.js';
 import{getAuth,signInAnonymously,signInWithCustomToken,onAuthStateChanged}from'https://www.gstatic.com/firebasejs/10.12.0/firebase-auth.js';
 import{getMessaging,getToken,onMessage}from'https://www.gstatic.com/firebasejs/10.12.0/firebase-messaging.js';
 import{getFunctions,httpsCallable}from'https://www.gstatic.com/firebasejs/10.12.0/firebase-functions.js';
-window._fb={initializeApp,getFirestore,collection,doc,getDoc,setDoc,onSnapshot,query,where,orderBy,limit,serverTimestamp,deleteDoc,updateDoc,addDoc,runTransaction,getAuth,signInAnonymously,signInWithCustomToken,onAuthStateChanged,getMessaging,getToken,onMessage,getFunctions,httpsCallable};
+window._fb={initializeApp,getFirestore,collection,doc,getDoc,getDocs,setDoc,onSnapshot,query,where,orderBy,limit,serverTimestamp,deleteDoc,updateDoc,addDoc,runTransaction,getAuth,signInAnonymously,signInWithCustomToken,onAuthStateChanged,getMessaging,getToken,onMessage,getFunctions,httpsCallable};
 window._fbReady=true;
 document.dispatchEvent(new Event('fbSDKReady'));
 </script>
