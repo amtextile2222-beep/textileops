@@ -1777,6 +1777,13 @@ let S={
   costTab:'prod',
 };
 
+// ─── היסטוריית משימות: חלון חי + שמירה ─────────────────────
+// HIST_WINDOW_DAYS — כמה ימי היסטוריה נטענים לזיכרון בזמן אמת (מוזיל קריאות Firestore).
+// דוחות/עלויות שולפים טווחים ישנים יותר לפי דרישה (loadHistRange).
+// HIST_RETENTION_DAYS — כמה זמן משימות נשמרות ב-Firestore לפני ארכוב+מחיקה (Cloud Function).
+const HIST_WINDOW_DAYS=14;
+const HIST_RETENTION_DAYS=60;
+
 // ─── LOCAL STORAGE ──────────────────────────────────────────
 function saveLS(){
   try{
@@ -1874,7 +1881,7 @@ function startDataListeners(){
 
 function listenFb(){
   if(!db)return;
-  const{collection,onSnapshot,query,orderBy}=window._fb;
+  const{collection,onSnapshot,query,orderBy,where}=window._fb;
   // workers
   onSnapshot(collection(db,'workers'),snap=>{
     if(snap.empty)return;
@@ -1952,8 +1959,10 @@ function listenFb(){
     }
     renderAll();
   });
-  // hist tasks
-  onSnapshot(query(collection(db,'histTasks'),orderBy('endTime','desc')),snap=>{
+  // hist tasks — חלון חי של HIST_WINDOW_DAYS ימים אחרונים בלבד (זמן אמת נשמר לחלון הזה).
+  // היסטוריה ישנה יותר נשלפת לפי דרישה בדוחות (loadHistRange) — מוזיל דרמטית קריאות Firestore.
+  const _histCutoff=new Date(Date.now()-HIST_WINDOW_DAYS*86400000).toISOString();
+  onSnapshot(query(collection(db,'histTasks'),where('endTime','>=',_histCutoff),orderBy('endTime','desc')),snap=>{
     S.histTasks=snap.docs.map(d=>{const dd=d.data();return{...dd,id:d.id,startTime:dd.startTime?.toDate?dd.startTime.toDate():new Date(dd.startTime),endTime:dd.endTime?.toDate?dd.endTime.toDate():new Date(dd.endTime)};});
     renderAll();
   });
@@ -2281,16 +2290,18 @@ function scheduleDailyReport(){
 scheduleDailyReport();
 
 // ─── גיבוי אוטומטי יומי ב-17:00 (רק אצל מנהל) ──────────
-function runDailyBackup(){
+async function runDailyBackup(){
   if(!S.user||S.user.role!=='manager')return;
   const today=todayStr();
   if(localStorage.getItem('txops_backup_done')===today)return;
   localStorage.setItem('txops_backup_done',today);
+  // גיבוי כולל את כל ההיסטוריה השמורה (עד HIST_RETENTION_DAYS), לא רק חלון החי
+  const histFull=await loadHistRange('','');
   const data={
     exportDate:new Date().toISOString(),
     workers:S.workers,
     activeTasks:S.activeTasks,
-    histTasks:S.histTasks,
+    histTasks:histFull,
     attHistory:S.attHistory,
     products:S.products||[],
     settings:S.settings
@@ -2302,10 +2313,11 @@ function runDailyBackup(){
   a.click();
   URL.revokeObjectURL(a.href);
 }
-function manualBackup(){
+async function manualBackup(){
   if(!S.user||S.user.role!=='manager')return;
   const st=document.getElementById('backup-status');
-  const data={exportDate:new Date().toISOString(),workers:S.workers,activeTasks:S.activeTasks,histTasks:S.histTasks,attHistory:S.attHistory,products:S.products||[],settings:S.settings};
+  const histFull=await loadHistRange('','');
+  const data={exportDate:new Date().toISOString(),workers:S.workers,activeTasks:S.activeTasks,histTasks:histFull,attHistory:S.attHistory,products:S.products||[],settings:S.settings};
   try{
     const blob=new Blob([JSON.stringify(data,null,2)],{type:'application/json'});
     const a=document.createElement('a');
@@ -3344,6 +3356,8 @@ function fillDeptSelects(){
   const opts=`<option value="">${selDept}</option>`+S.depts.map(d=>`<option value="${esc(d)}">${esc(d)}</option>`).join('');
   ['bc-dept','mgr-dept','ts-dept'].forEach(id=>{const s=document.getElementById(id);if(s)s.innerHTML=opts;});
 }
+// "מצטבר קודם" לברקוד — מבוסס על חלון החי (HIST_WINDOW_DAYS). לברקוד עם היסטוריה
+// ישנה מהחלון הסכום עלול להיות חלקי; זה מידע-עזר בלבד (לא חישוב שכר/דוח).
 function totalBcSecs(bc, workerId){
   return S.histTasks.filter(t=>t.bc===bc&&t.workerId===workerId).reduce((s,t)=>s+(t.duration||0),0);
 }
@@ -3496,14 +3510,36 @@ function setPrRange(range){
   }
   buildPersonalReport();
 }
-function buildPersonalReport(){
+// שליפת משימות היסטוריות לפי טווח תאריכים — לפי דרישה (דוחות/עלויות/גיבוי), מעבר לחלון החי.
+// fromD/toD בפורמט YYYY-MM-DD (ריק = ללא גבול). מסנן לפי endTime עם ריווח יום לכל צד כדי
+// לכלול משימות שחצו חצות; הקוראים ממילא מסננים שוב במדויק לפי startTime.
+// cache קצר (30 שנ') לפי טווח — buildRep נקרא מ-renderAll בכל עדכון real-time,
+// והמטמון מונע שליפת רשת חוזרת. שינוי טווח תאריכים → מפתח חדש → שליפה טרייה.
+let _histRangeCache={key:'',ts:0,data:null};
+async function loadHistRange(fromD,toD){
+  const key=(fromD||'')+'|'+(toD||'');
+  if(_histRangeCache.key===key&&_histRangeCache.data&&Date.now()-_histRangeCache.ts<30000)return _histRangeCache.data;
+  if(!db||!S.fbConnected)return S.histTasks.slice();
+  try{
+    const{collection,query,where,orderBy,getDocs}=window._fb;
+    const fromISO=fromD?new Date(new Date(fromD+'T00:00:00').getTime()-86400000).toISOString():'0000';
+    const toISO=toD?new Date(new Date(toD+'T23:59:59').getTime()+86400000).toISOString():'9999';
+    const qy=query(collection(db,'histTasks'),where('endTime','>=',fromISO),where('endTime','<=',toISO),orderBy('endTime','desc'));
+    const snap=await getDocs(qy);
+    const data=snap.docs.map(d=>{const dd=d.data();return{...dd,id:d.id,startTime:dd.startTime?.toDate?dd.startTime.toDate():new Date(dd.startTime),endTime:dd.endTime?.toDate?dd.endTime.toDate():new Date(dd.endTime)};});
+    _histRangeCache={key,ts:Date.now(),data};
+    return data;
+  }catch(e){console.error('loadHistRange:',e);return S.histTasks.slice();}
+}
+async function buildPersonalReport(){
   const el=document.getElementById('pr-body');if(!el)return;
   const isMgr=S.user?.role==='manager'||S.user?.role==='supervisor';
   if(isMgr){el.innerHTML='';return;}
   const uid=S.user?.id;if(!uid)return;
   const fromD=document.getElementById('pr-from')?.value||'';
   const toD=document.getElementById('pr-to')?.value||'';
-  const myTasks=S.histTasks.filter(t=>{
+  const hist=await loadHistRange(fromD,toD);
+  const myTasks=hist.filter(t=>{
     if(t.workerId!==uid)return false;
     const d=new Date(t.startTime).toISOString().slice(0,10);
     return(!fromD||d>=fromD)&&(!toD||d<=toD);
@@ -3617,14 +3653,15 @@ function buildAttDayTable(uid,fromD,toD,T){
   </div>`;
 }
 // ─── REPORTS ────────────────────────────────────────────────
-function buildRep(){
+async function buildRep(){
   const T=LANGS[currentLang];
   const wf=document.getElementById('rf-w').value;
   const cf=document.getElementById('rf-c').value;
   const pf=document.getElementById('rf-p').value;
   const fromD=document.getElementById('rf-from')?.value||'';
   const toD=document.getElementById('rf-to')?.value||'';
-  const all=[...S.activeTasks.map(t=>({...t,done:false})),...S.histTasks.map(t=>({...t,done:true}))];
+  const hist=await loadHistRange(fromD,toD);
+  const all=[...S.activeTasks.map(t=>({...t,done:false})),...hist.map(t=>({...t,done:true}))];
   const fl=all.filter(t=>{
     const d=new Date(t.startTime).toISOString().slice(0,10);
     return(!wf||t.workerName===wf)&&(!cf||t.cust===cf)&&(!pf||t.prod===pf)&&(!fromD||d>=fromD)&&(!toD||d<=toD);
@@ -3728,13 +3765,14 @@ function buildStageReport(){
     <tbody>${rows}</tbody>
   </table></div>`;
 }
-function exportCSV(){
+async function exportCSV(){
   const fromD=document.getElementById('rf-from')?.value||'';
   const toD=document.getElementById('rf-to')?.value||'';
   const wf=document.getElementById('rf-w').value;
   const cf=document.getElementById('rf-c').value;
   const pf=document.getElementById('rf-p').value;
-  const allRaw=[...S.activeTasks.map(t=>({...t,done:false})),...S.histTasks.map(t=>({...t,done:true}))];
+  const hist=await loadHistRange(fromD,toD);
+  const allRaw=[...S.activeTasks.map(t=>({...t,done:false})),...hist.map(t=>({...t,done:true}))];
   const all=allRaw.filter(t=>{
     const d=new Date(t.startTime).toISOString().slice(0,10);
     return(!wf||t.workerName===wf)&&(!cf||t.cust===cf)&&(!pf||t.prod===pf)&&(!fromD||d>=fromD)&&(!toD||d<=toD);
@@ -5850,13 +5888,14 @@ function showCostTab(tab){
   renderCostTab();
 }
 
-function calcCosts(){
+async function calcCosts(){
   const from=document.getElementById('cost-from')?.value;
   const to=document.getElementById('cost-to')?.value;
   if(!from||!to)return;
 
-  // סינון משימות בטווח
-  const tasks=S.histTasks.filter(t=>{
+  // סינון משימות בטווח — שליפה לפי דרישה (טווח יכול לחרוג מחלון החי)
+  const hist=await loadHistRange(from,to);
+  const tasks=hist.filter(t=>{
     const d=t.startTime instanceof Date?t.startTime:new Date(t.startTime);
     const ds=d.toISOString().slice(0,10);
     return ds>=from&&ds<=to&&t.duration>0;

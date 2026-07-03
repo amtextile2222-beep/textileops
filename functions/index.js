@@ -63,6 +63,18 @@ function sendTelegram(token, chatId, text) {
   });
 }
 
+// שולח קובץ (CSV) לטלגרם כמסמך. מחזיר true רק אם Telegram אישר ok — משמש את הארכוב
+// כדי לוודא שהנתונים נשמרו בהצלחה לפני שמוחקים אותם מ-Firestore.
+async function sendTelegramDocument(token, chatId, filename, buffer, caption) {
+  const fd = new FormData();
+  fd.append('chat_id', chatId);
+  if (caption) fd.append('caption', String(caption).slice(0, 1000));
+  fd.append('document', new Blob([buffer], { type: 'text/csv' }), filename);
+  const res = await fetch(`https://api.telegram.org/bot${token}/sendDocument`, { method: 'POST', body: fd });
+  const j = await res.json().catch(() => ({}));
+  return !!j.ok;
+}
+
 // ─── LOGIN — אימות בצד שרת + Custom Token עם role claim (שלב 2 אבטחה) ───
 // קלט: {user, pass?} | {user, faceDescriptor?} | {user, registerDescriptors?} | {emergencyCode} | {user, faceFailAlert, photoB64?}
 // פלט הצלחה: {token, worker, needFaceRegister?} | {needFace:true, name, faceUpdateAllowed}
@@ -519,4 +531,88 @@ exports.wifiMonitor = functions.pubsub.schedule('every 5 minutes').onRun(async (
     console.error('wifiMonitor error:', e);
   }
   return null;
+});
+
+// ─── ארכוב היסטוריית משימות ישנה — חודשי (1 בחודש, 03:00) ───
+// שולף משימות מעל ARCHIVE_AFTER_DAYS יום, שולח CSV לטלגרם, ומוחק רק אחרי אישור שליחה.
+// חלון חי בלקוח = 14 יום; שמירה ב-Firestore עד 60 יום; מעבר לכך — בקבצי CSV אצל המנהל.
+const ARCHIVE_AFTER_DAYS = 60;
+const ARCHIVE_MAX_DOCS = 8000;
+async function runArchive() {
+  const { token, chatId } = tgCfg();
+  if (!token || !chatId) return { ok: false, reason: 'telegram config missing' };
+  const cutoffISO = new Date(Date.now() - ARCHIVE_AFTER_DAYS * 86400000).toISOString();
+
+  // שליפת המשימות הישנות (הישנות ביותר קודם), בעימוד
+  const docs = [];
+  let last = null;
+  while (docs.length < ARCHIVE_MAX_DOCS) {
+    let qy = db.collection('histTasks').where('endTime', '<', cutoffISO).orderBy('endTime').limit(500);
+    if (last) qy = qy.startAfter(last);
+    const snap = await qy.get();
+    if (snap.empty) break;
+    snap.docs.forEach(d => docs.push(d));
+    last = snap.docs[snap.docs.length - 1];
+    if (snap.size < 500) break;
+  }
+  if (!docs.length) return { ok: true, archived: 0 };
+
+  // בניית CSV (זמנים/תאריכים בשעון ישראל)
+  const q = v => {
+    const s = (v == null ? '' : String(v)).replace(/"/g, '""');
+    return /[",\n]/.test(s) ? `"${s}"` : s;
+  };
+  const ilDate = x => x ? x.toLocaleDateString('sv-SE', { timeZone: 'Asia/Jerusalem' }) : '';
+  const ilTime = x => x ? x.toLocaleTimeString('he-IL', { hour: '2-digit', minute: '2-digit', hour12: false, timeZone: 'Asia/Jerusalem' }) : '';
+  const header = ['תאריך', 'עובד', 'מחלקה', 'לקוח', 'מוצר', 'מידה', 'כמות', 'צבע', 'סוג משימה', 'התחלה', 'סיום', 'משך (דק)', 'ברקוד'];
+  const lines = [header.join(',')];
+  for (const d of docs) {
+    const t = d.data();
+    const st = t.startTime ? new Date(t.startTime) : null;
+    const et = t.endTime ? new Date(t.endTime) : null;
+    lines.push([
+      q(ilDate(et || st)), q(t.workerName), q(t.dept), q(t.cust), q(t.prod), q(t.size),
+      t.qty || 0, q(t.col), q(t.taskType), q(ilTime(st)), q(ilTime(et)),
+      Math.round((t.duration || 0) / 60), q(t.bc)
+    ].join(','));
+  }
+  const csv = '﻿' + 'sep=,\n' + lines.join('\n');
+  const buffer = Buffer.from(csv, 'utf8');
+
+  const monthLabel = new Date().toISOString().slice(0, 7);
+  const filename = `TextileOps_archive_${monthLabel}.csv`;
+  const caption = `🗄️ TextileOps — ארכוב היסטוריית משימות\n${docs.length} משימות מעל ${ARCHIVE_AFTER_DAYS} יום\n⚠️ שמור קובץ זה — הנתונים נמחקים מהמערכת החיה.`;
+
+  // שליחה לטלגרם — מחיקה מתבצעת אך ורק אם השליחה אושרה
+  const sent = await sendTelegramDocument(token, chatId, filename, buffer, caption);
+  if (!sent) return { ok: false, reason: 'telegram send failed', found: docs.length };
+
+  // מחיקה באצוות של 500
+  let deleted = 0;
+  for (let i = 0; i < docs.length; i += 500) {
+    const batch = db.batch();
+    docs.slice(i, i + 500).forEach(d => batch.delete(d.ref));
+    await batch.commit();
+    deleted += Math.min(500, docs.length - i);
+  }
+  return { ok: true, archived: deleted, filename };
+}
+exports.archiveOldTasks = functions.pubsub.schedule('0 3 1 * *').timeZone('Asia/Jerusalem').onRun(async () => {
+  try {
+    const r = await runArchive();
+    console.log('archiveOldTasks:', JSON.stringify(r));
+  } catch (e) {
+    console.error('archiveOldTasks error:', e);
+  }
+  return null;
+});
+// טריגר ידני למנהל — ארכוב מיידי (גם לבדיקה)
+exports.archiveOldTasksNow = functions.https.onCall(async (data, context) => {
+  if (callerRole(context) !== 'manager') throw new functions.https.HttpsError('permission-denied', 'מנהל בלבד');
+  try {
+    return await runArchive();
+  } catch (e) {
+    console.error('archiveOldTasksNow error:', e);
+    throw new functions.https.HttpsError('internal', e.message || 'שגיאת ארכוב');
+  }
 });
