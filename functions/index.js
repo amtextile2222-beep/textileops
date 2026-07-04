@@ -616,3 +616,201 @@ exports.archiveOldTasksNow = functions.https.onCall(async (data, context) => {
     throw new functions.https.HttpsError('internal', e.message || 'שגיאת ארכוב');
   }
 });
+
+// ─── סגירת נוכחות ומשימות מהשרת — "נתוני נוכחות אמינים" ─────────────
+// הבעיה: רשומת נוכחות בלי חתימת יציאה חושבה עד "עכשיו" של הבוקר שאחרי (22-30 שעות),
+// ומשימות שנשארו רצות נעצרו רק ע"י "רשת ביטחון" בדפדפן פתוח (משימת 18 שעות של 30/06).
+// הפתרון: ריצה יומית מהשרת ב-23:30 שסוגרת הכל בשעת סוף המשמרת + מתקנת רשומות מנופחות.
+
+// תאריך IL (YYYY-MM-DD) של רגע נתון
+function ilDateOf(iso) { return new Date(iso).toLocaleDateString('sv-SE', { timeZone: 'Asia/Jerusalem' }); }
+// Date של "תאריך+שעה" בשעון ישראל (מטפל בקיץ/חורף)
+function ilDateTime(dateStr, timeStr) {
+  const guess = new Date(`${dateStr}T${timeStr}:00+03:00`);
+  const back = guess.toLocaleString('sv-SE', { timeZone: 'Asia/Jerusalem' });
+  if (back.startsWith(`${dateStr} ${timeStr}`)) return guess;
+  return new Date(`${dateStr}T${timeStr}:00+02:00`);
+}
+// נטו שעות עבודה: sessions פתוחות נחתכות ב-cutoff, בניכוי חלון ההפסקה
+function calcNetCapped(rec, cutoffMs) {
+  const sessions = (rec.sessions && rec.sessions.length) ? rec.sessions : (rec.checkin ? [{ in: rec.checkin, out: rec.checkout || null }] : []);
+  let total = 0;
+  for (const s of sessions) {
+    if (!s.in) continue;
+    const ci = new Date(s.in).getTime();
+    const co = s.out ? new Date(s.out).getTime() : cutoffMs;
+    let dur = co - ci;
+    if (rec.breakActive && rec.breakStart && rec.breakEnd) {
+      const dStr = ilDateOf(s.in);
+      const bs = ilDateTime(dStr, rec.breakStart).getTime();
+      const be = ilDateTime(dStr, rec.breakEnd).getTime();
+      if (be > bs) { const os = Math.max(ci, bs); const oe = Math.min(co, be); if (oe > os) dur -= (oe - os); }
+    }
+    total += Math.max(0, dur);
+  }
+  return total;
+}
+
+async function runAttendanceCloser() {
+  const setSnap = await db.collection('appSettings').doc('telegramSettings').get();
+  const shiftEnd = (setSnap.exists && setSnap.data().shiftEnd) || '15:00';
+  const closed = [], pausedNames = [];
+  let repaired = 0;
+
+  // 1) עובדים שלא חתמו יציאה — סגירת רשומת הנוכחות בשעת סוף המשמרת
+  const workersSnap = await db.collection('workers').where('status', '==', 'in').get();
+  for (const doc of workersSnap.docs) {
+    const w = doc.data();
+    const firstIn = (w.sessions && w.sessions[0] && w.sessions[0].in) || w.checkin;
+    if (!firstIn) continue;
+    const day = ilDateOf(firstIn);
+    const cutISO = ilDateTime(day, shiftEnd).toISOString();
+    const cutMs = new Date(cutISO).getTime();
+    if (Date.now() < cutMs) continue; // המשמרת עוד לא נגמרה — לא נוגעים
+    const histRef = db.collection('attHistory').doc(w.id + '_' + day);
+    const histSnap = await histRef.get();
+    if (histSnap.exists && histSnap.data().checkout) continue; // יש יציאה אמיתית
+    const baseSessions = (w.sessions && w.sessions.length) ? w.sessions : [{ in: firstIn, out: null }];
+    const rec = {
+      workerId: w.id, workerName: w.name || '', dept: w.dept || '', date: day,
+      sessions: baseSessions.map(s => s.out ? s : { ...s, out: cutISO }),
+      checkin: baseSessions[0].in, checkout: cutISO,
+      breakStart: w.breakStart || '', breakEnd: w.breakEnd || '', breakActive: !!w.breakActive,
+      autoClosed: true,
+      netMs: calcNetCapped({ ...w, sessions: baseSessions }, cutMs)
+    };
+    await histRef.set(rec);
+    closed.push(w.name || w.id);
+    // לא נוגעים במסמך העובד — האיפוס היומי בלקוח מנקה אותו בבוקר
+  }
+
+  // 2) ריפוי-עצמי: רשומות היסטוריות מנופחות (מעל 12 שעות נטו) — חיתוך בסוף המשמרת של אותו יום
+  const inflSnap = await db.collection('attHistory').where('netMs', '>', 12 * 3600000).get();
+  for (const doc of inflSnap.docs) {
+    const r = doc.data();
+    if (!r.date) continue;
+    const cutISO = ilDateTime(r.date, shiftEnd).toISOString();
+    const cutMs = new Date(cutISO).getTime();
+    const baseSessions = (r.sessions && r.sessions.length) ? r.sessions : (r.checkin ? [{ in: r.checkin, out: r.checkout || null }] : []);
+    const netMs = calcNetCapped({ ...r, sessions: baseSessions }, cutMs);
+    await doc.ref.set({
+      ...r,
+      sessions: baseSessions.map(s => s.out ? s : { ...s, out: cutISO }),
+      checkout: r.checkout || cutISO,
+      autoClosed: true,
+      netMs
+    });
+    repaired++;
+  }
+
+  // 3) משימות שנשארו רצות — השהיה מהשרת (רשת הביטחון בלקוח רצה רק בדפדפן פתוח)
+  const tasksSnap = await db.collection('activeTasks').get();
+  for (const doc of tasksSnap.docs) {
+    const t = doc.data();
+    if (t.paused || !t.startTime) continue;
+    const st = new Date(t.startTime).getTime();
+    if (isNaN(st)) continue;
+    const day = ilDateOf(t.startTime);
+    // עדיפות לשעת היציאה האמיתית של העובד באותו יום; אחרת סוף משמרת
+    let cutMs = ilDateTime(day, shiftEnd).getTime();
+    try {
+      const hSnap = await db.collection('attHistory').doc(String(t.workerId) + '_' + day).get();
+      const co = hSnap.exists && hSnap.data().checkout;
+      if (co) cutMs = new Date(co).getTime();
+    } catch (e) {}
+    const pauseAt = Math.max(st, cutMs);
+    if (Date.now() < pauseAt) continue; // המשימה עוד בתוך שעות העבודה של היום
+    let workedMs = pauseAt - st;
+    try {
+      const wSnap = await db.collection('workers').doc(String(t.workerId)).get();
+      const w = wSnap.exists ? wSnap.data() : null;
+      if (w && w.breakActive && w.breakStart && w.breakEnd) {
+        const bs = ilDateTime(day, w.breakStart).getTime(), be = ilDateTime(day, w.breakEnd).getTime();
+        if (be > bs) { const os = Math.max(st, bs); const oe = Math.min(pauseAt, be); if (oe > os) workedMs -= (oe - os); }
+      }
+    } catch (e) {}
+    const totalSec = (t.accumulatedSec || 0) + Math.max(0, Math.round(workedMs / 1000));
+    await doc.ref.set({
+      paused: true, pausedAt: new Date(pauseAt).toISOString(),
+      accumulatedSec: totalSec, elapsed: totalSec,
+      autoPausedByServer: true
+    }, { merge: true });
+    pausedNames.push((t.workerName || t.workerId || '?') + (t.taskType ? ' (' + t.taskType + ')' : ''));
+  }
+
+  // 4) ריפוי duration מנופח בהיסטוריית משימות — מעל 8 שעות נטו בלתי אפשרי במשמרת.
+  // נגרם מסגירות ישנות שחישבו endTime-startTime (כולל לילה/השהיות). לעולם רק מקטין, אף פעם לא מגדיל.
+  let fixedDur = 0;
+  const workersAll = await db.collection('workers').get();
+  const wMap = {};
+  workersAll.docs.forEach(d => { wMap[d.id] = d.data(); });
+  const histSnap = await db.collection('histTasks').where('duration', '>', 8 * 3600).get();
+  for (const doc of histSnap.docs) {
+    const t = doc.data();
+    let newDur = null;
+    if (typeof t.accumulatedSec === 'number' && (t.paused || !t.elapsed)) {
+      // הושהתה ולא חודשה — הזמן האמיתי הוא מה שנצבר
+      newDur = t.accumulatedSec;
+    } else if (typeof t.elapsed === 'number' && t.elapsed > 0 && t.elapsed < t.duration) {
+      // יש מדידת טיימר אמיתית קטנה מה-duration — היא הנכונה
+      newDur = t.elapsed;
+    } else if (t.startTime) {
+      // אין מדידה שמישה — חיתוך בסוף המשמרת של יום ההתחלה, בניכוי הפסקת העובד
+      const st = new Date(t.startTime).getTime();
+      if (!isNaN(st)) {
+        const day = ilDateOf(t.startTime);
+        const cut = ilDateTime(day, shiftEnd).getTime();
+        let end = t.endTime ? new Date(t.endTime).getTime() : cut;
+        if (isNaN(end)) end = cut;
+        end = Math.min(end, cut);
+        let dur = Math.max(0, end - st);
+        const w = wMap[String(t.workerId)] || {};
+        if (w.breakActive && w.breakStart && w.breakEnd) {
+          const bs = ilDateTime(day, w.breakStart).getTime(), be = ilDateTime(day, w.breakEnd).getTime();
+          const os = Math.max(st, bs), oe = Math.min(end, be);
+          if (oe > os) dur -= (oe - os);
+        }
+        newDur = Math.round(dur / 1000);
+      }
+    }
+    if (newDur !== null && newDur >= 0 && newDur < t.duration) {
+      await doc.ref.set({ duration: newDur, durationFixed: true }, { merge: true });
+      fixedDur++;
+    }
+  }
+
+  // דיווח לטלגרם — רק אם היה מה לסגור
+  if (closed.length || repaired || pausedNames.length || fixedDur) {
+    const { token, chatId } = tgCfg();
+    if (token && chatId) {
+      let msg = '🌙 TextileOps — סגירה אוטומטית מהשרת';
+      if (closed.length) msg += '\n📋 נוכחות נסגרה ב-' + shiftEnd + ' (' + closed.length + '): ' + closed.join(', ');
+      if (repaired) msg += '\n🛠 תוקנו ' + repaired + ' רשומות נוכחות מנופחות';
+      if (pausedNames.length) msg += '\n⏸ משימות הושהו (' + pausedNames.length + '): ' + pausedNames.join(', ');
+      if (fixedDur) msg += '\n⏱ תוקן משך מנופח ב-' + fixedDur + ' משימות בהיסטוריה';
+      await sendTelegram(token, chatId, msg).catch(() => {});
+    }
+  }
+  return { closed: closed.length, repaired, paused: pausedNames.length, fixedDur };
+}
+
+exports.attendanceCloser = functions.pubsub.schedule('30 23 * * *').timeZone('Asia/Jerusalem').onRun(async () => {
+  try {
+    const r = await runAttendanceCloser();
+    console.log('attendanceCloser:', JSON.stringify(r));
+  } catch (e) {
+    console.error('attendanceCloser error:', e);
+  }
+  return null;
+});
+// טריגר ידני מוגן במפתח (לתיקון מיידי של רשומות קיימות; אותה הגנה כמו migratePhase2)
+exports.attendanceCloserNow = functions.https.onRequest(async (req, res) => {
+  const key = (functions.config().app || {}).migratekey || '';
+  if (!key || String(req.query.key || '') !== key) { res.status(403).send('forbidden'); return; }
+  try {
+    res.json(await runAttendanceCloser());
+  } catch (e) {
+    console.error('attendanceCloserNow error:', e);
+    res.status(500).json({ error: String(e.message || e) });
+  }
+});

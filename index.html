@@ -1901,19 +1901,20 @@ function listenFb(){
           if(!existing.exists()||!existing.data().checkout){
             // אין רשומה או אין checkout — שמור רק אם באמת חסר
             const existingData=existing.exists()?existing.data():null;
+            // אין יציאה — סוגרים את הרשומה בשעת סוף המשמרת של אותו יום (לא ב"עכשיו")
+            const _cutISO=shiftEndDate(sessionDate).toISOString();
             const rec={
               workerId:w.id,workerName:w.name,dept:w.dept,date:sessionDate,
-              sessions:existingData?.sessions||w.sessions,
+              sessions:(existingData?.sessions||w.sessions).map(s=>s.out?s:{...s,out:_cutISO}),
               checkin:existingData?.checkin||w.sessions[0]?.in||'',
-              checkout:existingData?.checkout||null,
+              checkout:_cutISO,
               breakStart:w.breakStart||'',breakEnd:w.breakEnd||'',
               breakActive:!!w.breakActive,
-              netMs:existingData?.netMs||calcNetWorkRaw(w.sessions[0]?.in,null,w.breakActive,w.breakStart,w.breakEnd,sessionDate)
+              autoClosed:true,
+              netMs:calcNetWorkCapped(w,sessionDate)
             };
-            if(!existing.exists()){
-              S.attHistory.unshift(rec);
-              fbSet('attHistory',histKey,rec);
-            }
+            if(!existing.exists())S.attHistory.unshift(rec);
+            fbSet('attHistory',histKey,rec);
           }
         }catch(e){}
         w.status='out';w.checkin=null;w.checkout=null;w.sessions=[];
@@ -2142,9 +2143,11 @@ async function runDailyReset(){
       const hadOldSession=sessionDay&&sessionDay<today;
       if(w.status==='in'&&hadOldSession){
         const sessions=w.sessions&&w.sessions.length?w.sessions:(w.checkin?[{in:w.checkin,out:null}]:[]);
+        // אין יציאה מאתמול — חיתוך בסוף המשמרת של יום העבודה (לא ב"עכשיו" של הבוקר שאחרי)
+        const _cutISO=shiftEndDate(sessionDay).toISOString();
         const rec={workerId:w.id,workerName:w.name,dept:w.dept,date:lastDate,
-          sessions,checkin:sessions[0]?.in||w.checkin,checkout:null,
-          breakStart:w.breakStart||'',breakEnd:w.breakEnd||'',breakActive:!!w.breakActive,netMs:calcNetWork(w)};
+          sessions:sessions.map(s=>s.out?s:{...s,out:_cutISO}),checkin:sessions[0]?.in||w.checkin,checkout:_cutISO,autoClosed:true,
+          breakStart:w.breakStart||'',breakEnd:w.breakEnd||'',breakActive:!!w.breakActive,netMs:calcNetWorkCapped({...w,sessions},sessionDay)};
         S.attHistory.unshift(rec);
         if(S.fbConnected){
           // בדוק אם קיימת רשומה עם checkout — אם כן, אל תדרוס
@@ -2983,6 +2986,27 @@ async function punchOut(){
   const roundedOut=now.getTime()!==nowRaw.getTime();
   document.getElementById('att-msg').textContent='🚪 '+T.att_out+': '+pad2(now.getHours())+':'+pad2(now.getMinutes())+(roundedOut?' (עוגל)':'')+(pausedCount?' | '+pausedCount+' '+T.tasks_paused_msg:'');
 }
+// רשומה בלי חתימת יציאה נחתכת בשעת סוף המשמרת של אותו יום — לא ב"עכשיו"
+// (חישוב עד "עכשיו" בבוקר שאחרי ניפח רשומות ל-22-30 שעות ועיוות סיכומי שכר)
+function shiftEndDate(dateStr){return new Date(dateStr+'T'+(S.settings.shiftEnd||'15:00'));}
+function calcNetWorkCapped(w,dateStr){
+  const cutoff=shiftEndDate(dateStr).getTime();
+  const sessions=w.sessions&&w.sessions.length?w.sessions:(w.checkin?[{in:w.checkin,out:w.checkout||null}]:[]);
+  let total=0;
+  sessions.forEach(s=>{
+    const ci=new Date(s.in).getTime();
+    const co=s.out?new Date(s.out).getTime():cutoff;
+    let dur=co-ci;
+    if(w.breakActive&&w.breakStart&&w.breakEnd){
+      const ref=new Date(s.in).toDateString();
+      const bs=new Date(ref+' '+w.breakStart).getTime();
+      const be=new Date(ref+' '+w.breakEnd).getTime();
+      if(be>bs){const os=Math.max(ci,bs);const oe=Math.min(co,be);if(oe>os)dur-=(oe-os);}
+    }
+    total+=Math.max(0,dur);
+  });
+  return total;
+}
 function calcNetWorkRaw(checkin,checkout,breakActive,breakStart,breakEnd,refDate){
   if(!checkin)return 0;
   const ci=new Date(checkin).getTime();
@@ -2995,6 +3019,12 @@ function calcNetWorkRaw(checkin,checkout,breakActive,breakStart,breakEnd,refDate
     if(be>bs){const os=Math.max(ci,bs);const oe=Math.min(co,be);if(oe>os)total-=(oe-os);}
   }
   return Math.max(0,total);
+}
+// משך סופי של משימה בסגירה: מושהית → הזמן שנצבר בלבד; רצה → נצבר + הריצה הנוכחית.
+// חישוב לפי endTime-startTime ספר גם לילות והפסקות — כך נולדו משימות של 18+ שעות בדוחות.
+function taskFinalDur(t,endTime){
+  if(t.paused)return t.accumulatedSec||0;
+  return (t.accumulatedSec||0)+calcTaskDurSec(t.startTime,endTime,t.workerId);
 }
 function calcActualTaskTime(tasks){
   // מחשב זמן עבודה אמיתי — משימות מקביל נספרות פעם אחת (union of intervals)
@@ -3333,7 +3363,8 @@ async function submitBc(){
     if(!parallel){
       const endTime=new Date();
       for(const t of existTasks){
-        const done={...t,endTime,duration:Math.round((endTime-new Date(t.startTime))/1000)};
+        const done={...t,endTime,duration:taskFinalDur(t,endTime)};
+        delete done.paused;delete done.pausedAt;delete done.accumulatedSec;
         S.histTasks.unshift(done);
         if(S.fbConnected){await fbDel('activeTasks',String(t.id));await fbSet('histTasks',String(t.id),{...done,startTime:done.startTime instanceof Date?done.startTime.toISOString():done.startTime,endTime:done.endTime.toISOString()});}
       }
@@ -4943,7 +4974,8 @@ async function transferTask(taskId){
 async function mgrEndTask(taskId){
   const t=S.activeTasks.find(x=>x.id===taskId);if(!t)return;
   const endTime=new Date();
-  const done={...t,endTime,duration:Math.round((endTime-new Date(t.startTime))/1000)};
+  const done={...t,endTime,duration:taskFinalDur(t,endTime)};
+  delete done.paused;delete done.pausedAt;delete done.accumulatedSec;
   S.histTasks.unshift(done);S.activeTasks=S.activeTasks.filter(x=>x.id!==taskId);
   if(S.fbConnected){await fbDel('activeTasks',taskId);await fbSet('histTasks',taskId,{...done,startTime:done.startTime instanceof Date?done.startTime.toISOString():done.startTime,endTime:done.endTime.toISOString()});}
   tgTask(t,false,endTime);
@@ -5347,7 +5379,8 @@ async function confirmModal(){
         const checkoutTime=w.checkout?new Date(w.checkout):new Date();
         const myTasks=S.activeTasks.filter(t=>t.workerId===w.id);
         for(const t of myTasks){
-          const done={...t,endTime:checkoutTime,duration:Math.round((checkoutTime-new Date(t.startTime))/1000)};
+          const done={...t,endTime:checkoutTime,duration:taskFinalDur(t,checkoutTime)};
+          delete done.paused;delete done.pausedAt;delete done.accumulatedSec;
           S.histTasks.unshift(done);S.activeTasks=S.activeTasks.filter(x=>x.id!==t.id);
           if(S.fbConnected){await fbDel('activeTasks',String(t.id));await fbSet('histTasks',String(t.id),{...done,startTime:done.startTime instanceof Date?done.startTime.toISOString():done.startTime,endTime:done.endTime.toISOString()});}
         }
@@ -5412,7 +5445,8 @@ async function confirmModal(){
       if(endTime.getTime()-Date.now()>3600000){
         if(!await showConfirm('⚠ זמן סיום עתידי','זמן הסיום שהזנת (' +pad2(endTime.getHours())+':'+pad2(endTime.getMinutes())+ ') רחוק מהשעה הנוכחית ביותר משעה. להמשיך בכל זאת?','כן, שמור','בטל'))return;
       }
-      const done={...t,endTime,duration:Math.round((endTime-new Date(t.startTime))/1000)};
+      const done={...t,endTime,duration:taskFinalDur(t,endTime)};
+      delete done.paused;delete done.pausedAt;delete done.accumulatedSec;
       S.histTasks.unshift(done);
       S.activeTasks=S.activeTasks.filter(x=>x.id!==t.id);
       if(S.fbConnected){await fbDel('activeTasks',t.id);await fbSet('histTasks',t.id,{...done,startTime:done.startTime instanceof Date?done.startTime.toISOString():done.startTime,endTime:endTime.toISOString()});}
