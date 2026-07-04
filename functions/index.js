@@ -89,6 +89,8 @@ function sanitizeWorker(w) {
 }
 exports.login = functions.https.onCall(async (data, context) => {
   const d = data || {};
+  // ── ping לחימום הפונקציה (keepLoginWarm) — חוזר מיד, לפני כל לוגיקת אימות/נעילה/Firestore ──
+  if (d.ping) return { pong: true };
   const { token: tgToken, chatId: tgChatId } = tgCfg();
   const tg = text => (tgToken && tgChatId) ? sendTelegram(tgToken, tgChatId, text).catch(() => {}) : Promise.resolve();
 
@@ -427,6 +429,24 @@ exports.aiChat = functions.https.onCall(async (data, context) => {
     console.error('aiChat error:', e);
     throw new functions.https.HttpsError('internal', e.message || 'שגיאת AI');
   }
+});
+
+// ─── שמירת פונקציית login "חמה" בשעות העבודה (מונע cold-start / "מאמת..." ארוך) ───
+// רץ כל 2 דקות בין 06:00-15:59 שעון ישראל (מכסה 6:10-15:20). מחוץ לחלון login מתקררת כרגיל.
+// שולח ping ל-login עצמה כדי להשאיר מופע חי; ה-ping מזוהה בתחילת login וחוזר מיד.
+exports.keepLoginWarm = functions.pubsub.schedule('*/2 6-15 * * *').timeZone('Asia/Jerusalem').onRun(() => {
+  return new Promise(resolve => {
+    const body = JSON.stringify({ data: { ping: true } });
+    const req = https.request({
+      hostname: 'us-central1-textileops-aef4a.cloudfunctions.net',
+      path: '/login',
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json', 'Content-Length': Buffer.byteLength(body) }
+    }, res => { res.on('data', () => {}); res.on('end', () => resolve(null)); });
+    req.on('error', e => { console.error('keepLoginWarm ping error:', e.message); resolve(null); });
+    req.write(body);
+    req.end();
+  });
 });
 
 // בדיקת משימות ארוכות כל 5 דקות

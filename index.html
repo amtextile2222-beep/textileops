@@ -1280,6 +1280,7 @@ const LANGS={
     dash_recent:'פעילות אחרונה',
     att_in:'כניסה',
     att_out:'יציאה',
+    att_out_fail:'החתימה לא נשמרה בשרת — נסה/י שוב',
     att_present:'נכחו',
     att_absent:'נעדרו',
     att_nethours:'סה"כ שעות נטו היום',
@@ -1451,6 +1452,7 @@ const LANGS={
     dash_recent:'النشاط الأخير',
     att_in:'دخول',
     att_out:'خروج',
+    att_out_fail:'لم يتم حفظ تسجيل الخروج في الخادم — حاول/ي مرة أخرى',
     att_present:'حضروا',
     att_absent:'غابوا',
     att_nethours:'إجمالي ساعات اليوم',
@@ -1583,6 +1585,7 @@ const LANGS={
     dash_recent:'Recent Activity',
     att_in:'Check In',
     att_out:'Check Out',
+    att_out_fail:'Check-out was not saved to the server — please try again',
     att_present:'Present',
     att_absent:'Absent',
     att_nethours:'Total Net Hours Today',
@@ -2944,7 +2947,7 @@ function roundAttTime(now, isIn){
 async function punchIn(){
   if(!S.user)return;
   if(await checkVersion()){document.getElementById('att-msg').textContent='🔄 יש גרסה חדשה — לחץ "עדכן עכשיו" למעלה ונסה שוב';return;}
-  const w=await waitForWorker(S.user.id,5000);
+  const w=await waitForWorker(S.user.id,15000);
   if(!w){document.getElementById('att-msg').textContent='⏳ הנתונים עדיין נטענים — נסה שוב בעוד רגע';return;}
   if(!w.sessions)w.sessions=[];
   const today=todayStr();
@@ -2966,21 +2969,35 @@ async function punchOut(){
   if(!S.user)return;
   if(await checkVersion()){document.getElementById('att-msg').textContent='🔄 יש גרסה חדשה — לחץ "עדכן עכשיו" למעלה ונסה שוב';return;}
   const T=LANGS[currentLang];
-  const w=await waitForWorker(S.user.id,5000);
+  const w=await waitForWorker(S.user.id,15000);
   if(!w){document.getElementById('att-msg').textContent='⏳ הנתונים עדיין נטענים — נסה שוב בעוד רגע';return;}
   if(!w.sessions)w.sessions=[];
   const openIdx=w.sessions.findIndex(s=>!s.out);
   if(openIdx===-1){document.getElementById('att-msg').textContent='כבר רשום/ת כיצא/ה';return;}
   const nowRaw=new Date();
   const now=roundAttTime(nowRaw,false);
+  const prevOut=w.sessions[openIdx].out,prevStatus=w.status,prevCheckout=w.checkout;
   w.sessions[openIdx].out=now.toISOString();
   w.status='out';
   w.checkout=now.toISOString();
+  if(S.fbConnected){
+    try{
+      await fbSet('workers',w.id,w);
+    }catch(e){
+      // הכתיבה נדחתה/נכשלה בשרת — לבטל את השינוי המקומי כדי שהמסך לא ישקר שחתמה יציאה בזמן שהשרת עדיין מראה 'נוכח'
+      w.sessions[openIdx].out=prevOut;w.status=prevStatus;w.checkout=prevCheckout;
+      console.error('punchOut: fbSet workers failed:',e.message);
+      document.getElementById('att-msg').textContent='⚠️ '+T.att_out_fail;
+      sendTelegram('⚠️ חתימת יציאה נכשלה!\n👤 עובד: '+w.name+'\n🏭 מחלקה: '+w.dept+'\n🕐 שעה: '+pad2(now.getHours())+':'+pad2(now.getMinutes())+'\nשגיאה: '+(e.message||'')).catch(()=>{});
+      renderAtt();
+      return;
+    }
+  }
   const pausedCount=await pauseWorkerTasks(w.id,now);
   const netMs=calcNetWork(w);
   const rec={workerId:w.id,workerName:w.name,dept:w.dept,date:todayStr(),sessions:w.sessions,checkin:w.sessions[0]?.in||'',checkout:now.toISOString(),breakStart:w.breakStart||'',breakEnd:w.breakEnd||'',breakActive:!!w.breakActive,netMs};
   S.attHistory.unshift(rec);
-  if(S.fbConnected){await fbSet('workers',w.id,w);await fbSet('attHistory',w.id+'_'+todayStr(),rec);try{await fbDel('workerWifi',w.id);}catch(e){}}
+  if(S.fbConnected){try{await fbSet('attHistory',w.id+'_'+todayStr(),rec);}catch(e){console.error('punchOut: attHistory save failed:',e.message);}try{await fbDel('workerWifi',w.id);}catch(e){}}
   tgPunch(w.name,w.dept,false,now);
   saveLS();renderAtt();
   const roundedOut=now.getTime()!==nowRaw.getTime();
