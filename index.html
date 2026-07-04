@@ -1746,15 +1746,8 @@ function sumUnitsDedup(tasks){
 // ─── STATE ──────────────────────────────────────────────────
 let S={
   user:null,
-  workers:[
-    {id:'w1',name:'ריבה כהן',dept:'תפירה',role:'worker',user:'riva',pass:'1234',status:'out',checkin:null,checkout:null,breakStart:'13:00',breakEnd:'13:45',breakActive:true},
-    {id:'w2',name:'מוחמד עלי',dept:'חיתוך',role:'worker',user:'moha',pass:'1234',status:'out',checkin:null,checkout:null,breakStart:'13:00',breakEnd:'13:45',breakActive:true},
-    {id:'w3',name:'אסתר לוי',dept:'גימור',role:'worker',user:'ester',pass:'1234',status:'out',checkin:null,checkout:null,breakStart:'13:00',breakEnd:'13:45',breakActive:true},
-    {id:'w4',name:'יוסף אבו',dept:'תפירה',role:'worker',user:'yosef',pass:'1234',status:'out',checkin:null,checkout:null,breakStart:'13:00',breakEnd:'13:45',breakActive:true},
-    {id:'w6',name:'אחמד חסן',dept:'חיתוך',role:'worker',user:'ahmad',pass:'1234',status:'out',checkin:null,checkout:null,breakStart:'13:00',breakEnd:'13:45',breakActive:true},
-    {id:'w7',name:'שרה ברק',dept:'אריזה',role:'worker',user:'sara',pass:'1234',status:'out',checkin:null,checkout:null,breakStart:'13:00',breakEnd:'13:45',breakActive:true},
-    {id:'w8',name:'דוד פרץ',dept:'תפירה',role:'worker',user:'david',pass:'1234',status:'out',checkin:null,checkout:null,breakStart:'13:00',breakEnd:'13:45',breakActive:true},
-  ],
+  // אין עובדי דמו — הרשימה נטענת מ-Firebase בלבד. מכשיר טרי מתחיל ריק עד שהנתונים מגיעים.
+  workers:[],
   depts:['חיתוך','תפירה','גימור','איכות','אריזה'],
   activeTasks:[],
   histTasks:[],
@@ -1796,7 +1789,9 @@ function loadLS(){
     const raw=localStorage.getItem('txops_v3');
     if(!raw)return;
     const d=JSON.parse(raw);
-    if(d.workers)S.workers=d.workers;
+    // עובדי דמו ישנים (מגרסאות קודמות) שנשמרו ב-localStorage — לא לטעון אותם
+    const DEMO_USERS=['riva','moha','ester','yosef','ahmad','sara','david'];
+    if(d.workers)S.workers=d.workers.filter(w=>!DEMO_USERS.includes(w.user));
     if(d.depts)S.depts=d.depts;
     if(d.activeTasks)S.activeTasks=d.activeTasks.map(t=>({...t,startTime:new Date(t.startTime),elapsed:0}));
     if(d.histTasks)S.histTasks=d.histTasks.map(t=>({...t,startTime:new Date(t.startTime),endTime:t.endTime?new Date(t.endTime):null}));
@@ -2898,11 +2893,21 @@ async function sendMsgToMgr(){
   }else{st.style.color='var(--red-txt)';st.textContent='שגיאה בשליחה — בדוק הגדרות טלגרם';}
 }
 
+// המתנה עד שהעובד קיים ב-S.workers (הנתונים מ-Firebase מגיעים כמה שניות אחרי login)
+async function waitForWorker(id,timeoutMs=15000){
+  const t0=Date.now();
+  while(Date.now()-t0<timeoutMs){
+    const w=S.workers.find(x=>x.id===id);
+    if(w)return w;
+    await new Promise(r=>setTimeout(r,300));
+  }
+  return null;
+}
 // כניסה אוטומטית אחרי זיהוי פנים (ללא תלות ב-DOM של דף נוכחות)
 async function autoPunchIn(){
   if(!S.user)return;
-  const w=S.workers.find(x=>x.id===S.user.id);
-  if(!w)return;
+  const w=await waitForWorker(S.user.id);
+  if(!w){showToast('⏳ הנתונים עדיין נטענים — חתום כניסה ידנית בלשונית נוכחות','var(--red-txt)');return;}
   if(!w.sessions)w.sessions=[];
   // נקה sessions מימים קודמים — Firebase עלול לטעון נתונים ישנים לפני שהאיפוס היומי רץ
   const today=todayStr();
@@ -2936,8 +2941,8 @@ function roundAttTime(now, isIn){
 async function punchIn(){
   if(!S.user)return;
   if(await checkVersion()){document.getElementById('att-msg').textContent='🔄 יש גרסה חדשה — לחץ "עדכן עכשיו" למעלה ונסה שוב';return;}
-  const w=S.workers.find(x=>x.id===S.user.id);
-  if(!w)return;
+  const w=await waitForWorker(S.user.id,5000);
+  if(!w){document.getElementById('att-msg').textContent='⏳ הנתונים עדיין נטענים — נסה שוב בעוד רגע';return;}
   if(!w.sessions)w.sessions=[];
   const today=todayStr();
   w.sessions=w.sessions.filter(s=>{if(!s.in)return false;const d=new Date(s.in);return d.getFullYear()+'-'+pad2(d.getMonth()+1)+'-'+pad2(d.getDate())>=today;});
@@ -2958,8 +2963,8 @@ async function punchOut(){
   if(!S.user)return;
   if(await checkVersion()){document.getElementById('att-msg').textContent='🔄 יש גרסה חדשה — לחץ "עדכן עכשיו" למעלה ונסה שוב';return;}
   const T=LANGS[currentLang];
-  const w=S.workers.find(x=>x.id===S.user.id);
-  if(!w)return;
+  const w=await waitForWorker(S.user.id,5000);
+  if(!w){document.getElementById('att-msg').textContent='⏳ הנתונים עדיין נטענים — נסה שוב בעוד רגע';return;}
   if(!w.sessions)w.sessions=[];
   const openIdx=w.sessions.findIndex(s=>!s.out);
   if(openIdx===-1){document.getElementById('att-msg').textContent='כבר רשום/ת כיצא/ה';return;}
