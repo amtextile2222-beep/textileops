@@ -140,9 +140,15 @@ exports.login = functions.https.onCall(async (data, context) => {
     return { ok: true };
   }
 
-  // ── נעילה זמנית אחרי 5 כשלונות ──
-  if ((creds.failCount || 0) >= 5 && Date.now() - (creds.lastFail || 0) < 60 * 1000) {
-    throw new functions.https.HttpsError('resource-exhausted', 'locked');
+  // ── נעילה זמנית אחרי 5 כשלונות (חלון 60 שנ') ──
+  if ((creds.failCount || 0) >= 5) {
+    if (Date.now() - (creds.lastFail || 0) < 60 * 1000) {
+      throw new functions.https.HttpsError('resource-exhausted', 'locked');
+    }
+    // חלון הנעילה עבר — איפוס המונה. בלי זה המונה נשאר גבוה לתמיד
+    // וכל כישלון בודד חדש (טעות הקלדה אחת) נועל שוב מיד — מלכודת בלי יציאה.
+    creds.failCount = 0;
+    try { await credRef.set({ failCount: 0 }, { merge: true }); } catch (e) {}
   }
   if (w.disabled) throw new functions.https.HttpsError('permission-denied', 'disabled');
 
