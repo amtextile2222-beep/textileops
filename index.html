@@ -7308,11 +7308,14 @@ async function startFaceAuth(){
   }
 }
 
+// מונה כשלונות פנים לפי משתמש — שורד סגירה/פתיחה של מסך הכניסה.
+// (מונה מקומי בתוך הלולאה התאפס בכל פתיחה מחדש → עובד נכשל 9 פעמים בשרת בלי שנשלחה התראה למנהל)
+let _faceFailPersist={};
 async function _runFaceAuthLoop(){
   // שלב 2 אבטחה: ההשוואה מתבצעת בשרת — הלקוח שולח descriptor חי ומקבל טוקן רק אם יש התאמה
   const video=document.getElementById('face-auth-video');
   const opts=new faceapi.TinyFaceDetectorOptions({inputSize:224,scoreThreshold:0.5});
-  let failCount=0;
+  const _u=S._pendingUser?.user||'';
   let busy=false;
   _faceAuthLoop=setInterval(async()=>{
     if(busy||video.readyState<2||!S._pendingUser)return;
@@ -7325,6 +7328,7 @@ async function _runFaceAuthLoop(){
       try{
         const res=await loginCall({user:S._pendingUser.user,faceDescriptor:Array.from(det.descriptor),deviceId:devId||undefined});
         if(res&&res.token){
+          delete _faceFailPersist[_u];
           await fbSignInWithToken(res.token);
           _stopFaceAuthUI();
           const w=res.worker;S._pendingUser=null;
@@ -7333,12 +7337,19 @@ async function _runFaceAuthLoop(){
       }catch(e){
         const c=_loginErrCode(e);
         if(c==='face-mismatch'){
-          failCount++;
-          document.getElementById('face-auth-status').textContent='לא זוהית — ניסיון '+failCount+'/3';
-          if(failCount>=3){
+          _faceFailPersist[_u]=(_faceFailPersist[_u]||0)+1;
+          const fc=_faceFailPersist[_u];
+          document.getElementById('face-auth-status').textContent='לא זוהית — ניסיון '+Math.min(fc,3)+'/3';
+          if(fc>=3){
+            delete _faceFailPersist[_u];
             clearInterval(_faceAuthLoop);_faceAuthLoop=null;
             _onFaceAuthFailed();
           }
+        }else if(c==='locked'){
+          // השרת נעל אחרי כשלונות מצטברים — גם זה חייב להגיע למנהל עם תמונה
+          delete _faceFailPersist[_u];
+          clearInterval(_faceAuthLoop);_faceAuthLoop=null;
+          _onFaceAuthFailed();
         }else{
           _stopFaceAuthUI();
           S._pendingUser=null;
