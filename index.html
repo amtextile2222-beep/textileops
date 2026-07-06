@@ -789,7 +789,7 @@ code{background:var(--bg2);border:0.5px solid var(--b);border-radius:4px;padding
       <div class="card">
         <div class="sec" data-i18n="task_start_sec">▶ התחלת משימה לעובד</div>
         <div class="field"><label data-i18n="th_worker">עובד</label>
-          <select id="mgr-emp-sel" style="font-size:13px"><option value="">בחר עובד...</option></select>
+          <select id="mgr-emp-sel" style="font-size:13px" onchange="renderStepRecs('mgr')"><option value="">בחר עובד...</option></select>
         </div>
         <div class="field"><label data-i18n="lbl_task_barcode12">ברקוד משימה (12 ספרות)</label>
           <div id="mgr-cam-container" style="display:none;margin-bottom:.75rem;position:relative">
@@ -811,6 +811,7 @@ code{background:var(--bg2);border:0.5px solid var(--b);border-radius:4px;padding
         <div id="mgr-steps-wrap" style="display:none;margin-bottom:.75rem">
           <label style="font-size:13px;font-weight:600;display:block;margin-bottom:6px">🔧 בחר שלבי עבודה</label>
           <div id="mgr-steps-list"></div>
+          <div id="mgr-recs"></div>
         </div>
         <div class="field">
           <label data-i18n="lbl_dept">מחלקה</label>
@@ -837,7 +838,7 @@ code{background:var(--bg2);border:0.5px solid var(--b);border-radius:4px;padding
       <div class="sec" data-i18n="task_start_sec">▶ התחלת משימה לעובד</div>
       <div class="field"><label data-i18n="th_worker">עובד</label>
         <div style="display:flex;gap:6px;align-items:center">
-          <select id="ts-emp-sel" style="font-size:13px;flex:1"><option value="">בחר עובד...</option></select>
+          <select id="ts-emp-sel" style="font-size:13px;flex:1" onchange="renderStepRecs('ts')"><option value="">בחר עובד...</option></select>
           <button class="btn primary" onclick="tsStartWorkerCam()" id="ts-emp-cam-btn" style="font-size:13px;padding:8px 12px;flex-shrink:0" title="סרוק ברקוד עובד" data-i18n="btn_scan_worker">📷 עובד</button>
         </div>
         <div id="ts-emp-cam-container" style="display:none;margin-top:8px;position:relative">
@@ -867,6 +868,7 @@ code{background:var(--bg2);border:0.5px solid var(--b);border-radius:4px;padding
       <div id="ts-steps-wrap" style="display:none;margin-bottom:.75rem">
         <label style="font-size:13px;font-weight:600;display:block;margin-bottom:6px" data-i18n="btn_select_steps">🔧 בחר שלבי עבודה</label>
         <div id="ts-steps-list"></div>
+        <div id="ts-recs"></div>
       </div>
       <div class="field">
         <label data-i18n="lbl_dept">מחלקה</label>
@@ -1327,6 +1329,10 @@ const LANGS={
     lbl_dept:'מחלקה',
     sel_dept:'-- בחר מחלקה --',
     sel_worker:'בחר עובד...',
+    rec_title:'🎯 מומלצים לשלבים שנבחרו:',
+    rec_none:'⚠ אין עובד נוכח עם מיומנות מתאימה לשלבים שנבחרו',
+    rec_warn:'⚠ לעובד הנבחר אין מיומנות מספיקה לשלבים אלו',
+    rec_tasks:'משימות',
     btn_start_task:'▶ התחל משימה לעובד',
     bc_struct:'מבנה ברקוד',
     bc_cust:'מספר לקוח (2 ספרות)',
@@ -1500,6 +1506,10 @@ const LANGS={
     lbl_dept:'القسم',
     sel_dept:'-- اختر قسماً --',
     sel_worker:'اختر عاملاً...',
+    rec_title:'🎯 موصى بهم للمراحل المختارة:',
+    rec_none:'⚠ لا يوجد عامل حاضر بمهارة مناسبة للمراحل المختارة',
+    rec_warn:'⚠ العامل المختار لا يملك مهارة كافية لهذه المراحل',
+    rec_tasks:'مهام',
     btn_start_task:'▶ ابدأ المهمة للعامل',
     bc_struct:'هيكل الباركود',
     bc_cust:'رقم العميل (2 أرقام)',
@@ -1634,6 +1644,10 @@ const LANGS={
     lbl_dept:'Department',
     sel_dept:'-- Select Dept --',
     sel_worker:'Select worker...',
+    rec_title:'🎯 Recommended for the selected steps:',
+    rec_none:'⚠ No present worker has a suitable skill for the selected steps',
+    rec_warn:'⚠ The selected worker lacks sufficient skill for these steps',
+    rec_tasks:'tasks',
     btn_start_task:'▶ Start Task for Worker',
     bc_struct:'Barcode Structure',
     bc_cust:'Customer no. (2 digits)',
@@ -1787,6 +1801,50 @@ function stepDisplay(s){if(typeof s==='string')return s;return(currentLang==='ar
 function stepLevel(s){return(s&&typeof s==='object'&&s.level)?+s.level:0;}
 function stepStation(s){return(s&&typeof s==='object'&&s.station)?s.station:'';}
 function stepBadge(s){const l=stepLevel(s);return l?` <span style="font-size:11px;padding:1px 7px;border-radius:8px;background:var(--bg2);color:var(--txt3);border:1px solid var(--brd)">${levelName(l)}</span>`:'';}
+
+// ─── מנוע המלצת שיבוץ — תמחור שלב ב' ────────────────────────
+// לשלבים שנבחרו: עובד כשיר = מיומנות בתחנה ≥ רמת הקושי לכל שלב.
+// מיון: נוכחים תחילה → הרמה הנמוכה ביותר שמספיקה (slack) → הכי פחות משימות פעילות.
+function recommendWorkers(prodObj,checkedStepNames){
+  const steps=(prodObj?.workSteps||[]).filter(s=>checkedStepNames.includes(stepName(s))&&stepLevel(s)&&stepStation(s));
+  if(!steps.length)return null; // אין שלבים עם רמה+תחנה — אין על מה להמליץ
+  const recs=[];
+  for(const w of S.workers){
+    if(w.disabled||w.role==='manager')continue;
+    const sk=w.skills||{};let ok=true,slack=0;
+    for(const s of steps){const lvl=sk[stepStation(s)]||0;if(lvl<stepLevel(s)){ok=false;break;}slack+=lvl-stepLevel(s);}
+    if(!ok)continue;
+    const load=S.activeTasks.filter(t=>t.workerId===w.id&&!t.paused).length;
+    recs.push({w,slack,load,present:w.status==='in'});
+  }
+  recs.sort((a,b)=>((b.present?1:0)-(a.present?1:0))||(a.slack-b.slack)||(a.load-b.load));
+  return recs;
+}
+function renderStepRecs(prefix){
+  const T=LANGS[currentLang];
+  const box=document.getElementById(prefix+'-recs');if(!box)return;
+  const listEl=document.getElementById(prefix+'-steps-list');
+  if(!listEl){box.innerHTML='';return;}
+  const checked=[...listEl.querySelectorAll('input[type="checkbox"]:checked')].map(cb=>cb.dataset.step);
+  const prodObj=S.products.find(x=>x.cust===listEl.dataset.cust&&x.prod===listEl.dataset.prod);
+  if(!checked.length||!prodObj){box.innerHTML='';return;}
+  const recs=recommendWorkers(prodObj,checked);
+  if(!recs){box.innerHTML='';return;}
+  const sel=document.getElementById(prefix+'-emp-sel');
+  const selId=sel?.value||'';
+  const top=recs.filter(r=>r.present).slice(0,5);
+  const warn=selId&&!recs.some(r=>r.w.id===selId)
+    ?`<div style="font-size:11px;color:var(--amber-txt);margin-top:4px">${T.rec_warn||'⚠ לעובד הנבחר אין מיומנות מספיקה לשלבים אלו'}</div>`:'';
+  box.innerHTML=(top.length
+    ?`<div style="font-size:12px;font-weight:600;margin:8px 0 4px">${T.rec_title||'🎯 מומלצים לשלבים שנבחרו:'}</div>
+      <div style="display:flex;flex-wrap:wrap;gap:4px">${top.map(r=>`<span onclick="pickRecWorker('${prefix}','${r.w.id}')" style="cursor:pointer;font-size:12px;padding:4px 10px;border-radius:12px;border:1.5px solid ${selId===r.w.id?'var(--green-txt,#065f46)':'var(--brd)'};background:${selId===r.w.id?'var(--green-bg,#d1fae5)':'var(--bg2)'}">${esc(r.w.name)}${r.load?` <span style="color:var(--txt3);font-size:10px">· ${r.load} ${T.rec_tasks||'משימות'}</span>`:''}</span>`).join('')}</div>`
+    :`<div style="font-size:11px;color:var(--amber-txt);margin-top:8px">${T.rec_none||'⚠ אין עובד נוכח עם מיומנות מתאימה לשלבים שנבחרו'}</div>`)+warn;
+}
+function pickRecWorker(prefix,id){
+  const sel=document.getElementById(prefix+'-emp-sel');
+  if(sel)sel.value=id;
+  renderStepRecs(prefix);
+}
 
 // ─── היסטוריית משימות: חלון חי + שמירה ─────────────────────
 // HIST_WINDOW_DAYS — כמה ימי היסטוריה נטענים לזיכרון בזמן אמת (מוזיל קריאות Firestore).
@@ -4397,7 +4455,7 @@ function parseMgrBc(v){
     if(steps.length){
       mgrShowTaskTypeField(false);
       const listEl=document.getElementById('mgr-steps-list');
-      if(listEl)listEl.innerHTML=steps.map(s=>`<label style="display:flex;align-items:center;gap:8px;padding:6px 8px;margin-bottom:4px;background:var(--bg2);border-radius:8px;cursor:pointer;font-size:13px"><input type="checkbox" data-step="${esc(stepName(s))}" style="width:16px;height:16px"> ${esc(stepDisplay(s))}${stepBadge(s)}</label>`).join('');
+      if(listEl){listEl.dataset.cust=c;listEl.dataset.prod=p;listEl.innerHTML=steps.map(s=>`<label style="display:flex;align-items:center;gap:8px;padding:6px 8px;margin-bottom:4px;background:var(--bg2);border-radius:8px;cursor:pointer;font-size:13px"><input type="checkbox" data-step="${esc(stepName(s))}" style="width:16px;height:16px" onchange="renderStepRecs('mgr')"> ${esc(stepDisplay(s))}${stepBadge(s)}</label>`).join('');renderStepRecs('mgr');}
       return;
     }
   }
@@ -4408,6 +4466,7 @@ function mgrShowTaskTypeField(show){
   const stepsWrap=document.getElementById('mgr-steps-wrap');
   if(wrap)wrap.style.display=show?'':'none';
   if(stepsWrap)stepsWrap.style.display=show?'none':'';
+  if(show){const r=document.getElementById('mgr-recs');if(r)r.innerHTML='';}
 }
 
 let mgrCamStream=null;let mgrCamInterval=null;
@@ -4595,7 +4654,7 @@ function tsParseBc(v){
     if(steps.length){
       tsShowTaskTypeField(false);
       const listEl=document.getElementById('ts-steps-list');
-      if(listEl)listEl.innerHTML=steps.map(s=>`<label style="display:flex;align-items:center;gap:8px;padding:6px 8px;margin-bottom:4px;background:var(--bg2);border-radius:8px;cursor:pointer;font-size:13px"><input type="checkbox" data-step="${esc(stepName(s))}" style="width:16px;height:16px"> ${esc(stepDisplay(s))}${stepBadge(s)}</label>`).join('');
+      if(listEl){listEl.dataset.cust=c;listEl.dataset.prod=p;listEl.innerHTML=steps.map(s=>`<label style="display:flex;align-items:center;gap:8px;padding:6px 8px;margin-bottom:4px;background:var(--bg2);border-radius:8px;cursor:pointer;font-size:13px"><input type="checkbox" data-step="${esc(stepName(s))}" style="width:16px;height:16px" onchange="renderStepRecs('ts')"> ${esc(stepDisplay(s))}${stepBadge(s)}</label>`).join('');renderStepRecs('ts');}
       return;
     }
   }
@@ -4606,6 +4665,7 @@ function tsShowTaskTypeField(show){
   const stepsWrap=document.getElementById('ts-steps-wrap');
   if(wrap)wrap.style.display=show?'':'none';
   if(stepsWrap)stepsWrap.style.display=show?'none':'';
+  if(show){const r=document.getElementById('ts-recs');if(r)r.innerHTML='';}
 }
 async function tsStartCam(){
   const T=LANGS[currentLang];
