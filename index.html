@@ -1756,6 +1756,7 @@ let S={
   // אין עובדי דמו — הרשימה נטענת מ-Firebase בלבד. מכשיר טרי מתחיל ריק עד שהנתונים מגיעים.
   workers:[],
   depts:['חיתוך','תפירה','גימור','איכות','אריזה'],
+  deptStations:{},  // {"תפירה":["שרוולים","צווארונים"]} — תחנות פר מחלקה (תמחור שלב א')
   activeTasks:[],
   histTasks:[],
   alerts:[],
@@ -1777,6 +1778,16 @@ let S={
   costTab:'prod',
 };
 
+// ─── תחנות, רמות קושי ומיומנויות — תמחור שלב א' ─────────────
+const LEVELS={1:{he:'קל',ar:'سهل',en:'Easy'},2:{he:'בינוני',ar:'متوسط',en:'Medium'},3:{he:'מעל בינוני',ar:'فوق المتوسط',en:'Above medium'},4:{he:'קשה',ar:'صعب',en:'Hard'},5:{he:'מורכב',ar:'معقد',en:'Complex'}};
+function levelName(l,lang){return LEVELS[l]?(LEVELS[l][lang||currentLang]||LEVELS[l].he):'';}
+// שלב עבודה: מחרוזת (פורמט ישן) או {name,nameAr,level,station} — תאימות לאחור
+function stepName(s){return typeof s==='string'?s:(s?.name||'');}
+function stepDisplay(s){if(typeof s==='string')return s;return(currentLang==='ar'&&s?.nameAr)?s.nameAr:(s?.name||'');}
+function stepLevel(s){return(s&&typeof s==='object'&&s.level)?+s.level:0;}
+function stepStation(s){return(s&&typeof s==='object'&&s.station)?s.station:'';}
+function stepBadge(s){const l=stepLevel(s);return l?` <span style="font-size:11px;padding:1px 7px;border-radius:8px;background:var(--bg2);color:var(--txt3);border:1px solid var(--brd)">${levelName(l)}</span>`:'';}
+
 // ─── היסטוריית משימות: חלון חי + שמירה ─────────────────────
 // HIST_WINDOW_DAYS — כמה ימי היסטוריה נטענים לזיכרון בזמן אמת (מוזיל קריאות Firestore).
 // דוחות/עלויות שולפים טווחים ישנים יותר לפי דרישה (loadHistRange).
@@ -1787,7 +1798,7 @@ const HIST_RETENTION_DAYS=60;
 // ─── LOCAL STORAGE ──────────────────────────────────────────
 function saveLS(){
   try{
-    const d={workers:S.workers,depts:S.depts,activeTasks:S.activeTasks.map(t=>({...t,startTime:t.startTime instanceof Date?t.startTime.toISOString():t.startTime})),histTasks:S.histTasks.map(t=>({...t,startTime:t.startTime instanceof Date?t.startTime.toISOString():t.startTime,endTime:t.endTime instanceof Date?t.endTime.toISOString():t.endTime})),settings:S.settings,nextTId:S.nextTId,attHistory:S.attHistory,costs:S.costs,customerNames:S.customerNames,customColors:S.customColors,products:S.products,tgSentAlerts:S.tgSentAlerts,tgAbsentSig:S.tgAbsentSig};
+    const d={workers:S.workers,depts:S.depts,deptStations:S.deptStations,activeTasks:S.activeTasks.map(t=>({...t,startTime:t.startTime instanceof Date?t.startTime.toISOString():t.startTime})),histTasks:S.histTasks.map(t=>({...t,startTime:t.startTime instanceof Date?t.startTime.toISOString():t.startTime,endTime:t.endTime instanceof Date?t.endTime.toISOString():t.endTime})),settings:S.settings,nextTId:S.nextTId,attHistory:S.attHistory,costs:S.costs,customerNames:S.customerNames,customColors:S.customColors,products:S.products,tgSentAlerts:S.tgSentAlerts,tgAbsentSig:S.tgAbsentSig};
     localStorage.setItem('txops_v3',JSON.stringify(d));
   }catch(e){}
 }
@@ -1800,6 +1811,7 @@ function loadLS(){
     const DEMO_USERS=['riva','moha','ester','yosef','ahmad','sara','david'];
     if(d.workers)S.workers=d.workers.filter(w=>!DEMO_USERS.includes(w.user));
     if(d.depts)S.depts=d.depts;
+    if(d.deptStations)S.deptStations=d.deptStations;
     if(d.activeTasks)S.activeTasks=d.activeTasks.map(t=>({...t,startTime:new Date(t.startTime),elapsed:0}));
     if(d.histTasks)S.histTasks=d.histTasks.map(t=>({...t,startTime:new Date(t.startTime),endTime:t.endTime?new Date(t.endTime):null}));
     if(d.settings)S.settings={...S.settings,...d.settings};
@@ -1985,7 +1997,7 @@ function listenFb(){
       const data=d.data();
       if(d.id==='customerNames'){S.customerNames=data;saveLS();}
       if(d.id==='customColors'){S.customColors=data;Object.assign(COLORS,data);saveLS();}
-      if(d.id==='depts'&&data.list&&data.list.length){S.depts=data.list;saveLS();fillDeptSelects();}
+      if(d.id==='depts'&&data.list&&data.list.length){S.depts=data.list;S.deptStations=data.stations||S.deptStations||{};saveLS();fillDeptSelects();}
       if(d.id==='telegramSettings'){
         S.settings.factoryIP=data.factoryIP||S.settings.factoryIP;
         if(data.waEnabled!==undefined)S.settings.waEnabled=data.waEnabled;
@@ -3340,7 +3352,7 @@ function parseBc(v){
     if(steps.length){
       bcShowTaskTypeField(false);
       const listEl=document.getElementById('bc-steps-list');
-      if(listEl)listEl.innerHTML=steps.map(s=>`<label style="display:flex;align-items:center;gap:8px;padding:6px 8px;margin-bottom:4px;background:var(--bg2);border-radius:8px;cursor:pointer;font-size:13px"><input type="checkbox" data-step="${esc(s)}" style="width:16px;height:16px"> ${esc(s)}</label>`).join('');
+      if(listEl)listEl.innerHTML=steps.map(s=>`<label style="display:flex;align-items:center;gap:8px;padding:6px 8px;margin-bottom:4px;background:var(--bg2);border-radius:8px;cursor:pointer;font-size:13px"><input type="checkbox" data-step="${esc(stepName(s))}" style="width:16px;height:16px"> ${esc(stepDisplay(s))}${stepBadge(s)}</label>`).join('');
       return;
     }
   }
@@ -4385,7 +4397,7 @@ function parseMgrBc(v){
     if(steps.length){
       mgrShowTaskTypeField(false);
       const listEl=document.getElementById('mgr-steps-list');
-      if(listEl)listEl.innerHTML=steps.map(s=>`<label style="display:flex;align-items:center;gap:8px;padding:6px 8px;margin-bottom:4px;background:var(--bg2);border-radius:8px;cursor:pointer;font-size:13px"><input type="checkbox" data-step="${esc(s)}" style="width:16px;height:16px"> ${esc(s)}</label>`).join('');
+      if(listEl)listEl.innerHTML=steps.map(s=>`<label style="display:flex;align-items:center;gap:8px;padding:6px 8px;margin-bottom:4px;background:var(--bg2);border-radius:8px;cursor:pointer;font-size:13px"><input type="checkbox" data-step="${esc(stepName(s))}" style="width:16px;height:16px"> ${esc(stepDisplay(s))}${stepBadge(s)}</label>`).join('');
       return;
     }
   }
@@ -4583,7 +4595,7 @@ function tsParseBc(v){
     if(steps.length){
       tsShowTaskTypeField(false);
       const listEl=document.getElementById('ts-steps-list');
-      if(listEl)listEl.innerHTML=steps.map((s,i)=>`<label style="display:flex;align-items:center;gap:8px;padding:6px 8px;margin-bottom:4px;background:var(--bg2);border-radius:8px;cursor:pointer;font-size:13px"><input type="checkbox" data-step="${esc(s)}" style="width:16px;height:16px"> ${esc(s)}</label>`).join('');
+      if(listEl)listEl.innerHTML=steps.map(s=>`<label style="display:flex;align-items:center;gap:8px;padding:6px 8px;margin-bottom:4px;background:var(--bg2);border-radius:8px;cursor:pointer;font-size:13px"><input type="checkbox" data-step="${esc(stepName(s))}" style="width:16px;height:16px"> ${esc(stepDisplay(s))}${stepBadge(s)}</label>`).join('');
       return;
     }
   }
@@ -5052,9 +5064,21 @@ function renderAdmin(){
       <button class="btn warn" style="font-size:11px;padding:4px 8px" onclick="resetPass('${w.id}')">🔑</button>
       <button class="btn danger" style="font-size:11px;padding:4px 8px" onclick="delWorker('${w.id}')">🗑</button>
     </div>`).join('');
-  document.getElementById('adm-depts').innerHTML=S.depts.map(d=>`
-    <div class="row"><span style="flex:1;font-size:13px">${esc(d)}</span>
-    <button class="btn danger" style="font-size:11px;padding:4px 8px" onclick="delDept('${esc(d)}')">🗑</button></div>`).join('');
+  document.getElementById('adm-depts').innerHTML=S.depts.map(d=>{
+    const sts=S.deptStations?.[d]||[];
+    return`
+    <div style="border-bottom:0.5px solid var(--brd);padding:4px 0">
+      <div class="row" style="border-bottom:none"><span style="flex:1;font-size:13px;font-weight:600">${esc(d)}</span>
+      <button class="btn danger" style="font-size:11px;padding:4px 8px" onclick="delDept('${esc(d)}')">🗑</button></div>
+      <div style="display:flex;flex-wrap:wrap;gap:4px;align-items:center;padding:0 8px 6px">
+        ${sts.map(st=>`<span style="font-size:11px;background:var(--bg2);border:1px solid var(--brd);border-radius:10px;padding:2px 8px;display:inline-flex;align-items:center;gap:5px">🏷 ${esc(st)}<span onclick="delStation('${esc(d)}','${esc(st)}')" style="cursor:pointer;color:var(--red-txt);font-weight:700">✕</span></span>`).join('')}
+        <span style="display:inline-flex;gap:4px;align-items:center">
+          <input placeholder="תחנה חדשה" style="width:100px;font-size:11px;padding:3px 8px;border-radius:10px;border:1px solid var(--brd);background:var(--card);color:var(--txt)" onkeydown="if(event.key==='Enter')addStation('${esc(d)}',this.nextElementSibling)">
+          <button class="btn" style="font-size:11px;padding:3px 8px" onclick="addStation('${esc(d)}',this)">+</button>
+        </span>
+      </div>
+    </div>`;
+  }).join('');
   // לקוחות
   const custEl=document.getElementById('adm-customers');
   if(custEl){
@@ -5211,9 +5235,26 @@ function openModal(action,id){
     const wRole=w?.role||'worker';
     const wPerms=w?.permissions||(wRole==='supervisor'?ALL_SUPERVISOR_PAGE_IDS:ALL_WORKER_PAGE_IDS);
     const allPermPages=[...WORKER_PAGES,...SUPERVISOR_EXTRA_PAGES];
+    const deptsWithSt=Object.entries(S.deptStations||{}).filter(([,a])=>a&&a.length);
+    const skillsHtml=deptsWithSt.length?`
+      <div class="field" style="background:var(--bg2);border-radius:var(--r);padding:10px 12px;margin-bottom:8px">
+        <div style="font-size:12px;font-weight:600;color:var(--txt);margin-bottom:4px">🎯 מיומנויות לפי תחנה (לשיבוץ ותמחור)</div>
+        <div style="font-size:11px;color:var(--txt3);margin-bottom:6px">— ללא — = העובד לא עובד בתחנה זו</div>
+        ${deptsWithSt.map(([d,sts])=>`<div style="font-size:11px;color:var(--txt3);font-weight:600;margin:8px 0 3px">${esc(d)}</div>`+sts.map(st=>{
+          const key=d+'::'+st;const cur=w?.skills?.[key]||0;
+          return`<div style="display:flex;align-items:center;gap:8px;margin-bottom:4px">
+            <span style="flex:1;font-size:13px;color:var(--txt)">${esc(st)}</span>
+            <select class="mf-skill" data-skill="${esc(key)}" style="width:140px;font-size:12px">
+              <option value="0">— ללא —</option>
+              ${[1,2,3,4,5].map(l=>`<option value="${l}" ${cur===l?'selected':''}>${levelName(l,'he')} (${l})</option>`).join('')}
+            </select>
+          </div>`;
+        }).join('')).join('')}
+      </div>`:'';
     document.getElementById('modal-body').innerHTML=`
       <div class="field"><label>שם מלא</label><input id="mf-name" value="${esc(w?.name||'')}"/></div>
       <div class="field"><label>מחלקה</label><select id="mf-dept">${dOpts}</select></div>
+      ${skillsHtml}
       <div class="field"><label>תפקיד</label><select id="mf-role" onchange="updatePermBoxes(this.value)">
         <option value="worker" ${wRole==='worker'?'selected':''}>עובד</option>
         <option value="helper" ${wRole==='helper'?'selected':''}>עוזר</option>
@@ -5552,10 +5593,14 @@ async function confirmModal(){
   const pass=document.getElementById('mf-pass')?.value.trim();
   if(!name||!user){alert('שם ושם משתמש הם שדות חובה');return;}
   const perms=role==='manager'?ALL_SUPERVISOR_PAGE_IDS:[...ALL_WORKER_PAGE_IDS,...SUPERVISOR_EXTRA_PAGES.map(p=>p.id)].filter(id=>document.getElementById('mf-perm-'+id)?.checked);
+  // מיומנויות לפי תחנה — נאספות רק אם יש תחנות מוגדרות (אחרת ה-selects לא קיימים)
+  const skillEls=document.querySelectorAll('.mf-skill');
+  let skills=null;
+  if(skillEls.length){skills={};skillEls.forEach(s=>{const v=parseInt(s.value)||0;if(v)skills[s.dataset.skill]=v;});}
   if(S.modalAction==='add-worker'){
     if(!pass){alert('סיסמה חובה לעובד חדש');return;}
     if(!S.fbConnected){alert('אין חיבור לשרת — לא ניתן להוסיף עובד');return;}
-    const nw={id:'w'+Date.now(),name,dept,role,user,status:'out',checkin:null,permissions:perms,faceAuth:false,breakStart:'13:00',breakEnd:'13:45',breakActive:true};
+    const nw={id:'w'+Date.now(),name,dept,role,user,status:'out',checkin:null,permissions:perms,faceAuth:false,breakStart:'13:00',breakEnd:'13:45',breakActive:true,skills:skills||{}};
     S.workers.push(nw);
     await fbSet('workers',nw.id,nw);
     try{await _setWorkerPassword(nw.id,pass);}catch(e){alert('העובד נוצר אך שמירת הסיסמה נכשלה: '+e.message);}
@@ -5563,6 +5608,7 @@ async function confirmModal(){
     const id=S.modalAction.split(':')[1];
     const w=S.workers.find(x=>x.id===id);
     if(w){w.name=name;w.dept=dept;w.role=role;w.user=user;w.permissions=perms;
+    if(skills!==null)w.skills=skills;
     w.disabled=!!document.getElementById('mf-disabled')?.checked;
     w.requireFactoryIP=!!document.getElementById('mf-require-ip')?.checked;
     w.deviceBinding=!!document.getElementById('mf-device-binding')?.checked;
@@ -5588,7 +5634,7 @@ async function delWorker(id){
 }
 function saveDepts(){
   saveLS();
-  if(S.fbConnected)fbSet('appSettings','depts',{list:S.depts});
+  if(S.fbConnected)fbSet('appSettings','depts',{list:S.depts,stations:S.deptStations||{}});
 }
 function addDept(){
   const v=document.getElementById('new-dept').value.trim();
@@ -5598,7 +5644,24 @@ function addDept(){
 }
 function delDept(d){
   if(S.workers.some(w=>w.dept===d)){alert('לא ניתן למחוק מחלקה שיש בה עובדים');return;}
-  S.depts=S.depts.filter(x=>x!==d);saveDepts();renderAdmin();
+  S.depts=S.depts.filter(x=>x!==d);
+  if(S.deptStations)delete S.deptStations[d];
+  saveDepts();renderAdmin();
+}
+function addStation(d,btn){
+  const inp=btn.previousElementSibling;const v=(inp?.value||'').trim();
+  if(!v){alert('הזן שם תחנה');return;}
+  if(!S.deptStations)S.deptStations={};
+  const arr=S.deptStations[d]||(S.deptStations[d]=[]);
+  if(arr.includes(v)){alert('תחנה כבר קיימת במחלקה זו');return;}
+  arr.push(v);saveDepts();renderAdmin();
+}
+function delStation(d,st){
+  const key=d+'::'+st;
+  if(S.workers.some(w=>w.skills&&w.skills[key])){alert('לא ניתן למחוק — יש עובדים עם מיומנות בתחנה זו');return;}
+  if(S.products.some(p=>(p.workSteps||[]).some(s=>stepStation(s)===key))){alert('לא ניתן למחוק — יש שלבי מוצר משויכים לתחנה זו');return;}
+  S.deptStations[d]=(S.deptStations[d]||[]).filter(x=>x!==st);
+  saveDepts();renderAdmin();
 }
 
 // ─── REFRESH DASH EVERY 5s ──────────────────────────────────
@@ -6914,8 +6977,8 @@ function openProductModal(id){
       </div>
     </div>
     ${renderStagesHtml(p)}
-    <div class="sec" style="margin-top:14px;margin-bottom:8px">🔧 שלבי עבודה (לסורק)</div>
-    <div id="pm-tasksteps-list" style="margin-bottom:8px">${(p?.workSteps||[]).map((s,i)=>`<div style="display:flex;align-items:center;gap:6px;margin-bottom:4px"><input type="text" value="${esc(s)}" data-tsi="${i}" style="flex:1;font-size:12px;padding:4px 8px;border-radius:6px;border:1px solid var(--brd);background:var(--card);color:var(--txt)"><button type="button" onclick="this.parentElement.remove()" style="background:none;border:none;color:var(--red);cursor:pointer;font-size:14px">✕</button></div>`).join('')}</div>
+    <div class="sec" style="margin-top:14px;margin-bottom:8px">🔧 שלבי עבודה (לסורק + תמחור)</div>
+    <div id="pm-tasksteps-list" style="margin-bottom:8px">${(p?.workSteps||[]).map(s=>_stepRowHtml(s)).join('')}</div>
     <button type="button" class="btn" onclick="addTaskStepRow()" style="font-size:12px">+ הוסף שלב עבודה</button>`;
   document.getElementById('prod-modal-wrap').classList.remove('hidden');
   _prodImgs=p?[...(p.images||[])]:[];
@@ -6950,12 +7013,27 @@ function addQtyBulk(){
     document.getElementById('pm-qty-body').appendChild(tr);
   }
 }
+function _stationOpts(sel){
+  return`<option value="">— תחנה —</option>`+Object.entries(S.deptStations||{}).filter(([,a])=>a&&a.length).map(([d,sts])=>`<optgroup label="${esc(d)}">${sts.map(st=>{const k=d+'::'+st;return`<option value="${esc(k)}" ${sel===k?'selected':''}>${esc(st)}</option>`;}).join('')}</optgroup>`).join('');
+}
+function _stepRowHtml(s){
+  const name=stepName(s),nameAr=(s&&typeof s==='object'?s.nameAr:'')||'',lvl=stepLevel(s),stn=stepStation(s);
+  return`<div class="ts-row" style="border:1px solid var(--brd);border-radius:8px;padding:6px;margin-bottom:6px;display:flex;flex-direction:column;gap:4px">
+    <div style="display:flex;gap:6px;align-items:center">
+      <input type="text" data-f="name" value="${esc(name)}" placeholder="שם השלב (עברית)" style="flex:1;min-width:0;font-size:12px;padding:4px 8px;border-radius:6px;border:1px solid var(--brd);background:var(--card);color:var(--txt)">
+      <input type="text" data-f="nameAr" value="${esc(nameAr)}" placeholder="الاسم بالعربية" dir="rtl" style="flex:1;min-width:0;font-size:12px;padding:4px 8px;border-radius:6px;border:1px solid var(--brd);background:var(--card);color:var(--txt)">
+      <button type="button" onclick="this.closest('.ts-row').remove()" style="background:none;border:none;color:var(--red);cursor:pointer;font-size:14px">✕</button>
+    </div>
+    <div style="display:flex;gap:6px">
+      <select data-f="level" style="flex:1;min-width:0;font-size:12px">
+        <option value="0">— רמת קושי —</option>${[1,2,3,4,5].map(l=>`<option value="${l}" ${lvl===l?'selected':''}>${levelName(l,'he')} (${l})</option>`).join('')}
+      </select>
+      <select data-f="station" style="flex:1;min-width:0;font-size:12px">${_stationOpts(stn)}</select>
+    </div>
+  </div>`;
+}
 function addTaskStepRow(){
-  const i=Date.now();
-  const div=document.createElement('div');
-  div.style.cssText='display:flex;align-items:center;gap:6px;margin-bottom:4px';
-  div.innerHTML=`<input type="text" data-tsi="${i}" style="flex:1;font-size:12px;padding:4px 8px;border-radius:6px;border:1px solid var(--brd);background:var(--card);color:var(--txt)" placeholder="לדוגמה: תפירה"><button type="button" onclick="this.parentElement.remove()" style="background:none;border:none;color:var(--red);cursor:pointer;font-size:14px">✕</button>`;
-  document.getElementById('pm-tasksteps-list').appendChild(div);
+  document.getElementById('pm-tasksteps-list').insertAdjacentHTML('beforeend',_stepRowHtml(''));
 }
 function addQtyRow(){
   const colorOpts=Object.entries(COLORS).map(([k,v])=>`<option value="${k}">${v}</option>`).join('');
@@ -7151,7 +7229,12 @@ async function saveProduct(){
   });
   closeProdCamera();
   const {stageLog,stageSkipped}=readStagesFromModal();
-  const workSteps=[...document.querySelectorAll('#pm-tasksteps-list input[type="text"]')].map(i=>i.value.trim()).filter(Boolean);
+  const workSteps=[...document.querySelectorAll('#pm-tasksteps-list .ts-row')].map(r=>({
+    name:r.querySelector('[data-f="name"]')?.value.trim()||'',
+    nameAr:r.querySelector('[data-f="nameAr"]')?.value.trim()||'',
+    level:parseInt(r.querySelector('[data-f="level"]')?.value)||0,
+    station:r.querySelector('[data-f="station"]')?.value||''
+  })).filter(s=>s.name);
   if(_editProdId){
     const p=S.products.find(x=>x.id===_editProdId);
     if(p){
