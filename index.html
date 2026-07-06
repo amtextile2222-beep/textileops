@@ -2451,10 +2451,11 @@ function finishLogin(w,autoPunch){
   listenMgrInbox();
   loadAIUrl();
   if(w.role==='worker'||w.role==='helper')document.getElementById('worker-send-msg-bar').style.display='block';
-  if(w.role!=='manager'){
+  if(w.role!=='manager'&&w.role!=='supervisor'){
     if(typeof Notification!=='undefined'&&Notification.permission==='granted'){initWorkerFCM(w.id);}
     else if(typeof Notification!=='undefined'&&Notification.permission==='default'){setTimeout(()=>initWorkerFCM(w.id),2000);}
   }else{
+    // מנהל + אחראי מקבלים את התראות הניהול (ערוץ השידור המשותף)
     initFCM();
   }
   document.getElementById('login-screen').classList.add('hidden');
@@ -4014,7 +4015,7 @@ async function initFCM(){
       // שמור טוקן עם מפתח ייחודי לדפדפן זה
       const deviceKey='dev_'+btoa(token.slice(-16)).replace(/[^a-zA-Z0-9]/g,'').slice(0,12);
       const tokens=(pushSnap.tokens||{});
-      const deviceName=S.currentUser?.name||deviceKey;
+      const deviceName=S.user?.name||deviceKey;
       const isMobile=/iPhone|iPad|Android/i.test(navigator.userAgent);
       const deviceType=isMobile?'📱 נייד':'🖥 מחשב';
       tokens[deviceKey]={token,name:deviceName,type:deviceType,registeredAt:new Date().toISOString()};
