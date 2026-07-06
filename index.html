@@ -4020,7 +4020,7 @@ async function initFCM(){
       const deviceName=S.user?.name||deviceKey;
       const isMobile=/iPhone|iPad|Android/i.test(navigator.userAgent);
       const deviceType=isMobile?'📱 נייד':'🖥 מחשב';
-      tokens[deviceKey]={token,name:deviceName,type:deviceType,registeredAt:new Date().toISOString()};
+      tokens[deviceKey]={token,name:deviceName,type:deviceType,role:S.user?.role||'',workerId:S.user?.id||'',registeredAt:new Date().toISOString()};
       await fbSetMerge('appSettings','pushSettings',{tokens,lastRegistered:new Date().toISOString()});
       console.log('FCM: טוקן נרשם ✅');
     }
@@ -5254,8 +5254,16 @@ function openModal(action,id){
         </div>`:'<div style="font-size:11px;color:var(--txt3);margin-top:6px">שמור עובד תחילה, אחר כך רשום פנים</div>'}
       </div>
       <div class="field" style="background:var(--bg2);border-radius:var(--r);padding:10px 12px;margin-top:8px" id="mf-push-box">
-        <div style="font-size:12px;font-weight:600;color:var(--txt);margin-bottom:8px">🔔 התראות Push לעובד זה</div>
-        <div style="display:flex;flex-direction:column;gap:8px">
+        <div style="font-size:12px;font-weight:600;color:var(--txt);margin-bottom:8px">🔔 התראות Push ${wRole==='supervisor'?'— מה האחראי מקבל על כל העובדים':'לעובד זה'}</div>
+        ${wRole==='supervisor'?`<div style="display:flex;flex-direction:column;gap:8px">
+          <label style="display:flex;align-items:center;gap:8px;font-size:13px;color:var(--txt);cursor:pointer"><input type="checkbox" id="mf-ov-punch_in" ${(w?.oversightPrefs?.punch_in!==false)?'checked':''} style="width:auto;cursor:pointer"/> 🟢 כניסות עובדים</label>
+          <label style="display:flex;align-items:center;gap:8px;font-size:13px;color:var(--txt);cursor:pointer"><input type="checkbox" id="mf-ov-punch_out" ${(w?.oversightPrefs?.punch_out!==false)?'checked':''} style="width:auto;cursor:pointer"/> 🔴 יציאות עובדים</label>
+          <label style="display:flex;align-items:center;gap:8px;font-size:13px;color:var(--txt);cursor:pointer"><input type="checkbox" id="mf-ov-task_start" ${(w?.oversightPrefs?.task_start!==false)?'checked':''} style="width:auto;cursor:pointer"/> 🔧 התחלות משימה</label>
+          <label style="display:flex;align-items:center;gap:8px;font-size:13px;color:var(--txt);cursor:pointer"><input type="checkbox" id="mf-ov-task_end" ${(w?.oversightPrefs?.task_end!==false)?'checked':''} style="width:auto;cursor:pointer"/> ✅ סיומי משימה</label>
+          <label style="display:flex;align-items:center;gap:8px;font-size:13px;color:var(--txt);cursor:pointer"><input type="checkbox" id="mf-ov-worker_msg" ${(w?.oversightPrefs?.worker_msg!==false)?'checked':''} style="width:auto;cursor:pointer"/> 💬 הודעות עבודה מעובדים</label>
+          <div style="font-size:11px;color:var(--txt3)">משימה ארוכה + WiFi נשלטים ברשימה הראשית (משותף עם המנהל)</div>
+        </div>`:''}
+        <div style="display:${wRole==='supervisor'?'none':'flex'};flex-direction:column;gap:8px">
           <label style="display:flex;align-items:center;gap:8px;font-size:13px;color:var(--txt);cursor:pointer">
             <input type="checkbox" id="mf-push-long" ${(w?.pushPrefs?.task_long!==false)?'checked':''} style="width:auto;cursor:pointer"/>
             ⚠️ התראה על משימה ארוכה
@@ -5559,7 +5567,11 @@ async function confirmModal(){
     w.requireFactoryIP=!!document.getElementById('mf-require-ip')?.checked;
     w.deviceBinding=!!document.getElementById('mf-device-binding')?.checked;
     w.faceAuth=!!document.getElementById('mf-face-auth')?.checked;
-    w.pushPrefs={task_long:!!document.getElementById('mf-push-long')?.checked,manager_msg:!!document.getElementById('mf-push-msg')?.checked,task_assigned:!!document.getElementById('mf-push-task')?.checked,own_checkin:!!document.getElementById('mf-push-checkin')?.checked,own_checkout:!!document.getElementById('mf-push-checkout')?.checked,own_task_start:!!document.getElementById('mf-push-tstart')?.checked,own_task_end:!!document.getElementById('mf-push-tend')?.checked};
+    if(w.role==='supervisor'){
+      w.oversightPrefs={punch_in:!!document.getElementById('mf-ov-punch_in')?.checked,punch_out:!!document.getElementById('mf-ov-punch_out')?.checked,task_start:!!document.getElementById('mf-ov-task_start')?.checked,task_end:!!document.getElementById('mf-ov-task_end')?.checked,worker_msg:!!document.getElementById('mf-ov-worker_msg')?.checked};
+    }else{
+      w.pushPrefs={task_long:!!document.getElementById('mf-push-long')?.checked,manager_msg:!!document.getElementById('mf-push-msg')?.checked,task_assigned:!!document.getElementById('mf-push-task')?.checked,own_checkin:!!document.getElementById('mf-push-checkin')?.checked,own_checkout:!!document.getElementById('mf-push-checkout')?.checked,own_task_start:!!document.getElementById('mf-push-tstart')?.checked,own_task_end:!!document.getElementById('mf-push-tend')?.checked};
+    }
     if(pass){try{await _setWorkerPassword(w.id,pass);}catch(e){alert('שמירת הסיסמה נכשלה: '+e.message);}}
     if(S.fbConnected)await fbSet('workers',w.id,w);}
   }

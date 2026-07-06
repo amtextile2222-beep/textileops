@@ -297,15 +297,30 @@ exports.sendPush = functions.https.onCall(async (data, context) => {
     const settings = settingsSnap.data();
     if (!settings.enabled) return { sent: false, reason: 'disabled' };
 
-    // בדוק אם סוג ההתראה מופעל
     const alertPrefs = settings.alertPrefs || {};
-    if (alertType && alertPrefs[alertType] === false) return { sent: false, reason: 'alert type disabled' };
-
     const tokens = settings.tokens || {};
-    const tokenList = Object.values(tokens).map(t=>typeof t==='string'?t:t?.token).filter(Boolean);
-    if (!tokenList.length) return { sent: false, reason: 'no tokens' };
+    const entries = Object.values(tokens)
+      .map(t => typeof t === 'string' ? { token: t } : t)
+      .filter(e => e && e.token);
+    if (!entries.length) return { sent: false, reason: 'no tokens' };
 
-    // שלח לכל הטוקנים הרשומים
+    // העדפות פיקוח לכל אחראי — נשלפות מסמך העובד שלו (oversightPrefs)
+    const supIds = [...new Set(entries.filter(e => e.role === 'supervisor' && e.workerId).map(e => e.workerId))];
+    const supPrefs = {};
+    await Promise.all(supIds.map(async id => {
+      const s = await db.collection('workers').doc(id).get();
+      supPrefs[id] = s.exists ? (s.data().oversightPrefs || {}) : {};
+    }));
+
+    // סנן לכל נמען בנפרד: אחראי לפי oversightPrefs, מנהל/טוקן ישן לפי alertPrefs הגלובלי
+    const tokenList = entries.filter(e => {
+      if (!alertType) return true;
+      if (e.role === 'supervisor') return supPrefs[e.workerId] ? supPrefs[e.workerId][alertType] !== false : true;
+      return alertPrefs[alertType] !== false;
+    }).map(e => e.token);
+    if (!tokenList.length) return { sent: false, reason: 'filtered out' };
+
+    // שלח לכל הטוקנים שעברו סינון
     const results = await Promise.allSettled(tokenList.map(token =>
       admin.messaging().send({
         token,
