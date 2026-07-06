@@ -1025,9 +1025,43 @@ code{background:var(--bg2);border:0.5px solid var(--b);border-radius:4px;padding
     <!-- הגדרות שכר עובדים -->
     <div class="card" style="margin-top:1rem">
       <div class="sec">👷 תעריף יומי לעובד</div>
-      <div style="font-size:11px;color:var(--txt3);margin-bottom:.75rem">הזן שכר יומי לכל עובד — יחולק אוטומטית ל-8 שעות</div>
+      <div style="font-size:11px;color:var(--txt3);margin-bottom:.75rem">הזן שכר יומי לכל עובד — יחולק אוטומטית ל-8 שעות. הסעה וביטוח משמשים לחישוב "שעה עמוסה"</div>
       <div id="cost-worker-rates"></div>
       <button class="btn success" onclick="saveCostSettings()" style="margin-top:.75rem;width:100%">💾 שמור הגדרות</button>
+    </div>
+
+    <!-- שעה עמוסה — תמחור שלב ג' -->
+    <div class="card" style="margin-top:1rem">
+      <div class="sec">🕐 שעה עמוסה — הטבות והוצאות נלוות</div>
+      <div style="font-size:11px;color:var(--txt3);margin-bottom:.75rem">העלות האמיתית של שעת עבודה: שכר + הסעה + פיצויים + ימי חג + מתנות + טיול + ביטוח. הסעה וביטוח מוזנים פר-עובד בכרטיס למעלה.</div>
+      <div style="display:grid;grid-template-columns:1fr 1fr;gap:8px;margin-bottom:8px">
+        <div class="field" style="margin:0"><label>פיצויים (% על השכר)</label><input type="number" id="lh-sev" step="0.01" min="0" placeholder="8.33" style="font-size:13px"/></div>
+        <div class="field" style="margin:0"><label>ימי חג בתשלום בשנה</label><input type="number" id="lh-hol" min="0" placeholder="4" style="font-size:13px"/></div>
+        <div class="field" style="margin:0"><label>מתנות חג לעובד (₪/שנה)</label><input type="number" id="lh-gifts" min="0" placeholder="300" style="font-size:13px"/></div>
+        <div class="field" style="margin:0"><label>טיול שנתי — עלות כוללת (₪)</label><input type="number" id="lh-trip" min="0" placeholder="4000" style="font-size:13px"/></div>
+      </div>
+      <button class="btn success full" onclick="saveLoadedHourSettings()">💾 שמור והצג חישוב</button>
+      <div id="lh-table" style="margin-top:.75rem"></div>
+    </div>
+
+    <!-- תקורה מפעלית — תמחור שלב ג' -->
+    <div class="card" style="margin-top:1rem">
+      <div class="sec">🏭 תקורה מפעלית לשעה</div>
+      <div style="font-size:11px;color:var(--txt3);margin-bottom:.75rem">הוצאות קבועות (מהכרטיס למעלה) + ממוצע משתנות של עד 3 חודשים אחרונים + מרווח ביטחון — מחולק בסך שעות העבודה החודשיות של כל העובדים.</div>
+      <div style="display:flex;gap:8px;align-items:flex-end;flex-wrap:wrap;margin-bottom:10px">
+        <div class="field" style="margin:0"><label>מרווח ביטחון (%)</label><input type="number" id="lh-buffer" min="0" placeholder="10" style="font-size:13px;width:100px"/></div>
+        <button class="btn success" onclick="saveLoadedHourSettings()" style="font-size:12px">💾 שמור</button>
+      </div>
+      <div class="sec" style="font-size:12px;margin-bottom:6px">📝 סה"כ עלויות משתנות לפי חודש</div>
+      <div style="font-size:11px;color:var(--txt3);margin-bottom:6px">הזן ידנית מנתונים אמיתיים (חשמל, מים, מטבח, ניקיון, רו"ח, מיסים...) — או חשב אוטומטית מההוצאות המשתנות שנרשמו</div>
+      <div style="display:flex;gap:6px;flex-wrap:wrap;margin-bottom:6px">
+        <input type="month" id="cm-month" style="font-size:12px"/>
+        <input type="number" id="cm-amount" placeholder='סה"כ ₪' min="0" style="font-size:12px;width:110px"/>
+        <button class="btn primary" onclick="addCostMonth()" style="font-size:12px;padding:6px 10px">+ הוסף 📝</button>
+        <button class="btn" onclick="autoFillCostMonth()" style="font-size:12px;padding:6px 10px" title="סוכם את ההוצאות המשתנות שנרשמו בחודש הנבחר">🤖 חשב מההוצאות הרשומות</button>
+      </div>
+      <div id="cm-list" style="max-height:150px;overflow-y:auto"></div>
+      <div id="overhead-result" style="margin-top:.75rem"></div>
     </div>
   </div>
 
@@ -1785,7 +1819,10 @@ let S={
   modalAction:null,
   attHistory:[],  // {workerId, workerName, dept, date, checkin, checkout, breakStart, breakEnd, breakActive}
   products:[],    // {id, prod, cust, name, images:[], docs:[], quantities:[{size,color,qty}]}
-  costs:{workerRates:{}, workerUnitRates:{}, fixedDaily:0, fixedMonthly:0, workDaysMonth:22, fixedAnnual:0, workDaysYear:250, variableExpenses:[]},
+  costs:{workerRates:{}, workerUnitRates:{}, fixedDaily:0, fixedMonthly:0, workDaysMonth:22, fixedAnnual:0, workDaysYear:250, variableExpenses:[],
+    // תמחור שלב ג' — שעה עמוסה + תקורה
+    workerTransport:{}, workerInsurance:{}, severancePct:8.33, holidayDays:4, giftsAnnual:0, tripAnnual:0, overheadBufferPct:10, costMonths:[],
+    difficultyWeights:{1:1,2:1.5,3:2,4:2.5,5:3.5}},
   workerExpenses:[],
   customerNames:{},
   customColors:{},
@@ -2555,7 +2592,7 @@ function finishLogin(w,autoPunch){
   S.user=w;
   if(w.role!=='manager'){
     // עותקי עלויות ישנים לא נשארים במכשירי עובדים
-    S.costs={workerRates:{},workerUnitRates:{},fixedDaily:0,fixedMonthly:0,workDaysMonth:22,fixedAnnual:0,workDaysYear:250,variableExpenses:[]};
+    S.costs={workerRates:{},workerUnitRates:{},fixedDaily:0,fixedMonthly:0,workDaysMonth:22,fixedAnnual:0,workDaysYear:250,variableExpenses:[],workerTransport:{},workerInsurance:{},severancePct:8.33,holidayDays:4,giftsAnnual:0,tripAnnual:0,overheadBufferPct:10,costMonths:[],difficultyWeights:{1:1,2:1.5,3:2,4:2.5,5:3.5}};
     saveLS();
   }
   startDataListeners();
@@ -5946,8 +5983,18 @@ function initCostsPage(){
   document.getElementById('cost-workdays-month').value=S.costs.workDaysMonth||22;
   document.getElementById('cost-fixed-annual').value=S.costs.fixedAnnual||0;
   document.getElementById('cost-workdays-year').value=S.costs.workDaysYear||250;
+  // שעה עמוסה + תקורה (שלב ג')
+  const lhSev=document.getElementById('lh-sev');if(lhSev)lhSev.value=S.costs.severancePct??8.33;
+  const lhHol=document.getElementById('lh-hol');if(lhHol)lhHol.value=S.costs.holidayDays??4;
+  const lhGifts=document.getElementById('lh-gifts');if(lhGifts)lhGifts.value=S.costs.giftsAnnual||0;
+  const lhTrip=document.getElementById('lh-trip');if(lhTrip)lhTrip.value=S.costs.tripAnnual||0;
+  const lhBuf=document.getElementById('lh-buffer');if(lhBuf)lhBuf.value=S.costs.overheadBufferPct??10;
+  const cmMonth=document.getElementById('cm-month');if(cmMonth&&!cmMonth.value){const d=new Date();d.setMonth(d.getMonth()-1);cmMonth.value=d.toISOString().slice(0,7);}
   renderWorkerRates();
   renderVarExpList();
+  renderLoadedHourTable();
+  renderCostMonths();
+  renderOverheadResult();
   calcCosts();
 }
 
@@ -5984,6 +6031,16 @@ function renderWorkerRates(){
             onchange="if(!S.costs.workerUnitRates)S.costs.workerUnitRates={};S.costs.workerUnitRates['${w.id}']=parseFloat(this.value)||0"
             oninput="if(!S.costs.workerUnitRates)S.costs.workerUnitRates={};S.costs.workerUnitRates['${w.id}']=parseFloat(this.value)||0"/>
           <div style="font-size:10px;color:var(--green-txt)">₪/יחידה</div>
+          <input type="number" min="0" placeholder="0" value="${S.costs.workerTransport?.[w.id]||''}"
+            style="width:80px;font-size:13px;text-align:left;padding:5px 8px;border-color:var(--blue-txt)"
+            onchange="if(!S.costs.workerTransport)S.costs.workerTransport={};S.costs.workerTransport['${w.id}']=parseFloat(this.value)||0"
+            oninput="if(!S.costs.workerTransport)S.costs.workerTransport={};S.costs.workerTransport['${w.id}']=parseFloat(this.value)||0"/>
+          <div style="font-size:10px;color:var(--blue-txt)">🚌 הסעה ₪/יום</div>
+          <input type="number" min="0" placeholder="0" value="${S.costs.workerInsurance?.[w.id]||''}"
+            style="width:80px;font-size:13px;text-align:left;padding:5px 8px;border-color:var(--amber-txt)"
+            onchange="if(!S.costs.workerInsurance)S.costs.workerInsurance={};S.costs.workerInsurance['${w.id}']=parseFloat(this.value)||0"
+            oninput="if(!S.costs.workerInsurance)S.costs.workerInsurance={};S.costs.workerInsurance['${w.id}']=parseFloat(this.value)||0"/>
+          <div style="font-size:10px;color:var(--amber-txt)">🛡 ביטוח ₪/שנה</div>
         </div>
       </div>`).join('')}
   </div>`;
@@ -6156,7 +6213,124 @@ function saveCostSettings(){
   const btn=event.target;
   btn.textContent='✅ נשמר';btn.classList.add('success');
   setTimeout(()=>{btn.textContent='💾 שמור הגדרות';btn.classList.remove('success');},1500);
+  renderLoadedHourTable();renderOverheadResult();
   calcCosts();
+}
+
+// ─── שעה עמוסה + תקורה — תמחור שלב ג' ───────────────────────
+// עובדים שנכנסים לחישובי עלות (לא מנהל, לא מושעים)
+function _costWorkers(){return S.workers.filter(w=>w.role!=='manager'&&!w.disabled);}
+// פירוט שעה עמוסה לעובד (₪/שעה) — לפי התוכנית: שכר+הסעה+פיצויים+חגים+מתנות+טיול+ביטוח
+function loadedHourBreakdown(wid){
+  const c=S.costs;
+  const daily=c.workerRates[wid]||0;
+  if(!daily)return null;
+  const wdy=c.workDaysYear||250;
+  const nW=_costWorkers().length||1;
+  const base=daily/8;
+  const transport=(c.workerTransport?.[wid]||0)/8;
+  const severance=daily*((c.severancePct??8.33)/100)/8;
+  const holidays=daily*((c.holidayDays??4)/wdy)/8;
+  const gifts=(c.giftsAnnual||0)/wdy/8;
+  const trip=(c.tripAnnual||0)/nW/wdy/8;
+  const insurance=(c.workerInsurance?.[wid]||0)/wdy/8;
+  const loaded=base+transport+severance+holidays+gifts+trip+insurance;
+  return {base,transport,severance,holidays,gifts,trip,insurance,loaded};
+}
+function loadedHourlyRate(wid){return loadedHourBreakdown(wid)?.loaded||0;}
+// תקורה מפעלית לשעה: (קבועות חודשיות + מקדם משתנות משוער) ÷ שעות עבודה חודשיות
+function overheadBreakdown(){
+  const c=S.costs;
+  const fixedMonthly=(c.fixedDaily||0)*(c.workDaysMonth||22)+(c.fixedMonthly||0)+(c.fixedAnnual||0)/12;
+  const months=(c.costMonths||[]).slice().sort((a,b)=>b.month.localeCompare(a.month)).slice(0,3);
+  const varAvg=months.length?months.reduce((s,m)=>s+(m.variableTotal||0),0)/months.length:0;
+  const buffer=(c.overheadBufferPct??10)/100;
+  const varEst=varAvg*(1+buffer);
+  const hours=_costWorkers().length*(c.workDaysMonth||22)*8;
+  const perHour=hours?(fixedMonthly+varEst)/hours:0;
+  return {fixedMonthly,varAvg,varEst,monthsUsed:months.length,hours,perHour};
+}
+function saveLoadedHourSettings(){
+  const c=S.costs;
+  c.severancePct=parseFloat(document.getElementById('lh-sev')?.value);if(isNaN(c.severancePct))c.severancePct=8.33;
+  c.holidayDays=parseInt(document.getElementById('lh-hol')?.value)||0;
+  c.giftsAnnual=parseFloat(document.getElementById('lh-gifts')?.value)||0;
+  c.tripAnnual=parseFloat(document.getElementById('lh-trip')?.value)||0;
+  c.overheadBufferPct=parseFloat(document.getElementById('lh-buffer')?.value);if(isNaN(c.overheadBufferPct))c.overheadBufferPct=10;
+  saveLS();
+  if(S.fbConnected)fbSet('adminSettings','costs',S.costs);
+  renderLoadedHourTable();renderOverheadResult();
+  showToast('✅ נשמר');
+}
+function renderLoadedHourTable(){
+  const el=document.getElementById('lh-table');if(!el)return;
+  const oh=overheadBreakdown();
+  const rows=_costWorkers().filter(w=>S.costs.workerRates[w.id]).map(w=>{
+    const b=loadedHourBreakdown(w.id);
+    const pct=b.base?((b.loaded/b.base-1)*100):0;
+    const detail=`רגילה ₪${b.base.toFixed(2)} + הסעה ₪${b.transport.toFixed(2)} + פיצויים ₪${b.severance.toFixed(2)} + חגים ₪${b.holidays.toFixed(2)} + מתנות ₪${b.gifts.toFixed(2)} + טיול ₪${b.trip.toFixed(2)} + ביטוח ₪${b.insurance.toFixed(2)}`;
+    return`<div style="display:flex;align-items:center;gap:8px;padding:6px 4px;border-bottom:0.5px solid var(--brd);flex-wrap:wrap" title="${detail}">
+      <span style="flex:1;min-width:90px;font-size:13px;font-weight:500">${esc(w.name)}</span>
+      <span style="font-size:12px;color:var(--txt3)">רגילה ₪${b.base.toFixed(2)}</span>
+      <span style="font-size:13px;font-weight:700;color:var(--blue-txt)">עמוסה ₪${b.loaded.toFixed(2)}</span>
+      <span style="font-size:11px;color:var(--amber-txt)">+${pct.toFixed(0)}%</span>
+      <span style="font-size:12px;font-weight:600;color:var(--green-txt)">+ תקורה = ₪${(b.loaded+oh.perHour).toFixed(2)}</span>
+    </div>`;
+  }).join('');
+  el.innerHTML=rows||'<div style="font-size:12px;color:var(--txt3);text-align:center;padding:8px">הזן שכר יומי לעובדים בכרטיס למעלה כדי לראות חישוב</div>';
+}
+function renderCostMonths(){
+  const el=document.getElementById('cm-list');if(!el)return;
+  const months=(S.costs.costMonths||[]).slice().sort((a,b)=>b.month.localeCompare(a.month));
+  if(!months.length){el.innerHTML='<div style="font-size:11px;color:var(--txt3);text-align:center;padding:8px">אין חודשים מוזנים — התקורה תחושב מהקבועות בלבד</div>';return;}
+  el.innerHTML=months.map(m=>`
+    <div style="display:flex;align-items:center;gap:8px;padding:5px 0;border-bottom:0.5px solid var(--brd);font-size:12px">
+      <span style="width:70px;color:var(--txt2)">${esc(m.month)}</span>
+      <span style="font-weight:600;color:var(--blue-txt)">₪${Number(m.variableTotal||0).toLocaleString()}</span>
+      <span style="flex:1;font-size:11px;color:var(--txt3)">${m.source==='auto'?'🤖 אוטומטי':'📝 ידני'}</span>
+      <button onclick="delCostMonth('${esc(m.month)}')" style="background:none;border:none;color:var(--red-txt);cursor:pointer;font-size:14px">×</button>
+    </div>`).join('');
+}
+function _upsertCostMonth(month,amount,source){
+  if(!S.costs.costMonths)S.costs.costMonths=[];
+  const ex=S.costs.costMonths.find(m=>m.month===month);
+  if(ex){ex.variableTotal=amount;ex.source=source;}
+  else S.costs.costMonths.push({month,variableTotal:amount,source});
+  saveLS();
+  if(S.fbConnected)fbSet('adminSettings','costs',S.costs);
+  renderCostMonths();renderOverheadResult();renderLoadedHourTable();
+}
+function addCostMonth(){
+  const month=document.getElementById('cm-month')?.value;
+  const amount=parseFloat(document.getElementById('cm-amount')?.value)||0;
+  if(!month){alert('בחר חודש');return;}
+  if(!amount){alert('הזן סכום');return;}
+  _upsertCostMonth(month,amount,'manual');
+  document.getElementById('cm-amount').value='';
+}
+function autoFillCostMonth(){
+  const month=document.getElementById('cm-month')?.value;
+  if(!month){alert('בחר חודש');return;}
+  const sum=(S.costs.variableExpenses||[]).filter(e=>(e.date||'').slice(0,7)===month).reduce((s,e)=>s+Number(e.amount||0),0);
+  if(!sum){alert('לא נמצאו הוצאות משתנות רשומות בחודש '+month);return;}
+  if(!confirm(`נמצאו הוצאות בסך ₪${sum.toLocaleString()} בחודש ${month}. לשמור כסה"כ החודש?`))return;
+  _upsertCostMonth(month,sum,'auto');
+}
+function delCostMonth(month){
+  S.costs.costMonths=(S.costs.costMonths||[]).filter(m=>m.month!==month);
+  saveLS();
+  if(S.fbConnected)fbSet('adminSettings','costs',S.costs);
+  renderCostMonths();renderOverheadResult();renderLoadedHourTable();
+}
+function renderOverheadResult(){
+  const el=document.getElementById('overhead-result');if(!el)return;
+  const oh=overheadBreakdown();
+  el.innerHTML=`<div style="background:var(--bg2);border-radius:var(--r);padding:10px 12px;font-size:12px;line-height:1.9">
+    <div>🏢 קבועות לחודש: <b>₪${oh.fixedMonthly.toLocaleString(undefined,{maximumFractionDigits:0})}</b></div>
+    <div>📊 ממוצע משתנות (${oh.monthsUsed||0}/3 חודשים): <b>₪${oh.varAvg.toLocaleString(undefined,{maximumFractionDigits:0})}</b> ← עם מרווח ${S.costs.overheadBufferPct??10}%: <b>₪${oh.varEst.toLocaleString(undefined,{maximumFractionDigits:0})}</b></div>
+    <div>🕐 שעות עבודה חודשיות (${_costWorkers().length} עובדים × ${S.costs.workDaysMonth||22} ימים × 8): <b>${oh.hours.toLocaleString()}</b></div>
+    <div style="font-size:14px;font-weight:700;color:var(--green-txt);border-top:0.5px solid var(--brd);margin-top:4px;padding-top:6px">💰 תוספת תקורה לשעת עבודה: ₪${oh.perHour.toFixed(2)}</div>
+  </div>`;
 }
 
 function showCostTab(tab){
