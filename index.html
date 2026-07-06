@@ -1832,12 +1832,12 @@ function renderStepRecs(prefix){
   if(!recs){box.innerHTML='';return;}
   const sel=document.getElementById(prefix+'-emp-sel');
   const selId=sel?.value||'';
-  const top=recs.filter(r=>r.present).slice(0,5);
+  const top=recs.filter(r=>r.present);
   const warn=selId&&!recs.some(r=>r.w.id===selId)
     ?`<div style="font-size:11px;color:var(--amber-txt);margin-top:4px">${T.rec_warn||'⚠ לעובד הנבחר אין מיומנות מספיקה לשלבים אלו'}</div>`:'';
   box.innerHTML=(top.length
     ?`<div style="font-size:12px;font-weight:600;margin:8px 0 4px">${T.rec_title||'🎯 מומלצים לשלבים שנבחרו:'}</div>
-      <div style="display:flex;flex-wrap:wrap;gap:4px">${top.map(r=>`<span onclick="pickRecWorker('${prefix}','${r.w.id}')" style="cursor:pointer;font-size:12px;padding:4px 10px;border-radius:12px;border:1.5px solid ${selId===r.w.id?'var(--green-txt,#065f46)':'var(--brd)'};background:${selId===r.w.id?'var(--green-bg,#d1fae5)':'var(--bg2)'}">${esc(r.w.name)}${r.load?` <span style="color:var(--txt3);font-size:10px">· ${r.load} ${T.rec_tasks||'משימות'}</span>`:''}</span>`).join('')}</div>`
+      <div style="display:flex;flex-wrap:wrap;gap:4px">${top.map((r,i)=>`<span onclick="pickRecWorker('${prefix}','${r.w.id}')" style="cursor:pointer;font-size:12px;padding:4px 10px;border-radius:12px;border:1.5px solid ${selId===r.w.id?'var(--green-txt,#065f46)':(i===0?'var(--blue-txt,#1d4ed8)':'var(--brd)')};background:${selId===r.w.id?'var(--green-bg,#d1fae5)':'var(--bg2)'}">${i===0?'⭐ ':''}${esc(r.w.name)}${r.load?` <span style="color:var(--txt3);font-size:10px">· ${r.load} ${T.rec_tasks||'משימות'}</span>`:''}</span>`).join('')}</div>`
     :`<div style="font-size:11px;color:var(--amber-txt);margin-top:8px">${T.rec_none||'⚠ אין עובד נוכח עם מיומנות מתאימה לשלבים שנבחרו'}</div>`)+warn;
 }
 function pickRecWorker(prefix,id){
@@ -1856,7 +1856,6 @@ function showProductPlan(id){
   const rows=defined.map(s=>{
     const recs=recommendWorkers(p,[stepName(s)])||[];
     if(!recs.length)gaps++;
-    const top=recs.slice(0,4);
     const stName=stepStation(s).split('::')[1]||stepStation(s);
     return`<div style="display:flex;align-items:center;gap:8px;padding:7px 4px;border-bottom:0.5px solid var(--brd);flex-wrap:wrap">
       <div style="flex:1;min-width:140px">
@@ -1864,7 +1863,7 @@ function showProductPlan(id){
         <div style="font-size:11px;color:var(--txt3)">🏷 ${esc(stName)}</div>
       </div>
       <div style="display:flex;gap:4px;flex-wrap:wrap">${
-        top.length?top.map(r=>`<span style="font-size:11px;padding:3px 9px;border-radius:10px;background:${r.present?'var(--green-bg,#d1fae5)':'var(--bg2)'};color:${r.present?'var(--green-txt,#065f46)':'var(--txt3)'};border:1px solid var(--brd)">${r.present?'●':'○'} ${esc(r.w.name)}${r.load?` · ${r.load}🔧`:''}</span>`).join('')
+        recs.length?recs.map((r,i)=>`<span style="font-size:11px;padding:3px 9px;border-radius:10px;background:${r.present?'var(--green-bg,#d1fae5)':'var(--bg2)'};color:${r.present?'var(--green-txt,#065f46)':'var(--txt3)'};border:${i===0?'1.5px solid var(--green-txt,#065f46)':'1px solid var(--brd)'}">${i===0?'⭐ ':''}${r.present?'●':'○'} ${esc(r.w.name)}${r.load?` · ${r.load}🔧`:''}</span>`).join('')
         :`<span style="font-size:11px;color:var(--red-txt);font-weight:600">⚠ אין עובד כשיר</span>`}</div>
     </div>`;
   }).join('');
@@ -1879,7 +1878,7 @@ function showProductPlan(id){
       <div style="font-size:15px;font-weight:700;color:var(--txt)">🎯 שיבוץ מומלץ — מוצר ${esc(p.prod)} · לקוח ${esc(p.cust)}</div>
       <button onclick="document.getElementById('prod-plan-overlay').remove()" style="background:none;border:none;font-size:20px;cursor:pointer;color:var(--txt)">✕</button>
     </div>
-    <div style="font-size:11px;color:var(--txt3);margin-bottom:8px">● נוכח עכשיו · ○ לא נוכח · N🔧 = משימות פעילות · הסדר: הרמה המתאימה ביותר תחילה, ואז לפי עומס</div>
+    <div style="font-size:11px;color:var(--txt3);margin-bottom:8px">מוצגים כל העובדים הכשירים לכל שלב · ⭐ = המומלץ ביותר (הרמה המתאימה ביותר, לא עמוס) · ● נוכח עכשיו · ○ לא נוכח · N🔧 = משימות פעילות</div>
     ${gapWarn}
     ${rows||'<div style="color:var(--txt3);font-size:12px;padding:1rem;text-align:center">אין שלבים עם רמת קושי ותחנה</div>'}
     ${noDefHtml}
