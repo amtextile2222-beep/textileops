@@ -307,6 +307,7 @@ code{background:var(--bg2);border:0.5px solid var(--b);border-radius:4px;padding
       </div>
       <div class="av" style="width:32px;height:32px;font-size:11px" id="top-av"></div>
       <button class="btn hidden" id="ai-chat-btn" style="padding:5px 9px;font-size:12px;background:var(--blue-bg);color:var(--blue-txt)" onclick="openAIChat()" title="עוזר AI">🤖</button>
+      <button class="btn hidden" id="enable-notif-btn" style="padding:5px 9px;font-size:12px;background:var(--amber-bg);color:var(--amber-txt)" onclick="enableMyNotifications()" title="הפעל התראות">🔔</button>
       <button class="btn" style="padding:5px 9px;font-size:12px" onclick="doLogout()" data-i18n="logout" title="יציאה">↩</button>
     </div>
   </div>
@@ -2392,6 +2393,7 @@ function applyPerms(w){
   const fb=document.getElementById('floating-msg-btn');
   if(fb)fb.style.display=w.role==='manager'?'none':'flex';
   updateAIBtnVisibility();
+  document.getElementById('enable-notif-btn')?.classList.toggle('hidden',w.role==='manager');
   if(w.role==='manager'){
     [...ALL_SUPERVISOR_PAGE_IDS,'admin','setup','costs','products'].forEach(p=>document.getElementById('nb-'+p)?.classList.remove('hidden'));
   } else {
@@ -2930,7 +2932,7 @@ async function autoPunchIn(){
   saveLS(); // שמור מקומי תחילה — לא תלוי ב-Firebase
   try{if(S.fbConnected)await fbSet('workers',w.id,w);}catch(e){}
   if(w.requireFactoryIP&&S.fbConnected){try{const r=await fetch('https://api.ipify.org?format=json');const ip=(await r.json()).ip||'';await fbSet('workerWifi',w.id,{ip,lastSeen:Date.now(),name:w.name,dept:w.dept});}catch(e){}}
-  tgPunch(w.name,w.dept,true,now);
+  tgPunch(w.name,w.dept,true,now,w.id);
   try{renderAdmin();}catch(e){}
   try{renderAtt();}catch(e){}
 }
@@ -2964,7 +2966,7 @@ async function punchIn(){
   w.checkin=w.sessions[0].in;
   if(S.fbConnected)await fbSet('workers',w.id,w);
   if(w.requireFactoryIP&&S.fbConnected){try{const r=await fetch('https://api.ipify.org?format=json');const ip=(await r.json()).ip||'';await fbSet('workerWifi',w.id,{ip,lastSeen:Date.now(),name:w.name,dept:w.dept});}catch(e){}}
-  tgPunch(w.name,w.dept,true,now);
+  tgPunch(w.name,w.dept,true,now,w.id);
   saveLS();renderAtt();
   const rounded=now.getTime()!==nowRaw.getTime();
   document.getElementById('att-msg').textContent='✅ כניסה '+(w.sessions.length>1?w.sessions.length+': ':'')+pad2(now.getHours())+':'+pad2(now.getMinutes())+(rounded?' (עוגל)':'');
@@ -3002,7 +3004,7 @@ async function punchOut(){
   const rec={workerId:w.id,workerName:w.name,dept:w.dept,date:todayStr(),sessions:w.sessions,checkin:w.sessions[0]?.in||'',checkout:now.toISOString(),breakStart:w.breakStart||'',breakEnd:w.breakEnd||'',breakActive:!!w.breakActive,netMs};
   S.attHistory.unshift(rec);
   if(S.fbConnected){try{await fbSet('attHistory',w.id+'_'+todayStr(),rec);}catch(e){console.error('punchOut: attHistory save failed:',e.message);}try{await fbDel('workerWifi',w.id);}catch(e){}}
-  tgPunch(w.name,w.dept,false,now);
+  tgPunch(w.name,w.dept,false,now,w.id);
   saveLS();renderAtt();
   const roundedOut=now.getTime()!==nowRaw.getTime();
   document.getElementById('att-msg').textContent='🚪 '+T.att_out+': '+pad2(now.getHours())+':'+pad2(now.getMinutes())+(roundedOut?' (עוגל)':'')+(pausedCount?' | '+pausedCount+' '+T.tasks_paused_msg:'');
@@ -4071,11 +4073,24 @@ function blobToB64(blob){
 async function sendTelegram(message){
   return tgCall({kind:'message',text:message});
 }
-function tgPunch(name,dept,isIn,time){
+// כפתור "הפעל התראות" לעובד/אחראי — מקשר את המכשיר ומפעיל קבלת התראות (לחיצה ישירה = user gesture)
+async function enableMyNotifications(){
+  const w=S.user;if(!w)return;
+  if(typeof Notification==='undefined'){showToast('הדפדפן לא תומך בהתראות','var(--red-txt)');return;}
+  if(Notification.permission==='denied'){showToast('❌ התראות חסומות בדפדפן — פתח הגדרות אתר (אייקון ליד הכתובת) ואפשר התראות','var(--red-txt)',7000);return;}
+  showToast('מפעיל התראות...','var(--blue-txt)',2000);
+  if(w.role==='supervisor'){await initFCM();showToast('✅ התראות ניהול הופעלו','var(--green-txt)',3000);}
+  else{await initWorkerFCM(w.id);}
+}
+function tgPunch(name,dept,isIn,time,workerId){
   const ts=pad2(time.getHours())+':'+pad2(time.getMinutes());
   const title=isIn?'✅ כניסה לעבודה':'🚪 יציאה מהעבודה';
   sendTelegram(title+'\n👤 עובד: '+name+'\n🏭 מחלקה: '+dept+'\n🕐 שעה: '+ts).catch(()=>{});
   sendPush(title,name+' · '+dept+' · '+ts, isIn?'punch_in':'punch_out').catch(()=>{});
+  // התראה אישית לעובד על הפעילות שלו עצמו (רק אם המנהל הפעיל לו במפורש)
+  const wk=workerId?S.workers.find(x=>x.id===workerId):null;
+  const pk=isIn?'own_checkin':'own_checkout';
+  if(wk&&wk.pushPrefs&&wk.pushPrefs[pk]===true)sendPushToWorker(workerId,title,dept+' · '+ts).catch(()=>{});
 }
 function tgTask(task,isStart,endTime){
   const custName=(S.customerNames&&S.customerNames[task.cust])||task.cust;
@@ -4090,6 +4105,10 @@ function tgTask(task,isStart,endTime){
   const title=isStart?'🔧 התחלת משימה':'✅ סיום משימה';
   const pushBody=task.workerName+' · '+task.prod+(task.taskType?' · '+task.taskType:'')+' · '+ts;
   sendPush(title,pushBody,isStart?'task_start':'task_end').catch(()=>{});
+  // התראה אישית לעובד על המשימה שלו עצמו (רק אם המנהל הפעיל לו במפורש)
+  const wk=S.workers.find(x=>x.id===task.workerId);
+  const pk=isStart?'own_task_start':'own_task_end';
+  if(wk&&wk.pushPrefs&&wk.pushPrefs[pk]===true)sendPushToWorker(task.workerId,title,pushBody).catch(()=>{});
 }
 async function savePushSettings(){
   if(window._loadingPushSettings)return;
@@ -4879,7 +4898,7 @@ async function mgrPunchIn(wId){
   w.sessions.push({in:now.toISOString(),out:null});
   w.status='in';w.checkin=w.sessions[0].in;
   if(S.fbConnected)await fbSet('workers',w.id,w);
-  tgPunch(w.name,w.dept,true,now);
+  tgPunch(w.name,w.dept,true,now,w.id);
   saveLS();renderMgrTasks();renderAtt();
 }
 async function mgrPunchOut(wId){
@@ -4895,7 +4914,7 @@ async function mgrPunchOut(wId){
   const rec={workerId:w.id,workerName:w.name,dept:w.dept,date:todayStr(),sessions:w.sessions,checkin:w.sessions[0]?.in||'',checkout:now.toISOString(),breakStart:w.breakStart||'',breakEnd:w.breakEnd||'',breakActive:!!w.breakActive,netMs};
   S.attHistory.unshift(rec);
   if(S.fbConnected){await fbSet('workers',w.id,w);await fbSet('attHistory',w.id+'_'+todayStr(),rec);try{await fbDel('workerWifi',w.id);}catch(e){}}
-  tgPunch(w.name,w.dept,false,now);
+  tgPunch(w.name,w.dept,false,now,w.id);
   saveLS();renderMgrTasks();renderAtt();
 }
 function mgrAddToBatch(){
@@ -5249,6 +5268,24 @@ function openModal(action,id){
             <input type="checkbox" id="mf-push-task" ${(w?.pushPrefs?.task_assigned!==false)?'checked':''} style="width:auto;cursor:pointer"/>
             📋 שיוך משימה חדשה
           </label>
+          <div style="border-top:0.5px solid var(--b);margin:2px 0"></div>
+          <div style="font-size:11px;color:var(--txt3)">התראות על הפעילות שלו עצמו (ברירת מחדל כבוי):</div>
+          <label style="display:flex;align-items:center;gap:8px;font-size:13px;color:var(--txt);cursor:pointer">
+            <input type="checkbox" id="mf-push-checkin" ${(w?.pushPrefs?.own_checkin===true)?'checked':''} style="width:auto;cursor:pointer"/>
+            🟢 כניסה שלו
+          </label>
+          <label style="display:flex;align-items:center;gap:8px;font-size:13px;color:var(--txt);cursor:pointer">
+            <input type="checkbox" id="mf-push-checkout" ${(w?.pushPrefs?.own_checkout===true)?'checked':''} style="width:auto;cursor:pointer"/>
+            🔴 יציאה שלו
+          </label>
+          <label style="display:flex;align-items:center;gap:8px;font-size:13px;color:var(--txt);cursor:pointer">
+            <input type="checkbox" id="mf-push-tstart" ${(w?.pushPrefs?.own_task_start===true)?'checked':''} style="width:auto;cursor:pointer"/>
+            🔧 התחלת משימה שלו
+          </label>
+          <label style="display:flex;align-items:center;gap:8px;font-size:13px;color:var(--txt);cursor:pointer">
+            <input type="checkbox" id="mf-push-tend" ${(w?.pushPrefs?.own_task_end===true)?'checked':''} style="width:auto;cursor:pointer"/>
+            ✅ סיום משימה שלו
+          </label>
         </div>
         ${w?.fcmToken?'<div style="font-size:11px;color:var(--green-txt);margin-top:6px">✅ טלפון רשום לקבלת Push</div>':'<div style="font-size:11px;color:var(--txt3);margin-top:6px">⚪ טלפון לא רשום עדיין</div>'}
       </div>
@@ -5522,7 +5559,7 @@ async function confirmModal(){
     w.requireFactoryIP=!!document.getElementById('mf-require-ip')?.checked;
     w.deviceBinding=!!document.getElementById('mf-device-binding')?.checked;
     w.faceAuth=!!document.getElementById('mf-face-auth')?.checked;
-    w.pushPrefs={task_long:!!document.getElementById('mf-push-long')?.checked,manager_msg:!!document.getElementById('mf-push-msg')?.checked,task_assigned:!!document.getElementById('mf-push-task')?.checked};
+    w.pushPrefs={task_long:!!document.getElementById('mf-push-long')?.checked,manager_msg:!!document.getElementById('mf-push-msg')?.checked,task_assigned:!!document.getElementById('mf-push-task')?.checked,own_checkin:!!document.getElementById('mf-push-checkin')?.checked,own_checkout:!!document.getElementById('mf-push-checkout')?.checked,own_task_start:!!document.getElementById('mf-push-tstart')?.checked,own_task_end:!!document.getElementById('mf-push-tend')?.checked};
     if(pass){try{await _setWorkerPassword(w.id,pass);}catch(e){alert('שמירת הסיסמה נכשלה: '+e.message);}}
     if(S.fbConnected)await fbSet('workers',w.id,w);}
   }
