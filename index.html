@@ -1845,6 +1845,47 @@ function pickRecWorker(prefix,id){
   if(sel)sel.value=id;
   renderStepRecs(prefix);
 }
+// דוח שיבוץ מתוכנן למוצר — לפני הכנסה לעבודה (כפתור 🎯 בכרטיס המוצר)
+function showProductPlan(id){
+  const p=S.products.find(x=>x.id===id);if(!p)return;
+  document.getElementById('prod-plan-overlay')?.remove();
+  const steps=p.workSteps||[];
+  const defined=steps.filter(s=>stepLevel(s)&&stepStation(s));
+  const noDef=steps.filter(s=>!(stepLevel(s)&&stepStation(s)));
+  let gaps=0;
+  const rows=defined.map(s=>{
+    const recs=recommendWorkers(p,[stepName(s)])||[];
+    if(!recs.length)gaps++;
+    const top=recs.slice(0,4);
+    const stName=stepStation(s).split('::')[1]||stepStation(s);
+    return`<div style="display:flex;align-items:center;gap:8px;padding:7px 4px;border-bottom:0.5px solid var(--brd);flex-wrap:wrap">
+      <div style="flex:1;min-width:140px">
+        <div style="font-size:13px;font-weight:500">${esc(stepDisplay(s))}${stepBadge(s)}</div>
+        <div style="font-size:11px;color:var(--txt3)">🏷 ${esc(stName)}</div>
+      </div>
+      <div style="display:flex;gap:4px;flex-wrap:wrap">${
+        top.length?top.map(r=>`<span style="font-size:11px;padding:3px 9px;border-radius:10px;background:${r.present?'var(--green-bg,#d1fae5)':'var(--bg2)'};color:${r.present?'var(--green-txt,#065f46)':'var(--txt3)'};border:1px solid var(--brd)">${r.present?'●':'○'} ${esc(r.w.name)}${r.load?` · ${r.load}🔧`:''}</span>`).join('')
+        :`<span style="font-size:11px;color:var(--red-txt);font-weight:600">⚠ אין עובד כשיר</span>`}</div>
+    </div>`;
+  }).join('');
+  const gapWarn=gaps?`<div style="font-size:12px;color:var(--red-txt);font-weight:600;margin-bottom:6px;background:var(--red-bg,#fee2e2);padding:6px 10px;border-radius:8px">⚠ ${gaps} שלבים ללא עובד כשיר — צוואר בקבוק אפשרי</div>`:'';
+  const noDefHtml=noDef.length?`<div style="font-size:11px;color:var(--txt3);margin-top:10px">שלבים ללא רמה/תחנה (לא בחישוב): ${noDef.map(s=>esc(stepDisplay(s))).join(', ')}</div>`:'';
+  const ov=document.createElement('div');
+  ov.id='prod-plan-overlay';
+  ov.style.cssText='position:fixed;inset:0;background:rgba(0,0,0,.55);z-index:9999;display:flex;align-items:center;justify-content:center;padding:16px';
+  ov.onclick=e=>{if(e.target===ov)ov.remove();};
+  ov.innerHTML=`<div style="background:var(--card);border-radius:14px;max-width:560px;width:100%;max-height:85vh;overflow-y:auto;padding:16px" dir="rtl">
+    <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:8px">
+      <div style="font-size:15px;font-weight:700;color:var(--txt)">🎯 שיבוץ מומלץ — מוצר ${esc(p.prod)} · לקוח ${esc(p.cust)}</div>
+      <button onclick="document.getElementById('prod-plan-overlay').remove()" style="background:none;border:none;font-size:20px;cursor:pointer;color:var(--txt)">✕</button>
+    </div>
+    <div style="font-size:11px;color:var(--txt3);margin-bottom:8px">● נוכח עכשיו · ○ לא נוכח · N🔧 = משימות פעילות · הסדר: הרמה המתאימה ביותר תחילה, ואז לפי עומס</div>
+    ${gapWarn}
+    ${rows||'<div style="color:var(--txt3);font-size:12px;padding:1rem;text-align:center">אין שלבים עם רמת קושי ותחנה</div>'}
+    ${noDefHtml}
+  </div>`;
+  document.body.appendChild(ov);
+}
 
 // ─── היסטוריית משימות: חלון חי + שמירה ─────────────────────
 // HIST_WINDOW_DAYS — כמה ימי היסטוריה נטענים לזיכרון בזמן אמת (מוזיל קריאות Firestore).
@@ -6952,6 +6993,7 @@ function renderProducts(){
           ${stageHtml}${qtyRows}${imgHtml}${docHtml}
         </div>
         <div style="display:flex;gap:6px;flex-shrink:0">
+          ${(p.workSteps||[]).some(s=>stepLevel(s)&&stepStation(s))?`<button class="btn" style="font-size:11px;padding:4px 10px;color:var(--blue-txt)" onclick="showProductPlan('${p.id}')">🎯 שיבוץ</button>`:''}
           <button class="btn" style="font-size:11px;padding:4px 10px" onclick="bcFromProduct('${p.id}')">🏷️ ברקודים</button>
           <button class="btn" style="font-size:11px;padding:4px 10px" onclick="openProductModal('${p.id}')">✏️ עריכה</button>
           <button class="btn danger" style="font-size:11px;padding:4px 8px;opacity:.7" onclick="deleteProduct('${p.id}')">🗑</button>
