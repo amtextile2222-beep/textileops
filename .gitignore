@@ -1,0 +1,10 @@
+node_modules/
+functions/node_modules/
+*.xlsx
+*.pdf
+.claude/
+.firebaserc
+package-lock.json
+functions/package-lock.json
+read-pdf.cjs
+read-pdf.mjs
