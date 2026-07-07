@@ -1279,6 +1279,25 @@ document.dispatchEvent(new Event('fbSDKReady'));
 const LANGS={
   he:{
     login_title:'כניסה למערכת',
+    scan_dup_no_step:'ללא שלב',
+    scan_dup_in_cart:'כבר בסל',
+    scan_dup_active:'פעיל כעת',
+    scan_dup_done:'כבר בוצע',
+    scan_not_added:'⛔ לא נוסף:',
+    scan_added_cart:'➕ נוסף לסל',
+    scan_cart:'🛒 סל',
+    scan_barcodes:'ברקודים',
+    tr_no_workers:'אין עובדים אחרים נוכחים כרגע',
+    tr_title:'🔄 העברת משימה',
+    tr_of_worker:'משימה של',
+    tr_product:'מוצר',
+    tr_qty_label:"כמות להעברה (ריק = כל הכמות)",
+    tr_qty_hint:"פיצול: העובד המקורי נשאר עם היתרה",
+    tr_btn:'העבר',
+    tr_cancel:'ביטול',
+    tr_invalid_qty:'⚠ כמות לא תקינה',
+    tr_done_all:'✅ המשימה הועברה ל-',
+    tr_done_split:'✅ פוצל והועבר:',
     login_sub:'הזן פרטי משתמש',
     username:'שם משתמש',
     password:'סיסמה',
@@ -1456,6 +1475,25 @@ const LANGS={
   },
   ar:{
     login_title:'تسجيل الدخول',
+    scan_dup_no_step:'بدون مرحلة',
+    scan_dup_in_cart:'موجود في السلة',
+    scan_dup_active:'قيد التنفيذ حالياً',
+    scan_dup_done:'تم تنفيذه مسبقاً',
+    scan_not_added:'⛔ لم تتم الإضافة:',
+    scan_added_cart:'➕ أُضيف إلى السلة',
+    scan_cart:'🛒 السلة',
+    scan_barcodes:'باركود',
+    tr_no_workers:'لا يوجد عمال آخرون حاضرون حالياً',
+    tr_title:'🔄 نقل المهمة',
+    tr_of_worker:'مهمة',
+    tr_product:'المنتج',
+    tr_qty_label:'الكمية المراد نقلها (فارغ = كل الكمية)',
+    tr_qty_hint:'تقسيم: يبقى العامل الأصلي مع الكمية المتبقية',
+    tr_btn:'نقل',
+    tr_cancel:'إلغاء',
+    tr_invalid_qty:'⚠ كمية غير صالحة',
+    tr_done_all:'✅ تم نقل المهمة إلى ',
+    tr_done_split:'✅ تم التقسيم والنقل:',
     login_sub:'أدخل بيانات المستخدم',
     username:'اسم المستخدم',
     password:'كلمة المرور',
@@ -1633,6 +1671,25 @@ const LANGS={
   },
   en:{
     login_title:'Login',
+    scan_dup_no_step:'No stage',
+    scan_dup_in_cart:'Already in cart',
+    scan_dup_active:'Currently active',
+    scan_dup_done:'Already done',
+    scan_not_added:'⛔ Not added:',
+    scan_added_cart:'➕ Added to cart',
+    scan_cart:'🛒 Cart',
+    scan_barcodes:'barcodes',
+    tr_no_workers:'No other workers present now',
+    tr_title:'🔄 Transfer task',
+    tr_of_worker:'Task of',
+    tr_product:'Product',
+    tr_qty_label:'Quantity to transfer (empty = all)',
+    tr_qty_hint:'Split: original worker keeps the remainder',
+    tr_btn:'Transfer',
+    tr_cancel:'Cancel',
+    tr_invalid_qty:'⚠ Invalid quantity',
+    tr_done_all:'✅ Task transferred to ',
+    tr_done_split:'✅ Split & transferred:',
     login_sub:'Enter credentials',
     username:'Username',
     password:'Password',
@@ -1815,7 +1872,9 @@ function getTotalQty(cust,prod){
 // (שני עובדים שחולקים ברקוד באותו שלב לא מכפילים את הכמות)
 function unitKey(t){
   const d=t.startTime instanceof Date?t.startTime:new Date(t.startTime);
-  return taskBc(t)+'|'+(t.taskType||'').trim().toLowerCase()+'|'+d.getFullYear()+'-'+pad2(d.getMonth()+1)+'-'+pad2(d.getDate());
+  // splitId: משימה שפוצלה בהעברה חלקית מקבלת מזהה ייחודי כדי ששני חלקי הכמות ייספרו בנפרד
+  // (בלי splitId — שני עובדים על אותו ברקוד+שלב עדיין נספרים פעם אחת, כמקודם)
+  return taskBc(t)+'|'+(t.taskType||'').trim().toLowerCase()+'|'+d.getFullYear()+'-'+pad2(d.getMonth()+1)+'-'+pad2(d.getDate())+(t.splitId?'|'+t.splitId:'');
 }
 function sumUnitsDedup(tasks){
   const seen=new Set();let total=0;
@@ -3356,14 +3415,15 @@ function stepAlreadyTaken(raw,taskType,stamp){
 }
 // מוסיף שלבים לסל עם חסימת כפילויות (בסל / פעיל / בוצע). מחזיר מערך תיאורים של שלבים שנחסמו.
 function addStepsToBatch(batch,base,types){
+  const T=LANGS[currentLang];
   const stamp=prodStampFor(base.cust,base.prod);
   const skipped=[];
   for(const t of types){
-    const tt=t||'';const label=tt||'ללא שלב';
-    if(batch.some(b=>b.raw===base.raw&&(b.taskType||'')===tt)){skipped.push(label+' — כבר בסל');continue;}
+    const tt=t||'';const label=tt||T.scan_dup_no_step;
+    if(batch.some(b=>b.raw===base.raw&&(b.taskType||'')===tt)){skipped.push(label+' — '+T.scan_dup_in_cart);continue;}
     const st=stepAlreadyTaken(base.raw,tt,stamp);
-    if(st==='active'){skipped.push(label+' — פעיל כעת');continue;}
-    if(st==='done'){skipped.push(label+' — כבר בוצע');continue;}
+    if(st==='active'){skipped.push(label+' — '+T.scan_dup_active);continue;}
+    if(st==='done'){skipped.push(label+' — '+T.scan_dup_done);continue;}
     batch.push({...base,taskType:tt,prodStamp:stamp});
   }
   return skipped;
@@ -3373,9 +3433,10 @@ function genBatchId(){return 'b'+Date.now().toString(36)+Math.random().toString(
 
 function renderTsBatchQueue(){
   const el=document.getElementById('ts-batch-queue');if(!el)return;
+  const T=LANGS[currentLang];
   if(!_tsBatch.length){el.innerHTML='';return;}
   el.innerHTML=`<div style="background:var(--card);border:1px solid var(--brd);border-radius:8px;padding:8px;font-size:12px">
-    <div style="font-weight:600;margin-bottom:6px;color:var(--txt)">🛒 סל (${_tsBatch.length} ברקודים):</div>
+    <div style="font-weight:600;margin-bottom:6px;color:var(--txt)">${T.scan_cart} (${_tsBatch.length} ${T.scan_barcodes}):</div>
     ${_tsBatch.map((b,i)=>`<div style="display:flex;justify-content:space-between;align-items:center;padding:3px 0;border-bottom:1px solid var(--brd)">
       <span style="color:var(--txt)">${b.prod} · ${b.qty} יח' · ${COLORS[b.col]||b.col}${b.taskType?' · '+b.taskType:''}</span>
       <button onclick="_tsBatch.splice(${i},1);renderTsBatchQueue()" style="background:none;border:none;cursor:pointer;color:var(--red-txt);font-size:14px;padding:0 4px">✕</button>
@@ -3384,9 +3445,10 @@ function renderTsBatchQueue(){
 }
 function renderMgrBatchQueue(){
   const el=document.getElementById('mgr-batch-queue');if(!el)return;
+  const T=LANGS[currentLang];
   if(!_mgrBatch.length){el.innerHTML='';return;}
   el.innerHTML=`<div style="background:var(--card);border:1px solid var(--brd);border-radius:8px;padding:8px;font-size:12px">
-    <div style="font-weight:600;margin-bottom:6px;color:var(--txt)">🛒 סל (${_mgrBatch.length} ברקודים):</div>
+    <div style="font-weight:600;margin-bottom:6px;color:var(--txt)">${T.scan_cart} (${_mgrBatch.length} ${T.scan_barcodes}):</div>
     ${_mgrBatch.map((b,i)=>`<div style="display:flex;justify-content:space-between;align-items:center;padding:3px 0;border-bottom:1px solid var(--brd)">
       <span style="color:var(--txt)">${b.prod} · ${b.qty} יח' · ${COLORS[b.col]||b.col}${b.taskType?' · '+b.taskType:''}</span>
       <button onclick="_mgrBatch.splice(${i},1);renderMgrBatchQueue()" style="background:none;border:none;cursor:pointer;color:var(--red-txt);font-size:14px;padding:0 4px">✕</button>
@@ -4796,7 +4858,7 @@ function renderMgrTasks(){
         </div>
         <div style="display:flex;gap:4px">
           <button class="btn" style="font-size:11px;padding:4px 10px" onclick="openEditTask('${t.id}')">✏️ ערוך</button>
-          <button class="btn" style="font-size:11px;padding:4px 10px;color:var(--blue-txt)" onclick="transferTask('${t.id}')">🔄 העבר</button>
+          <button class="btn" style="font-size:11px;padding:4px 10px;color:var(--blue-txt)" onclick="transferTask('${t.id}')">🔄 ${T.tr_btn}</button>
           <button class="btn danger" style="font-size:11px;padding:4px 10px" onclick="mgrEndTask('${t.id}')">${T.btn_end_task}</button>
           <button class="btn danger" style="font-size:11px;padding:4px 8px;opacity:0.7" onclick="deleteActiveTask('${t.id}')" title="מחק משימה שנפתחה בטעות">🗑</button>
         </div>
@@ -5103,8 +5165,8 @@ function tsAddToBatch(){
   document.getElementById('ts-bc-prev').innerHTML='';
   document.getElementById('ts-tasktype').value='';
   renderTsBatchQueue();
-  if(_sk.length)showToast('⛔ לא נוסף: '+_sk.join(' · '),'var(--red-txt)',7000);
-  else showToast('➕ נוסף לסל');
+  if(_sk.length)showToast(T.scan_not_added+' '+_sk.join(' · '),'var(--red-txt)',7000);
+  else showToast(T.scan_added_cart);
 }
 async function tsStartTask(){
   const empId=document.getElementById('ts-emp-sel').value;
@@ -5125,7 +5187,7 @@ async function tsStartTask(){
     const taskDept=(document.getElementById('ts-dept').value||'').trim();
     const types=useSteps?checkedSteps:[taskType||''];
     const _sk=addStepsToBatch(_tsBatch,{raw,cust,prod,size,qty,col,isTotal,taskDept},types);
-    if(_sk.length)showToast('⛔ לא נוסף: '+_sk.join(' · '),'var(--red-txt)',7000);
+    if(_sk.length)showToast(T.scan_not_added+' '+_sk.join(' · '),'var(--red-txt)',7000);
   }
   if(!_tsBatch.length){showToast(T.err_barcode_13||'⚠ סרוק לפחות ברקוד אחד','var(--red-txt)');return;}
   // בדיקת משימות מושהות
@@ -5391,8 +5453,8 @@ function mgrAddToBatch(){
   document.getElementById('mgr-bc-inp').value='';parseMgrBc('');
   document.getElementById('mgr-tasktype').value='';document.getElementById('mgr-dept').value='';
   renderMgrBatchQueue();
-  if(_sk.length)showToast('⛔ לא נוסף: '+_sk.join(' · '),'var(--red-txt)',7000);
-  else showToast('➕ נוסף לסל');
+  if(_sk.length)showToast(T.scan_not_added+' '+_sk.join(' · '),'var(--red-txt)',7000);
+  else showToast(T.scan_added_cart);
 }
 async function mgrStartTask(){
   const empId=document.getElementById('mgr-emp-sel').value;
@@ -5413,7 +5475,7 @@ async function mgrStartTask(){
     const taskDept=(document.getElementById('mgr-dept').value||'').trim();
     const types=mgrUseSteps?mgrCheckedSteps:[taskType||''];
     const _sk=addStepsToBatch(_mgrBatch,{raw,cust,prod,size,qty,col,isTotal,taskDept},types);
-    if(_sk.length)showToast('⛔ לא נוסף: '+_sk.join(' · '),'var(--red-txt)',7000);
+    if(_sk.length)showToast(T.scan_not_added+' '+_sk.join(' · '),'var(--red-txt)',7000);
   }
   if(!_mgrBatch.length){showToast(T.err_barcode_13||'⚠ סרוק לפחות ברקוד אחד','var(--red-txt)');return;}
   const newBcs=_mgrBatch.map(b=>b.raw);
@@ -5456,22 +5518,52 @@ async function deleteActiveTask(taskId){
   saveLS();renderTasks();renderMgrTasks();renderDash();
 }
 async function transferTask(taskId){
+  const T=LANGS[currentLang];
   const t=S.activeTasks.find(x=>x.id===taskId);if(!t)return;
   const eligible=S.workers.filter(w=>w.status==='in'&&w.id!==t.workerId);
-  if(!eligible.length){alert('אין עובדים אחרים נוכחים כרגע');return;}
+  if(!eligible.length){alert(T.tr_no_workers);return;}
   const opts=eligible.map(w=>`<option value="${esc(w.id)}">${esc(w.name)} (${esc(w.dept)})</option>`).join('');
-  const sel=`<select id="transfer-sel" style="width:100%;padding:8px;font-size:14px;border-radius:6px;border:1px solid #ccc;margin-top:8px">${opts}</select>`;
-  const ok=await showConfirm('🔄 העברת משימה',`משימה של <b>${esc(t.workerName)}</b> — מוצר ${t.prod}<br>${sel}`,'העבר','ביטול');
+  const totalQty=t.qty||0;
+  const sel=`<select id="transfer-sel" style="width:100%;padding:8px;font-size:14px;border-radius:6px;border:1px solid #ccc;margin-top:8px">${opts}</select>
+    <input id="transfer-qty" type="number" min="1" max="${Math.max(1,totalQty-1)}" placeholder="${esc(T.tr_qty_label)}" style="width:100%;padding:8px;font-size:14px;border-radius:6px;border:1px solid #ccc;margin-top:8px">
+    <div style="font-size:11px;color:var(--txt3);margin-top:4px">${esc(T.tr_qty_hint)}</div>`;
+  const ok=await showConfirm(T.tr_title,`${T.tr_of_worker} <b>${esc(t.workerName)}</b> — ${T.tr_product} ${esc(t.prod)} (${totalQty})<br>${sel}`,T.tr_btn,T.tr_cancel);
   if(!ok)return;
   const newWorkerId=document.getElementById('transfer-sel')?.value;
   const newWorker=S.workers.find(w=>w.id===newWorkerId);
   if(!newWorker){return;}
+  const qtyRaw=(document.getElementById('transfer-qty')?.value||'').trim();
+  let partQty=qtyRaw===''?0:parseInt(qtyRaw);
+  if(qtyRaw!==''&&(isNaN(partQty)||partQty<1)){showToast(T.tr_invalid_qty,'var(--red-txt)');return;}
+  if(partQty>=totalQty)partQty=0;  // כמות מלאה או יותר = העברה רגילה
+  const tt=t.taskType||'';
+  if(partQty>0){
+    // ── פיצול כמות: משימה חדשה לעובד הנבחר, המקורי נשאר עם היתרה (שני עובדים במקביל = עוזר) ──
+    const splitId='sp'+Date.now().toString(36)+Math.random().toString(36).slice(2,5);
+    const newTask={...t,id:String(Date.now())+Math.random().toString(36).slice(2,6),workerId:newWorker.id,workerName:newWorker.name,dept:newWorker.dept,qty:partQty,startTime:new Date(),elapsed:0,accumulatedSec:0,splitId};
+    delete newTask.batchId;
+    const expN=_expMap[taskExpectedKey(t.cust,t.prod,newWorker.id,partQty)];
+    if(expN?.ok&&expN.perStep?.[tt]!=null)newTask.expectedMin=expN.perStep[tt];else delete newTask.expectedMin;
+    t.qty=totalQty-partQty;
+    const expO=_expMap[taskExpectedKey(t.cust,t.prod,t.workerId,t.qty)];
+    if(expO?.ok&&expO.perStep?.[tt]!=null)t.expectedMin=expO.perStep[tt];
+    S.activeTasks.unshift(newTask);
+    if(S.fbConnected){
+      await fbSet('activeTasks',newTask.id,{...newTask,startTime:newTask.startTime.toISOString()});
+      await fbSet('activeTasks',String(t.id),{...t,startTime:t.startTime instanceof Date?t.startTime.toISOString():t.startTime});
+    }
+    tgTask(newTask,true);
+    saveLS();renderTasks();renderMgrTasks();
+    showToast(`${T.tr_done_split} ${partQty} → ${newWorker.name}`);
+    return;
+  }
+  // ── העברה מלאה (התנהגות קיימת) ──
   t.workerId=newWorker.id;
   t.workerName=newWorker.name;
   t.dept=newWorker.dept;
   if(S.fbConnected)await fbSet('activeTasks',String(t.id),{...t,startTime:t.startTime instanceof Date?t.startTime.toISOString():t.startTime});
   saveLS();renderTasks();renderMgrTasks();
-  showToast(`✅ המשימה הועברה ל-${newWorker.name}`);
+  showToast(`${T.tr_done_all}${newWorker.name}`);
 }
 async function mgrEndTask(taskId){
   const t=S.activeTasks.find(x=>x.id===taskId);if(!t)return;
