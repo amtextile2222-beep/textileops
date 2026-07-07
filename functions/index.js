@@ -878,8 +878,40 @@ async function runAttendanceCloser() {
     }
   }
 
+  // 5) ריפוי זמן batch מנופח — משימות שחולקות batchId ונשמרו עם הזמן המלא על כל אחת
+  // (במקום חלוקה יחסית לכמות). מזוהה לפי סכום duration >> הזמן המשותף של ה-batch. לעולם רק מקטין.
+  let fixedBatch = 0;
+  try {
+    const sinceISO = new Date(Date.now() - 65 * 86400000).toISOString();
+    const bSnap = await db.collection('histTasks').where('startTime', '>=', sinceISO).get();
+    const groups = {};
+    bSnap.docs.forEach(d => {
+      const t = d.data();
+      if (!t.batchId) return;
+      const k = String(t.workerId) + '|' + t.batchId;
+      (groups[k] = groups[k] || []).push({ ref: d.ref, t });
+    });
+    for (const g of Object.values(groups)) {
+      if (g.length < 2) continue;
+      const starts = g.map(x => new Date(x.t.startTime).getTime()).filter(n => !isNaN(n));
+      const ends = g.map(x => x.t.endTime ? new Date(x.t.endTime).getTime() : NaN).filter(n => !isNaN(n));
+      if (!starts.length || !ends.length) continue;
+      const clock = Math.max(0, Math.round((Math.max(...ends) - Math.min(...starts)) / 1000));
+      const sumDur = g.reduce((s, x) => s + (x.t.duration || 0), 0);
+      if (!(clock > 0 && sumDur > clock * 1.5)) continue; // כבר חולק נכון
+      const totQ = g.reduce((s, x) => s + (x.t.qty || 0), 0);
+      for (const x of g) {
+        const nd = totQ > 0 ? Math.round(clock * (x.t.qty || 0) / totQ) : Math.round(clock / g.length);
+        if (nd >= 0 && nd < (x.t.duration || 0)) {
+          await x.ref.set({ duration: nd, batchFixed: true }, { merge: true });
+          fixedBatch++;
+        }
+      }
+    }
+  } catch (e) { console.error('batch heal error:', e); }
+
   // דיווח לטלגרם — רק אם היה מה לסגור
-  if (closed.length || repaired || pausedNames.length || fixedDur) {
+  if (closed.length || repaired || pausedNames.length || fixedDur || fixedBatch) {
     const { token, chatId } = tgCfg();
     if (token && chatId) {
       let msg = '🌙 TextileOps — סגירה אוטומטית מהשרת';
@@ -887,10 +919,11 @@ async function runAttendanceCloser() {
       if (repaired) msg += '\n🛠 תוקנו ' + repaired + ' רשומות נוכחות מנופחות';
       if (pausedNames.length) msg += '\n⏸ משימות הושהו (' + pausedNames.length + '): ' + pausedNames.join(', ');
       if (fixedDur) msg += '\n⏱ תוקן משך מנופח ב-' + fixedDur + ' משימות בהיסטוריה';
+      if (fixedBatch) msg += '\n🧮 תוקן זמן batch מנופח ב-' + fixedBatch + ' משימות';
       await sendTelegram(token, chatId, msg).catch(() => {});
     }
   }
-  return { closed: closed.length, repaired, paused: pausedNames.length, fixedDur };
+  return { closed: closed.length, repaired, paused: pausedNames.length, fixedDur, fixedBatch };
 }
 
 exports.attendanceCloser = functions.pubsub.schedule('30 23 * * *').timeZone('Asia/Jerusalem').onRun(async () => {

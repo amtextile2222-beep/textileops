@@ -2018,13 +2018,14 @@ async function fillProductBalance(p){
     const avgAll=rated.length?rated.reduce((s,w)=>s+loadedHourlyRate(w.id),0)/rated.length:0;
     const hist=await loadHistRange('','');
     const done=hist.filter(t=>t.cust===p.cust&&t.prod===p.prod&&(t.duration||0)>0);
+    const nd=normalizeBatchDurations(done); // תיקון זמן batch מנופח בקריאה
     let bud=0,act=0,counted=0;
     for(const t of done){
       const st=lvl.find(s=>stepName(s)===t.taskType);
       if(!st)continue;
       const rate=(loadedHourlyRate(t.workerId)||avgAll)+oh;
       bud+=budgetUnit*(+weights[stepLevel(st)]||1)/totW*(t.qty||0);
-      act+=(t.duration/3600)*rate;
+      act+=((nd[t.id]||0)/3600)*rate;
       counted++;
     }
     if(!counted){el.innerHTML='<div style="font-size:11px;color:var(--txt3);margin-top:10px">💰 מאזן: טרם הושלמו משימות שלבים למוצר זה</div>';return;}
@@ -3358,10 +3359,12 @@ function renderMgrBatchQueue(){
   </div>`;
 }
 
-// סגירת batch עם חלוקת זמן יחסית לפי כמות
+// סגירת batch עם חלוקת זמן יחסית לפי כמות.
+// baseSec = הזמן המשותף של כל ה-batch (טיימר אחד) — מתחלק בין המשימות לפי כמות.
 async function closeBatchProportional(tasks,endTime){
   const totalQty=tasks.reduce((s,t)=>s+(t.qty||0),0);
-  const baseSec=(tasks[0].accumulatedSec||0)+calcTaskDurSec(tasks[0].startTime,endTime,tasks[0].workerId);
+  const lead=tasks[0];
+  const baseSec=lead.paused?(lead.accumulatedSec||0):(lead.accumulatedSec||0)+calcTaskDurSec(lead.startTime,endTime,lead.workerId);
   for(const t of tasks){
     const proportion=totalQty>0?(t.qty||0)/totalQty:1/tasks.length;
     const duration=Math.round(baseSec*proportion);
@@ -3374,6 +3377,43 @@ async function closeBatchProportional(tasks,endTime){
       await fbSet('histTasks',String(t.id),{...done,startTime:done.startTime instanceof Date?done.startTime.toISOString():done.startTime,endTime:endTime.toISOString()});
     }
   }
+}
+// סוגר אוסף משימות עם חלוקת זמן נכונה: משימות שחולקות batchId (עבדו במקביל על טיימר אחד)
+// מתחלקות יחסית; משימות בודדות נסגרות עם הזמן המלא שלהן. כל מסלולי הסגירה עוברים דרך כאן.
+async function closeTasksBatchAware(tasks,endTime){
+  const groups={};
+  const singles=[];
+  tasks.forEach(t=>{if(t.batchId){(groups[t.workerId+'|'+t.batchId]=groups[t.workerId+'|'+t.batchId]||[]).push(t);}else singles.push(t);});
+  for(const g of Object.values(groups)){
+    if(g.length>1)await closeBatchProportional(g,endTime);else singles.push(g[0]);
+  }
+  for(const t of singles){
+    const done={...t,endTime,duration:taskFinalDur(t,endTime)};
+    delete done.paused;delete done.pausedAt;delete done.accumulatedSec;
+    S.histTasks.unshift(done);
+    S.activeTasks=S.activeTasks.filter(x=>x.id!==t.id);
+    if(S.fbConnected){await fbDel('activeTasks',String(t.id));await fbSet('histTasks',String(t.id),{...done,startTime:done.startTime instanceof Date?done.startTime.toISOString():done.startTime,endTime:endTime instanceof Date?endTime.toISOString():endTime});}
+  }
+}
+// נרמול הגנתי בקריאה: מחזיר מפה id→שניות מתוקנות. משימות batch שנשמרו מנופחות
+// (הזמן המלא על כל משימה) מזוהות לפי סכום duration >> הזמן המשותף ומתוקנות יחסית לכמות.
+// batch שכבר חולק נכון נשאר כמו שהוא. משמש את הדוחות/מאזן/עלויות כדי שמספרים יהיו נכונים
+// גם על נתונים ישנים, ללא תלות בתיקון השרת.
+function normalizeBatchDurations(tasks){
+  const out={};const groups={};
+  tasks.forEach(t=>{if(t.batchId)(groups[t.workerId+'|'+t.batchId]=groups[t.workerId+'|'+t.batchId]||[]).push(t);else out[t.id]=t.duration||0;});
+  for(const g of Object.values(groups)){
+    if(g.length<2){out[g[0].id]=g[0].duration||0;continue;}
+    const start=Math.min(...g.map(t=>new Date(t.startTime).getTime()));
+    const end=Math.max(...g.map(t=>t.endTime?new Date(t.endTime).getTime():start));
+    const clock=Math.max(0,(end-start)/1000);
+    const sumDur=g.reduce((s,t)=>s+(t.duration||0),0);
+    if(clock>0&&sumDur>clock*1.5){ // מנופח: הזמן המלא נשמר על כל משימה
+      const totQ=g.reduce((s,t)=>s+(t.qty||0),0);
+      g.forEach(t=>{out[t.id]=totQ>0?Math.round(clock*(t.qty||0)/totQ):Math.round(clock/g.length);});
+    }else g.forEach(t=>{out[t.id]=t.duration||0;}); // כבר חולק נכון
+  }
+  return out;
 }
 
 // השהיית כל המשימות הפעילות של עובד
@@ -3646,13 +3686,7 @@ async function submitBc(){
     const msg=existTasks.length>1?existTasks.length+' משימות פעילות — '+existTasks.map(t=>t.prod).join(', ')+T.cfm_existing_msg:'מוצר '+prev.prod+T.cfm_existing_msg;
     const parallel=await showConfirm(T.cfm_existing_title||'משימה קיימת',msg,T.cfm_parallel||'עבודה במקביל',T.cfm_close_old||'סגור ישנה + התחל חדשה');
     if(!parallel){
-      const endTime=new Date();
-      for(const t of existTasks){
-        const done={...t,endTime,duration:taskFinalDur(t,endTime)};
-        delete done.paused;delete done.pausedAt;delete done.accumulatedSec;
-        S.histTasks.unshift(done);
-        if(S.fbConnected){await fbDel('activeTasks',String(t.id));await fbSet('histTasks',String(t.id),{...done,startTime:done.startTime instanceof Date?done.startTime.toISOString():done.startTime,endTime:done.endTime.toISOString()});}
-      }
+      await closeTasksBatchAware(existTasks,new Date());
       S.activeTasks=S.activeTasks.filter(t=>t.workerId!==u.id);
     }
   }
@@ -4112,6 +4146,7 @@ function buildBudgetReport(fl){
   const ctx=_pricingCtx();
   if(!ctx){card.classList.add('hidden');return;}
   card.classList.remove('hidden');
+  const nd=normalizeBatchDurations(fl); // תיקון זמן batch מנופח בקריאה
   const rows=[];
   for(const t of fl){
     if(!t.done||!(t.duration>0))continue;
@@ -4125,7 +4160,7 @@ function buildBudgetReport(fl){
       alloc=rate>0?(pb.budgetUnit*(+ctx.weights[stepLevel(st)]||1)/pb.totW*(t.qty||0))/rate*60:0;
     }
     if(!(alloc>0))continue;
-    const actual=(t.duration||0)/60;
+    const actual=(nd[t.id]||0)/60;
     rows.push({t,alloc,actual,eff:actual>0?alloc/actual*100:0});
   }
   if(!rows.length){el.innerHTML='<div style="color:var(--txt3);font-size:12px;padding:.5rem 0">אין משימות שהושלמו עם תמחור בטווח הנבחר</div>';return;}
@@ -4154,6 +4189,7 @@ function buildProfitReport(fl){
   if(!ctx){card.classList.add('hidden');return;}
   card.classList.remove('hidden');
   const done=fl.filter(t=>t.done&&(t.duration||0)>0);
+  const nd=normalizeBatchDurations(done); // תיקון זמן batch מנופח בקריאה
   const prods=S.products.filter(p=>+p.unitPrice&&(p.workSteps||[]).some(s=>stepLevel(s)));
   const blocks=[];
   for(const p of prods){
@@ -4167,7 +4203,7 @@ function buildProfitReport(fl){
       const units=ts.reduce((sum,t)=>sum+(t.qty||0),0);
       let actPU=null;
       if(units>0){
-        const cost=ts.reduce((sum,t)=>sum+(t.duration/3600)*((loadedHourlyRate(t.workerId)||ctx.avgAll)+ctx.oh),0);
+        const cost=ts.reduce((sum,t)=>sum+((nd[t.id]||0)/3600)*((loadedHourlyRate(t.workerId)||ctx.avgAll)+ctx.oh),0);
         actPU=cost/units;withData++;
       }
       costUnit+=actPU!=null?actPU:budPU;
@@ -5395,10 +5431,9 @@ async function transferTask(taskId){
 async function mgrEndTask(taskId){
   const t=S.activeTasks.find(x=>x.id===taskId);if(!t)return;
   const endTime=new Date();
-  const done={...t,endTime,duration:taskFinalDur(t,endTime)};
-  delete done.paused;delete done.pausedAt;delete done.accumulatedSec;
-  S.histTasks.unshift(done);S.activeTasks=S.activeTasks.filter(x=>x.id!==taskId);
-  if(S.fbConnected){await fbDel('activeTasks',taskId);await fbSet('histTasks',taskId,{...done,startTime:done.startTime instanceof Date?done.startTime.toISOString():done.startTime,endTime:done.endTime.toISOString()});}
+  // אם המשימה חלק מ-batch (עבדו במקביל) — סוגר את כל ה-batch יחד כדי שהזמן יתחלק נכון
+  const group=t.batchId?S.activeTasks.filter(x=>x.batchId===t.batchId&&x.workerId===t.workerId):[t];
+  await closeTasksBatchAware(group,endTime);
   tgTask(t,false,endTime);
   saveLS();renderMgrTasks();renderTasks();
 }
@@ -5854,12 +5889,7 @@ async function confirmModal(){
       if(!openSess){
         const checkoutTime=w.checkout?new Date(w.checkout):new Date();
         const myTasks=S.activeTasks.filter(t=>t.workerId===w.id);
-        for(const t of myTasks){
-          const done={...t,endTime:checkoutTime,duration:taskFinalDur(t,checkoutTime)};
-          delete done.paused;delete done.pausedAt;delete done.accumulatedSec;
-          S.histTasks.unshift(done);S.activeTasks=S.activeTasks.filter(x=>x.id!==t.id);
-          if(S.fbConnected){await fbDel('activeTasks',String(t.id));await fbSet('histTasks',String(t.id),{...done,startTime:done.startTime instanceof Date?done.startTime.toISOString():done.startTime,endTime:done.endTime.toISOString()});}
-        }
+        await closeTasksBatchAware(myTasks,checkoutTime);
       }
       if(S.fbConnected)await fbSet('workers',w.id,w);
     } else {
