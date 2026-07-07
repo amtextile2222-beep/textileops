@@ -103,6 +103,7 @@ input:focus,select:focus{outline:none;border-color:var(--blue-txt)}
 .bc-p{background:var(--green-bg);color:var(--green-txt)}
 .bc-q{background:var(--amber-bg);color:var(--amber-txt)}
 .bc-col{background:var(--red-bg);color:var(--red-txt)}
+.bc-s{background:#ede9fe;color:#6d28d9}
 /* TASK CARDS */
 .task-card{background:var(--bg);border:0.5px solid var(--b);border-radius:var(--rl);padding:.875rem;margin-bottom:8px}
 .task-tmr{font-size:18px;font-weight:600;font-variant-numeric:tabular-nums;color:var(--blue-txt);font-family:monospace}
@@ -558,13 +559,19 @@ code{background:var(--bg2);border:0.5px solid var(--b);border-radius:4px;padding
       <div class="card"><div class="mlbl" data-i18n="rep_units">יחידות</div><div class="mval" id="rp-units">0</div></div>
       <div class="card"><div class="mlbl" data-i18n="rep_eff">יעילות</div><div class="mval" id="rp-eff">—</div></div>
     </div>
-    <div class="card"><div class="sec" data-i18n="rep_detail">פירוט לפי לקוח ומוצר</div>
-      <div class="tbl-wrap"><table><thead><tr><th data-i18n="th_worker">עובד</th><th data-i18n="th_dept">מחלקה</th><th data-i18n="th_task_type">סוג משימה</th><th data-i18n="th_customer">לקוח</th><th data-i18n="th_product">מוצר</th><th data-i18n="th_qty">כמות</th><th data-i18n="th_color">צבע</th><th data-i18n="th_start_time">התחלה</th><th data-i18n="th_end_time">סיום</th><th data-i18n="th_duration">משך</th><th data-i18n="th_status">סטטוס</th></tr></thead>
-      <tbody id="rp-body"></tbody></table></div>
-    </div>
-    <div class="card" style="margin-top:1rem">
+    <div class="card">
       <div class="sec">👥 דוח מרוכז — שעות לפי עובד</div>
       <div id="rp-summary-body"></div>
+    </div>
+    <div class="card" style="margin-top:1rem">
+      <div style="display:flex;align-items:center;justify-content:space-between;gap:8px">
+        <div class="sec" data-i18n="rep_detail" style="margin-bottom:0">פירוט לפי לקוח ומוצר</div>
+        <button class="btn" style="font-size:12px" onclick="const w=document.getElementById('rp-detail-wrap');w.classList.toggle('hidden');this.textContent=w.classList.contains('hidden')?'📋 הצג פירוט':'הסתר פירוט'">📋 הצג פירוט</button>
+      </div>
+      <div id="rp-detail-wrap" class="hidden" style="margin-top:8px">
+      <div class="tbl-wrap"><table><thead><tr><th data-i18n="th_worker">עובד</th><th data-i18n="th_dept">מחלקה</th><th data-i18n="th_task_type">סוג משימה</th><th data-i18n="th_customer">לקוח</th><th data-i18n="th_product">מוצר</th><th>מידה</th><th data-i18n="th_qty">כמות</th><th data-i18n="th_color">צבע</th><th data-i18n="th_start_time">התחלה</th><th data-i18n="th_end_time">סיום</th><th data-i18n="th_duration">משך</th><th data-i18n="th_status">סטטוס</th></tr></thead>
+      <tbody id="rp-body"></tbody></table></div>
+      </div>
     </div>
     <div class="card" style="margin-top:1rem">
       <div class="sec">📦 דוח ייצור לפי שלב</div>
@@ -812,6 +819,7 @@ code{background:var(--bg2);border:0.5px solid var(--b);border-radius:4px;padding
           <label style="font-size:13px;font-weight:600;display:block;margin-bottom:6px">🔧 בחר שלבי עבודה</label>
           <div id="mgr-steps-list"></div>
           <div id="mgr-recs"></div>
+          <div id="mgr-expected"></div>
         </div>
         <div class="field">
           <label data-i18n="lbl_dept">מחלקה</label>
@@ -869,6 +877,7 @@ code{background:var(--bg2);border:0.5px solid var(--b);border-radius:4px;padding
         <label style="font-size:13px;font-weight:600;display:block;margin-bottom:6px" data-i18n="btn_select_steps">🔧 בחר שלבי עבודה</label>
         <div id="ts-steps-list"></div>
         <div id="ts-recs"></div>
+        <div id="ts-expected"></div>
       </div>
       <div class="field">
         <label data-i18n="lbl_dept">מחלקה</label>
@@ -1859,6 +1868,7 @@ function recommendWorkers(prodObj,checkedStepNames){
 }
 function renderStepRecs(prefix){
   const T=LANGS[currentLang];
+  updateExpectedTime(prefix);
   const box=document.getElementById(prefix+'-recs');if(!box)return;
   const listEl=document.getElementById(prefix+'-steps-list');
   if(!listEl){box.innerHTML='';return;}
@@ -1881,6 +1891,55 @@ function pickRecWorker(prefix,id){
   const sel=document.getElementById(prefix+'-emp-sel');
   if(sel)sel.value=id;
   renderStepRecs(prefix);
+}
+// ─── צפי זמן למשימה — תמחור שלב ד' המשך ─────────────────────
+// החישוב בצד שרת (CF calcTaskExpected): שכר העובדים ב-adminSettings שאחראי לא רשאי לקרוא;
+// השרת מחזיר דקות בלבד. cache פר לקוח+מוצר+עובד+כמות — נשלחים כל השלבים, מוצג לפי המסומנים.
+let _expMap={};
+let _expTimer=null;
+function taskExpectedKey(cust,prod,workerId,qty){return cust+'|'+prod+'|'+workerId+'|'+qty;}
+function fmtExpMin(min){
+  if(min>=60)return Math.floor(min/60)+" שע' "+Math.round(min%60)+" דק'";
+  return Math.round(min)+" דק'";
+}
+function updateExpectedTime(prefix){
+  const box=document.getElementById(prefix+'-expected');if(!box)return;
+  const listEl=document.getElementById(prefix+'-steps-list');
+  const sel=document.getElementById(prefix+'-emp-sel');
+  const raw=(document.getElementById(prefix+'-bc-inp')?.value||'').replace(/\D/g,'');
+  const workerId=sel?.value||'';
+  const checked=listEl?[...listEl.querySelectorAll('input[type="checkbox"]:checked')].map(cb=>cb.dataset.step):[];
+  if(!workerId||raw.length!==13||!checked.length||!listEl?.dataset.cust||!S.fbConnected||!window._fbFunctions){box.innerHTML='';return;}
+  const cust=raw.slice(0,2),prod=raw.slice(2,7);
+  if(cust!==listEl.dataset.cust||prod!==listEl.dataset.prod){box.innerHTML='';return;}
+  const prodObj=S.products.find(x=>x.cust===cust&&x.prod===prod);
+  if(!prodObj||!(+prodObj.unitPrice)){box.innerHTML='';return;} // אין תמחור — אין צפי
+  const qty=isTotalBc(raw)?getTotalQty(cust,prod):parseInt(raw.slice(8,11))||0;
+  if(!qty){box.innerHTML='';return;}
+  const key=taskExpectedKey(cust,prod,workerId,qty);
+  const render=res=>{
+    if(!res||!res.ok){box.innerHTML='';return;}
+    const parts=checked.filter(n=>res.perStep[n]!=null);
+    if(!parts.length){box.innerHTML='';return;}
+    const tot=parts.reduce((s,n)=>s+res.perStep[n],0);
+    box.innerHTML=`<div style="margin-top:6px;background:var(--blue-bg,#dbeafe);color:var(--blue-txt,#1d4ed8);border-radius:8px;padding:7px 10px;font-size:12px">
+      ⏱ צפי לפי תמחור (${qty} יח'): <b style="font-size:13px">${fmtExpMin(tot)}</b>
+      ${parts.length>1?`<div style="font-size:11px;margin-top:2px;opacity:.85">${parts.map(n=>esc(n)+': '+fmtExpMin(res.perStep[n])).join(' · ')}</div>`:''}
+    </div>`;
+  };
+  if(_expMap[key]){render(_expMap[key]);return;}
+  clearTimeout(_expTimer);
+  box.innerHTML='<div style="font-size:11px;color:var(--txt3);margin-top:6px">⏱ מחשב צפי…</div>';
+  const allSteps=(prodObj.workSteps||[]).map(s=>stepName(s)).filter(Boolean);
+  _expTimer=setTimeout(async()=>{
+    try{
+      const{httpsCallable}=window._fb;
+      const fn=httpsCallable(window._fbFunctions,'calcTaskExpected');
+      const r=await fn({cust,prod,workerId,qty,stepNames:allSteps});
+      _expMap[key]=r.data||{ok:false};
+      render(_expMap[key]);
+    }catch(e){console.error('calcTaskExpected:',e);box.innerHTML='';}
+  },600);
 }
 // דוח שיבוץ מתוכנן למוצר — לפני הכנסה לעבודה (כפתור 🎯 בכרטיס המוצר)
 function showProductPlan(id){
@@ -1919,8 +1978,48 @@ function showProductPlan(id){
     ${gapWarn}
     ${rows||'<div style="color:var(--txt3);font-size:12px;padding:1rem;text-align:center">אין שלבים עם רמת קושי ותחנה</div>'}
     ${noDefHtml}
+    <div id="prod-plan-balance"></div>
   </div>`;
   document.body.appendChild(ov);
+  fillProductBalance(p);
+}
+// מאזן תקציב מול בפועל למוצר — בשקלים (חיסכון של עובד זול ≠ חיסכון של עובד יקר).
+// מנהל בלבד (דורש שכר מ-adminSettings). עודף משלב לא מתגלגל — נצבר רק במאזן הכולל.
+async function fillProductBalance(p){
+  const el=document.getElementById('prod-plan-balance');if(!el)return;
+  if(S.user?.role!=='manager')return;
+  const price=+p.unitPrice||0;if(!price)return;
+  const budgetUnit=price*(1-(+p.targetProfitPct||0)/100)-(+p.directMaterialsCost||0);
+  if(budgetUnit<=0)return;
+  const weights=S.costs.difficultyWeights||{1:1,2:1.5,3:2,4:2.5,5:3.5};
+  const lvl=(p.workSteps||[]).filter(s=>stepLevel(s));
+  const totW=lvl.reduce((s,x)=>s+(+weights[stepLevel(x)]||1),0);
+  if(!totW)return;
+  el.innerHTML='<div style="font-size:11px;color:var(--txt3);margin-top:10px">💰 מחשב מאזן…</div>';
+  try{
+    const oh=overheadBreakdown().perHour;
+    const rated=_costWorkers().filter(w=>S.costs.workerRates[w.id]);
+    const avgAll=rated.length?rated.reduce((s,w)=>s+loadedHourlyRate(w.id),0)/rated.length:0;
+    const hist=await loadHistRange('','');
+    const done=hist.filter(t=>t.cust===p.cust&&t.prod===p.prod&&(t.duration||0)>0);
+    let bud=0,act=0,counted=0;
+    for(const t of done){
+      const st=lvl.find(s=>stepName(s)===t.taskType);
+      if(!st)continue;
+      const rate=(loadedHourlyRate(t.workerId)||avgAll)+oh;
+      bud+=budgetUnit*(+weights[stepLevel(st)]||1)/totW*(t.qty||0);
+      act+=(t.duration/3600)*rate;
+      counted++;
+    }
+    if(!counted){el.innerHTML='<div style="font-size:11px;color:var(--txt3);margin-top:10px">💰 מאזן: טרם הושלמו משימות שלבים למוצר זה</div>';return;}
+    const diff=bud-act;
+    const ahead=diff>=0;
+    el.innerHTML=`<div style="margin-top:10px;background:${ahead?'var(--green-bg,#d1fae5)':'var(--red-bg,#fee2e2)'};border-radius:8px;padding:8px 12px;font-size:12px">
+      💰 <b>מאזן תקציב עבודה</b> (${counted} משימות שהושלמו):
+      תקציב ₪${bud.toFixed(0)} · בפועל ₪${act.toFixed(0)} ·
+      <b style="color:${ahead?'var(--green-txt,#065f46)':'var(--red-txt,#b91c1c)'}">${ahead?'✅ מקדים ב-':'⚠ חורג ב-'}₪${Math.abs(diff).toFixed(0)}</b>
+    </div>`;
+  }catch(e){console.error('fillProductBalance:',e);el.innerHTML='';}
 }
 
 // ─── היסטוריית משימות: חלון חי + שמירה ─────────────────────
@@ -2842,9 +2941,9 @@ function goPage(p){
   if(p==='scan')renderScanActive();
   if(p==='tasks'){renderTasks();buildPersonalReport();}
   if(p==='reports'){
+    // ברירת מחדל: היום בלבד (רשימה קצרה + פחות קריאות Firestore); טווח רחב — ידנית
     const today=todayStr();
-    const monthAgo=new Date();monthAgo.setDate(monthAgo.getDate()-30);
-    const fi=document.getElementById('rf-from');if(fi&&!fi.value)fi.value=monthAgo.toISOString().slice(0,10);
+    const fi=document.getElementById('rf-from');if(fi&&!fi.value)fi.value=today;
     const ti=document.getElementById('rf-to');if(ti&&!ti.value)ti.value=today;
     buildRep();
   }
@@ -3586,7 +3685,7 @@ function renderScanActive(){
         <span class="badge green"><span class="pulse"></span> ${T.active}</span>
       </div>
       <div style="display:flex;gap:4px;flex-wrap:wrap">
-        <span class="bc-seg bc-c">${t.cust}</span><span class="bc-seg bc-p">${t.prod}</span><span class="bc-seg bc-q">${t.qty}</span><span class="bc-seg bc-col">${COLORS[t.col]||t.col}</span>
+        <span class="bc-seg bc-c">${t.cust}</span><span class="bc-seg bc-p">${t.prod}</span>${t.size?`<span class="bc-seg bc-s">מידה ${t.size}</span>`:''}<span class="bc-seg bc-q">${t.qty}</span><span class="bc-seg bc-col">${COLORS[t.col]||t.col}</span>
         ${t.taskType?`<span class="badge gray">📋 ${esc(t.taskType)}</span>`:''}
       </div>
     </div>`).join('');
@@ -3627,7 +3726,7 @@ function renderTasks(){
         </div>
       </div>
       <div style="display:flex;gap:4px;flex-wrap:wrap">
-        <span class="bc-seg bc-c">לקוח ${t.cust}</span><span class="bc-seg bc-p">${t.prod}</span><span class="bc-seg bc-q">${t.qty} יח'</span><span class="bc-seg bc-col">${COLORS[t.col]||t.col}</span>
+        <span class="bc-seg bc-c">לקוח ${t.cust}</span><span class="bc-seg bc-p">${t.prod}</span>${t.size?`<span class="bc-seg bc-s">מידה ${t.size}</span>`:''}<span class="bc-seg bc-q">${t.qty} יח'</span><span class="bc-seg bc-col">${COLORS[t.col]||t.col}</span>
         ${t.taskType?`<span class="badge gray">📋 ${esc(t.taskType)}</span>`:''}
         ${t.paused?`<span class="badge" style="background:#e0e7ff;color:#4338ca">⏸ ${T.task_paused}${pausedStr?' '+pausedStr:''}</span>`:''}
         ${over?'<span class="badge amber">⚠ ארוכה</span>':''}
@@ -3757,14 +3856,14 @@ async function buildPersonalReport(){
   // קיבוץ לפי מוצר
   const byProd={};
   myTasks.forEach(t=>{
-    const key=t.prod;
-    if(!byProd[key])byProd[key]={prod:t.prod,cust:t.cust,taskType:t.taskType||'',tasks:[]};
+    const key=t.prod+'_'+(t.size||'');
+    if(!byProd[key])byProd[key]={prod:t.prod,cust:t.cust,size:t.size||'',taskType:t.taskType||'',tasks:[]};
     byProd[key].tasks.push(t);
   });
   const prodRows=Object.values(byProd).map(p=>{
     const secs=calcActualTaskTime(p.tasks);
     const units=p.tasks.reduce((s,t)=>s+(t.qty||0),0);
-    return{prod:p.prod,cust:p.cust,taskType:p.taskType,secs,units};
+    return{prod:p.prod,cust:p.cust,size:p.size,taskType:p.taskType,secs,units};
   }).sort((a,b)=>b.secs-a.secs);
   const T=LANGS[currentLang];
   // סה"כ שעות נוכחות מ-attHistory + היום
@@ -3800,7 +3899,7 @@ async function buildPersonalReport(){
         <th style="text-align:right;padding:6px 8px">${T.rep_time||'שעות'}</th>
       </tr></thead>
       <tbody>${prodRows.map(r=>`<tr style="border-bottom:0.5px solid var(--b)">
-        <td style="padding:7px 8px"><span class="bc-seg bc-p">${r.prod}</span> <span style="font-size:11px;color:var(--txt3)">לקוח ${r.cust}</span></td>
+        <td style="padding:7px 8px"><span class="bc-seg bc-p">${r.prod}</span>${r.size?` <span class="bc-seg bc-s">מידה ${r.size}</span>`:''} <span style="font-size:11px;color:var(--txt3)">לקוח ${r.cust}</span></td>
         <td style="padding:7px 8px;color:var(--txt2)">${esc(r.taskType||'—')}</td>
         <td style="padding:7px 8px">${r.units}</td>
         <td style="padding:7px 8px"><span class="badge blue">${(r.secs/3600).toFixed(1)} ${T.hours||"שע'"}</span></td>
@@ -3887,6 +3986,7 @@ async function buildRep(){
     <td>${esc(t.taskType||'—')}</td>
     <td><span class="bc-seg bc-c">${t.cust}</span></td>
     <td><span class="bc-seg bc-p">${t.prod}</span></td>
+    <td>${t.size?`<span class="bc-seg bc-s">${t.size}</span>`:'—'}</td>
     <td>${t.qty}</td><td>${COLORS[t.col]||t.col}</td>
     <td>${stStr}</td><td>${etStr}</td>
     <td>${t.done?fmtM(t.duration||0):'<span class="badge amber">'+fmtS(t.elapsed||0)+'</span>'}</td>
@@ -3983,13 +4083,13 @@ async function exportCSV(){
     const d=new Date(t.startTime).toISOString().slice(0,10);
     return(!wf||t.workerName===wf)&&(!cf||t.cust===cf)&&(!pf||t.prod===pf)&&(!fromD||d>=fromD)&&(!toD||d<=toD);
   });
-  const rows=[['עובד','מחלקה','לקוח','מוצר','כמות','צבע','שעת התחלה','שעת סיום','משך (דק)','סטטוס','תאריך']];
+  const rows=[['עובד','מחלקה','לקוח','מוצר','מידה','כמות','צבע','שעת התחלה','שעת סיום','משך (דק)','סטטוס','תאריך']];
   all.forEach(t=>{
     const d=new Date(t.startTime);
     const et=t.endTime?new Date(t.endTime):null;
     const stStr=pad2(d.getHours())+':'+pad2(d.getMinutes());
     const etStr=et?pad2(et.getHours())+':'+pad2(et.getMinutes()):'—';
-    rows.push([t.workerName,t.dept,t.cust,t.prod,t.qty,COLORS[t.col]||t.col,stStr,etStr,t.done?Math.round((t.duration||0)/60):Math.round((t.elapsed||0)/60),t.done?'הושלם':'פעיל',d.toLocaleDateString('he-IL')]);
+    rows.push([t.workerName,t.dept,t.cust,t.prod,t.size||'',t.qty,COLORS[t.col]||t.col,stStr,etStr,t.done?Math.round((t.duration||0)/60):Math.round((t.elapsed||0)/60),t.done?'הושלם':'פעיל',d.toLocaleDateString('he-IL')]);
   });
   const csv='﻿'+'sep=,\n'+rows.map(r=>r.join(',')).join('\n');
   const blob2=new Blob([csv],{type:'text/csv;charset=utf-8'});
@@ -4434,7 +4534,7 @@ function renderDash(){
     <div class="row">
       <div style="flex:1"><span style="font-size:13px;font-weight:500">${esc(t.workerName)}</span>
       <span class="badge ${t.endTime?'green':'blue'}" style="margin-right:6px">${t.endTime?T.completed:T.active}</span>
-      <div style="font-size:11px;color:var(--txt3)">לקוח ${t.cust} · מוצר ${t.prod} · ${t.qty===0?'<span style="color:#d97706;font-weight:700">⏳ כמות פתוחה</span>':t.qty+' יח\''}${t.isTotal?' · <span style="color:#059669;font-weight:700">📦 כל הכמות</span>':' · '+(COLORS[t.col]||t.col)}</div></div>
+      <div style="font-size:11px;color:var(--txt3)">לקוח ${t.cust} · מוצר ${t.prod}${t.size?' · מידה '+t.size:''} · ${t.qty===0?'<span style="color:#d97706;font-weight:700">⏳ כמות פתוחה</span>':t.qty+' יח\''}${t.isTotal?' · <span style="color:#059669;font-weight:700">📦 כל הכמות</span>':' · '+(COLORS[t.col]||t.col)}</div></div>
       <span style="font-size:12px;color:var(--txt2)">${t.endTime?fmtM(t.duration||0):fmtS(t.elapsed||0)}</span>
     </div>`).join(''):`<div style="color:var(--txt3);font-size:13px;padding:.5rem 0">${T.dash_no_activity}</div>`;
 }
@@ -4487,7 +4587,7 @@ function renderMgrTasks(){
       <div class="row">
         <div style="flex:1">
           <div style="font-size:13px;font-weight:500">${esc(t.workerName)}</div>
-          <div style="font-size:11px;color:var(--txt3)">לקוח ${t.cust} | ${t.prod} | ${t.qty} יח'</div>
+          <div style="font-size:11px;color:var(--txt3)">לקוח ${t.cust} | ${t.prod}${t.size?' | מידה '+t.size:''} | ${t.qty} יח'</div>
           <div style="font-size:11px;color:var(--txt3)">▶ ${(()=>{const d=new Date(t.startTime);return pad2(d.getHours())+':'+pad2(d.getMinutes());})()}</div>
         </div>
         <div style="display:flex;gap:4px">
@@ -4841,6 +4941,8 @@ async function tsStartTask(){
     const startTime=new Date();
     for(const b of _tsBatch){
       const task={id:String(Date.now())+Math.random().toString(36).slice(2,6),workerId:w.id,workerName:w.name,dept:b.taskDept||w.dept,cust:b.cust,prod:b.prod,size:b.size,qty:b.qty,col:b.col,taskType:b.taskType,bc:b.raw,isTotal:b.isTotal||false,startTime,elapsed:0,accumulatedSec:0};
+      const exp=_expMap[taskExpectedKey(b.cust,b.prod,w.id,b.qty)];
+      if(exp?.ok&&exp.perStep?.[b.taskType]!=null)task.expectedMin=exp.perStep[b.taskType];
       if(batchId)task.batchId=batchId;
       S.activeTasks.push(task);
       if(S.fbConnected)await fbSet('activeTasks',String(task.id),{...task,startTime:task.startTime.toISOString()});
@@ -5121,6 +5223,8 @@ async function mgrStartTask(){
   const startTime=new Date();
   for(const b of _mgrBatch){
     const newTask={id:String(Date.now())+Math.random().toString(36).slice(2,6),workerId:empId,workerName:w.name,dept:b.taskDept||w.dept,cust:b.cust,prod:b.prod,size:b.size,qty:b.qty,col:b.col,taskType:b.taskType,bc:b.raw,isTotal:b.isTotal||false,startTime,elapsed:0,accumulatedSec:0};
+    const expM=_expMap[taskExpectedKey(b.cust,b.prod,empId,b.qty)];
+    if(expM?.ok&&expM.perStep?.[b.taskType]!=null)newTask.expectedMin=expM.perStep[b.taskType];
     if(batchId)newTask.batchId=batchId;
     S.activeTasks.unshift(newTask);
     if(S.fbConnected)await fbSet('activeTasks',newTask.id,{...newTask,startTime:newTask.startTime.toISOString()});
@@ -7614,6 +7718,7 @@ async function saveProduct(){
     if(p)await fbSet('products',p.id,{...p,images:p.images,docs:p.docs.map(d=>({name:d.name,data:d.data}))});
   }
   closeProdModal();renderProducts();
+  _expMap={}; // התמחור אולי השתנה — ניקוי cache של צפי הזמן
 }
 
 async function deleteProduct(id){
@@ -7649,7 +7754,7 @@ function doPrintChoice(){
   const now=new Date().toLocaleDateString('he-IL');
   let html='';
   if(val==='detail'||val==='all'){
-    html+=`<div class="card"><div class="sec">פירוט לפי לקוח ומוצר</div><div class="tbl-wrap"><table><thead><tr><th>עובד</th><th>מחלקה</th><th>סוג משימה</th><th>לקוח</th><th>מוצר</th><th>כמות</th><th>צבע</th><th>התחלה</th><th>סיום</th><th>משך</th><th>סטטוס</th></tr></thead><tbody>${document.getElementById('rp-body')?.innerHTML||''}</tbody></table></div></div>`;
+    html+=`<div class="card"><div class="sec">פירוט לפי לקוח ומוצר</div><div class="tbl-wrap"><table><thead><tr><th>עובד</th><th>מחלקה</th><th>סוג משימה</th><th>לקוח</th><th>מוצר</th><th>מידה</th><th>כמות</th><th>צבע</th><th>התחלה</th><th>סיום</th><th>משך</th><th>סטטוס</th></tr></thead><tbody>${document.getElementById('rp-body')?.innerHTML||''}</tbody></table></div></div>`;
   }
   if(val==='summary'||val==='all'){
     html+=`<div class="card" style="margin-top:12px"><div class="sec">👥 דוח מרוכז — שעות לפי עובד</div>${document.getElementById('rp-summary-body')?.innerHTML||''}</div>`;

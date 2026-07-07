@@ -41,12 +41,21 @@ service cloud.firestore {
         && request.resource.data.get('permissions', []) == resource.data.get('permissions', []));
     }
 
+    // הגדרות אפליקציה: קריאה לכולם (עובדים צריכים shiftEnd/factoryIP/לקוחות/צבעים);
+    // telegramSettings כתיבה למנהל בלבד — factoryIP/shiftEnd הם ערכי אכיפה
+    // שפונקציות login/wifiMonitor/attendanceCloser מסתמכות עליהם
+    match /appSettings/{docId} {
+      allow read: if hasRole();
+      allow write: if isMgr() || (hasRole() && docId != 'telegramSettings');
+    }
+
     // שאר האוספים — כל משתמש מחובר עם role
     match /{collection}/{docId} {
       allow read, write: if hasRole()
         && collection != 'credentials'
         && collection != 'adminSettings'
-        && collection != 'workers';
+        && collection != 'workers'
+        && collection != 'appSettings';
     }
   }
 }

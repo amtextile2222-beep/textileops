@@ -255,36 +255,76 @@ exports.updateCredentials = functions.https.onCall(async (data, context) => {
   throw new functions.https.HttpsError('invalid-argument', 'פעולה לא מוכרת');
 });
 
-// ─── מיגרציה חד-פעמית לשלב 2 — מוגנת במפתח מ-config (app.migratekey) ───
-// מעביר hashes/תבניות פנים ל-credentials, מאפס deviceId (מעבר לזיהוי UUID),
-// מוסיף שדות מירור (faceRegistered/deviceRegistered), ומעביר costs ל-adminSettings
-exports.migratePhase2 = functions.https.onCall(async (data, context) => {
-  const key = (functions.config().app || {}).migratekey || '';
-  if (!key || String(data && data.key) !== key) throw new functions.https.HttpsError('permission-denied', 'מפתח שגוי');
-  const snap = await db.collection('workers').get();
-  let migrated = 0;
-  for (const doc of snap.docs) {
-    const w = doc.data();
-    const creds = {};
-    if (w.pass !== undefined) creds.pass = w.pass;
-    if (w.faceDescriptor !== undefined) creds.faceDescriptor = w.faceDescriptor;
-    if (w.faceDescriptors !== undefined) creds.faceDescriptors = w.faceDescriptors;
-    if (Object.keys(creds).length) await db.collection('credentials').doc(doc.id).set(creds, { merge: true });
-    await doc.ref.update({
-      pass: FieldValue.delete(), faceDescriptor: FieldValue.delete(), faceDescriptors: FieldValue.delete(), deviceId: FieldValue.delete(),
-      faceRegistered: !!(w.faceDescriptor || (w.faceDescriptors && Object.keys(w.faceDescriptors).length)),
-      deviceRegistered: false
-    });
-    migrated++;
+// ─── תמחור: שעה עמוסה + תקורה בצד שרת (שיקוף loadedHourBreakdown/overheadBreakdown מהלקוח) ───
+// נדרש כאן כי workerRates ב-adminSettings שאחראי לא רשאי לקרוא — השרת מחזיר דקות בלבד.
+function loadedRateServer(costs, nWorkers, wid) {
+  const daily = (costs.workerRates || {})[wid] || 0;
+  if (!daily) return 0;
+  const wdy = costs.workDaysYear || 250;
+  const base = daily / 8;
+  const transport = ((costs.workerTransport || {})[wid] || 0) / 8;
+  const sev = daily * ((costs.severancePct != null ? costs.severancePct : 8.33) / 100) / 8;
+  const hol = daily * ((costs.holidayDays != null ? costs.holidayDays : 4) / wdy) / 8;
+  const gifts = (costs.giftsAnnual || 0) / wdy / 8;
+  const trip = (costs.tripAnnual || 0) / (nWorkers || 1) / wdy / 8;
+  const ins = ((costs.workerInsurance || {})[wid] || 0) / wdy / 8;
+  return base + transport + sev + hol + gifts + trip + ins;
+}
+function overheadPerHourServer(costs, nWorkers) {
+  const fixedMonthly = (costs.fixedDaily || 0) * (costs.workDaysMonth || 22) + (costs.fixedMonthly || 0) + (costs.fixedAnnual || 0) / 12;
+  const months = (costs.costMonths || []).slice().sort((a, b) => String(b.month).localeCompare(String(a.month))).slice(0, 3);
+  const varAvg = months.length ? months.reduce((s, m) => s + (m.variableTotal || 0), 0) / months.length : 0;
+  const varEst = varAvg * (1 + ((costs.overheadBufferPct != null ? costs.overheadBufferPct : 10) / 100));
+  const hours = (nWorkers || 0) * (costs.workDaysMonth || 22) * 8;
+  return hours ? (fixedMonthly + varEst) / hours : 0;
+}
+
+// צפי זמן למשימה — לפי תקציב ₪ של השלבים (מתמחור המוצר) ÷ עלות שעת העובד הספציפי.
+// קלט: {cust, prod, workerId, qty, stepNames[]} — פלט: {ok, perStep:{שם:דקות}, totalMin}
+exports.calcTaskExpected = functions.https.onCall(async (data, context) => {
+  const role = callerRole(context);
+  if (role !== 'manager' && role !== 'supervisor') throw new functions.https.HttpsError('permission-denied', 'אין הרשאה');
+  const d = data || {};
+  const cust = String(d.cust || ''), prod = String(d.prod || ''), workerId = String(d.workerId || '');
+  const qty = Math.max(0, parseInt(d.qty) || 0);
+  const stepNames = Array.isArray(d.stepNames) ? d.stepNames.map(String).slice(0, 60) : [];
+  if (!cust || !prod || !workerId || !qty || !stepNames.length) return { ok: false, reason: 'missing' };
+  const pq = await db.collection('products').where('cust', '==', cust).where('prod', '==', prod).limit(1).get();
+  if (pq.empty) return { ok: false, reason: 'no-product' };
+  const p = pq.docs[0].data();
+  const price = +p.unitPrice || 0, profit = +p.targetProfitPct || 0, mats = +p.directMaterialsCost || 0;
+  if (!price) return { ok: false, reason: 'no-pricing' };
+  const budget = price * (1 - profit / 100) - mats;
+  if (budget <= 0) return { ok: false, reason: 'negative-budget' };
+  const costsSnap = await db.collection('adminSettings').doc('costs').get();
+  if (!costsSnap.exists) return { ok: false, reason: 'no-costs' };
+  const costs = costsSnap.data();
+  const workersSnap = await db.collection('workers').get();
+  const active = workersSnap.docs.map(x => ({ id: x.id, ...x.data() })).filter(w => w.role !== 'manager' && !w.disabled);
+  const nW = active.length || 1;
+  const oh = overheadPerHourServer(costs, nW);
+  let rate = loadedRateServer(costs, nW, workerId);
+  if (!rate) { // אין שכר לעובד — ממוצע כל העובדים עם שכר (כמו fallback בלקוח)
+    const rated = active.filter(w => (costs.workerRates || {})[w.id]);
+    rate = rated.length ? rated.reduce((s, w) => s + loadedRateServer(costs, nW, w.id), 0) / rated.length : 0;
   }
-  const costs = await db.collection('appSettings').doc('costs').get();
-  let costsMoved = false;
-  if (costs.exists) {
-    await db.collection('adminSettings').doc('costs').set(costs.data());
-    await costs.ref.delete();
-    costsMoved = true;
+  const hourCost = rate + oh;
+  if (!(hourCost > 0)) return { ok: false, reason: 'no-rate' };
+  const weights = costs.difficultyWeights || { 1: 1, 2: 1.5, 3: 2, 4: 2.5, 5: 3.5 };
+  const lvl = (p.workSteps || []).filter(s => s && typeof s === 'object' && +s.level > 0);
+  const totW = lvl.reduce((s, x) => s + (+weights[+x.level] || 1), 0);
+  if (!totW) return { ok: false, reason: 'no-levels' };
+  const perStep = {};
+  let total = 0;
+  for (const name of stepNames) {
+    const st = lvl.find(s => s.name === name);
+    if (!st) continue;
+    const min = budget * (+weights[+st.level] || 1) / totW * qty / hourCost * 60;
+    perStep[name] = Math.round(min * 10) / 10;
+    total += min;
   }
-  return { ok: true, workers: migrated, costsMoved };
+  if (!Object.keys(perStep).length) return { ok: false, reason: 'no-steps' };
+  return { ok: true, perStep, totalMin: Math.round(total * 10) / 10, qty };
 });
 
 // שליחת Push Notification
@@ -480,10 +520,13 @@ exports.longTaskMonitor = functions.pubsub.schedule('every 5 minutes').onRun(asy
     const now = Date.now();
     for (const doc of tasksSnap.docs) {
       const t = doc.data();
-      if (!t.startTime || !t.workerId) continue;
+      if (!t.startTime || !t.workerId || t.paused) continue;
       const start = new Date(t.startTime).getTime();
       const elapsed = now - start;
-      if (elapsed < threshMs) continue;
+      // סף פר-משימה: אם יש צפי מהתמחור (expectedMin) — הוא הקובע; אחרת הסף הקבוע
+      const hasExpected = typeof t.expectedMin === 'number' && t.expectedMin > 0;
+      const limitMs = hasExpected ? t.expectedMin * 60000 : threshMs;
+      if (elapsed < limitMs) continue;
 
       // שלח רק פעם אחת — בדוק אם כבר שלחנו התראה
       const alertKey = 'longAlert_' + doc.id;
@@ -493,22 +536,37 @@ exports.longTaskMonitor = functions.pubsub.schedule('every 5 minutes').onRun(asy
       const workerSnap = await db.collection('workers').doc(t.workerId).get();
       if (!workerSnap.exists) continue;
       const workerData = workerSnap.data();
-      const fcmToken = workerData.fcmToken;
-      if (!fcmToken) continue;
-      const pushPrefs = workerData.pushPrefs || {};
-      if (pushPrefs.task_long === false) continue;
-
       const mins = Math.round(elapsed / 60000);
-      await admin.messaging().send({
-        token: fcmToken,
-        notification: {
-          title: '⚠️ משימה ארוכה',
-          body: 'המשימה שלך פעילה כבר ' + mins + ' דקות'
-        },
-        android: { priority: 'high', notification: { sound: 'default', channelId: 'textileops' } },
-        webpush: { notification: { icon: 'https://amtextile2222-beep.github.io/textileops/icon-192.png', requireInteraction: true } }
-      });
-      await db.collection('taskAlerts').doc(alertKey).set({ sent: true, ts: now, taskId: doc.id });
+
+      // חריגה מצפי התמחור — גם טלגרם למנהל (לא רק push לעובד)
+      if (hasExpected) {
+        const { token: tgT, chatId: tgC } = tgCfg();
+        if (tgT && tgC) {
+          await sendTelegram(tgT, tgC,
+            '⏱ TextileOps — חריגה מזמן מתוקצב\n👤 עובד: ' + (t.workerName || t.workerId) +
+            (t.taskType ? '\n🔧 שלב: ' + t.taskType : '') +
+            '\n📦 מוצר: ' + (t.prod || '') + ' · ' + (t.qty || 0) + " יח'" +
+            '\n🎯 מוקצב: ' + Math.round(t.expectedMin) + ' דק\' · בפועל: ' + mins + ' דק\'' +
+            '\n🕐 שעה: ' + ilTime()).catch(() => {});
+        }
+      }
+
+      const fcmToken = workerData.fcmToken;
+      const pushPrefs = workerData.pushPrefs || {};
+      if (fcmToken && pushPrefs.task_long !== false) {
+        await admin.messaging().send({
+          token: fcmToken,
+          notification: {
+            title: hasExpected ? '⏱ חריגה מהזמן המוקצב' : '⚠️ משימה ארוכה',
+            body: hasExpected
+              ? 'למשימה הוקצבו ' + Math.round(t.expectedMin) + ' דקות — עברו כבר ' + mins + ' דקות'
+              : 'המשימה שלך פעילה כבר ' + mins + ' דקות'
+          },
+          android: { priority: 'high', notification: { sound: 'default', channelId: 'textileops' } },
+          webpush: { notification: { icon: 'https://amtextile2222-beep.github.io/textileops/icon-192.png', requireInteraction: true } }
+        });
+      }
+      await db.collection('taskAlerts').doc(alertKey).set({ sent: true, ts: now, taskId: doc.id, expected: hasExpected ? t.expectedMin : null });
       console.log('longTaskMonitor: sent alert for task', doc.id);
     }
   } catch (e) {
