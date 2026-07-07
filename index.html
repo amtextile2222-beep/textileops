@@ -3331,8 +3331,43 @@ function calcActualTaskTime(tasks){
   return totalMs/1000;
 }
 // ─── BATCH STATE ─────────────────────────────────────────────
-let _tsBatch=[];  // {raw,cust,prod,size,qty,col,isTotal,taskType,taskDept}
+let _tsBatch=[];  // {raw,cust,prod,size,qty,col,isTotal,taskType,taskDept,prodStamp}
 let _mgrBatch=[];
+// ─── חסימת סריקה כפולה של אותו שלב (ברקוד+שלב) ─────────────────
+// חותמת מופע-מוצר = תאריך הקמת המוצר (הרשומה העדכנית ביותר ללקוח+מוצר).
+// הזמנה חדשה נכנסת כרשומת מוצר חדשה עם תאריך חדש ⇒ אינה נחסמת מול היסטוריה ישנה.
+function prodStampFor(cust,prod){
+  let mx=0;
+  for(const p of (S.products||[])){
+    if(p.cust!==cust||p.prod!==prod)continue;
+    const c=+p.createdAt||parseInt(String(p.id).replace(/\D/g,''))||0;
+    if(c>mx)mx=c;
+  }
+  return mx;
+}
+// האם ברקוד+שלב כבר פעיל (לא מושהה) או כבר בוצע עבור אותו מופע-מוצר.
+// מושהות מוחרגות — הן מיועדות לחידוש בסריקה חוזרת. היסטוריה ישנה בלי חותמת נחסמת תמיד.
+function stepAlreadyTaken(raw,taskType,stamp){
+  const tt=taskType||'';
+  const same=t=>t.bc===raw&&(t.taskType||'')===tt;
+  if(S.activeTasks.some(t=>same(t)&&!t.paused))return 'active';
+  if(S.histTasks.some(t=>same(t)&&(t.prodStamp==null||t.prodStamp===stamp)))return 'done';
+  return '';
+}
+// מוסיף שלבים לסל עם חסימת כפילויות (בסל / פעיל / בוצע). מחזיר מערך תיאורים של שלבים שנחסמו.
+function addStepsToBatch(batch,base,types){
+  const stamp=prodStampFor(base.cust,base.prod);
+  const skipped=[];
+  for(const t of types){
+    const tt=t||'';const label=tt||'ללא שלב';
+    if(batch.some(b=>b.raw===base.raw&&(b.taskType||'')===tt)){skipped.push(label+' — כבר בסל');continue;}
+    const st=stepAlreadyTaken(base.raw,tt,stamp);
+    if(st==='active'){skipped.push(label+' — פעיל כעת');continue;}
+    if(st==='done'){skipped.push(label+' — כבר בוצע');continue;}
+    batch.push({...base,taskType:tt,prodStamp:stamp});
+  }
+  return skipped;
+}
 
 function genBatchId(){return 'b'+Date.now().toString(36)+Math.random().toString(36).slice(2,5);}
 
@@ -5063,12 +5098,13 @@ function tsAddToBatch(){
   const taskType=useSteps?'':((document.getElementById('ts-tasktype').value||'').trim());
   const taskDept=(document.getElementById('ts-dept').value||'').trim();
   const types=useSteps?checkedSteps:[taskType||''];
-  types.forEach(tt=>_tsBatch.push({raw,cust,prod,size,qty,col,isTotal,taskType:tt,taskDept}));
+  const _sk=addStepsToBatch(_tsBatch,{raw,cust,prod,size,qty,col,isTotal,taskDept},types);
   document.getElementById('ts-bc-inp').value='';
   document.getElementById('ts-bc-prev').innerHTML='';
   document.getElementById('ts-tasktype').value='';
   renderTsBatchQueue();
-  showToast('➕ נוסף לסל');
+  if(_sk.length)showToast('⛔ לא נוסף: '+_sk.join(' · '),'var(--red-txt)',7000);
+  else showToast('➕ נוסף לסל');
 }
 async function tsStartTask(){
   const empId=document.getElementById('ts-emp-sel').value;
@@ -5088,7 +5124,8 @@ async function tsStartTask(){
     const taskType=useSteps?'':((document.getElementById('ts-tasktype').value||'').trim());
     const taskDept=(document.getElementById('ts-dept').value||'').trim();
     const types=useSteps?checkedSteps:[taskType||''];
-    types.forEach(tt=>_tsBatch.push({raw,cust,prod,size,qty,col,isTotal,taskType:tt,taskDept}));
+    const _sk=addStepsToBatch(_tsBatch,{raw,cust,prod,size,qty,col,isTotal,taskDept},types);
+    if(_sk.length)showToast('⛔ לא נוסף: '+_sk.join(' · '),'var(--red-txt)',7000);
   }
   if(!_tsBatch.length){showToast(T.err_barcode_13||'⚠ סרוק לפחות ברקוד אחד','var(--red-txt)');return;}
   // בדיקת משימות מושהות
@@ -5109,7 +5146,7 @@ async function tsStartTask(){
     const batchId=_tsBatch.length>1?genBatchId():null;
     const startTime=new Date();
     for(const b of _tsBatch){
-      const task={id:String(Date.now())+Math.random().toString(36).slice(2,6),workerId:w.id,workerName:w.name,dept:b.taskDept||w.dept,cust:b.cust,prod:b.prod,size:b.size,qty:b.qty,col:b.col,taskType:b.taskType,bc:b.raw,isTotal:b.isTotal||false,startTime,elapsed:0,accumulatedSec:0};
+      const task={id:String(Date.now())+Math.random().toString(36).slice(2,6),workerId:w.id,workerName:w.name,dept:b.taskDept||w.dept,cust:b.cust,prod:b.prod,size:b.size,qty:b.qty,col:b.col,taskType:b.taskType,bc:b.raw,isTotal:b.isTotal||false,startTime,elapsed:0,accumulatedSec:0,prodStamp:b.prodStamp};
       const exp=_expMap[taskExpectedKey(b.cust,b.prod,w.id,b.qty)];
       if(exp?.ok&&exp.perStep?.[b.taskType]!=null)task.expectedMin=exp.perStep[b.taskType];
       if(batchId)task.batchId=batchId;
@@ -5350,10 +5387,12 @@ function mgrAddToBatch(){
   const taskType=mgrUseSteps?'':((document.getElementById('mgr-tasktype').value||'').trim());
   const taskDept=(document.getElementById('mgr-dept').value||'').trim();
   const types=mgrUseSteps?mgrCheckedSteps:[taskType||''];
-  types.forEach(tt=>_mgrBatch.push({raw,cust,prod,size,qty,col,isTotal,taskType:tt,taskDept}));
+  const _sk=addStepsToBatch(_mgrBatch,{raw,cust,prod,size,qty,col,isTotal,taskDept},types);
   document.getElementById('mgr-bc-inp').value='';parseMgrBc('');
   document.getElementById('mgr-tasktype').value='';document.getElementById('mgr-dept').value='';
-  renderMgrBatchQueue();showToast('➕ נוסף לסל');
+  renderMgrBatchQueue();
+  if(_sk.length)showToast('⛔ לא נוסף: '+_sk.join(' · '),'var(--red-txt)',7000);
+  else showToast('➕ נוסף לסל');
 }
 async function mgrStartTask(){
   const empId=document.getElementById('mgr-emp-sel').value;
@@ -5373,7 +5412,8 @@ async function mgrStartTask(){
     const taskType=mgrUseSteps?'':((document.getElementById('mgr-tasktype').value||'').trim());
     const taskDept=(document.getElementById('mgr-dept').value||'').trim();
     const types=mgrUseSteps?mgrCheckedSteps:[taskType||''];
-    types.forEach(tt=>_mgrBatch.push({raw,cust,prod,size,qty,col,isTotal,taskType:tt,taskDept}));
+    const _sk=addStepsToBatch(_mgrBatch,{raw,cust,prod,size,qty,col,isTotal,taskDept},types);
+    if(_sk.length)showToast('⛔ לא נוסף: '+_sk.join(' · '),'var(--red-txt)',7000);
   }
   if(!_mgrBatch.length){showToast(T.err_barcode_13||'⚠ סרוק לפחות ברקוד אחד','var(--red-txt)');return;}
   const newBcs=_mgrBatch.map(b=>b.raw);
@@ -5391,7 +5431,7 @@ async function mgrStartTask(){
   const batchId=_mgrBatch.length>1?genBatchId():null;
   const startTime=new Date();
   for(const b of _mgrBatch){
-    const newTask={id:String(Date.now())+Math.random().toString(36).slice(2,6),workerId:empId,workerName:w.name,dept:b.taskDept||w.dept,cust:b.cust,prod:b.prod,size:b.size,qty:b.qty,col:b.col,taskType:b.taskType,bc:b.raw,isTotal:b.isTotal||false,startTime,elapsed:0,accumulatedSec:0};
+    const newTask={id:String(Date.now())+Math.random().toString(36).slice(2,6),workerId:empId,workerName:w.name,dept:b.taskDept||w.dept,cust:b.cust,prod:b.prod,size:b.size,qty:b.qty,col:b.col,taskType:b.taskType,bc:b.raw,isTotal:b.isTotal||false,startTime,elapsed:0,accumulatedSec:0,prodStamp:b.prodStamp};
     const expM=_expMap[taskExpectedKey(b.cust,b.prod,empId,b.qty)];
     if(expM?.ok&&expM.perStep?.[b.taskType]!=null)newTask.expectedMin=expM.perStep[b.taskType];
     if(batchId)newTask.batchId=batchId;
@@ -7937,7 +7977,7 @@ async function saveProduct(){
     }
   }else{
     const id='p'+Date.now();
-    S.products.push({id,prod,cust,name,images:_prodImgs,docs:_prodDocs,quantities,stageLog,stageSkipped,workSteps,unitPrice,targetProfitPct,directMaterialsCost});
+    S.products.push({id,createdAt:Date.now(),prod,cust,name,images:_prodImgs,docs:_prodDocs,quantities,stageLog,stageSkipped,workSteps,unitPrice,targetProfitPct,directMaterialsCost});
   }
   saveLS();
   if(S.fbConnected){
@@ -8492,7 +8532,7 @@ async function raumaConfirm(){
     if(size||color)quantities.push({size,color,qty});
   });
   const id='p'+Date.now();
-  const newProd={id,prod,cust,name,images:[],docs:[],quantities,stageLog:[],stageSkipped:[]};
+  const newProd={id,createdAt:Date.now(),prod,cust,name,images:[],docs:[],quantities,stageLog:[],stageSkipped:[]};
   S.products.push(newProd);
   saveLS();
   if(S.fbConnected)await fbSet('products',id,{...newProd});
