@@ -4147,7 +4147,9 @@ function buildBudgetReport(fl){
   if(!ctx){card.classList.add('hidden');return;}
   card.classList.remove('hidden');
   const nd=normalizeBatchDurations(fl); // תיקון זמן batch מנופח בקריאה
-  const rows=[];
+  // איחוד לפי עובד+מוצר+שלב: העובד סורק מידות במקובץ ולא בזמן-אמת, לכן חישוב פר-סריקה
+  // מייצר יעילות מעוותת. מסכמים את כל הסריקות של אותו שלב-מוצר לשורה הוגנת אחת.
+  const grp={};
   for(const t of fl){
     if(!t.done||!(t.duration>0))continue;
     const p=S.products.find(x=>x.cust===t.cust&&x.prod===t.prod);if(!p)continue;
@@ -4161,8 +4163,11 @@ function buildBudgetReport(fl){
     }
     if(!(alloc>0))continue;
     const actual=(nd[t.id]||0)/60;
-    rows.push({t,alloc,actual,eff:actual>0?alloc/actual*100:0});
+    const key=t.workerId+'|'+t.cust+'|'+t.prod+'|'+t.taskType;
+    const g=grp[key]||(grp[key]={workerName:t.workerName,taskType:t.taskType,cust:t.cust,prod:t.prod,qty:0,alloc:0,actual:0});
+    g.qty+=(t.qty||0);g.alloc+=alloc;g.actual+=actual;
   }
+  const rows=Object.values(grp).map(g=>({...g,eff:g.actual>0?g.alloc/g.actual*100:0}));
   if(!rows.length){el.innerHTML='<div style="color:var(--txt3);font-size:12px;padding:.5rem 0">אין משימות שהושלמו עם תמחור בטווח הנבחר</div>';return;}
   rows.sort((a,b)=>a.eff-b.eff);
   const totAlloc=rows.reduce((s,r)=>s+r.alloc,0),totAct=rows.reduce((s,r)=>s+r.actual,0);
@@ -4172,9 +4177,9 @@ function buildBudgetReport(fl){
   <div class="tbl-wrap"><table>
     <thead><tr><th>עובד</th><th>שלב</th><th>מוצר</th><th>כמות</th><th>מוקצב</th><th>בפועל</th><th>יעילות</th></tr></thead>
     <tbody>${rows.map(r=>`<tr${r.actual>r.alloc?' style="background:var(--red-bg,#fee2e2)"':''}>
-      <td>${esc(r.t.workerName)}</td><td style="font-size:12px">${esc(r.t.taskType||'—')}</td>
-      <td><span class="bc-seg bc-c">${r.t.cust}</span> <span class="bc-seg bc-p">${r.t.prod}</span></td>
-      <td>${r.t.qty||0}</td><td>${fmtExpMin(r.alloc)}</td><td>${fmtExpMin(r.actual)}</td>
+      <td>${esc(r.workerName)}</td><td style="font-size:12px">${esc(r.taskType||'—')}</td>
+      <td><span class="bc-seg bc-c">${r.cust}</span> <span class="bc-seg bc-p">${r.prod}</span></td>
+      <td>${r.qty||0}</td><td>${fmtExpMin(r.alloc)}</td><td>${fmtExpMin(r.actual)}</td>
       <td>${effBadge(r.eff)}</td></tr>`).join('')}</tbody>
     <tfoot><tr style="border-top:1.5px solid var(--b);font-weight:600;background:var(--bg2)">
       <td colspan="4">סה"כ (${rows.length} משימות)</td>
