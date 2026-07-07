@@ -7253,11 +7253,20 @@ function openProductModal(id){
     </div>
     ${renderStagesHtml(p)}
     <div class="sec" style="margin-top:14px;margin-bottom:8px">🔧 שלבי עבודה (לסורק + תמחור)</div>
-    <div id="pm-tasksteps-list" style="margin-bottom:8px">${(p?.workSteps||[]).map(s=>_stepRowHtml(s)).join('')}</div>
-    <button type="button" class="btn" onclick="addTaskStepRow()" style="font-size:12px">+ הוסף שלב עבודה</button>`;
+    <div id="pm-tasksteps-list" style="margin-bottom:8px" onchange="renderProductPricing()">${(p?.workSteps||[]).map(s=>_stepRowHtml(s)).join('')}</div>
+    <button type="button" class="btn" onclick="addTaskStepRow()" style="font-size:12px">+ הוסף שלב עבודה</button>
+
+    <div class="sec" style="margin-top:14px;margin-bottom:6px">💰 תמחור ליחידה</div>
+    <div style="display:grid;grid-template-columns:1fr 1fr 1fr;gap:8px;margin-bottom:8px">
+      <div class="field"><label>מחיר מכירה ₪</label><input id="pm-price" type="number" min="0" step="0.1" value="${p?.unitPrice||''}" placeholder="0" style="font-size:13px" oninput="renderProductPricing()"/></div>
+      <div class="field"><label>רווח יעד %</label><input id="pm-profit" type="number" min="0" max="95" step="1" value="${p?.targetProfitPct??''}" placeholder="0" style="font-size:13px" oninput="renderProductPricing()"/></div>
+      <div class="field"><label>חומרים ₪ <span style="font-size:10px;color:var(--txt3)">(+אריזה+הובלה)</span></label><input id="pm-materials" type="number" min="0" step="0.1" value="${p?.directMaterialsCost||''}" placeholder="0" style="font-size:13px" oninput="renderProductPricing()"/></div>
+    </div>
+    <div id="pm-pricing-result" style="margin-bottom:8px"></div>`;
   document.getElementById('prod-modal-wrap').classList.remove('hidden');
   _prodImgs=p?[...(p.images||[])]:[];
   _prodDocs=p?[...(p.docs||[])]:[];
+  renderProductPricing();
 }
 
 let _prodImgs=[], _prodDocs=[], _prodCamStream=null;
@@ -7297,7 +7306,7 @@ function _stepRowHtml(s){
     <div style="display:flex;gap:6px;align-items:center">
       <input type="text" data-f="name" value="${esc(name)}" placeholder="שם השלב (עברית)" style="flex:1;min-width:0;font-size:12px;padding:4px 8px;border-radius:6px;border:1px solid var(--brd);background:var(--card);color:var(--txt)">
       <input type="text" data-f="nameAr" value="${esc(nameAr)}" placeholder="الاسم بالعربية" dir="rtl" style="flex:1;min-width:0;font-size:12px;padding:4px 8px;border-radius:6px;border:1px solid var(--brd);background:var(--card);color:var(--txt)">
-      <button type="button" onclick="this.closest('.ts-row').remove()" style="background:none;border:none;color:var(--red);cursor:pointer;font-size:14px">✕</button>
+      <button type="button" onclick="this.closest('.ts-row').remove();renderProductPricing()" style="background:none;border:none;color:var(--red);cursor:pointer;font-size:14px">✕</button>
     </div>
     <div style="display:flex;gap:6px">
       <select data-f="level" style="flex:1;min-width:0;font-size:12px">
@@ -7309,6 +7318,73 @@ function _stepRowHtml(s){
 }
 function addTaskStepRow(){
   document.getElementById('pm-tasksteps-list').insertAdjacentHTML('beforeend',_stepRowHtml(''));
+}
+// ─── תמחור שלב ד' — תקצוב זמן לשלב לפי מחיר, רווח יעד וחומרים ───
+// תקציב עבודה+תקורה ליחידה = מחיר×(1−רווח%) − חומרים.
+// חלוקה בין השלבים עם רמת קושי לפי difficultyWeights; דקות לשלב = תקציב_שלב ÷ (שעה עמוסה של הכשירים + תקורה) × 60.
+function _pricingStepRate(station,level,avgAll){
+  // ממוצע שעה עמוסה של העובדים הכשירים לשלב (בלי סינון נוכחות); fallback: ממוצע כל העובדים עם שכר
+  if(station){
+    const q=_costWorkers().filter(w=>((w.skills||{})[station]||0)>=level&&S.costs.workerRates[w.id]);
+    if(q.length)return q.reduce((s,w)=>s+loadedHourlyRate(w.id),0)/q.length;
+  }
+  return avgAll;
+}
+function renderProductPricing(){
+  const box=document.getElementById('pm-pricing-result');if(!box)return;
+  const price=parseFloat(document.getElementById('pm-price')?.value)||0;
+  const profitPct=parseFloat(document.getElementById('pm-profit')?.value)||0;
+  const materials=parseFloat(document.getElementById('pm-materials')?.value)||0;
+  if(!price){box.innerHTML='<div style="font-size:11px;color:var(--txt3)">הזן מחיר מכירה כדי לראות תקצוב זמן לשלבים</div>';return;}
+  const budget=price*(1-profitPct/100)-materials;
+  const profitILS=price*profitPct/100;
+  const head=`<div style="font-size:12px;line-height:1.8">💵 מחיר ₪${price.toFixed(2)} − רווח ${profitPct}% (₪${profitILS.toFixed(2)}) − חומרים ₪${materials.toFixed(2)} = <b>תקציב עבודה+תקורה: ₪${budget.toFixed(2)}</b></div>`;
+  if(budget<=0){
+    box.innerHTML=`<div style="background:var(--red-bg,#fee2e2);border-radius:8px;padding:8px 10px">${head}
+      <div style="font-size:12px;color:var(--red-txt);font-weight:700;margin-top:4px">❌ המחיר לא מחזיק את יעד הרווח — לא נשאר תקציב לעבודה</div></div>`;
+    return;
+  }
+  const steps=[...document.querySelectorAll('#pm-tasksteps-list .ts-row')].map(r=>({
+    name:r.querySelector('[data-f="name"]')?.value.trim()||'',
+    level:parseInt(r.querySelector('[data-f="level"]')?.value)||0,
+    station:r.querySelector('[data-f="station"]')?.value||''
+  })).filter(s=>s.name);
+  const lvlSteps=steps.filter(s=>s.level);
+  if(!lvlSteps.length){
+    box.innerHTML=`<div style="background:var(--bg2);border-radius:8px;padding:8px 10px">${head}
+      <div style="font-size:11px;color:var(--txt3);margin-top:4px">הגדר רמת קושי לשלבים כדי לחלק את התקציב לדקות עבודה</div></div>`;
+    return;
+  }
+  const weights=S.costs.difficultyWeights||{1:1,2:1.5,3:2,4:2.5,5:3.5};
+  const totW=lvlSteps.reduce((s,x)=>s+(+weights[x.level]||1),0);
+  const oh=overheadBreakdown().perHour;
+  const rated=_costWorkers().filter(w=>S.costs.workerRates[w.id]);
+  const avgAll=rated.length?rated.reduce((s,w)=>s+loadedHourlyRate(w.id),0)/rated.length:0;
+  if(!avgAll&&!oh){
+    box.innerHTML=`<div style="background:var(--bg2);border-radius:8px;padding:8px 10px">${head}
+      <div style="font-size:11px;color:var(--amber-txt);margin-top:4px">⚠ אין נתוני עלות שעה — הזן שכר לעובדים בלשונית עלויות</div></div>`;
+    return;
+  }
+  let totalMin=0,tooShortCnt=0;
+  const rows=lvlSteps.map(s=>{
+    const share=budget*(+weights[s.level]||1)/totW;
+    const rate=_pricingStepRate(s.station,s.level,avgAll)+oh;
+    const min=rate>0?share/rate*60:0;
+    totalMin+=min;
+    const tooShort=min*60<s.level*30; // היוריסטיקה: פחות מ-30 שנ' לרמת קושי = לא ריאלי
+    if(tooShort)tooShortCnt++;
+    return`<div style="display:flex;align-items:center;gap:8px;padding:4px 0;border-bottom:0.5px solid var(--brd);font-size:12px${tooShort?';color:var(--red-txt)':''}">
+      <span style="flex:1;min-width:110px">${esc(s.name)} <span style="font-size:10px;color:var(--txt3)">(${levelName(s.level,'he')})</span></span>
+      <span style="color:var(--txt3)">₪${share.toFixed(2)}</span>
+      <span style="font-weight:700">${tooShort?'⚠ ':''}${min.toFixed(1)} דק'</span>
+    </div>`;
+  }).join('');
+  const shortWarn=tooShortCnt?`<div style="font-size:12px;color:var(--red-txt);font-weight:600;margin-top:6px;background:var(--red-bg,#fee2e2);padding:6px 10px;border-radius:8px">⚠ ${tooShortCnt} שלבים עם זמן לא ריאלי — המחיר כנראה לא מחזיק את יעד הרווח</div>`:'';
+  box.innerHTML=`<div style="background:var(--bg2);border-radius:8px;padding:8px 10px">${head}
+    <div style="font-size:11px;color:var(--txt3);margin:4px 0 2px">תקצוב זמן לשלב (לפי משקל קושי ÷ עלות שעה עמוסה+תקורה ₪${oh.toFixed(2)}):</div>
+    ${rows}
+    <div style="font-size:13px;font-weight:700;color:var(--green-txt);margin-top:6px">⏱ סה"כ זמן עבודה מתוקצב ליחידה: ${totalMin.toFixed(1)} דק'</div>
+    ${shortWarn}</div>`;
 }
 function addQtyRow(){
   const colorOpts=Object.entries(COLORS).map(([k,v])=>`<option value="${k}">${v}</option>`).join('');
@@ -7510,6 +7586,9 @@ async function saveProduct(){
     level:parseInt(r.querySelector('[data-f="level"]')?.value)||0,
     station:r.querySelector('[data-f="station"]')?.value||''
   })).filter(s=>s.name);
+  const unitPrice=parseFloat(document.getElementById('pm-price')?.value)||0;
+  const targetProfitPct=parseFloat(document.getElementById('pm-profit')?.value)||0;
+  const directMaterialsCost=parseFloat(document.getElementById('pm-materials')?.value)||0;
   if(_editProdId){
     const p=S.products.find(x=>x.id===_editProdId);
     if(p){
@@ -7523,11 +7602,11 @@ async function saveProduct(){
           sendTelegram('📦 TextileOps — מוצר עבר שלב ייצור\n🏷 מוצר: '+name+' ('+cust+'-'+prod+')\n📍 שלב: '+stageName+'\n📅 תאריך: '+s.date+' '+s.time+'\n🕐 עודכן: '+now).catch(()=>{});
         }
       }
-      Object.assign(p,{prod,cust,name,images:_prodImgs,docs:_prodDocs,quantities,stageLog,stageSkipped,workSteps});
+      Object.assign(p,{prod,cust,name,images:_prodImgs,docs:_prodDocs,quantities,stageLog,stageSkipped,workSteps,unitPrice,targetProfitPct,directMaterialsCost});
     }
   }else{
     const id='p'+Date.now();
-    S.products.push({id,prod,cust,name,images:_prodImgs,docs:_prodDocs,quantities,stageLog,stageSkipped,workSteps});
+    S.products.push({id,prod,cust,name,images:_prodImgs,docs:_prodDocs,quantities,stageLog,stageSkipped,workSteps,unitPrice,targetProfitPct,directMaterialsCost});
   }
   saveLS();
   if(S.fbConnected){
