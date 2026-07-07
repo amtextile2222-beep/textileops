@@ -577,6 +577,15 @@ code{background:var(--bg2);border:0.5px solid var(--b);border-radius:4px;padding
       <div class="sec">📦 דוח ייצור לפי שלב</div>
       <div id="rp-stages-body"></div>
     </div>
+    <!-- תמחור שלב ה' — דוחות (מנהל בלבד, דורש נתוני עלות) -->
+    <div class="card hidden" style="margin-top:1rem" id="rp-budget-card">
+      <div class="sec">🎯 מוקצב מול בפועל — לפי תמחור</div>
+      <div id="rp-budget-body"></div>
+    </div>
+    <div class="card hidden" style="margin-top:1rem" id="rp-profit-card">
+      <div class="sec">💰 רווח בפועל מול יעד — לפי מוצר</div>
+      <div id="rp-profit-body"></div>
+    </div>
   </div>
 
   <!-- ALERTS -->
@@ -1071,6 +1080,13 @@ code{background:var(--bg2);border:0.5px solid var(--b);border-radius:4px;padding
       </div>
       <div id="cm-list" style="max-height:150px;overflow-y:auto"></div>
       <div id="overhead-result" style="margin-top:.75rem"></div>
+    </div>
+
+    <!-- התחשבנות חודשית — תמחור שלב ה' -->
+    <div class="card" style="margin-top:1rem">
+      <div class="sec">🧾 התחשבנות חודשית — משוער מול בפועל</div>
+      <div style="font-size:11px;color:var(--txt3);margin-bottom:.5rem">לכל חודש: מה המקדם היה צופה (ממוצע עד 3 חודשים קודמים + מרווח ביטחון) מול מה שיצא בפועל. המקדם מתעדכן אוטומטית ככל שנוספים חודשים.</div>
+      <div id="recon-list"></div>
     </div>
   </div>
 
@@ -4002,6 +4018,8 @@ async function buildRep(){
   rfp.innerHTML='<option value="">כל המוצרים</option>'+pOpts.map(p=>`<option value="${p}" ${p===pf?'selected':''}>מוצר ${p}</option>`).join('');
   buildSummaryReport(fl);
   buildStageReport();
+  buildBudgetReport(fl);
+  buildProfitReport(fl);
 }
 function buildSummaryReport(fl){
   const el=document.getElementById('rp-summary-body');if(!el)return;
@@ -4071,6 +4089,116 @@ function buildStageReport(){
     <tbody>${rows}</tbody>
   </table></div>`;
 }
+// ─── תמחור שלב ה': דוחות מוקצב מול בפועל + רווח מול יעד ─────
+// מנהל בלבד: החישוב דורש שכר עובדים מ-adminSettings/costs שאחראי לא רשאי לקרוא.
+function _pricingCtx(){
+  if(S.user?.role!=='manager')return null;
+  const oh=overheadBreakdown().perHour;
+  const rated=_costWorkers().filter(w=>S.costs.workerRates[w.id]);
+  if(!rated.length&&!oh)return null;
+  const avgAll=rated.length?rated.reduce((s,w)=>s+loadedHourlyRate(w.id),0)/rated.length:0;
+  return{oh,avgAll,weights:S.costs.difficultyWeights||{1:1,2:1.5,3:2,4:2.5,5:3.5}};
+}
+function _prodBudget(p,ctx){
+  const price=+p.unitPrice||0;if(!price)return null;
+  const lvl=(p.workSteps||[]).filter(s=>stepLevel(s));if(!lvl.length)return null;
+  const budgetUnit=price*(1-(+p.targetProfitPct||0)/100)-(+p.directMaterialsCost||0);
+  const totW=lvl.reduce((s,x)=>s+(+ctx.weights[stepLevel(x)]||1),0);
+  return{price,budgetUnit,totW,lvl,materials:+p.directMaterialsCost||0,targetPct:+p.targetProfitPct||0};
+}
+function buildBudgetReport(fl){
+  const card=document.getElementById('rp-budget-card'),el=document.getElementById('rp-budget-body');
+  if(!card||!el)return;
+  const ctx=_pricingCtx();
+  if(!ctx){card.classList.add('hidden');return;}
+  card.classList.remove('hidden');
+  const rows=[];
+  for(const t of fl){
+    if(!t.done||!(t.duration>0))continue;
+    const p=S.products.find(x=>x.cust===t.cust&&x.prod===t.prod);if(!p)continue;
+    const pb=_prodBudget(p,ctx);if(!pb||pb.budgetUnit<=0)continue;
+    const st=pb.lvl.find(s=>stepName(s)===t.taskType);if(!st)continue;
+    // מוקצב: עדיף הצפי שנשמר במשימה בפתיחה; אחרת חישוב מהתמחור לפי העובד שביצע
+    let alloc=+t.expectedMin;
+    if(!(alloc>0)){
+      const rate=(loadedHourlyRate(t.workerId)||ctx.avgAll)+ctx.oh;
+      alloc=rate>0?(pb.budgetUnit*(+ctx.weights[stepLevel(st)]||1)/pb.totW*(t.qty||0))/rate*60:0;
+    }
+    if(!(alloc>0))continue;
+    const actual=(t.duration||0)/60;
+    rows.push({t,alloc,actual,eff:actual>0?alloc/actual*100:0});
+  }
+  if(!rows.length){el.innerHTML='<div style="color:var(--txt3);font-size:12px;padding:.5rem 0">אין משימות שהושלמו עם תמחור בטווח הנבחר</div>';return;}
+  rows.sort((a,b)=>a.eff-b.eff);
+  const totAlloc=rows.reduce((s,r)=>s+r.alloc,0),totAct=rows.reduce((s,r)=>s+r.actual,0);
+  const overCnt=rows.filter(r=>r.actual>r.alloc).length;
+  const effBadge=e=>`<span class="badge ${e>=100?'green':e>=80?'amber':'red'}">${Math.round(e)}%</span>`;
+  el.innerHTML=`<div style="font-size:11px;color:var(--txt3);margin-bottom:6px">יעילות = מוקצב ÷ בפועל · מעל 100% = מהיר מהמוקצב · ${overCnt?`<b style="color:var(--red-txt)">${overCnt} משימות חרגו</b>`:'✅ אין חריגות'}</div>
+  <div class="tbl-wrap"><table>
+    <thead><tr><th>עובד</th><th>שלב</th><th>מוצר</th><th>כמות</th><th>מוקצב</th><th>בפועל</th><th>יעילות</th></tr></thead>
+    <tbody>${rows.map(r=>`<tr${r.actual>r.alloc?' style="background:var(--red-bg,#fee2e2)"':''}>
+      <td>${esc(r.t.workerName)}</td><td style="font-size:12px">${esc(r.t.taskType||'—')}</td>
+      <td><span class="bc-seg bc-c">${r.t.cust}</span> <span class="bc-seg bc-p">${r.t.prod}</span></td>
+      <td>${r.t.qty||0}</td><td>${fmtExpMin(r.alloc)}</td><td>${fmtExpMin(r.actual)}</td>
+      <td>${effBadge(r.eff)}</td></tr>`).join('')}</tbody>
+    <tfoot><tr style="border-top:1.5px solid var(--b);font-weight:600;background:var(--bg2)">
+      <td colspan="4">סה"כ (${rows.length} משימות)</td>
+      <td>${fmtExpMin(totAlloc)}</td><td>${fmtExpMin(totAct)}</td>
+      <td>${effBadge(totAct>0?totAlloc/totAct*100:0)}</td></tr></tfoot>
+  </table></div>`;
+}
+function buildProfitReport(fl){
+  const card=document.getElementById('rp-profit-card'),el=document.getElementById('rp-profit-body');
+  if(!card||!el)return;
+  const ctx=_pricingCtx();
+  if(!ctx){card.classList.add('hidden');return;}
+  card.classList.remove('hidden');
+  const done=fl.filter(t=>t.done&&(t.duration||0)>0);
+  const prods=S.products.filter(p=>+p.unitPrice&&(p.workSteps||[]).some(s=>stepLevel(s)));
+  const blocks=[];
+  for(const p of prods){
+    const pb=_prodBudget(p,ctx);if(!pb||pb.budgetUnit<=0)continue;
+    const pTasks=done.filter(t=>t.cust===p.cust&&t.prod===p.prod);
+    if(!pTasks.length)continue;
+    let costUnit=pb.materials,withData=0;
+    const stepRows=pb.lvl.map(s=>{
+      const budPU=pb.budgetUnit*(+ctx.weights[stepLevel(s)]||1)/pb.totW;
+      const ts=pTasks.filter(t=>t.taskType===stepName(s));
+      const units=ts.reduce((sum,t)=>sum+(t.qty||0),0);
+      let actPU=null;
+      if(units>0){
+        const cost=ts.reduce((sum,t)=>sum+(t.duration/3600)*((loadedHourlyRate(t.workerId)||ctx.avgAll)+ctx.oh),0);
+        actPU=cost/units;withData++;
+      }
+      costUnit+=actPU!=null?actPU:budPU;
+      return{name:stepName(s),budPU,actPU,units};
+    });
+    const profit=pb.price-costUnit;
+    const profitPct=pb.price>0?profit/pb.price*100:0;
+    blocks.push({p,pb,stepRows,withData,profit,profitPct});
+  }
+  if(!blocks.length){el.innerHTML='<div style="color:var(--txt3);font-size:12px;padding:.5rem 0">אין מוצרים מתומחרים עם משימות שהושלמו בטווח הנבחר</div>';return;}
+  el.innerHTML=`<div style="font-size:11px;color:var(--txt3);margin-bottom:6px">רווח בפועל ליחידה = מחיר − חומרים − עלות עבודה+תקורה בפועל · שלבים בלי נתונים מחושבים לפי המוקצב</div>`+blocks.map(b=>{
+    const ok=b.profitPct>=b.pb.targetPct-1;
+    return`<details style="border-bottom:0.5px solid var(--brd);padding:6px 0">
+      <summary style="cursor:pointer;display:flex;align-items:center;gap:8px;flex-wrap:wrap;list-style:none">
+        <span style="font-weight:600;font-size:13px"><span class="bc-seg bc-c">${b.p.cust}</span> <span class="bc-seg bc-p">${b.p.prod}</span>${b.p.name?' '+esc(b.p.name):''}</span>
+        <span style="font-size:12px;color:var(--txt3)">מחיר ₪${b.pb.price.toFixed(2)} · יעד ${b.pb.targetPct}%</span>
+        <span class="badge ${ok?'green':'red'}">בפועל ${b.profitPct.toFixed(1)}% (₪${b.profit.toFixed(2)})</span>
+        <span style="font-size:11px;color:var(--txt3)">${b.withData}/${b.stepRows.length} שלבים עם נתונים</span>
+      </summary>
+      <div style="padding:6px 8px 2px">${b.stepRows.map(s=>{
+        const has=s.actPU!=null;
+        const leak=has?s.actPU-s.budPU:0;
+        return`<div style="display:flex;gap:8px;align-items:center;font-size:12px;padding:3px 0;border-bottom:0.5px dashed var(--brd)${has&&leak>0?';color:var(--red-txt)':''}">
+          <span style="flex:1;min-width:110px">${esc(s.name)}</span>
+          <span style="color:var(--txt3)">מוקצב ₪${s.budPU.toFixed(2)}</span>
+          <span style="font-weight:600">${has?`בפועל ₪${s.actPU.toFixed(2)} (${s.units} יח')`:'— אין נתונים'}</span>
+          ${has?`<span style="font-weight:700">${leak>0?'▲ +':'▼ '}₪${Math.abs(leak).toFixed(2)}</span>`:''}
+        </div>`;}).join('')}</div>
+    </details>`;}).join('');
+}
+
 async function exportCSV(){
   const fromD=document.getElementById('rf-from')?.value||'';
   const toD=document.getElementById('rf-to')?.value||'';
@@ -6096,6 +6224,7 @@ function initCostsPage(){
   const cmMonth=document.getElementById('cm-month');if(cmMonth&&!cmMonth.value){const d=new Date();d.setMonth(d.getMonth()-1);cmMonth.value=d.toISOString().slice(0,7);}
   renderWorkerRates();
   renderVarExpList();
+  ensureAutoCostMonths();
   renderLoadedHourTable();
   renderCostMonths();
   renderOverheadResult();
@@ -6435,6 +6564,48 @@ function renderOverheadResult(){
     <div>🕐 שעות עבודה חודשיות (${_costWorkers().length} עובדים × ${S.costs.workDaysMonth||22} ימים × 8): <b>${oh.hours.toLocaleString()}</b></div>
     <div style="font-size:14px;font-weight:700;color:var(--green-txt);border-top:0.5px solid var(--brd);margin-top:4px;padding-top:6px">💰 תוספת תקורה לשעת עבודה: ₪${oh.perHour.toFixed(2)}</div>
   </div>`;
+  renderReconciliation();
+}
+// ─── תמחור שלב ה': התחשבנות חודשית + מעבר לאיסוף אוטומטי ───
+// לכל חודש מוזן: מה המקדם היה צופה (ממוצע עד 3 חודשים שלפניו + מרווח) מול מה שיצא בפועל.
+function renderReconciliation(){
+  const el=document.getElementById('recon-list');if(!el)return;
+  const months=(S.costs.costMonths||[]).slice().sort((a,b)=>a.month.localeCompare(b.month));
+  const buffer=(S.costs.overheadBufferPct??10)/100;
+  const rows=[];
+  for(let i=0;i<months.length;i++){
+    const prev=months.slice(Math.max(0,i-3),i);
+    if(!prev.length)continue;
+    const est=prev.reduce((s,m)=>s+(m.variableTotal||0),0)/prev.length*(1+buffer);
+    const act=months[i].variableTotal||0;
+    rows.push({month:months[i].month,est,act,gap:act-est,src:months[i].source});
+  }
+  const autoCnt=months.slice(-3).filter(m=>m.source==='auto').length;
+  const status=`<div style="font-size:11px;margin-top:8px;color:var(--txt3)">מצב איסוף: ${autoCnt>=3?'<b style="color:var(--green-txt)">🤖 אוטומטי מלא</b> (3 חודשים אחרונים נאספו אוטומטית)':`📝 ${autoCnt}/3 חודשים אחרונים אוטומטיים`} · חודש שהסתיים מתווסף אוטומטית מההוצאות המשתנות הרשומות (תיקון ידני תמיד אפשרי)</div>`;
+  if(!rows.length){el.innerHTML='<div style="font-size:11px;color:var(--txt3);text-align:center;padding:8px">צריך לפחות 2 חודשים מוזנים כדי להשוות משוער מול בפועל</div>'+status;return;}
+  rows.reverse();
+  el.innerHTML=rows.slice(0,6).map(r=>{
+    const over=r.gap>0;
+    const pct=r.est>0?Math.abs(r.gap)/r.est*100:0;
+    return`<div style="display:flex;align-items:center;gap:8px;padding:5px 0;border-bottom:0.5px solid var(--brd);font-size:12px;flex-wrap:wrap">
+      <span style="width:70px;color:var(--txt2)">${esc(r.month)}</span>
+      <span style="color:var(--txt3)">משוער ₪${r.est.toLocaleString(undefined,{maximumFractionDigits:0})}</span>
+      <span style="font-weight:600">בפועל ₪${r.act.toLocaleString(undefined,{maximumFractionDigits:0})}</span>
+      <span class="badge ${over?'red':'green'}">${over?'▲ חריגה':'▼ חיסכון'} ₪${Math.abs(r.gap).toLocaleString(undefined,{maximumFractionDigits:0})} (${pct.toFixed(0)}%)</span>
+    </div>`;}).join('')+status;
+}
+// משלים אוטומטית חודשים שהסתיימו וחסרים ב-costMonths מתוך ההוצאות המשתנות הרשומות.
+// לא נוגע בחודשים שהוזנו ידנית — רק מוסיף חסרים.
+function ensureAutoCostMonths(){
+  if(S.user?.role!=='manager')return;
+  const now=new Date();
+  for(let k=1;k<=3;k++){
+    const d=new Date(now.getFullYear(),now.getMonth()-k,1);
+    const mo=d.getFullYear()+'-'+pad2(d.getMonth()+1);
+    if((S.costs.costMonths||[]).find(m=>m.month===mo))continue;
+    const sum=(S.costs.variableExpenses||[]).filter(e=>(e.date||'').slice(0,7)===mo).reduce((s,e)=>s+Number(e.amount||0),0);
+    if(sum>0)_upsertCostMonth(mo,sum,'auto');
+  }
 }
 
 function showCostTab(tab){
@@ -7263,11 +7434,18 @@ function renderProducts(){
           ${nextStage&&!isDone?`<span style="color:var(--txt3);margin-right:6px">← הבא: ${nextStage.label}</span>`:''}
         </div>`
       :'';
+    // תמחור בכרטיס המוצר — מנהל בלבד (תמחור שלב ה', השלמה משלב ד')
+    let pricingHtml='';
+    if(S.user?.role==='manager'&&+p.unitPrice){
+      const price=+p.unitPrice,pct=+p.targetProfitPct||0,mat=+p.directMaterialsCost||0;
+      const budget=price*(1-pct/100)-mat;
+      pricingHtml=`<div style="margin-top:6px;font-size:11px;color:var(--txt3)">💰 מחיר <b style="color:var(--txt)">₪${price.toFixed(2)}</b> · רווח יעד ${pct}% (₪${(price*pct/100).toFixed(2)}) · חומרים ₪${mat.toFixed(2)} · תקציב עבודה <b style="color:${budget>0?'var(--green-txt)':'var(--red-txt)'}">₪${budget.toFixed(2)}</b>${budget<=0?' ⚠':''}</div>`;
+    }
     return`<div class="card" style="margin-bottom:10px">
       <div style="display:flex;align-items:flex-start;justify-content:space-between;gap:8px">
         <div style="flex:1">
           <div style="font-size:14px;font-weight:700;color:var(--txt)">מוצר ${esc(p.prod)} &nbsp;·&nbsp; לקוח ${esc(p.cust)}${p.name?` &nbsp;·&nbsp; <span style="color:var(--txt3)">${esc(p.name)}</span>`:''}</div>
-          ${stageHtml}${qtyRows}${imgHtml}${docHtml}
+          ${stageHtml}${pricingHtml}${qtyRows}${imgHtml}${docHtml}
         </div>
         <div style="display:flex;gap:6px;flex-shrink:0">
           ${(p.workSteps||[]).some(s=>stepLevel(s)&&stepStation(s))?`<button class="btn" style="font-size:11px;padding:4px 10px;color:var(--blue-txt)" onclick="showProductPlan('${p.id}')">🎯 שיבוץ</button>`:''}
@@ -7361,9 +7539,10 @@ function openProductModal(id){
     <button type="button" class="btn" onclick="addTaskStepRow()" style="font-size:12px">+ הוסף שלב עבודה</button>
 
     <div class="sec" style="margin-top:14px;margin-bottom:6px">💰 תמחור ליחידה</div>
-    <div style="display:grid;grid-template-columns:1fr 1fr 1fr;gap:8px;margin-bottom:8px">
-      <div class="field"><label>מחיר מכירה ₪</label><input id="pm-price" type="number" min="0" step="0.1" value="${p?.unitPrice||''}" placeholder="0" style="font-size:13px" oninput="renderProductPricing()"/></div>
-      <div class="field"><label>רווח יעד %</label><input id="pm-profit" type="number" min="0" max="95" step="1" value="${p?.targetProfitPct??''}" placeholder="0" style="font-size:13px" oninput="renderProductPricing()"/></div>
+    <div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(105px,1fr));gap:8px;margin-bottom:8px">
+      <div class="field"><label>מחיר מכירה ₪</label><input id="pm-price" type="number" min="0" step="0.1" value="${p?.unitPrice||''}" placeholder="0" style="font-size:13px" oninput="syncProfitFields('price')"/></div>
+      <div class="field"><label>רווח יעד %</label><input id="pm-profit" type="number" min="0" max="95" step="1" value="${p?.targetProfitPct??''}" placeholder="0" style="font-size:13px" oninput="syncProfitFields('pct')"/></div>
+      <div class="field"><label>רווח יעד ₪</label><input id="pm-profit-ils" type="number" min="0" step="0.1" value="${p&&+p.unitPrice&&p.targetProfitPct!=null?((+p.unitPrice)*(+p.targetProfitPct)/100).toFixed(2):''}" placeholder="0" style="font-size:13px" oninput="syncProfitFields('ils')"/></div>
       <div class="field"><label>חומרים ₪ <span style="font-size:10px;color:var(--txt3)">(+אריזה+הובלה)</span></label><input id="pm-materials" type="number" min="0" step="0.1" value="${p?.directMaterialsCost||''}" placeholder="0" style="font-size:13px" oninput="renderProductPricing()"/></div>
     </div>
     <div id="pm-pricing-result" style="margin-bottom:8px"></div>`;
@@ -7433,6 +7612,19 @@ function _pricingStepRate(station,level,avgAll){
     if(q.length)return q.reduce((s,w)=>s+loadedHourlyRate(w.id),0)/q.length;
   }
   return avgAll;
+}
+// רווח יעד ניתן להזנה גם ב-% וגם ב-₪ — שני השדות מסונכרנים; הנשמר במוצר הוא ה-% (מקור אמת יחיד)
+function syncProfitFields(src){
+  const priceEl=document.getElementById('pm-price'),pctEl=document.getElementById('pm-profit'),ilsEl=document.getElementById('pm-profit-ils');
+  const price=parseFloat(priceEl?.value)||0;
+  if(src==='ils'&&pctEl){
+    const ils=parseFloat(ilsEl?.value)||0;
+    pctEl.value=price>0?+(ils/price*100).toFixed(2):'';
+  }else if(ilsEl){
+    const pct=parseFloat(pctEl?.value)||0;
+    ilsEl.value=price>0&&pctEl?.value!==''?(price*pct/100).toFixed(2):'';
+  }
+  renderProductPricing();
 }
 function renderProductPricing(){
   const box=document.getElementById('pm-pricing-result');if(!box)return;
