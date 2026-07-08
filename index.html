@@ -1424,6 +1424,8 @@ const LANGS={
     err_barcode_13:'⚠ ברקוד חייב להיות 13 ספרות',
     err_scan_one:'⚠ סרוק לפחות ברקוד אחד',
     err_sel_step:'⚠ בחר לפחות שלב עבודה אחד',
+    lim_steps:'⚠ ניתן לבחור עד 2 שלבים לכל ברקוד',
+    lim_bc:'⚠ ניתן לסרוק עד 2 ברקודים',
     rep_detail:'פירוט לפי לקוח ומוצר',
     th_worker:'עובד',
     th_dept:'מחלקה',
@@ -1622,6 +1624,8 @@ const LANGS={
     err_barcode_13:'⚠ الباركود يجب أن يكون 13 رقماً',
     err_scan_one:'⚠ امسح باركوداً واحداً على الأقل',
     err_sel_step:'⚠ اختر مرحلة عمل واحدة على الأقل',
+    lim_steps:'⚠ يمكن اختيار مرحلتين كحد أقصى لكل باركود',
+    lim_bc:'⚠ يمكن مسح باركودين كحد أقصى',
     rep_detail:'تفاصيل حسب العميل والمنتج',
     th_worker:'العامل',
     th_dept:'القسم',
@@ -1781,6 +1785,8 @@ const LANGS={
     err_barcode_13:'⚠ Barcode must be 13 digits',
     err_scan_one:'⚠ Scan at least one barcode',
     err_sel_step:'⚠ Select at least one work step',
+    lim_steps:'⚠ Up to 2 steps per barcode',
+    lim_bc:'⚠ Up to 2 barcodes',
     rep_detail:'Detail by Customer & Product',
     th_worker:'Worker',
     th_dept:'Dept',
@@ -5103,7 +5109,7 @@ function tsParseBc(v){
     if(steps.length){
       tsShowTaskTypeField(false);
       const listEl=document.getElementById('ts-steps-list');
-      if(listEl){listEl.dataset.cust=c;listEl.dataset.prod=p;listEl.innerHTML=steps.map(s=>`<label style="display:flex;align-items:center;gap:8px;padding:6px 8px;margin-bottom:4px;background:var(--bg2);border-radius:8px;cursor:pointer;font-size:13px"><input type="checkbox" data-step="${esc(stepName(s))}" style="width:16px;height:16px" onchange="renderStepRecs('ts')"> ${esc(stepDisplay(s))}${stepBadge(s)}</label>`).join('');renderStepRecs('ts');}
+      if(listEl){listEl.dataset.cust=c;listEl.dataset.prod=p;listEl.innerHTML=steps.map(s=>`<label style="display:flex;align-items:center;gap:8px;padding:6px 8px;margin-bottom:4px;background:var(--bg2);border-radius:8px;cursor:pointer;font-size:13px"><input type="checkbox" data-step="${esc(stepName(s))}" style="width:16px;height:16px" onchange="tsStepToggle(this)"> ${esc(stepDisplay(s))}${stepBadge(s)}</label>`).join('');renderStepRecs('ts');}
       return;
     }
   }
@@ -5115,6 +5121,20 @@ function tsShowTaskTypeField(show){
   if(wrap)wrap.style.display=show?'':'none';
   if(stepsWrap)stepsWrap.style.display=show?'none':'';
   if(show){const r=document.getElementById('ts-recs');if(r)r.innerHTML='';}
+}
+// הגבלת סריקה לאחראי/עובד/עוזר: עד 2 שלבים לכל ברקוד ועד 2 ברקודים בסל (מנהל — ללא הגבלה)
+function tsStepToggle(cb){
+  if(S.user?.role!=='manager'&&cb.checked&&document.querySelectorAll('#ts-steps-list input[type="checkbox"]:checked').length>2){
+    cb.checked=false;showToast(LANGS[currentLang].lim_steps||'⚠ ניתן לבחור עד 2 שלבים לכל ברקוד','var(--red-txt)');return;
+  }
+  renderStepRecs('ts');
+}
+function tsScanLimitsOk(raw,checkedSteps){
+  if(S.user?.role==='manager')return true;
+  if(checkedSteps&&checkedSteps.length>2){showToast(LANGS[currentLang].lim_steps||'⚠ ניתן לבחור עד 2 שלבים לכל ברקוד','var(--red-txt)');return false;}
+  const distinct=new Set(_tsBatch.map(b=>b.raw));
+  if(!distinct.has(raw)&&distinct.size>=2){showToast(LANGS[currentLang].lim_bc||'⚠ ניתן לסרוק עד 2 ברקודים','var(--red-txt)');return false;}
+  return true;
 }
 async function tsStartCam(){
   const T=LANGS[currentLang];
@@ -5167,6 +5187,7 @@ function tsAddToBatch(){
   const taskType=useSteps?'':((document.getElementById('ts-tasktype').value||'').trim());
   const taskDept=(document.getElementById('ts-dept').value||'').trim();
   const types=useSteps?checkedSteps:[taskType||''];
+  if(!tsScanLimitsOk(raw,checkedSteps))return;
   const _sk=addStepsToBatch(_tsBatch,{raw,cust,prod,size,qty,col,isTotal,taskDept},types);
   document.getElementById('ts-bc-inp').value='';
   document.getElementById('ts-bc-prev').innerHTML='';
@@ -5194,6 +5215,7 @@ async function tsStartTask(){
     const taskType=useSteps?'':((document.getElementById('ts-tasktype').value||'').trim());
     const taskDept=(document.getElementById('ts-dept').value||'').trim();
     const types=useSteps?checkedSteps:[taskType||''];
+    if(!tsScanLimitsOk(raw,checkedSteps))return;
     const _sk=addStepsToBatch(_tsBatch,{raw,cust,prod,size,qty,col,isTotal,taskDept},types);
     if(_sk.length){showToast(T.scan_not_added+' '+_sk.join(' · '),'var(--red-txt)',7000);if(!_tsBatch.length)return;}
   }
