@@ -1422,6 +1422,8 @@ const LANGS={
     ph_task_type:'לדוגמה: תפירה, חיתוך, גימור...',
     err_sel_worker:'⚠ בחר עובד',
     err_barcode_13:'⚠ ברקוד חייב להיות 13 ספרות',
+    err_scan_one:'⚠ סרוק לפחות ברקוד אחד',
+    err_sel_step:'⚠ בחר לפחות שלב עבודה אחד',
     rep_detail:'פירוט לפי לקוח ומוצר',
     th_worker:'עובד',
     th_dept:'מחלקה',
@@ -1618,6 +1620,8 @@ const LANGS={
     ph_task_type:'مثال: خياطة، قص، تشطيب...',
     err_sel_worker:'⚠ اختر عاملاً',
     err_barcode_13:'⚠ الباركود يجب أن يكون 13 رقماً',
+    err_scan_one:'⚠ امسح باركوداً واحداً على الأقل',
+    err_sel_step:'⚠ اختر مرحلة عمل واحدة على الأقل',
     rep_detail:'تفاصيل حسب العميل والمنتج',
     th_worker:'العامل',
     th_dept:'القسم',
@@ -1775,6 +1779,8 @@ const LANGS={
     ph_task_type:'e.g. sewing, cutting, finishing...',
     err_sel_worker:'⚠ Select a worker',
     err_barcode_13:'⚠ Barcode must be 13 digits',
+    err_scan_one:'⚠ Scan at least one barcode',
+    err_sel_step:'⚠ Select at least one work step',
     rep_detail:'Detail by Customer & Product',
     th_worker:'Worker',
     th_dept:'Dept',
@@ -3787,7 +3793,7 @@ async function submitBc(){
       S.activeTasks=S.activeTasks.filter(t=>t.workerId!==u.id);
     }
   }
-  if(bcUseSteps&&!bcCheckedSteps.length){showToast('⚠ בחר לפחות שלב עבודה אחד','var(--red-txt)');return;}
+  if(bcUseSteps&&!bcCheckedSteps.length){showToast(T.err_sel_step||'⚠ בחר לפחות שלב עבודה אחד','var(--red-txt)');return;}
   try{
     const typesToCreate=bcUseSteps?bcCheckedSteps:[taskType||''];
     for(const tt of typesToCreate){
@@ -5157,6 +5163,7 @@ function tsAddToBatch(){
   const stepsWrap=document.getElementById('ts-steps-wrap');
   const useSteps=stepsWrap&&stepsWrap.style.display!=='none';
   const checkedSteps=useSteps?[...document.querySelectorAll('#ts-steps-list input[type="checkbox"]:checked')].map(cb=>cb.dataset.step):[];
+  if(useSteps&&!checkedSteps.length){showToast(T.err_sel_step||'⚠ בחר לפחות שלב עבודה אחד','var(--red-txt)');return;}
   const taskType=useSteps?'':((document.getElementById('ts-tasktype').value||'').trim());
   const taskDept=(document.getElementById('ts-dept').value||'').trim();
   const types=useSteps?checkedSteps:[taskType||''];
@@ -5183,13 +5190,14 @@ async function tsStartTask(){
     const isTotal=isTotalBc(raw);const qty=isTotal?getTotalQty(cust,prod):parseInt(raw.slice(8,11))||0;
     const stepsWrap=document.getElementById('ts-steps-wrap');const useSteps=stepsWrap&&stepsWrap.style.display!=='none';
     const checkedSteps=useSteps?[...document.querySelectorAll('#ts-steps-list input[type="checkbox"]:checked')].map(cb=>cb.dataset.step):[];
+    if(useSteps&&!checkedSteps.length){showToast(T.err_sel_step||'⚠ בחר לפחות שלב עבודה אחד','var(--red-txt)');return;}
     const taskType=useSteps?'':((document.getElementById('ts-tasktype').value||'').trim());
     const taskDept=(document.getElementById('ts-dept').value||'').trim();
     const types=useSteps?checkedSteps:[taskType||''];
     const _sk=addStepsToBatch(_tsBatch,{raw,cust,prod,size,qty,col,isTotal,taskDept},types);
-    if(_sk.length)showToast(T.scan_not_added+' '+_sk.join(' · '),'var(--red-txt)',7000);
+    if(_sk.length){showToast(T.scan_not_added+' '+_sk.join(' · '),'var(--red-txt)',7000);if(!_tsBatch.length)return;}
   }
-  if(!_tsBatch.length){showToast(T.err_barcode_13||'⚠ סרוק לפחות ברקוד אחד','var(--red-txt)');return;}
+  if(!_tsBatch.length){showToast(T.err_scan_one||'⚠ סרוק לפחות ברקוד אחד','var(--red-txt)');return;}
   // בדיקת משימות מושהות
   const newBcs=_tsBatch.map(b=>b.raw);
   const canProceed=await handlePausedTasks(w.id,newBcs);
@@ -5446,6 +5454,7 @@ function mgrAddToBatch(){
   const isTotal=isTotalBc(raw);const qty=isTotal?getTotalQty(cust,prod):parseInt(raw.slice(8,11))||0;
   const mgrStepsWrap=document.getElementById('mgr-steps-wrap');const mgrUseSteps=mgrStepsWrap&&mgrStepsWrap.style.display!=='none';
   const mgrCheckedSteps=mgrUseSteps?[...document.querySelectorAll('#mgr-steps-list input[type="checkbox"]:checked')].map(cb=>cb.dataset.step):[];
+  if(mgrUseSteps&&!mgrCheckedSteps.length){showToast(T.err_sel_step||'⚠ בחר לפחות שלב עבודה אחד','var(--red-txt)');return;}
   const taskType=mgrUseSteps?'':((document.getElementById('mgr-tasktype').value||'').trim());
   const taskDept=(document.getElementById('mgr-dept').value||'').trim();
   const types=mgrUseSteps?mgrCheckedSteps:[taskType||''];
@@ -5470,14 +5479,14 @@ async function mgrStartTask(){
     const isTotal=isTotalBc(raw);const qty=isTotal?getTotalQty(cust,prod):parseInt(raw.slice(8,11))||0;
     const mgrStepsWrap=document.getElementById('mgr-steps-wrap');const mgrUseSteps=mgrStepsWrap&&mgrStepsWrap.style.display!=='none';
     const mgrCheckedSteps=mgrUseSteps?[...document.querySelectorAll('#mgr-steps-list input[type="checkbox"]:checked')].map(cb=>cb.dataset.step):[];
-    if(mgrUseSteps&&!mgrCheckedSteps.length){showToast('⚠ בחר לפחות שלב עבודה אחד','var(--red-txt)');return;}
+    if(mgrUseSteps&&!mgrCheckedSteps.length){showToast(T.err_sel_step||'⚠ בחר לפחות שלב עבודה אחד','var(--red-txt)');return;}
     const taskType=mgrUseSteps?'':((document.getElementById('mgr-tasktype').value||'').trim());
     const taskDept=(document.getElementById('mgr-dept').value||'').trim();
     const types=mgrUseSteps?mgrCheckedSteps:[taskType||''];
     const _sk=addStepsToBatch(_mgrBatch,{raw,cust,prod,size,qty,col,isTotal,taskDept},types);
-    if(_sk.length)showToast(T.scan_not_added+' '+_sk.join(' · '),'var(--red-txt)',7000);
+    if(_sk.length){showToast(T.scan_not_added+' '+_sk.join(' · '),'var(--red-txt)',7000);if(!_mgrBatch.length)return;}
   }
-  if(!_mgrBatch.length){showToast(T.err_barcode_13||'⚠ סרוק לפחות ברקוד אחד','var(--red-txt)');return;}
+  if(!_mgrBatch.length){showToast(T.err_scan_one||'⚠ סרוק לפחות ברקוד אחד','var(--red-txt)');return;}
   const newBcs=_mgrBatch.map(b=>b.raw);
   const canProceed=await handlePausedTasks(w.id,newBcs);
   if(!canProceed){_mgrBatch=[];renderMgrBatchQueue();saveLS();return;}
