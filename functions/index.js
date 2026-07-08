@@ -283,7 +283,8 @@ function overheadPerHourServer(costs, nWorkers) {
 // קלט: {cust, prod, workerId, qty, stepNames[]} — פלט: {ok, perStep:{שם:דקות}, totalMin}
 exports.calcTaskExpected = functions.https.onCall(async (data, context) => {
   const role = callerRole(context);
-  if (role !== 'manager' && role !== 'supervisor') throw new functions.https.HttpsError('permission-denied', 'אין הרשאה');
+  // מחזיר דקות בלבד (לא שכר) — בטוח לכל תפקיד מחובר: עובד/עוזר/אחראי/מנהל רואים צפי לסריקה שלהם
+  if (!role) throw new functions.https.HttpsError('unauthenticated', 'יש להתחבר תחילה');
   const d = data || {};
   const cust = String(d.cust || ''), prod = String(d.prod || ''), workerId = String(d.workerId || '');
   const qty = Math.max(0, parseInt(d.qty) || 0);
