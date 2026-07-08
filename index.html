@@ -443,6 +443,7 @@ code{background:var(--bg2);border:0.5px solid var(--b);border-radius:4px;padding
           <div id="bc-steps-wrap" style="display:none;margin-top:.75rem">
             <label style="font-size:12px;color:var(--txt2);font-weight:600;display:block;margin-bottom:6px">🔧 בחר שלבי עבודה</label>
             <div id="bc-steps-list"></div>
+            <div id="bc-expected"></div>
           </div>
           <div class="field" style="margin-top:.75rem;margin-bottom:0">
             <label style="font-size:12px;color:var(--txt2);margin-bottom:5px;display:block" data-i18n="lbl_dept">מחלקה</label>
@@ -1993,8 +1994,10 @@ function updateExpectedTime(prefix){
   const box=document.getElementById(prefix+'-expected');if(!box)return;
   const listEl=document.getElementById(prefix+'-steps-list');
   const sel=document.getElementById(prefix+'-emp-sel');
-  const raw=(document.getElementById(prefix+'-bc-inp')?.value||'').replace(/\D/g,'');
-  const workerId=sel?.value||'';
+  // עמוד "סריקה" (bc): קלט הברקוד הוא bc-inp, והעובד הוא המשתמש המחובר עצמו (אין בורר עובד)
+  const rawEl=document.getElementById(prefix+'-bc-inp')||(prefix==='bc'?document.getElementById('bc-inp'):null);
+  const raw=(rawEl?.value||'').replace(/\D/g,'');
+  const workerId=sel?sel.value:(prefix==='bc'?(S.user?.id||''):'');
   const checked=listEl?[...listEl.querySelectorAll('input[type="checkbox"]:checked')].map(cb=>cb.dataset.step):[];
   if(!workerId||raw.length!==13||!checked.length||!listEl?.dataset.cust||!S.fbConnected||!window._fbFunctions){box.innerHTML='';return;}
   const cust=raw.slice(0,2),prod=raw.slice(2,7);
@@ -3751,7 +3754,7 @@ function parseBc(v){
     if(steps.length){
       bcShowTaskTypeField(false);
       const listEl=document.getElementById('bc-steps-list');
-      if(listEl)listEl.innerHTML=steps.map(s=>`<label style="display:flex;align-items:center;gap:8px;padding:6px 8px;margin-bottom:4px;background:var(--bg2);border-radius:8px;cursor:pointer;font-size:13px"><input type="checkbox" data-step="${esc(stepName(s))}" style="width:16px;height:16px"> ${esc(stepDisplay(s))}${stepBadge(s)}</label>`).join('');
+      if(listEl){listEl.dataset.cust=c;listEl.dataset.prod=p;listEl.innerHTML=steps.map(s=>`<label style="display:flex;align-items:center;gap:8px;padding:6px 8px;margin-bottom:4px;background:var(--bg2);border-radius:8px;cursor:pointer;font-size:13px"><input type="checkbox" data-step="${esc(stepName(s))}" style="width:16px;height:16px" onchange="bcStepToggle(this)"> ${esc(stepDisplay(s))}${stepBadge(s)}</label>`).join('');updateExpectedTime('bc');}
       return;
     }
   }
@@ -3762,6 +3765,14 @@ function bcShowTaskTypeField(show){
   const stepsWrap=document.getElementById('bc-steps-wrap');
   if(wrap)wrap.style.display=show?'':'none';
   if(stepsWrap)stepsWrap.style.display=show?'none':'';
+  if(show){const ex=document.getElementById('bc-expected');if(ex)ex.innerHTML='';}
+}
+// הגבלת סריקה בעמוד "סריקה" (bc): עד 2 שלבים לברקוד (מנהל — ללא הגבלה) + עדכון צפי זמן
+function bcStepToggle(cb){
+  if(S.user?.role!=='manager'&&cb.checked&&document.querySelectorAll('#bc-steps-list input[type="checkbox"]:checked').length>2){
+    cb.checked=false;showToast(LANGS[currentLang].lim_steps||'⚠ ניתן לבחור עד 2 שלבים לכל ברקוד','var(--red-txt)');return;
+  }
+  updateExpectedTime('bc');
 }
 function tryDemo(){
   document.getElementById('bc-inp').value='0710042302503';
@@ -3800,6 +3811,12 @@ async function submitBc(){
     }
   }
   if(bcUseSteps&&!bcCheckedSteps.length){showToast(T.err_sel_step||'⚠ בחר לפחות שלב עבודה אחד','var(--red-txt)');return;}
+  // הגבלת סריקה לאחראי/עובד/עוזר (מנהל — ללא הגבלה): עד 2 שלבים לברקוד ועד 2 ברקודים פעילים
+  if(u.role!=='manager'){
+    if(bcUseSteps&&bcCheckedSteps.length>2){showToast(T.lim_steps||'⚠ ניתן לבחור עד 2 שלבים לכל ברקוד','var(--red-txt)');return;}
+    const distinctBc=new Set(S.activeTasks.filter(t=>t.workerId===u.id).map(t=>taskBc(t)));
+    if(!distinctBc.has(raw)&&distinctBc.size>=2){showToast(T.lim_bc||'⚠ ניתן לסרוק עד 2 ברקודים','var(--red-txt)');return;}
+  }
   try{
     const typesToCreate=bcUseSteps?bcCheckedSteps:[taskType||''];
     for(const tt of typesToCreate){
