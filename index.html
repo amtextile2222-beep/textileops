@@ -5234,9 +5234,14 @@ async function tsStartTask(){
 }
 function renderTsScan(){
   const sel=document.getElementById('ts-emp-sel');if(!sel)return;
-  const cur=sel.value;
+  // עובד/עוזר פותח משימה לעצמו בלבד — בחירה אוטומטית ונעולה (וכך גם צפי הזמן מקבל workerId)
+  const isSelf=S.user&&(S.user.role==='worker'||S.user.role==='helper');
+  const cur=isSelf?S.user.id:sel.value;
   const selW=LANGS[currentLang].sel_worker||'בחר עובד...';
-  sel.innerHTML=`<option value="">${selW}</option>`+S.workers.filter(w=>w.status==='in').map(w=>`<option value="${w.id}" ${w.id===cur?'selected':''}>${esc(w.name)}</option>`).join('');
+  let opts=S.workers.filter(w=>w.status==='in');
+  if(isSelf&&!opts.some(w=>w.id===S.user.id))opts=[{id:S.user.id,name:S.user.name},...opts];
+  sel.innerHTML=`<option value="">${selW}</option>`+opts.map(w=>`<option value="${w.id}" ${w.id===cur?'selected':''}>${esc(w.name)}</option>`).join('');
+  if(isSelf){sel.value=S.user.id;sel.disabled=true;renderStepRecs('ts');}else{sel.disabled=false;}
   fillDeptSelects();
 }
 
