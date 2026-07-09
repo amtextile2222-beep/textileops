@@ -107,7 +107,14 @@ input:focus,select:focus{outline:none;border-color:var(--blue-txt)}
 /* TASK CARDS */
 .task-card{background:var(--bg);border:0.5px solid var(--b);border-radius:var(--rl);padding:.875rem;margin-bottom:8px}
 .task-tmr{font-size:18px;font-weight:600;font-variant-numeric:tabular-nums;color:var(--blue-txt);font-family:monospace}
-.task-tmr.over{color:var(--amber-txt)}
+.task-tmr.over,.task-tmr.warn{color:var(--amber-txt)}
+.task-tmr.late{color:var(--red-txt,#dc2626)}
+/* ספירה לאחור — כמה זמן נותר עד הצפי */
+.task-cd{font-size:12px;font-weight:600;font-variant-numeric:tabular-nums;font-family:monospace;color:var(--txt3);white-space:nowrap}
+.task-cd.warn{color:var(--amber-txt)}
+.task-cd.late{color:var(--red-txt,#dc2626)}
+.task-group-stages{display:flex;flex-direction:column;gap:6px;margin-top:8px;padding-top:8px;border-top:0.5px dashed var(--brd)}
+.task-stage-row{display:flex;align-items:center;gap:8px;flex-wrap:wrap}
 .pulse{display:inline-block;width:7px;height:7px;border-radius:50%;background:#1D9E75;animation:pulse 1.5s infinite}
 @keyframes pulse{0%,100%{opacity:1;transform:scale(1)}50%{opacity:.5;transform:scale(1.4)}}
 /* TABLE */
@@ -1170,6 +1177,13 @@ code{background:var(--bg2);border:0.5px solid var(--b);border-radius:4px;padding
         </div>
         <button class="btn" style="font-size:13px;padding:7px 14px;border-color:var(--amber-txt);color:var(--amber-txt)" onclick="bcGenerateOpenQty()">✂️ צור ברקוד</button>
       </div>
+      <div style="background:var(--green-bg,#dcfce7);border:1px solid var(--green-txt,#16a34a);border-radius:8px;padding:10px 12px;margin-bottom:12px;display:flex;align-items:center;justify-content:space-between;gap:10px;flex-wrap:wrap">
+        <div>
+          <div style="font-size:13px;font-weight:700;color:var(--green-txt,#16a34a)">🚚 ברקוד יצא ללקוח</div>
+          <div style="font-size:11px;color:var(--txt3);margin-top:2px">סריקתו מסמנת "יצא ללקוח" ופותחת עדכון כמות סופית</div>
+        </div>
+        <button class="btn" style="font-size:13px;padding:7px 14px;border-color:var(--green-txt,#16a34a);color:var(--green-txt,#16a34a)" onclick="bcGenerateShip()">🚚 צור ברקוד</button>
+      </div>
       <div class="sec" style="margin-top:12px">מידות וכמויות</div>
       <div style="font-size:11px;color:var(--txt3);margin-bottom:8px">כל שורה = ברקוד נפרד. מידה = ספרה אחת (1,2,3...). כמות = עד 999.</div>
       <div id="bc-gen-rows"></div>
@@ -1871,6 +1885,8 @@ const esc=s=>String(s??'').replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>
 const taskBc=t=>t.bc||String(t.cust)+String(t.prod)+String(t.size||'0')+String(t.qty).padStart(3,'0')+String(t.col);
 // ברקוד "כל הכמות": size='9', col='00'
 function isTotalBc(raw){return raw&&raw.length===13&&raw.slice(7,8)==='9'&&raw.slice(11,13)==='00';}
+// ברקוד "יצא ללקוח": size='9', col='99' (הצבעים 01-20 בלבד — אין התנגשות). מבנה: לקוח+מוצר+9+000+99
+function isShipBc(raw){return raw&&raw.length===13&&raw.slice(7,8)==='9'&&raw.slice(11,13)==='99';}
 function productHasDefinedQty(cust,prod){
   const p=S.products.find(x=>x.cust===cust&&x.prod===prod);
   return p&&p.quantities&&p.quantities.some(q=>parseInt(q.qty)>0);
@@ -1903,6 +1919,7 @@ let S={
   workers:[],
   depts:['חיתוך','תפירה','גימור','איכות','אריזה'],
   deptStations:{},  // {"תפירה":["שרוולים","צווארונים"]} — תחנות פר מחלקה (תמחור שלב א')
+  deptStageMap:{},  // {"תפירה":"sewing"} — מיפוי מחלקה→שלב ייצור; סריקה במחלקה מסמנת אוטומטית את השלב
   activeTasks:[],
   histTasks:[],
   alerts:[],
@@ -1935,6 +1952,7 @@ function stepName(s){return typeof s==='string'?s:(s?.name||'');}
 function stepDisplay(s){if(typeof s==='string')return s;return(currentLang==='ar'&&s?.nameAr)?s.nameAr:(s?.name||'');}
 function stepLevel(s){return(s&&typeof s==='object'&&s.level)?+s.level:0;}
 function stepStation(s){return(s&&typeof s==='object'&&s.station)?s.station:'';}
+function stepManualMin(s){return(s&&typeof s==='object'&&+s.manualMin>0)?+s.manualMin:0;} // דקות ידניות ליחידה — דורס חישוב אוטומטי
 function stepBadge(s){const l=stepLevel(s);return l?` <span style="font-size:11px;padding:1px 7px;border-radius:8px;background:var(--bg2);color:var(--txt3);border:1px solid var(--brd)">${levelName(l)}</span>`:'';}
 
 // ─── מנוע המלצת שיבוץ — תמחור שלב ב' ────────────────────────
@@ -2138,6 +2156,7 @@ function loadLS(){
     if(d.workers)S.workers=d.workers.filter(w=>!DEMO_USERS.includes(w.user));
     if(d.depts)S.depts=d.depts;
     if(d.deptStations)S.deptStations=d.deptStations;
+    if(d.deptStageMap)S.deptStageMap=d.deptStageMap;
     if(d.activeTasks)S.activeTasks=d.activeTasks.map(t=>({...t,startTime:new Date(t.startTime),elapsed:0}));
     if(d.histTasks)S.histTasks=d.histTasks.map(t=>({...t,startTime:new Date(t.startTime),endTime:t.endTime?new Date(t.endTime):null}));
     if(d.settings)S.settings={...S.settings,...d.settings};
@@ -2323,7 +2342,7 @@ function listenFb(){
       const data=d.data();
       if(d.id==='customerNames'){S.customerNames=data;saveLS();}
       if(d.id==='customColors'){S.customColors=data;Object.assign(COLORS,data);saveLS();}
-      if(d.id==='depts'&&data.list&&data.list.length){S.depts=data.list;S.deptStations=data.stations||S.deptStations||{};saveLS();fillDeptSelects();}
+      if(d.id==='depts'&&data.list&&data.list.length){S.depts=data.list;S.deptStations=data.stations||S.deptStations||{};S.deptStageMap=data.stageMap||S.deptStageMap||{};saveLS();fillDeptSelects();}
       if(d.id==='telegramSettings'){
         S.settings.factoryIP=data.factoryIP||S.settings.factoryIP;
         if(data.waEnabled!==undefined)S.settings.waEnabled=data.waEnabled;
@@ -3785,6 +3804,7 @@ async function submitBc(){
   const T=LANGS[currentLang];
   if(raw.length!==13){alert('ברקוד חייב להיות 13 ספרות בדיוק');return;}
   if(!S.user){alert('יש להתחבר תחילה');return;}
+  if(isShipBc(raw)){openShipModal(raw.slice(0,2),raw.slice(2,7));document.getElementById('bc-inp').value='';parseBc('');return;} // ברקוד "יצא ללקוח" — לא משימה
   const cust=raw.slice(0,2),prod=raw.slice(2,7),size=raw.slice(7,8),col=raw.slice(11,13);
   const isTotal=isTotalBc(raw);
   if(!isTotal&&parseInt(raw.slice(8,11))===0&&productHasDefinedQty(cust,prod)){showToast('⚠ קיים ברקוד עם כמות למוצר זה — השתמש בברקוד הספציפי','var(--red-txt)',6000);return;}
@@ -3820,12 +3840,18 @@ async function submitBc(){
   }
   try{
     const typesToCreate=bcUseSteps?bcCheckedSteps:[taskType||''];
+    const bcBatchId=typesToCreate.length>1?genBatchId():null; // כמה שלבים יחד = קבוצה אחת (טיימר משותף + מסגרת אחת)
+    const bcStart=new Date();
+    const _bcExp=_expMap[taskExpectedKey(cust,prod,u.id,qty)]; // צפי זמן לפי התמחור
     for(const tt of typesToCreate){
-      const newTask={id:String(Date.now())+Math.random().toString(36).slice(2,6),workerId:u.id,workerName:u.name,dept:taskDept||u.dept,cust,prod,size,qty,col,taskType:tt,bc:raw,isTotal:isTotal||false,startTime:new Date(),elapsed:0};
+      const newTask={id:String(Date.now())+Math.random().toString(36).slice(2,6),workerId:u.id,workerName:u.name,dept:taskDept||u.dept,cust,prod,size,qty,col,taskType:tt,bc:raw,isTotal:isTotal||false,startTime:bcStart,elapsed:0};
+      if(bcBatchId)newTask.batchId=bcBatchId;
+      if(_bcExp?.ok&&_bcExp.perStep?.[tt]!=null)newTask.expectedMin=_bcExp.perStep[tt];
       S.activeTasks.unshift(newTask);
       if(S.fbConnected)await fbSet('activeTasks',newTask.id,{...newTask,startTime:newTask.startTime.toISOString()});
       tgTask(newTask,true);
     }
+    await autoStampStage(cust,prod,taskDept||u.dept); // עדכון אוטומטי של שלב הייצור
     document.getElementById('bc-inp').value='';parseBc('');
     document.getElementById('bc-tasktype').value='';
     document.getElementById('bc-dept').value='';
@@ -3869,6 +3895,43 @@ function renderScanActive(){
 }
 
 // ─── TASKS ──────────────────────────────────────────────────
+// קיבוץ משימות שנפתחו יחד (batchId משותף) = קבוצה אחת: טיימר משותף + מסגרת אחת
+function _taskGroups(list){
+  const groups=[],byKey={};
+  list.forEach(t=>{
+    const key=t.batchId?('B:'+t.workerId+'|'+t.batchId):('S:'+t.id);
+    if(!byKey[key]){byKey[key]={key,tasks:[]};groups.push(byKey[key]);}
+    byKey[key].tasks.push(t);
+  });
+  return groups;
+}
+// תזמון קבוצה: elapsed = הטיימר המשותף (מקס'); expected = סכום צפי השלבים
+function _groupTiming(tasks){
+  const elapsedSec=Math.max(0,...tasks.map(t=>t.elapsed||0));
+  let expSec=0,hasExp=false;
+  tasks.forEach(t=>{if(+t.expectedMin>0){expSec+=(+t.expectedMin)*60;hasExp=true;}});
+  return{elapsedSec,expSec:hasExp?expSec:0,hasExp};
+}
+// מחלקת צבע לטיימר: חום ב-80% מהצפי, אדום ב-100%+. בלי צפי — נופל לסף הגלובלי (משימה ארוכה)
+function _tmrClass(elapsedSec,expSec,threshSec){
+  if(expSec>0)return elapsedSec>=expSec?'late':(elapsedSec>=expSec*0.8?'warn':'');
+  return elapsedSec>threshSec?'over':'';
+}
+// ספירה לאחור: כמה זמן נותר עד הצפי, או בכמה חרגנו
+function fmtCountdown(remainSec){
+  return remainSec>=0?'⏳ '+fmtS(remainSec)+' נותרו':'⏱ +'+fmtS(-remainSec)+' חריגה';
+}
+// כפתורי פעולה למשימה (מנהל/אחראי)
+function _taskActions(t){
+  const r=S.user?.role;
+  if(r==='manager')return`<button class="btn" style="font-size:11px;padding:3px 8px" onclick="openEditTask('${t.id}')" title="עריכת משימה">✏️</button><button class="btn" style="font-size:11px;padding:3px 8px;color:var(--blue-txt)" onclick="transferTask('${t.id}')" title="העבר לעובד אחר">🔄</button><button class="btn danger" style="font-size:11px;padding:3px 8px;opacity:0.7" onclick="deleteActiveTask('${t.id}')" title="מחק משימה בטעות">🗑</button>`;
+  if(r==='supervisor')return`<button class="btn" style="font-size:11px;padding:3px 8px;color:var(--blue-txt)" onclick="transferTask('${t.id}')" title="העבר לעובד אחר">🔄</button>`;
+  return'';
+}
+function _prevTotalHtml(t){
+  const prev=totalBcSecs(t.bc,t.workerId),ses=totalBcSessions(t.bc,t.workerId);
+  return prev>0?`<div style="font-size:11px;color:var(--txt3);margin-top:4px">📊 סה"כ על מוצר זה: <b>${fmtM(prev)}</b> (${ses} ${ses===1?'יום':'ימים'} קודמים)</div>`:'';
+}
 function renderTasks(){
   const T=LANGS[currentLang];
   // עובד רגיל רואה רק את המשימות שלו; מנהל/אחראי רואים הכל
@@ -3890,26 +3953,52 @@ function renderTasks(){
     const emptyMsg=isMgr?'📷 '+(T.scan_to_start||'סרוק ברקוד להתחלת משימה'):'⏳ '+(T.no_task_worker||'אין משימה פעילה כרגע — המתן עד שהאחראי יפתח לך משימה');
     al.innerHTML=`<div style="text-align:center;padding:3rem 1rem;color:var(--txt3);font-size:14px">${emptyMsg}</div>`;
   }
-  else{al.innerHTML=visActive.map(t=>{
-    const over=!t.paused&&t.elapsed>thresh;
-    const pausedDate=t.pausedAt?new Date(t.pausedAt):null;
+  else{al.innerHTML=_taskGroups(visActive).map(g=>{
+    const tasks=g.tasks,lead=tasks[0],multi=tasks.length>1;
+    const allPaused=tasks.every(t=>t.paused);
+    const {elapsedSec,expSec,hasExp}=_groupTiming(tasks);
+    const cls=allPaused?'':_tmrClass(elapsedSec,expSec,thresh);
+    const ids=tasks.map(t=>t.id).join(',');
+    const pausedDate=lead.pausedAt?new Date(lead.pausedAt):null;
     const pausedStr=pausedDate?pad2(pausedDate.getDate())+'/'+pad2(pausedDate.getMonth()+1):null;
-    return`<div class="task-card" style="${t.paused?'opacity:.75;background:var(--hover,#f8f8f8)':''}">
-      <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:6px">
-        <div><div style="font-size:13px;font-weight:500;color:var(--txt)">${esc(t.workerName)}</div><div style="font-size:11px;color:var(--txt3)">${esc(t.dept)}</div></div>
-        <div style="display:flex;align-items:center;gap:6px">
-          ${t.paused?`<span class="badge" style="background:#e0e7ff;color:#4338ca;font-size:11px">⏸ ${fmtM(t.accumulatedSec||0)}</span>`:`<div class="task-tmr ${over?'over':''}" id="tmr-${t.id}">${fmtS(t.elapsed||0)}</div>`}
-          ${S.user?.role==='manager'?`<button class="btn" style="font-size:11px;padding:3px 8px" onclick="openEditTask('${t.id}')" title="עריכת משימה">✏️</button><button class="btn" style="font-size:11px;padding:3px 8px;color:var(--blue-txt)" onclick="transferTask('${t.id}')" title="העבר לעובד אחר">🔄</button><button class="btn danger" style="font-size:11px;padding:3px 8px;opacity:0.7" onclick="deleteActiveTask('${t.id}')" title="מחק משימה בטעות">🗑</button>`:S.user?.role==='supervisor'?`<button class="btn" style="font-size:11px;padding:3px 8px;color:var(--blue-txt)" onclick="transferTask('${t.id}')" title="העבר לעובד אחר">🔄</button>`:''}
-        </div>
-      </div>
-      <div style="display:flex;gap:4px;flex-wrap:wrap">
-        <span class="bc-seg bc-c">לקוח ${t.cust}</span><span class="bc-seg bc-p">${t.prod}</span>${t.size?`<span class="bc-seg bc-s">מידה ${t.size}</span>`:''}<span class="bc-seg bc-q">${t.qty} יח'</span><span class="bc-seg bc-col">${COLORS[t.col]||t.col}</span>
-        ${t.taskType?`<span class="badge gray">📋 ${esc(t.taskType)}</span>`:''}
-        ${t.paused?`<span class="badge" style="background:#e0e7ff;color:#4338ca">⏸ ${T.task_paused}${pausedStr?' '+pausedStr:''}</span>`:''}
-        ${over?'<span class="badge amber">⚠ ארוכה</span>':''}
-      </div>
-      ${(()=>{const prev=totalBcSecs(t.bc,t.workerId);const ses=totalBcSessions(t.bc,t.workerId);return prev>0?`<div style="font-size:11px;color:var(--txt3);margin-top:4px">📊 סה"כ על מוצר זה: <b>${fmtM(prev)}</b> (${ses} ${ses===1?'יום':'ימים'} קודמים)</div>`:''})()}
+    const expLabel=hasExp?`<span style="font-size:11px;color:var(--txt3)">🎯 צפי ${fmtExpMin(expSec/60)}</span>`:'';
+    const statusBadge=cls==='late'?'<span class="badge" style="background:var(--red-bg,#fee2e2);color:var(--red-txt,#dc2626)">🔴 חריגה מהצפי</span>':cls==='warn'?'<span class="badge amber">🟤 מתקרב לצפי</span>':cls==='over'?'<span class="badge amber">⚠ ארוכה</span>':'';
+    // בלוק טיימרים: ספירה עולה + ספירה לאחור עד הצפי
+    const timerBlock=allPaused
+      ?`<span class="badge" style="background:#e0e7ff;color:#4338ca;font-size:11px">⏸ ${fmtM(lead.accumulatedSec||0)}</span>`
+      :`<div style="display:flex;flex-direction:column;align-items:flex-end;gap:1px">
+          <div class="task-tmr ${cls}" id="tmr-${lead.id}" data-ids="${ids}" data-exp="${expSec}">${fmtS(elapsedSec)}</div>
+          ${hasExp?`<div class="task-cd ${cls}" id="cd-${lead.id}">${fmtCountdown(expSec-elapsedSec)}</div>`:''}
+        </div>`;
+    const prodChips=`<span class="bc-seg bc-c">לקוח ${lead.cust}</span><span class="bc-seg bc-p">${lead.prod}</span>${lead.size?`<span class="bc-seg bc-s">מידה ${lead.size}</span>`:''}<span class="bc-seg bc-q">${lead.qty} יח'</span><span class="bc-seg bc-col">${COLORS[lead.col]||lead.col}</span>`;
+    const pausedBadge=allPaused?`<span class="badge" style="background:#e0e7ff;color:#4338ca">⏸ ${T.task_paused}${pausedStr?' '+pausedStr:''}</span>`:'';
+    const header=`<div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:6px">
+        <div><div style="font-size:13px;font-weight:500;color:var(--txt)">${esc(lead.workerName)}${multi?` <span class="badge gray" style="font-size:10px">${tasks.length} שלבים</span>`:''}</div><div style="font-size:11px;color:var(--txt3)">${esc(lead.dept)}</div></div>
+        <div style="display:flex;align-items:center;gap:6px">${timerBlock}${multi?'':_taskActions(lead)}</div>
       </div>`;
+    if(!multi){
+      // משימה בודדת — כרטיס רגיל
+      return`<div class="task-card" style="${allPaused?'opacity:.75;background:var(--hover,#f8f8f8)':''}">
+        ${header}
+        <div style="display:flex;gap:4px;flex-wrap:wrap;align-items:center">
+          ${prodChips}${lead.taskType?`<span class="badge gray">📋 ${esc(lead.taskType)}</span>`:''}${expLabel}${pausedBadge}${statusBadge}
+        </div>
+        ${_prevTotalHtml(lead)}
+      </div>`;
+    }
+    // קבוצה — מסגרת אחת, טיימר משותף, שורת שלב לכל משימה
+    return`<div class="task-card" style="${allPaused?'opacity:.75;background:var(--hover,#f8f8f8)':''}">
+      ${header}
+      <div style="display:flex;gap:4px;flex-wrap:wrap;align-items:center">${prodChips}${expLabel}${pausedBadge}${statusBadge}</div>
+      <div class="task-group-stages">
+        ${tasks.map(t=>`<div class="task-stage-row">
+          <span class="badge gray">📋 ${esc(t.taskType||'—')}</span>
+          <span style="font-size:11px;color:var(--txt3)">${t.qty} יח'${t.prod!==lead.prod?' · '+esc(t.prod):''}</span>
+          <div style="margin-inline-start:auto;display:flex;gap:6px">${_taskActions(t)}</div>
+        </div>`).join('')}
+      </div>
+      ${_prevTotalHtml(lead)}
+    </div>`;
   }).join('');}
   renderTaskHist();
 }
@@ -3961,12 +4050,22 @@ function renderTaskHist(){
 // ─── TIMER TICK ─────────────────────────────────────────────
 setInterval(()=>{
   if(document.hidden)return;
+  const thresh=S.settings.thresh*60;
   S.activeTasks.forEach(t=>{
     if(t.paused)return;
     t.elapsed=(t.accumulatedSec||0)+calcTaskDurSec(t.startTime,new Date(),t.workerId);
-    const el=document.getElementById('tmr-'+t.id);if(el)el.textContent=fmtS(t.elapsed);
-    const thresh=S.settings.thresh*60;
-    if(el){el.className='task-tmr'+(t.elapsed>thresh?' over':'');}
+  });
+  // עדכון חי לכל קבוצת טיימר: ספירה עולה + צבע (חום/אדום) + ספירה לאחור
+  document.querySelectorAll('.task-tmr[data-ids]').forEach(el=>{
+    const gts=el.dataset.ids.split(',').map(id=>S.activeTasks.find(t=>t.id===id)).filter(Boolean);
+    if(!gts.length||gts.every(t=>t.paused))return;
+    const elapsedSec=Math.max(0,...gts.map(t=>t.elapsed||0));
+    const expSec=+el.dataset.exp||0;
+    const cls=_tmrClass(elapsedSec,expSec,thresh);
+    el.textContent=fmtS(elapsedSec);
+    el.className='task-tmr'+(cls?' '+cls:'');
+    const cd=document.getElementById('cd-'+el.id.slice(4));
+    if(cd){cd.textContent=fmtCountdown(expSec-elapsedSec);cd.className='task-cd'+(cls?' '+cls:'');}
   });
   // live net hours update in attendance
   const tnEl=document.getElementById('att-total-net');
@@ -4225,8 +4324,12 @@ function buildStageReport(){
   // לכל מוצר — מצא את השלב האחרון שהושלם
   const rows=prods.map(p=>{
     const log=p.stageLog||[];
-    const lastStage=log.length?PROD_STAGES.find(s=>s.id===log[log.length-1].id):null;
-    const lastDate=log.length?log[log.length-1].date:'—';
+    // השלב הנוכחי = המתקדם ביותר לפי סדר PROD_STAGES (עמיד לסימון אוטומטי לא-מסודר)
+    let cur=null,curIdx=-1;
+    log.forEach(e=>{const i=PROD_STAGES.findIndex(s=>s.id===e.id);if(i>=curIdx){curIdx=i;cur=e;}});
+    const lastStage=cur?PROD_STAGES.find(s=>s.id===cur.id):null;
+    const lastDate=cur?cur.date:'—';
+    const isAuto=!!cur?.auto;
     const totalStages=PROD_STAGES.filter(s=>!p.stageSkipped?.includes(s.id)).length;
     const doneStages=log.length;
     const pct=totalStages?Math.round(doneStages/totalStages*100):0;
@@ -4234,7 +4337,7 @@ function buildStageReport(){
     return`<tr>
       <td><span class="bc-seg bc-c">${p.cust}</span> <span class="bc-seg bc-p">${p.prod}</span></td>
       <td style="font-size:13px">${esc(p.name||'—')}</td>
-      <td>${lastStage?esc(lastStage.label):'טרם התחיל'}</td>
+      <td>${lastStage?esc(lastStage.label):'טרם התחיל'}${isAuto?' <span title="עודכן אוטומטית מסריקת עובד" style="font-size:10px">🤖</span>':''}</td>
       <td>${lastDate}</td>
       <td style="min-width:120px">
         <div style="background:var(--bg2);border-radius:4px;height:8px;overflow:hidden">
@@ -4262,9 +4365,10 @@ function _pricingCtx(){
 }
 function _prodBudget(p,ctx){
   const price=+p.unitPrice||0;if(!price)return null;
-  const lvl=(p.workSteps||[]).filter(s=>stepLevel(s));if(!lvl.length)return null;
+  const lvl=(p.workSteps||[]).filter(s=>stepLevel(s)||stepManualMin(s)>0);if(!lvl.length)return null;
   const budgetUnit=price*(1-(+p.targetProfitPct||0)/100)-(+p.directMaterialsCost||0);
-  const totW=lvl.reduce((s,x)=>s+(+ctx.weights[stepLevel(x)]||1),0);
+  // רק שלבים אוטומטיים (קושי בלי override ידני) מתחלקים את התקציב לפי משקל
+  const totW=lvl.filter(s=>stepLevel(s)&&!(stepManualMin(s)>0)).reduce((s,x)=>s+(+ctx.weights[stepLevel(x)]||1),0);
   return{price,budgetUnit,totW,lvl,materials:+p.directMaterialsCost||0,targetPct:+p.targetProfitPct||0};
 }
 function buildBudgetReport(fl){
@@ -4285,8 +4389,12 @@ function buildBudgetReport(fl){
     // מוקצב: עדיף הצפי שנשמר במשימה בפתיחה; אחרת חישוב מהתמחור לפי העובד שביצע
     let alloc=+t.expectedMin;
     if(!(alloc>0)){
-      const rate=(loadedHourlyRate(t.workerId)||ctx.avgAll)+ctx.oh;
-      alloc=rate>0?(pb.budgetUnit*(+ctx.weights[stepLevel(st)]||1)/pb.totW*(t.qty||0))/rate*60:0;
+      const mm=stepManualMin(st);
+      if(mm>0){alloc=mm*(t.qty||0);} // דקות ידניות — צפי = דקות×כמות
+      else{
+        const rate=(loadedHourlyRate(t.workerId)||ctx.avgAll)+ctx.oh;
+        alloc=rate>0&&pb.totW>0?(pb.budgetUnit*(+ctx.weights[stepLevel(st)]||1)/pb.totW*(t.qty||0))/rate*60:0;
+      }
     }
     if(!(alloc>0))continue;
     const actual=(nd[t.id]||0)/60;
@@ -4322,7 +4430,7 @@ function buildProfitReport(fl){
   card.classList.remove('hidden');
   const done=fl.filter(t=>t.done&&(t.duration||0)>0);
   const nd=normalizeBatchDurations(done); // תיקון זמן batch מנופח בקריאה
-  const prods=S.products.filter(p=>+p.unitPrice&&(p.workSteps||[]).some(s=>stepLevel(s)));
+  const prods=S.products.filter(p=>+p.unitPrice&&(p.workSteps||[]).some(s=>stepLevel(s)||stepManualMin(s)>0));
   const blocks=[];
   for(const p of prods){
     const pb=_prodBudget(p,ctx);if(!pb||pb.budgetUnit<=0)continue;
@@ -4330,7 +4438,8 @@ function buildProfitReport(fl){
     if(!pTasks.length)continue;
     let costUnit=pb.materials,withData=0;
     const stepRows=pb.lvl.map(s=>{
-      const budPU=pb.budgetUnit*(+ctx.weights[stepLevel(s)]||1)/pb.totW;
+      const mm=stepManualMin(s);
+      const budPU=mm>0?mm/60*(ctx.avgAll+ctx.oh):(pb.totW>0?pb.budgetUnit*(+ctx.weights[stepLevel(s)]||1)/pb.totW:0); // ידני: ₪ = דקות/60×עלות שעה ממוצעת
       const ts=pTasks.filter(t=>t.taskType===stepName(s));
       const units=ts.reduce((sum,t)=>sum+(t.qty||0),0);
       let actPU=null;
@@ -5195,6 +5304,7 @@ function tsAddToBatch(){
   const T=LANGS[currentLang];
   if(!empId){showToast(T.err_sel_worker||'⚠ בחר עובד','var(--red-txt)');return;}
   if(raw.length!==13){showToast(T.err_barcode_13||'⚠ ברקוד חייב להיות 13 ספרות','var(--red-txt)');return;}
+  if(isShipBc(raw)){openShipModal(raw.slice(0,2),raw.slice(2,7));document.getElementById('ts-bc-inp').value='';return;} // ברקוד "יצא ללקוח"
   const cust=raw.slice(0,2),prod=raw.slice(2,7),size=raw.slice(7,8),col=raw.slice(11,13);
   const isTotal=isTotalBc(raw);
   const qty=isTotal?getTotalQty(cust,prod):parseInt(raw.slice(8,11))||0;
@@ -5264,6 +5374,7 @@ async function tsStartTask(){
       if(S.fbConnected)await fbSet('activeTasks',String(task.id),{...task,startTime:task.startTime.toISOString()});
       tgTask(task,true);
       if(w.pushPrefs?.task_assigned!==false)sendPushToWorker(w.id,'📋 משימה חדשה',`${task.prod}${task.taskType?' · '+task.taskType:''} · ${task.qty} יח'`).catch(()=>{});
+      await autoStampStage(b.cust,b.prod,b.taskDept||w.dept); // עדכון אוטומטי של שלב הייצור
     }
     showToast('✅ '+_tsBatch.length+' משימות התחילו עבור '+w.name);
     _tsBatch=[];renderTsBatchQueue();
@@ -5495,6 +5606,7 @@ function mgrAddToBatch(){
   const T=LANGS[currentLang];
   if(!empId){showToast(T.err_sel_worker||'⚠ בחר עובד','var(--red-txt)');return;}
   if(raw.length!==13){showToast(T.err_barcode_13||'⚠ ברקוד חייב להיות 13 ספרות','var(--red-txt)');return;}
+  if(isShipBc(raw)){openShipModal(raw.slice(0,2),raw.slice(2,7));document.getElementById('mgr-bc-inp').value='';parseMgrBc('');return;} // ברקוד "יצא ללקוח"
   const cust=raw.slice(0,2),prod=raw.slice(2,7),size=raw.slice(7,8),col=raw.slice(11,13);
   const isTotal=isTotalBc(raw);const qty=isTotal?getTotalQty(cust,prod):parseInt(raw.slice(8,11))||0;
   const mgrStepsWrap=document.getElementById('mgr-steps-wrap');const mgrUseSteps=mgrStepsWrap&&mgrStepsWrap.style.display!=='none';
@@ -5554,6 +5666,7 @@ async function mgrStartTask(){
     S.activeTasks.unshift(newTask);
     if(S.fbConnected)await fbSet('activeTasks',newTask.id,{...newTask,startTime:newTask.startTime.toISOString()});
     tgTask(newTask,true);
+    await autoStampStage(b.cust,b.prod,b.taskDept||w.dept); // עדכון אוטומטי של שלב הייצור
   }
   showToast('✅ '+_mgrBatch.length+' משימות התחילו עבור '+w.name);
   _mgrBatch=[];renderMgrBatchQueue();
@@ -5664,6 +5777,10 @@ function renderAdmin(){
     return`
     <div style="border-bottom:0.5px solid var(--brd);padding:4px 0">
       <div class="row" style="border-bottom:none"><span style="flex:1;font-size:13px;font-weight:600">${esc(d)}</span>
+      <select title="שלב ייצור שהסריקה במחלקה זו מסמנת אוטומטית" onchange="setDeptStage('${esc(d)}',this.value)" style="font-size:11px;padding:3px 6px;border-radius:8px;border:1px solid var(--brd);background:var(--card);color:var(--txt);max-width:170px">
+        <option value="">🔗 שלב ייצור — אין</option>
+        ${PROD_STAGES.map(s=>`<option value="${s.id}" ${(S.deptStageMap?.[d])===s.id?'selected':''}>${esc(s.label)}</option>`).join('')}
+      </select>
       <button class="btn danger" style="font-size:11px;padding:4px 8px" onclick="delDept('${esc(d)}')">🗑</button></div>
       <div style="display:flex;flex-wrap:wrap;gap:4px;align-items:center;padding:0 8px 6px">
         ${sts.map(st=>`<span style="font-size:11px;background:var(--bg2);border:1px solid var(--brd);border-radius:10px;padding:2px 8px;display:inline-flex;align-items:center;gap:5px">🏷 ${esc(st)}<span onclick="delStation('${esc(d)}','${esc(st)}')" style="cursor:pointer;color:var(--red-txt);font-weight:700">✕</span></span>`).join('')}
@@ -6224,7 +6341,7 @@ async function delWorker(id){
 }
 function saveDepts(){
   saveLS();
-  if(S.fbConnected)fbSet('appSettings','depts',{list:S.depts,stations:S.deptStations||{}});
+  if(S.fbConnected)fbSet('appSettings','depts',{list:S.depts,stations:S.deptStations||{},stageMap:S.deptStageMap||{}});
 }
 function addDept(){
   const v=document.getElementById('new-dept').value.trim();
@@ -6236,7 +6353,79 @@ function delDept(d){
   if(S.workers.some(w=>w.dept===d)){alert('לא ניתן למחוק מחלקה שיש בה עובדים');return;}
   S.depts=S.depts.filter(x=>x!==d);
   if(S.deptStations)delete S.deptStations[d];
+  if(S.deptStageMap)delete S.deptStageMap[d];
   saveDepts();renderAdmin();
+}
+// מיפוי מחלקה→שלב ייצור: סריקה במחלקה זו תסמן אוטומטית את השלב בדוח "ייצור לפי שלב"
+function setDeptStage(d,stageId){
+  if(!S.deptStageMap)S.deptStageMap={};
+  if(stageId)S.deptStageMap[d]=stageId;else delete S.deptStageMap[d];
+  saveDepts();
+}
+// עדכון אוטומטי של שלב הייצור כשעובד סורק משימה במחלקה ממופה
+async function autoStampStage(cust,prod,dept){
+  const stageId=S.deptStageMap?.[dept];
+  if(!stageId)return;
+  const p=S.products.find(x=>String(x.cust)===String(cust)&&String(x.prod)===String(prod));
+  if(!p)return;
+  if(!Array.isArray(p.stageLog))p.stageLog=[];
+  if(p.stageLog.some(s=>s.id===stageId))return; // השלב כבר מסומן — לא לדרוס תאריך ידני
+  const now=new Date();
+  const date=now.getFullYear()+'-'+pad2(now.getMonth()+1)+'-'+pad2(now.getDate());
+  const time=pad2(now.getHours())+':'+pad2(now.getMinutes());
+  p.stageLog.push({id:stageId,date,time,note:'',auto:true});
+  // שמירה על סדר PROD_STAGES כדי ש"השלב הנוכחי" (האחרון) יהיה המתקדם ביותר
+  p.stageLog.sort((a,b)=>PROD_STAGES.findIndex(x=>x.id===a.id)-PROD_STAGES.findIndex(x=>x.id===b.id));
+  saveLS();
+  if(S.fbConnected)try{await fbSet('products',p.id,{...p});}catch(e){}
+}
+// ─── ברקוד "יצא ללקוח": מסמן שלב shipped + עדכון כמות סופית בפועל ───
+function openShipModal(cust,prod){
+  const p=S.products.find(x=>String(x.cust)===String(cust)&&String(x.prod)===String(prod));
+  if(!p){showToast('⚠ מוצר לא נמצא: '+cust+'-'+prod,'var(--red-txt)',5000);return;}
+  const planned=getTotalQty(cust,prod)||0;
+  const cur=p.shippedQty!=null?p.shippedQty:planned;
+  closeShipModal();
+  const wrap=document.createElement('div');
+  wrap.id='ship-modal-wrap';
+  wrap.style.cssText='position:fixed;inset:0;background:rgba(0,0,0,.5);display:flex;align-items:center;justify-content:center;z-index:9999;padding:16px';
+  wrap.onclick=e=>{if(e.target===wrap)closeShipModal();};
+  wrap.innerHTML=`<div style="background:var(--card);border-radius:14px;padding:20px;max-width:360px;width:100%;box-shadow:0 10px 40px rgba(0,0,0,.3)">
+    <div style="font-size:16px;font-weight:800;margin-bottom:4px">🚚 יצא ללקוח</div>
+    <div style="font-size:13px;color:var(--txt3);margin-bottom:12px"><span class="bc-seg bc-c">לקוח ${esc(cust)}</span> <span class="bc-seg bc-p">${esc(prod)}</span> ${esc(p.name||'')}</div>
+    <div style="font-size:12px;color:var(--txt3);margin-bottom:8px">כמות מתוכננת בהזמנה: <b style="color:var(--txt)">${planned}</b> יח'</div>
+    <label style="font-size:13px;font-weight:600">כמות בפועל שיצאה ללקוח</label>
+    <input id="ship-qty-inp" type="number" inputmode="numeric" min="0" value="${cur}" style="width:100%;font-size:16px;padding:8px;margin-top:6px;border-radius:8px;border:1px solid var(--brd);background:var(--bg);color:var(--txt)"/>
+    <div style="font-size:11px;color:var(--txt3);margin-top:4px">לפעמים הכמות הסופית שונה מהמתוכננת — עדכן לפי מה שבאמת נשלח.</div>
+    <div style="display:flex;gap:8px;margin-top:16px">
+      <button class="btn primary" style="flex:1;font-size:14px" onclick="confirmShip('${esc(cust)}','${esc(prod)}')">✅ אשר יציאה</button>
+      <button class="btn" style="flex:1;font-size:14px" onclick="closeShipModal()">ביטול</button>
+    </div>
+  </div>`;
+  document.body.appendChild(wrap);
+  setTimeout(()=>{const i=document.getElementById('ship-qty-inp');if(i){i.focus();i.select();}},50);
+}
+function closeShipModal(){document.getElementById('ship-modal-wrap')?.remove();}
+async function confirmShip(cust,prod){
+  const p=S.products.find(x=>String(x.cust)===String(cust)&&String(x.prod)===String(prod));
+  if(!p){closeShipModal();return;}
+  const qty=Math.max(0,parseInt(document.getElementById('ship-qty-inp')?.value)||0);
+  if(!Array.isArray(p.stageLog))p.stageLog=[];
+  const now=new Date();
+  const date=now.getFullYear()+'-'+pad2(now.getMonth()+1)+'-'+pad2(now.getDate());
+  const time=pad2(now.getHours())+':'+pad2(now.getMinutes());
+  p.shippedQty=qty;p.shippedAt=now.toISOString();
+  const note='כמות בפועל: '+qty+" יח'";
+  const ex=p.stageLog.find(s=>s.id==='shipped');
+  if(ex){ex.date=date;ex.time=time;ex.note=note;ex.auto=true;}
+  else p.stageLog.push({id:'shipped',date,time,note,auto:true});
+  p.stageLog.sort((a,b)=>PROD_STAGES.findIndex(x=>x.id===a.id)-PROD_STAGES.findIndex(x=>x.id===b.id));
+  saveLS();
+  if(S.fbConnected)try{await fbSet('products',p.id,{...p});}catch(e){}
+  closeShipModal();
+  showToast('✅ '+(p.name||prod)+' — יצא ללקוח ('+qty+" יח')");
+  try{buildStageReport();}catch(e){}
+  try{renderProducts();}catch(e){}
 }
 function addStation(d,btn){
   const inp=btn.previousElementSibling;const v=(inp?.value||'').trim();
@@ -7400,6 +7589,50 @@ function bcPrintOpenQty(cust,prod,code){
     </div>
     <script>window.onload=()=>window.print()<\/script></body></html>`);
 }
+// ברקוד "יצא ללקוח": לקוח+מוצר+9+000+99 (col='99' שמור). סריקתו מסמנת shipped + פותחת עדכון כמות
+function bcGenerateShip(){
+  const cust=(document.getElementById('bc-gen-cust')?.value||'').replace(/\D/g,'').padStart(2,'0').slice(0,2);
+  const prod=(document.getElementById('bc-gen-prod')?.value||'').replace(/\D/g,'').padStart(5,'0').slice(0,5);
+  if(cust==='00'||prod==='00000'){alert('הזן מספר לקוח ומספר מוצר');return;}
+  const code=cust+prod+'900099';
+  const out=document.getElementById('bc-gen-output');
+  if(!out)return;
+  out.innerHTML=`
+    <div style="display:flex;gap:8px;margin-bottom:10px">
+      <button class="btn" onclick="bcPrintShip('${cust}','${prod}','${code}')" style="font-size:13px">🖨️ הדפס</button>
+    </div>
+    <div id="bc-ship-card" style="background:#fff;border:3px solid var(--green-txt,#16a34a);border-radius:8px;padding:14px;display:flex;align-items:center;gap:14px;max-width:400px">
+      <div id="bc-ship-qr" style="flex-shrink:0;width:150px;height:150px"></div>
+      <div style="line-height:2">
+        <div style="font-size:14px;font-weight:800;color:var(--green-txt,#16a34a)">🚚 יצא ללקוח</div>
+        <div style="font-size:13px;font-weight:700;color:#000">לקוח: ${cust}</div>
+        <div style="font-size:13px;font-weight:700;color:#000">מוצר: ${prod}</div>
+        <div style="font-size:12px;color:#666">✅ סמן יציאה + עדכן כמות סופית</div>
+        <div style="font-size:11px;color:#999;margin-top:4px">${code}</div>
+      </div>
+    </div>`;
+  new QRCode(document.getElementById('bc-ship-qr'),{text:code,width:150,height:150,colorDark:'#16a34a',colorLight:'#ffffff',correctLevel:QRCode.CorrectLevel.M});
+  setTimeout(()=>{const im=document.getElementById('bc-ship-qr')?.querySelector('img');if(im)im.style.display='none';},50);
+}
+function bcPrintShip(cust,prod,code){
+  const canvas=document.querySelector('#bc-ship-qr canvas');
+  const img=canvas?`<img src="${canvas.toDataURL('image/png')}" style="width:150px;height:150px"/>`:'';
+  const win=window.open('','_blank');
+  win.document.write(`<html dir="rtl"><head><title>ברקוד יצא ללקוח</title>
+    <style>body{margin:20px;font-family:Arial,sans-serif;background:#fff}
+    .card{border:3px solid #16a34a;border-radius:8px;padding:16px;display:inline-flex;align-items:center;gap:16px}
+    @media print{@page{size:A4 portrait;margin:10mm}}</style></head><body>
+    <div class="card">
+      ${img}
+      <div style="line-height:2.2">
+        <div style="font-size:16px;font-weight:800;color:#16a34a">🚚 יצא ללקוח</div>
+        <div style="font-size:14px;font-weight:700">לקוח: ${cust}</div>
+        <div style="font-size:14px;font-weight:700">מוצר: ${prod}</div>
+        <div style="font-size:13px;color:#666">✅ סמן יציאה + עדכן כמות סופית</div>
+        <div style="font-size:11px;color:#999;margin-top:4px">${code}</div>
+      </div></div>
+    <script>window.onload=()=>window.print()<\/script></body></html>`);
+}
 function bcGenerate(){
   const cust=(document.getElementById('bc-gen-cust')?.value||'').replace(/\D/g,'').padStart(2,'0').slice(0,2);
   const prod=(document.getElementById('bc-gen-prod')?.value||'').replace(/\D/g,'').padStart(5,'0').slice(0,5);
@@ -7808,18 +8041,19 @@ function _stationOpts(sel){
   return`<option value="">— תחנה —</option>`+Object.entries(S.deptStations||{}).filter(([,a])=>a&&a.length).map(([d,sts])=>`<optgroup label="${esc(d)}">${sts.map(st=>{const k=d+'::'+st;return`<option value="${esc(k)}" ${sel===k?'selected':''}>${esc(st)}</option>`;}).join('')}</optgroup>`).join('');
 }
 function _stepRowHtml(s){
-  const name=stepName(s),nameAr=(s&&typeof s==='object'?s.nameAr:'')||'',lvl=stepLevel(s),stn=stepStation(s);
+  const name=stepName(s),nameAr=(s&&typeof s==='object'?s.nameAr:'')||'',lvl=stepLevel(s),stn=stepStation(s),mMin=stepManualMin(s);
   return`<div class="ts-row" style="border:1px solid var(--brd);border-radius:8px;padding:6px;margin-bottom:6px;display:flex;flex-direction:column;gap:4px">
     <div style="display:flex;gap:6px;align-items:center">
       <input type="text" data-f="name" value="${esc(name)}" placeholder="שם השלב (עברית)" style="flex:1;min-width:0;font-size:12px;padding:4px 8px;border-radius:6px;border:1px solid var(--brd);background:var(--card);color:var(--txt)">
       <input type="text" data-f="nameAr" value="${esc(nameAr)}" placeholder="الاسم بالعربية" dir="rtl" style="flex:1;min-width:0;font-size:12px;padding:4px 8px;border-radius:6px;border:1px solid var(--brd);background:var(--card);color:var(--txt)">
       <button type="button" onclick="this.closest('.ts-row').remove();renderProductPricing()" style="background:none;border:none;color:var(--red);cursor:pointer;font-size:14px">✕</button>
     </div>
-    <div style="display:flex;gap:6px">
+    <div style="display:flex;gap:6px;align-items:center">
       <select data-f="level" style="flex:1;min-width:0;font-size:12px">
         <option value="0">— רמת קושי —</option>${[1,2,3,4,5].map(l=>`<option value="${l}" ${lvl===l?'selected':''}>${levelName(l,'he')} (${l})</option>`).join('')}
       </select>
       <select data-f="station" style="flex:1;min-width:0;font-size:12px">${_stationOpts(stn)}</select>
+      <input type="number" data-f="manualMin" min="0" step="0.1" value="${mMin||''}" placeholder="דק' ידני" title="דקות ידניות ליחידה — משאירים ריק לחישוב אוטומטי לפי קושי" style="width:78px;flex:none;font-size:12px;padding:4px 6px;border-radius:6px;border:1px solid var(--brd);background:var(--card);color:var(--txt)">
     </div>
   </div>`;
 }
@@ -7867,16 +8101,19 @@ function renderProductPricing(){
   const steps=[...document.querySelectorAll('#pm-tasksteps-list .ts-row')].map(r=>({
     name:r.querySelector('[data-f="name"]')?.value.trim()||'',
     level:parseInt(r.querySelector('[data-f="level"]')?.value)||0,
-    station:r.querySelector('[data-f="station"]')?.value||''
+    station:r.querySelector('[data-f="station"]')?.value||'',
+    manualMin:parseFloat(r.querySelector('[data-f="manualMin"]')?.value)||0
   })).filter(s=>s.name);
-  const lvlSteps=steps.filter(s=>s.level);
-  if(!lvlSteps.length){
+  const shownSteps=steps.filter(s=>s.level||s.manualMin>0);
+  if(!shownSteps.length){
     box.innerHTML=`<div style="background:var(--bg2);border-radius:8px;padding:8px 10px">${head}
-      <div style="font-size:11px;color:var(--txt3);margin-top:4px">הגדר רמת קושי לשלבים כדי לחלק את התקציב לדקות עבודה</div></div>`;
+      <div style="font-size:11px;color:var(--txt3);margin-top:4px">הגדר רמת קושי לשלבים (או דקות ידני) כדי לחלק את התקציב לדקות עבודה</div></div>`;
     return;
   }
   const weights=S.costs.difficultyWeights||{1:1,2:1.5,3:2,4:2.5,5:3.5};
-  const totW=lvlSteps.reduce((s,x)=>s+(+weights[x.level]||1),0);
+  // רק שלבים אוטומטיים (עם קושי, בלי override ידני) מתחלקים את התקציב לפי משקל
+  const autoSteps=shownSteps.filter(s=>s.level&&!(s.manualMin>0));
+  const totW=autoSteps.reduce((s,x)=>s+(+weights[x.level]||1),0);
   const oh=overheadBreakdown().perHour;
   const rated=_costWorkers().filter(w=>S.costs.workerRates[w.id]);
   const avgAll=rated.length?rated.reduce((s,w)=>s+loadedHourlyRate(w.id),0)/rated.length:0;
@@ -7886,15 +8123,22 @@ function renderProductPricing(){
     return;
   }
   let totalMin=0,tooShortCnt=0;
-  const rows=lvlSteps.map(s=>{
-    const share=budget*(+weights[s.level]||1)/totW;
+  const rows=shownSteps.map(s=>{
     const rate=_pricingStepRate(s.station,s.level,avgAll)+oh;
-    const min=rate>0?share/rate*60:0;
+    let min,share,manual=s.manualMin>0;
+    if(manual){ // דקות ידניות דורסות את החישוב; ה-₪ מחושב לצורך מידע בלבד
+      min=s.manualMin;
+      share=min/60*rate;
+    }else{
+      share=totW?budget*(+weights[s.level]||1)/totW:0;
+      min=rate>0?share/rate*60:0;
+    }
     totalMin+=min;
-    const tooShort=min*60<s.level*30; // היוריסטיקה: פחות מ-30 שנ' לרמת קושי = לא ריאלי
+    const tooShort=!manual&&min*60<s.level*30; // היוריסטיקה: פחות מ-30 שנ' לרמת קושי = לא ריאלי
     if(tooShort)tooShortCnt++;
+    const tag=manual?` <span style="font-size:10px;color:var(--txt3)">✎ ידני</span>`:(s.level?` <span style="font-size:10px;color:var(--txt3)">(${levelName(s.level,'he')})</span>`:'');
     return`<div style="display:flex;align-items:center;gap:8px;padding:4px 0;border-bottom:0.5px solid var(--brd);font-size:12px${tooShort?';color:var(--red-txt)':''}">
-      <span style="flex:1;min-width:110px">${esc(s.name)} <span style="font-size:10px;color:var(--txt3)">(${levelName(s.level,'he')})</span></span>
+      <span style="flex:1;min-width:110px">${esc(s.name)}${tag}</span>
       <span style="color:var(--txt3)">₪${share.toFixed(2)}</span>
       <span style="font-weight:700">${tooShort?'⚠ ':''}${min.toFixed(1)} דק'</span>
     </div>`;
@@ -8104,7 +8348,8 @@ async function saveProduct(){
     name:r.querySelector('[data-f="name"]')?.value.trim()||'',
     nameAr:r.querySelector('[data-f="nameAr"]')?.value.trim()||'',
     level:parseInt(r.querySelector('[data-f="level"]')?.value)||0,
-    station:r.querySelector('[data-f="station"]')?.value||''
+    station:r.querySelector('[data-f="station"]')?.value||'',
+    manualMin:parseFloat(r.querySelector('[data-f="manualMin"]')?.value)||0
   })).filter(s=>s.name);
   const unitPrice=parseFloat(document.getElementById('pm-price')?.value)||0;
   const targetProfitPct=parseFloat(document.getElementById('pm-profit')?.value)||0;
@@ -8126,6 +8371,12 @@ async function saveProduct(){
     }
   }else{
     const id='p'+Date.now();
+    // הקמת מוצר = קבלת סחורה: סימון אוטומטי של שלב 'receive' אם לא הוזן ידנית
+    if(!stageLog.some(s=>s.id==='receive')){
+      const now=new Date();
+      stageLog.unshift({id:'receive',date:now.getFullYear()+'-'+pad2(now.getMonth()+1)+'-'+pad2(now.getDate()),time:pad2(now.getHours())+':'+pad2(now.getMinutes()),note:'',auto:true});
+      stageLog.sort((a,b)=>PROD_STAGES.findIndex(x=>x.id===a.id)-PROD_STAGES.findIndex(x=>x.id===b.id));
+    }
     S.products.push({id,createdAt:Date.now(),prod,cust,name,images:_prodImgs,docs:_prodDocs,quantities,stageLog,stageSkipped,workSteps,unitPrice,targetProfitPct,directMaterialsCost});
   }
   saveLS();

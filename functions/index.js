@@ -312,15 +312,20 @@ exports.calcTaskExpected = functions.https.onCall(async (data, context) => {
   const hourCost = rate + oh;
   if (!(hourCost > 0)) return { ok: false, reason: 'no-rate' };
   const weights = costs.difficultyWeights || { 1: 1, 2: 1.5, 3: 2, 4: 2.5, 5: 3.5 };
-  const lvl = (p.workSteps || []).filter(s => s && typeof s === 'object' && +s.level > 0);
-  const totW = lvl.reduce((s, x) => s + (+weights[+x.level] || 1), 0);
-  if (!totW) return { ok: false, reason: 'no-levels' };
+  // שלב שמיש = יש לו רמת קושי או דקות ידניות (manualMin > 0 = override)
+  const usable = (p.workSteps || []).filter(s => s && typeof s === 'object' && (+s.level > 0 || +s.manualMin > 0));
+  // רק שלבים אוטומטיים (קושי בלי override ידני) מתחלקים את התקציב לפי משקל
+  const totW = usable.filter(s => +s.level > 0 && !(+s.manualMin > 0)).reduce((s, x) => s + (+weights[+x.level] || 1), 0);
+  if (!usable.length) return { ok: false, reason: 'no-levels' };
   const perStep = {};
   let total = 0;
   for (const name of stepNames) {
-    const st = lvl.find(s => s.name === name);
+    const st = usable.find(s => s.name === name);
     if (!st) continue;
-    const min = budget * (+weights[+st.level] || 1) / totW * qty / hourCost * 60;
+    let min;
+    if (+st.manualMin > 0) { min = +st.manualMin * qty; } // דקות ידניות דורסות — צפי = דקות×כמות
+    else if (totW > 0) { min = budget * (+weights[+st.level] || 1) / totW * qty / hourCost * 60; }
+    else continue;
     perStep[name] = Math.round(min * 10) / 10;
     total += min;
   }
