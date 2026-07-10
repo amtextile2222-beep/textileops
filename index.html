@@ -7582,7 +7582,7 @@ function bcGenerateOpenQty(){
         <div style="font-size:11px;color:var(--txt3);margin-top:4px">${code}</div>
       </div>
     </div>`;
-  new QRCode(document.getElementById('bc-openqty-qr'),{text:code,width:150,height:150,colorDark:'#d97706',colorLight:'#ffffff',correctLevel:QRCode.CorrectLevel.M});
+  new QRCode(document.getElementById('bc-openqty-qr'),{text:code,width:150,height:150,colorDark:'#000000',colorLight:'#ffffff',correctLevel:QRCode.CorrectLevel.M});
   setTimeout(()=>{const im=document.getElementById('bc-openqty-qr')?.querySelector('img');if(im)im.style.display='none';},50);
 }
 function bcPrintOpenQty(cust,prod,code){
@@ -7627,7 +7627,7 @@ function bcGenerateShip(){
         <div style="font-size:11px;color:#999;margin-top:4px">${code}</div>
       </div>
     </div>`;
-  new QRCode(document.getElementById('bc-ship-qr'),{text:code,width:150,height:150,colorDark:'#16a34a',colorLight:'#ffffff',correctLevel:QRCode.CorrectLevel.M});
+  new QRCode(document.getElementById('bc-ship-qr'),{text:code,width:150,height:150,colorDark:'#000000',colorLight:'#ffffff',correctLevel:QRCode.CorrectLevel.M});
   setTimeout(()=>{const im=document.getElementById('bc-ship-qr')?.querySelector('img');if(im)im.style.display='none';},50);
 }
 function bcPrintShip(cust,prod,code){
@@ -7697,7 +7697,7 @@ function bcGenerate(){
     div.appendChild(qrWrap);
     div.appendChild(infoDiv);
     printArea.appendChild(div);
-    new QRCode(qrWrap,{text:totalCode,width:150,height:150,colorDark:'#059669',colorLight:'#ffffff',correctLevel:QRCode.CorrectLevel.M});
+    new QRCode(qrWrap,{text:totalCode,width:150,height:150,colorDark:'#000000',colorLight:'#ffffff',correctLevel:QRCode.CorrectLevel.M});
     setTimeout(()=>{const im=qrWrap.querySelector('img');if(im)im.style.display='none';},50);
   })();
   items.forEach(it=>{
@@ -7744,21 +7744,40 @@ function bcPrint(){
     }
     byColor.get(col).push(clone.outerHTML);
   });
-  const pages=[...byColor.entries()].map(([col,cards],i,arr)=>{
+  // רצף אחד בלי עמוד נפרד לכל צבע — רק כותרת מפרידה בין צבעים
+  const pages=[...byColor.entries()].map(([col,cards])=>{
     const colName=(COLORS_AR[col]||COLORS[col]||col);
-    const pageBreak=i<arr.length-1?'page-break-after:always':'';
-    return`<div style="${pageBreak}">
-      <div style="text-align:right;padding:6px 10px 4px;font-size:14px;font-weight:700;color:#333">צבע: ${col} · ${colName} — ${cards.length} יחידות</div>
-      <div class="grid">${cards.join('')}</div>
-    </div>`;
+    const header=col==='total'?'':`<div style="text-align:right;padding:6px 10px 4px;font-size:14px;font-weight:700;color:#333">צבע: ${col} · ${colName} — ${cards.length} יחידות</div>`;
+    return`<div>${header}<div class="grid">${cards.join('')}</div></div>`;
   }).join('');
+  // ברקוד "יצא ללקוח" מצורף בסוף — בדף האחרון
+  let shipHTML='';
+  const g=window._bcLastGen;
+  if(g){
+    const shipCode=g.cust+g.prod+'900099';
+    const tmp=document.createElement('div');
+    new QRCode(tmp,{text:shipCode,width:150,height:150,colorDark:'#000000',colorLight:'#ffffff',correctLevel:QRCode.CorrectLevel.M});
+    const cv=tmp.querySelector('canvas');
+    if(cv)shipHTML=`<div class="grid" style="page-break-before:always">
+      <div class="bc-card" style="border-width:3px;grid-column:1/-1">
+        <img src="${cv.toDataURL('image/png')}" style="width:150px;height:150px;flex-shrink:0"/>
+        <div style="text-align:right;line-height:2.2;flex:1">
+          <div style="font-size:16px;font-weight:800;color:#000">🚚 יצא ללקוח</div>
+          <div style="font-size:13px;font-weight:700;color:#000">לקוח: ${g.cust}</div>
+          <div style="font-size:13px;font-weight:700;color:#000">מוצר: ${g.prod}</div>
+          <div style="font-size:12px;color:#555">✅ סמן יציאה + עדכן כמות סופית</div>
+          <div style="font-size:11px;color:#555;margin-top:4px">${shipCode}</div>
+        </div>
+      </div>
+    </div>`;
+  }
   const win=window.open('','_blank');
   win.document.write(`<html dir="rtl"><head><title>QR קודים למשימות</title>
     <style>body{margin:0;font-family:Arial,sans-serif;background:#fff}
     .grid{display:grid;grid-template-columns:repeat(2,1fr);gap:10px;padding:6px 10px}
     .bc-card{border:2px solid #333;border-radius:6px;padding:10px;display:flex;align-items:center;gap:12px;break-inside:avoid}
     @media print{@page{size:A4 portrait;margin:8mm}}</style></head><body>
-    ${pages}
+    ${pages}${shipHTML}
     <script>window.onload=()=>window.print()<\/script></body></html>`);
   win.document.close();
 }
