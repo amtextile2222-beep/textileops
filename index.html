@@ -1958,7 +1958,13 @@ function stepDisplay(s){if(typeof s==='string')return s;return(currentLang==='ar
 function stepLevel(s){return(s&&typeof s==='object'&&s.level)?+s.level:0;}
 function stepStation(s){return(s&&typeof s==='object'&&s.station)?s.station:'';}
 function stepManualMin(s){return(s&&typeof s==='object'&&+s.manualMin>0)?+s.manualMin:0;} // דקות ידניות ליחידה — דורס חישוב אוטומטי
-function stepBadge(s){const l=stepLevel(s);return l?` <span style="font-size:11px;padding:1px 7px;border-radius:8px;background:var(--bg2);color:var(--txt3);border:1px solid var(--brd)">${levelName(l)}</span>`:'';}
+function stepBadge(s){const l=stepLevel(s);return(s&&typeof s==='object'&&s.quick?` <span style="font-size:11px;padding:1px 7px;border-radius:8px;background:var(--amber-bg);color:var(--amber-txt);border:1px solid var(--brd)">⚡ מהיר</span>`:'')+(l?` <span style="font-size:11px;padding:1px 7px;border-radius:8px;background:var(--bg2);color:var(--txt3);border:1px solid var(--brd)">${levelName(l)}</span>`:'');}
+// שלב "מהיר" ⚡ — פטור מהגבלת 2 שלבים/2 ברקודים בשני הסורקים
+function isQuickStep(cust,prod,stepNm){
+  const p=S.products.find(x=>x.cust===cust&&x.prod===prod);if(!p)return false;
+  const s=(p.workSteps||[]).find(w=>stepName(w)===stepNm);
+  return!!(s&&typeof s==='object'&&s.quick);
+}
 
 // ─── מנוע המלצת שיבוץ — תמחור שלב ב' ────────────────────────
 // לשלבים שנבחרו: עובד כשיר = מיומנות בתחנה ≥ רמת הקושי לכל שלב.
@@ -2054,6 +2060,35 @@ function updateExpectedTime(prefix){
       render(_expMap[key]);
     }catch(e){console.error('calcTaskExpected:',e);box.innerHTML='';}
   },600);
+}
+// עדכון צפי הזמן (expectedMin) למשימות פעילות/בהשהיה של מוצר אחרי שמירת שינוי תמחור/דק' ידני.
+// מקבץ קריאות ל-CF לפי עובד+כמות; משימה ללא צפי מקבלת מחיקת expectedMin. שקט בכשל (הרשאה/רשת).
+async function recalcActiveExpected(cust,prod){
+  if(!S.fbConnected||!window._fbFunctions)return;
+  const prodObj=S.products.find(x=>x.cust===cust&&x.prod===prod);if(!prodObj)return;
+  const affected=S.activeTasks.filter(t=>t.cust===cust&&t.prod===prod);if(!affected.length)return;
+  const hasPricing=+prodObj.unitPrice>0;
+  const allSteps=(prodObj.workSteps||[]).map(s=>stepName(s)).filter(Boolean);
+  const{httpsCallable}=window._fb;
+  const fn=httpsCallable(window._fbFunctions,'calcTaskExpected');
+  const cache={};let changed=false;
+  for(const t of affected){
+    let res={ok:false};
+    if(hasPricing){
+      const key=taskExpectedKey(cust,prod,t.workerId,t.qty);
+      if(cache[key]===undefined){
+        try{const r=await fn({cust,prod,workerId:t.workerId,qty:t.qty,stepNames:allSteps});cache[key]=r.data||{ok:false};}
+        catch(e){console.error('recalcActiveExpected:',e);cache[key]={ok:false};}
+      }
+      res=cache[key];
+    }
+    const newExp=(res&&res.ok&&res.perStep&&res.perStep[t.taskType]!=null)?res.perStep[t.taskType]:null;
+    let taskChanged=false;
+    if(newExp!=null){if(t.expectedMin!==newExp){t.expectedMin=newExp;taskChanged=true;}}
+    else if(t.expectedMin!=null){delete t.expectedMin;taskChanged=true;}
+    if(taskChanged){changed=true;if(S.fbConnected)await fbSet('activeTasks',String(t.id),{...t,startTime:t.startTime instanceof Date?t.startTime.toISOString():t.startTime});}
+  }
+  if(changed){saveLS();renderTasks();if(typeof renderMgrTasks==='function')renderMgrTasks();}
 }
 // דוח שיבוץ מתוכנן למוצר — לפני הכנסה לעבודה (כפתור 🎯 בכרטיס המוצר)
 function showProductPlan(id){
@@ -3794,8 +3829,10 @@ function bcShowTaskTypeField(show){
 }
 // הגבלת סריקה בעמוד "סריקה" (bc): עד 2 שלבים לברקוד (מנהל — ללא הגבלה) + עדכון צפי זמן
 function bcStepToggle(cb){
-  if(S.user?.role!=='manager'&&cb.checked&&document.querySelectorAll('#bc-steps-list input[type="checkbox"]:checked').length>2){
-    cb.checked=false;showToast(LANGS[currentLang].lim_steps||'⚠ ניתן לבחור עד 2 שלבים לכל ברקוד','var(--red-txt)');return;
+  if(S.user?.role!=='manager'&&cb.checked){
+    const list=document.getElementById('bc-steps-list');
+    const nonQuick=[...list.querySelectorAll('input[type="checkbox"]:checked')].filter(x=>!isQuickStep(list?.dataset.cust,list?.dataset.prod,x.dataset.step)).length;
+    if(nonQuick>2){cb.checked=false;showToast(LANGS[currentLang].lim_steps||'⚠ ניתן לבחור עד 2 שלבים לכל ברקוד','var(--red-txt)');return;}
   }
   updateExpectedTime('bc');
 }
@@ -3839,9 +3876,12 @@ async function submitBc(){
   if(bcUseSteps&&!bcCheckedSteps.length){showToast(T.err_sel_step||'⚠ בחר לפחות שלב עבודה אחד','var(--red-txt)');return;}
   // הגבלת סריקה לאחראי/עובד/עוזר (מנהל — ללא הגבלה): עד 2 שלבים לברקוד ועד 2 ברקודים פעילים
   if(u.role!=='manager'){
-    if(bcUseSteps&&bcCheckedSteps.length>2){showToast(T.lim_steps||'⚠ ניתן לבחור עד 2 שלבים לכל ברקוד','var(--red-txt)');return;}
-    const distinctBc=new Set(S.activeTasks.filter(t=>t.workerId===u.id).map(t=>taskBc(t)));
-    if(!distinctBc.has(raw)&&distinctBc.size>=2){showToast(T.lim_bc||'⚠ ניתן לסרוק עד 2 ברקודים','var(--red-txt)');return;}
+    const nonQuickSteps=bcUseSteps?bcCheckedSteps.filter(st=>!isQuickStep(cust,prod,st)):[];
+    if(bcUseSteps&&nonQuickSteps.length>2){showToast(T.lim_steps||'⚠ ניתן לבחור עד 2 שלבים לכל ברקוד','var(--red-txt)');return;}
+    // ברקודים שכל משימותיהם הפעילות הן שלבי ⚡ מהיר אינם נספרים; סריקה כולה-מהירה לא נחסמת
+    const addingNonQuick=bcUseSteps?nonQuickSteps.length>0:true;
+    const nonQuickBc=new Set(S.activeTasks.filter(t=>t.workerId===u.id&&!isQuickStep(t.cust,t.prod,t.taskType)).map(t=>taskBc(t)));
+    if(addingNonQuick&&!nonQuickBc.has(raw)&&nonQuickBc.size>=2){showToast(T.lim_bc||'⚠ ניתן לסרוק עד 2 ברקודים','var(--red-txt)');return;}
   }
   try{
     const typesToCreate=bcUseSteps?bcCheckedSteps:[taskType||''];
@@ -3999,6 +4039,7 @@ function renderTasks(){
         ${tasks.map(t=>`<div class="task-stage-row">
           <span class="badge gray">📋 ${esc(t.taskType||'—')}</span>
           <span style="font-size:11px;color:var(--txt3)">${t.qty} יח'${t.prod!==lead.prod?' · '+esc(t.prod):''}</span>
+          ${t.size&&t.size!==lead.size?`<span class="bc-seg bc-s">מידה ${esc(t.size)}</span>`:''}${t.col!==lead.col?`<span class="bc-seg bc-col">${COLORS[t.col]||esc(t.col)}</span>`:''}
           <div style="margin-inline-start:auto;display:flex;gap:6px">${_taskActions(t)}</div>
         </div>`).join('')}
       </div>
@@ -5267,16 +5308,23 @@ function tsShowTaskTypeField(show){
 }
 // הגבלת סריקה לאחראי/עובד/עוזר: עד 2 שלבים לכל ברקוד ועד 2 ברקודים בסל (מנהל — ללא הגבלה)
 function tsStepToggle(cb){
-  if(S.user?.role!=='manager'&&cb.checked&&document.querySelectorAll('#ts-steps-list input[type="checkbox"]:checked').length>2){
-    cb.checked=false;showToast(LANGS[currentLang].lim_steps||'⚠ ניתן לבחור עד 2 שלבים לכל ברקוד','var(--red-txt)');return;
+  if(S.user?.role!=='manager'&&cb.checked){
+    const list=document.getElementById('ts-steps-list');
+    const nonQuick=[...list.querySelectorAll('input[type="checkbox"]:checked')].filter(x=>!isQuickStep(list?.dataset.cust,list?.dataset.prod,x.dataset.step)).length;
+    if(nonQuick>2){cb.checked=false;showToast(LANGS[currentLang].lim_steps||'⚠ ניתן לבחור עד 2 שלבים לכל ברקוד','var(--red-txt)');return;}
   }
   renderStepRecs('ts');
 }
 function tsScanLimitsOk(raw,checkedSteps){
   if(S.user?.role==='manager')return true;
-  if(checkedSteps&&checkedSteps.length>2){showToast(LANGS[currentLang].lim_steps||'⚠ ניתן לבחור עד 2 שלבים לכל ברקוד','var(--red-txt)');return false;}
-  const distinct=new Set(_tsBatch.map(b=>b.raw));
-  if(!distinct.has(raw)&&distinct.size>=2){showToast(LANGS[currentLang].lim_bc||'⚠ ניתן לסרוק עד 2 ברקודים','var(--red-txt)');return false;}
+  const T=LANGS[currentLang];
+  const cust=raw.slice(0,2),prod=raw.slice(2,7);
+  const nonQuickSteps=(checkedSteps||[]).filter(st=>!isQuickStep(cust,prod,st));
+  if(nonQuickSteps.length>2){showToast(T.lim_steps||'⚠ ניתן לבחור עד 2 שלבים לכל ברקוד','var(--red-txt)');return false;}
+  // ברקוד שכל שלביו בסל הם ⚡ מהיר אינו נספר; סריקה כולה-מהירה לא נחסמת
+  const addingNonQuick=(checkedSteps&&checkedSteps.length)?nonQuickSteps.length>0:true;
+  const nonQuickBc=new Set(_tsBatch.filter(b=>!b.taskType||!isQuickStep(b.cust,b.prod,b.taskType)).map(b=>b.raw));
+  if(addingNonQuick&&!nonQuickBc.has(raw)&&nonQuickBc.size>=2){showToast(T.lim_bc||'⚠ ניתן לסרוק עד 2 ברקודים','var(--red-txt)');return false;}
   return true;
 }
 async function tsStartCam(){
@@ -7672,6 +7720,7 @@ function bcGenerate(){
       <div style="display:flex;gap:8px;flex-wrap:wrap">
         <button class="btn success" onclick="bcExportNiimbot()" style="font-size:13px">📥 ייצא ל-NIIMBOT</button>
         <button class="btn" onclick="bcPrint()" style="font-size:13px">🖨️ הדפס הכל</button>
+        <button class="btn" onclick="bcPrint('labels')" style="font-size:13px" title="רשת 105×57 מ&quot;מ, 10 מדבקות בדף A4">🏷️ הדפס למדבקות</button>
       </div>
     </div>
     <div id="bc-print-area" style="display:grid;grid-template-columns:repeat(auto-fill,minmax(300px,1fr));gap:12px">
@@ -7725,14 +7774,14 @@ function bcGenerate(){
     setTimeout(()=>{const im=qrWrap.querySelector('img');if(im)im.style.display='none';},50);
   });
 }
-function bcPrint(){
+function bcPrint(mode){
+  const labels=mode==='labels'; // מצב מדבקות: רשת 105×57 מ"מ קבועה, 10 בדף A4, בלי מרווח/כותרות
   const area=document.getElementById('bc-print-area');
   if(!area)return;
-  // קבץ לפי צבע — כל צבע בעמוד נפרד
-  const byColor=new Map();
+  // קבץ לפי צבע (למצב רגיל) + רשימה רציפה של כל הכרטיסים (למצב מדבקות)
+  const byColor=new Map();const allCards=[];
   [...area.querySelectorAll('.bc-card')].forEach(card=>{
     const col=card.dataset.col||'00';
-    if(!byColor.has(col))byColor.set(col,[]);
     const clone=card.cloneNode(true);
     const origCanvas=card.querySelector('canvas');
     const cloneCanvas=clone.querySelector('canvas');
@@ -7742,24 +7791,19 @@ function bcPrint(){
       img.style.cssText='width:150px;height:150px';
       cloneCanvas.replaceWith(img);
     }
+    if(!byColor.has(col))byColor.set(col,[]);
     byColor.get(col).push(clone.outerHTML);
+    allCards.push(clone.outerHTML);
   });
-  // רצף אחד בלי עמוד נפרד לכל צבע — רק כותרת מפרידה בין צבעים
-  const pages=[...byColor.entries()].map(([col,cards])=>{
-    const colName=(COLORS_AR[col]||COLORS[col]||col);
-    const header=col==='total'?'':`<div style="text-align:right;padding:6px 10px 4px;font-size:14px;font-weight:700;color:#333">צבע: ${col} · ${colName} — ${cards.length} יחידות</div>`;
-    return`<div>${header}<div class="grid">${cards.join('')}</div></div>`;
-  }).join('');
-  // ברקוד "יצא ללקוח" מצורף בסוף — בדף האחרון
-  let shipHTML='';
+  // ברקוד "יצא ללקוח" — כרטיס בודד
+  let shipCard='';
   const g=window._bcLastGen;
   if(g){
     const shipCode=g.cust+g.prod+'900099';
     const tmp=document.createElement('div');
     new QRCode(tmp,{text:shipCode,width:150,height:150,colorDark:'#000000',colorLight:'#ffffff',correctLevel:QRCode.CorrectLevel.M});
     const cv=tmp.querySelector('canvas');
-    if(cv)shipHTML=`<div class="grid" style="page-break-before:always">
-      <div class="bc-card" style="border-width:3px;grid-column:1/-1">
+    if(cv)shipCard=`<div class="bc-card" style="border-width:3px;grid-column:1/-1">
         <img src="${cv.toDataURL('image/png')}" style="width:150px;height:150px;flex-shrink:0"/>
         <div style="text-align:right;line-height:2.2;flex:1">
           <div style="font-size:16px;font-weight:800;color:#000">🚚 יצא ללקוח</div>
@@ -7768,16 +7812,37 @@ function bcPrint(){
           <div style="font-size:12px;color:#555">✅ סמן יציאה + עדכן כמות סופית</div>
           <div style="font-size:11px;color:#555;margin-top:4px">${shipCode}</div>
         </div>
-      </div>
-    </div>`;
+      </div>`;
   }
+  let body;
+  if(labels){
+    // רשת אחת רציפה — כל הכרטיסים + "יצא ללקוח" נופלים על גבולות המדבקות בלי כותרות/מעברי-עמוד
+    body=`<div class="grid">${allCards.join('')}${shipCard}</div>`;
+  }else{
+    // רצף אחד בלי עמוד נפרד לכל צבע — רק כותרת מפרידה בין צבעים
+    const pages=[...byColor.entries()].map(([col,cards])=>{
+      const colName=(COLORS_AR[col]||COLORS[col]||col);
+      const header=col==='total'?'':`<div style="text-align:right;padding:6px 10px 4px;font-size:14px;font-weight:700;color:#333">צבע: ${col} · ${colName} — ${cards.length} יחידות</div>`;
+      return`<div>${header}<div class="grid">${cards.join('')}</div></div>`;
+    }).join('');
+    // ברקוד "יצא ללקוח" מצורף בסוף — בדף האחרון
+    body=pages+(shipCard?`<div class="grid" style="page-break-before:always">${shipCard}</div>`:'');
+  }
+  // במצב מדבקות: !important גובר על ה-inline של הכרטיסים (padding/border/grid-column) כדי לקבע גודל תא
+  const style=labels
+    ?`body{margin:0;font-family:Arial,sans-serif;background:#fff}
+      .grid{display:grid!important;grid-template-columns:repeat(2,105mm)!important;gap:0!important;padding:0!important}
+      .bc-card{width:105mm!important;height:57mm!important;box-sizing:border-box!important;padding:4mm!important;border:none!important;border-radius:0!important;gap:8px!important;grid-column:auto!important;overflow:hidden!important}
+      .bc-card img{width:34mm!important;height:34mm!important;flex-shrink:0}
+      @media print{@page{size:A4 portrait;margin:6mm 0}}`
+    :`body{margin:0;font-family:Arial,sans-serif;background:#fff}
+      .grid{display:grid;grid-template-columns:repeat(2,1fr);gap:10px;padding:6px 10px}
+      .bc-card{border:2px solid #333;border-radius:6px;padding:10px;display:flex;align-items:center;gap:12px;break-inside:avoid}
+      @media print{@page{size:A4 portrait;margin:8mm}}`;
   const win=window.open('','_blank');
   win.document.write(`<html dir="rtl"><head><title>QR קודים למשימות</title>
-    <style>body{margin:0;font-family:Arial,sans-serif;background:#fff}
-    .grid{display:grid;grid-template-columns:repeat(2,1fr);gap:10px;padding:6px 10px}
-    .bc-card{border:2px solid #333;border-radius:6px;padding:10px;display:flex;align-items:center;gap:12px;break-inside:avoid}
-    @media print{@page{size:A4 portrait;margin:8mm}}</style></head><body>
-    ${pages}${shipHTML}
+    <style>${style}</style></head><body>
+    ${body}
     <script>window.onload=()=>window.print()<\/script></body></html>`);
   win.document.close();
 }
@@ -8089,6 +8154,7 @@ function _stepRowHtml(s){
       </select>
       <select data-f="station" style="flex:1;min-width:0;font-size:12px">${_stationOpts(stn)}</select>
       <input type="number" data-f="manualMin" min="0" step="0.1" value="${mMin||''}" placeholder="דק' ידני" title="דקות ידניות ליחידה — משאירים ריק לחישוב אוטומטי לפי קושי" style="width:78px;flex:none;font-size:12px;padding:4px 6px;border-radius:6px;border:1px solid var(--brd);background:var(--card);color:var(--txt)">
+      <label style="display:flex;align-items:center;gap:3px;flex:none;font-size:12px;color:var(--txt3);cursor:pointer;white-space:nowrap" title="שלב מהיר — פטור מהגבלת 2 שלבים / 2 ברקודים לעובד"><input type="checkbox" data-f="quick" ${s&&typeof s==='object'&&s.quick?'checked':''} style="width:15px;height:15px">⚡ מהיר</label>
     </div>
   </div>`;
 }
@@ -8384,7 +8450,8 @@ async function saveProduct(){
     nameAr:r.querySelector('[data-f="nameAr"]')?.value.trim()||'',
     level:parseInt(r.querySelector('[data-f="level"]')?.value)||0,
     station:r.querySelector('[data-f="station"]')?.value||'',
-    manualMin:parseFloat(r.querySelector('[data-f="manualMin"]')?.value)||0
+    manualMin:parseFloat(r.querySelector('[data-f="manualMin"]')?.value)||0,
+    quick:!!r.querySelector('[data-f="quick"]')?.checked
   })).filter(s=>s.name);
   const unitPrice=parseFloat(document.getElementById('pm-price')?.value)||0;
   const targetProfitPct=parseFloat(document.getElementById('pm-profit')?.value)||0;
@@ -8421,6 +8488,7 @@ async function saveProduct(){
   }
   closeProdModal();renderProducts();
   _expMap={}; // התמחור אולי השתנה — ניקוי cache של צפי הזמן
+  recalcActiveExpected(cust,prod); // עדכון צפי במשימות פעילות של המוצר (אם התמחור/דק' השתנו)
 }
 
 async function deleteProduct(id){
