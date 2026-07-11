@@ -5242,9 +5242,7 @@ function printWorkerBarcodes(){
       return {name:w.name,dept:w.dept||'',role:w.role==='supervisor'?'אחראי':w.role==='helper'?'עוזר':'עובד',id:w.id,src};
     });
     document.body.removeChild(tmpWrap);
-    const win=window.open('','_blank','width=800,height=600');
-    if(!win){alert('אפשר חלונות קופצים בדפדפן');return;}
-    win.document.write(`<!DOCTYPE html><html dir="rtl"><head><meta charset="UTF-8"><title>ברקודים עובדים</title>
+    printViaIframe(`<!DOCTYPE html><html dir="rtl"><head><meta charset="UTF-8"><title>ברקודים עובדים</title>
     <style>
       *{box-sizing:border-box;margin:0;padding:0}
       body{font-family:Arial,sans-serif;background:#fff;padding:10px}
@@ -5263,9 +5261,7 @@ function printWorkerBarcodes(){
         <div class="sub">${w.dept} · ${w.role}</div>
       </div>`).join('')}
     </div>
-    <script>window.onload=function(){window.print();}<\/script>
     </body></html>`);
-    win.document.close();
   },300);
 }
 function tsParseBc(v){
@@ -7489,8 +7485,7 @@ function printPayroll(){
   const to=document.getElementById('cost-to')?.value||'';
   const tbl=document.getElementById('payroll-table')?.outerHTML||'';
   const now=new Date().toLocaleDateString('he-IL');
-  const win=window.open('','_blank','width=900,height=700');
-  win.document.write(`<!DOCTYPE html><html dir="rtl" lang="he"><head>
+  printViaIframe(`<!DOCTYPE html><html dir="rtl" lang="he"><head>
     <meta charset="UTF-8"/><title>תשלום משכורות</title>
     <style>
       *{box-sizing:border-box;margin:0;padding:0}
@@ -7506,9 +7501,7 @@ function printPayroll(){
     <h1>✂️ TextileOps — תשלום משכורות</h1>
     <div class="sub">תקופה: ${from} עד ${to} | הודפס: ${now}</div>
     ${tbl}
-    <script>window.onload=()=>{window.print();}<\/script>
   </body></html>`);
-  win.document.close();
 }
 
 // ─── PRODUCTS ────────────────────────────────────────────────
@@ -7636,8 +7629,7 @@ function bcGenerateOpenQty(){
 function bcPrintOpenQty(cust,prod,code){
   const canvas=document.querySelector('#bc-openqty-qr canvas');
   const img=canvas?`<img src="${canvas.toDataURL('image/png')}" style="width:150px;height:150px"/>`:'';
-  const win=window.open('','_blank');
-  win.document.write(`<html dir="rtl"><head><title>ברקוד ספירה/גזירה</title>
+  printViaIframe(`<html dir="rtl"><head><title>ברקוד ספירה/גזירה</title>
     <style>body{margin:20px;font-family:Arial,sans-serif;background:#fff}
     .card{border:3px solid #d97706;border-radius:8px;padding:16px;display:inline-flex;align-items:center;gap:16px}
     @media print{@page{size:A4 portrait;margin:10mm}}</style></head><body>
@@ -7650,8 +7642,7 @@ function bcPrintOpenQty(cust,prod,code){
         <div style="font-size:13px;color:#666">⏳ כמות פתוחה</div>
         <div style="font-size:11px;color:#999;margin-top:4px">${code}</div>
       </div>
-    </div>
-    <script>window.onload=()=>window.print()<\/script></body></html>`);
+    </div></body></html>`);
 }
 // ברקוד "יצא ללקוח": לקוח+מוצר+9+000+99 (col='99' שמור). סריקתו מסמנת shipped + פותחת עדכון כמות
 function bcGenerateShip(){
@@ -7681,8 +7672,7 @@ function bcGenerateShip(){
 function bcPrintShip(cust,prod,code){
   const canvas=document.querySelector('#bc-ship-qr canvas');
   const img=canvas?`<img src="${canvas.toDataURL('image/png')}" style="width:150px;height:150px"/>`:'';
-  const win=window.open('','_blank');
-  win.document.write(`<html dir="rtl"><head><title>ברקוד יצא ללקוח</title>
+  printViaIframe(`<html dir="rtl"><head><title>ברקוד יצא ללקוח</title>
     <style>body{margin:20px;font-family:Arial,sans-serif;background:#fff}
     .card{border:3px solid #16a34a;border-radius:8px;padding:16px;display:inline-flex;align-items:center;gap:16px}
     @media print{@page{size:A4 portrait;margin:10mm}}</style></head><body>
@@ -7694,8 +7684,7 @@ function bcPrintShip(cust,prod,code){
         <div style="font-size:14px;font-weight:700">מוצר: ${prod}</div>
         <div style="font-size:13px;color:#666">✅ סמן יציאה + עדכן כמות סופית</div>
         <div style="font-size:11px;color:#999;margin-top:4px">${code}</div>
-      </div></div>
-    <script>window.onload=()=>window.print()<\/script></body></html>`);
+      </div></div></body></html>`);
 }
 function bcGenerate(){
   const cust=(document.getElementById('bc-gen-cust')?.value||'').replace(/\D/g,'').padStart(2,'0').slice(0,2);
@@ -7774,6 +7763,24 @@ function bcGenerate(){
     setTimeout(()=>{const im=qrWrap.querySelector('img');if(im)im.style.display='none';},50);
   });
 }
+// הדפסה דרך iframe נסתר במקום window.open — ב-PWA במסך הבית (standalone) window.open נתקע על דף ההדפסה ואי אפשר לסגור אותו אלא בסגירת האפליקציה כולה
+function printViaIframe(html){
+  const old=document.getElementById('print-iframe');if(old)old.remove();
+  const f=document.createElement('iframe');
+  f.id='print-iframe';
+  f.style.cssText='position:fixed;right:0;bottom:0;width:0;height:0;border:0;visibility:hidden';
+  document.body.appendChild(f);
+  const doc=f.contentWindow.document;
+  doc.open();doc.write(html);doc.close();
+  const go=()=>{
+    if(f.dataset.printed)return;f.dataset.printed='1';
+    try{f.contentWindow.focus();f.contentWindow.print();}catch(e){window.print();}
+    setTimeout(()=>{const el=document.getElementById('print-iframe');if(el)el.remove();},60000);
+  };
+  // התמונות הן data-URL ומוכנות מיד; שהות קצרה לוודא רינדור לפני פתיחת גיליון ההדפסה + fallback אם onload לא נורה
+  f.onload=()=>setTimeout(go,300);
+  setTimeout(go,600);
+}
 function bcPrint(mode){
   const labels=mode==='labels'; // מצב מדבקות: רשת 105×57 מ"מ קבועה, 10 בדף A4, בלי מרווח/כותרות
   const area=document.getElementById('bc-print-area');
@@ -7839,12 +7846,10 @@ function bcPrint(mode){
       .grid{display:grid;grid-template-columns:repeat(2,1fr);gap:10px;padding:6px 10px}
       .bc-card{border:2px solid #333;border-radius:6px;padding:10px;display:flex;align-items:center;gap:12px;break-inside:avoid}
       @media print{@page{size:A4 portrait;margin:8mm}}`;
-  const win=window.open('','_blank');
-  win.document.write(`<html dir="rtl"><head><title>QR קודים למשימות</title>
+  printViaIframe(`<html dir="rtl"><head><title>QR קודים למשימות</title>
     <style>${style}</style></head><body>
     ${body}
-    <script>window.onload=()=>window.print()<\/script></body></html>`);
-  win.document.close();
+    </body></html>`);
 }
 // ─── PDF IMPORT ──────────────────────────────────────────────
 function bcOpenPDF(){document.getElementById('bc-pdf-input')?.click();}
@@ -8532,15 +8537,12 @@ function doPrintChoice(){
   if(val==='stages'||val==='all'){
     html+=`<div class="card" style="margin-top:12px"><div class="sec">📦 דוח ייצור לפי שלב</div>${document.getElementById('rp-stages-body')?.innerHTML||''}</div>`;
   }
-  const win=window.open('','_blank','width=900,height=700');
-  win.document.write(`<!DOCTYPE html><html dir="rtl" lang="he"><head><meta charset="UTF-8"/><title>דוח משימות</title><style>*{box-sizing:border-box;margin:0;padding:0}body{font-family:Arial,sans-serif;padding:20px;color:#000;background:#fff;font-size:13px}h1{font-size:18px;margin-bottom:4px;color:#185FA5}.print-date{font-size:11px;color:#666;margin-bottom:16px}.card{background:#fff;border:1px solid #ddd;border-radius:8px;padding:12px 16px;margin-bottom:12px}.sec{font-size:14px;font-weight:700;margin-bottom:8px}table{width:100%;border-collapse:collapse;font-size:12px}th{background:#f0f0f0;padding:7px 8px;text-align:right;font-weight:600;border-bottom:2px solid #ddd}td{padding:6px 8px;border-bottom:1px solid #eee}.badge{display:inline-block;padding:2px 8px;border-radius:999px;font-size:11px;font-weight:600}@media print{body{padding:10px}}</style></head><body><h1>TextileOps — דוח משימות</h1><div class="print-date">${now}</div>${html}<script>window.onload=()=>window.print();<\/script></body></html>`);
-  win.document.close();
+  printViaIframe(`<!DOCTYPE html><html dir="rtl" lang="he"><head><meta charset="UTF-8"/><title>דוח משימות</title><style>*{box-sizing:border-box;margin:0;padding:0}body{font-family:Arial,sans-serif;padding:20px;color:#000;background:#fff;font-size:13px}h1{font-size:18px;margin-bottom:4px;color:#185FA5}.print-date{font-size:11px;color:#666;margin-bottom:16px}.card{background:#fff;border:1px solid #ddd;border-radius:8px;padding:12px 16px;margin-bottom:12px}.sec{font-size:14px;font-weight:700;margin-bottom:8px}table{width:100%;border-collapse:collapse;font-size:12px}th{background:#f0f0f0;padding:7px 8px;text-align:right;font-weight:600;border-bottom:2px solid #ddd}td{padding:6px 8px;border-bottom:1px solid #eee}.badge{display:inline-block;padding:2px 8px;border-radius:999px;font-size:11px;font-weight:600}@media print{body{padding:10px}}</style></head><body><h1>TextileOps — דוח משימות</h1><div class="print-date">${now}</div>${html}</body></html>`);
 }
 function printPage(pageId, title){
   const content=document.getElementById(pageId)?.innerHTML||'';
   const now=new Date().toLocaleDateString('he-IL');
-  const win=window.open('','_blank','width=900,height=700');
-  win.document.write(`<!DOCTYPE html><html dir="rtl" lang="he"><head>
+  printViaIframe(`<!DOCTYPE html><html dir="rtl" lang="he"><head>
     <meta charset="UTF-8"/>
     <title>${title}</title>
     <style>
@@ -8566,9 +8568,7 @@ function printPage(pageId, title){
     <h1>✂️ TextileOps — ${title}</h1>
     <div class="print-date">תאריך הדפסה: ${now}</div>
     ${content}
-    <script>window.onload=()=>{window.print();}<\/script>
   </body></html>`);
-  win.document.close();
 }
 
 // ─── EMERGENCY LOGIN PROTECTION ──────────────────────────────
