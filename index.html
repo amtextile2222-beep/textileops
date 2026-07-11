@@ -1899,6 +1899,8 @@ const fmtS=s=>pad2(Math.floor(s/3600))+':'+pad2(Math.floor(s/60)%60)+':'+pad2(s%
 const fmtM=s=>Math.round(s/60)+' '+(window.T?.dash_min||"דק'");
 const todayStr=()=>{const d=new Date();return d.getFullYear()+'-'+pad2(d.getMonth()+1)+'-'+pad2(d.getDate());};
 const esc=s=>String(s??'').replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;');
+// לְברוח מחרוזת שנכנסת כארגומנט JS בתוך onclick='...' — קודם גרש+בקסלאש ל-JS, אח"כ esc ל-HTML. שם עם גרש (ג'מאל) לא ישבור את הקוד.
+const escj=s=>esc(String(s??'').replace(/\\/g,'\\\\').replace(/'/g,"\\'"));
 // ברקוד מלא של משימה (תאימות למשימות ישנות בלי שדה bc)
 const taskBc=t=>t.bc||String(t.cust)+String(t.prod)+String(t.size||'0')+String(t.qty).padStart(3,'0')+String(t.col);
 // ברקוד "כל הכמות": size='9', col='00'
@@ -3335,7 +3337,7 @@ async function autoPunchIn(){
   const today=todayStr();
   w.sessions=w.sessions.filter(s=>{if(!s.in)return false;const d=new Date(s.in);return d.getFullYear()+'-'+pad2(d.getMonth()+1)+'-'+pad2(d.getDate())>=today;});
   if(w.sessions.find(s=>!s.out))return; // כבר נכנס
-  const now=new Date();
+  const now=roundAttTime(new Date(),true); // עיגול לשעת משמרת — עקביות עם כניסה ידנית (punchIn)
   w.sessions.push({in:now.toISOString(),out:null});
   w.status='in';
   w.checkin=w.sessions[0].in;
@@ -3897,12 +3899,24 @@ async function submitBc(){
     if(addingNonQuick&&!nonQuickBc.has(raw)&&nonQuickBc.size>=2){showToast(T.lim_bc||'⚠ ניתן לסרוק עד 2 ברקודים','var(--red-txt)');return;}
   }
   try{
-    const typesToCreate=bcUseSteps?bcCheckedSteps:[taskType||''];
+    // חסימת סריקה כפולה ([[feature-dup-scan-block]]) — חובה גם בעמוד "סריקה" (submitBc), לא רק בסורק המשימות ([[two-scanners-gotcha]]).
+    const stamp=prodStampFor(cust,prod);
+    const dupSkipped=[];
+    const typesToCreate=(bcUseSteps?bcCheckedSteps:[taskType||'']).filter(tt=>{
+      const ttv=tt||'';
+      // כבר בוצע עבור מופע-מוצר זה (או היסטוריה ישנה בלי חותמת) — חסום
+      if(S.histTasks.some(t=>t.bc===raw&&(t.taskType||'')===ttv&&(t.prodStamp==null||t.prodStamp===stamp))){dupSkipped.push((ttv||T.scan_dup_no_step)+' — '+T.scan_dup_done);return false;}
+      // אותו עובד כבר מבצע שלב זה כעת — כפילות עצמית (עובד אחר = הצטרפות, מותר דרך otherSame)
+      if(S.activeTasks.some(t=>t.workerId===u.id&&taskBc(t)===raw&&(t.taskType||'')===ttv&&!t.paused)){dupSkipped.push((ttv||T.scan_dup_no_step)+' — '+T.scan_dup_active);return false;}
+      return true;
+    });
+    if(dupSkipped.length)showToast(T.scan_not_added+' '+dupSkipped.join(' · '),'var(--red-txt)',7000);
+    if(!typesToCreate.length)return;
     const bcBatchId=typesToCreate.length>1?genBatchId():null; // כמה שלבים יחד = קבוצה אחת (טיימר משותף + מסגרת אחת)
     const bcStart=new Date();
     const _bcExp=_expMap[taskExpectedKey(cust,prod,u.id,qty)]; // צפי זמן לפי התמחור
     for(const tt of typesToCreate){
-      const newTask={id:String(Date.now())+Math.random().toString(36).slice(2,6),workerId:u.id,workerName:u.name,dept:taskDept||u.dept,cust,prod,size,qty,col,taskType:tt,bc:raw,isTotal:isTotal||false,startTime:bcStart,elapsed:0};
+      const newTask={id:String(Date.now())+Math.random().toString(36).slice(2,6),workerId:u.id,workerName:u.name,dept:taskDept||u.dept,cust,prod,size,qty,col,taskType:tt,bc:raw,isTotal:isTotal||false,startTime:bcStart,elapsed:0,prodStamp:stamp};
       if(bcBatchId)newTask.batchId=bcBatchId;
       if(_bcExp?.ok&&_bcExp.perStep?.[tt]!=null)newTask.expectedMin=_bcExp.perStep[tt];
       S.activeTasks.unshift(newTask);
@@ -5041,7 +5055,7 @@ function renderMgrTasks(){
         ${!bulk?`<span class="badge ${isIn?'green':'red'}" style="align-self:center">${isIn?'<span class="pulse"></span> בעבודה':'יצא/ה'}</span>`:''}
         ${!bulk&&!isIn?`<button class="btn success" style="font-size:11px;padding:5px 12px" onclick="mgrPunchIn('${w.id}')">✅ כניסה</button>`:''}
         ${!bulk&&isIn?`<button class="btn danger" style="font-size:11px;padding:5px 12px" onclick="mgrPunchOut('${w.id}')">🚪 יציאה</button>`:''}
-        ${!bulk&&isIn?`<button class="btn" style="font-size:11px;padding:5px 10px" onclick="mgrSendMsg('${w.id}','${esc(w.name)}')" title="שלח הודעה לעובד">📢</button>`:''}
+        ${!bulk&&isIn?`<button class="btn" style="font-size:11px;padding:5px 10px" onclick="mgrSendMsg('${w.id}','${escj(w.name)}')" title="שלח הודעה לעובד">📢</button>`:''}
         <button class="btn" style="font-size:11px;padding:5px 10px" onclick="mgrEditAtt('${w.id}')" title="עריכת שעות">✏️</button>
       </div>`;
     }).join('');
@@ -5586,7 +5600,7 @@ function showMgrInboxPopup(msg,fromName,docId){
     <div style="font-size:17px;font-weight:600;color:var(--txt);margin-bottom:20px;line-height:1.5">${esc(msg)}</div>
     <div style="display:flex;gap:8px">
       <button class="btn success" style="flex:1;padding:10px;font-size:14px" onclick="markMgrInboxRead('${docId}');document.getElementById('mgr-inbox-popup').remove()">✅ הבנתי</button>
-      <button class="btn primary" style="flex:1;padding:10px;font-size:14px" onclick="replyToWorker('${esc(fromName)}');document.getElementById('mgr-inbox-popup').remove();markMgrInboxRead('${docId}')">↩ השב</button>
+      <button class="btn primary" style="flex:1;padding:10px;font-size:14px" onclick="replyToWorker('${escj(fromName)}');document.getElementById('mgr-inbox-popup').remove();markMgrInboxRead('${docId}')">↩ השב</button>
     </div>
   </div>`;
   document.body.appendChild(div);
@@ -5850,16 +5864,16 @@ function renderAdmin(){
     return`
     <div style="border-bottom:0.5px solid var(--brd);padding:4px 0">
       <div class="row" style="border-bottom:none"><span style="flex:1;font-size:13px;font-weight:600">${esc(d)}</span>
-      <select title="שלב ייצור שהסריקה במחלקה זו מסמנת אוטומטית" onchange="setDeptStage('${esc(d)}',this.value)" style="font-size:11px;padding:3px 6px;border-radius:8px;border:1px solid var(--brd);background:var(--card);color:var(--txt);max-width:170px">
+      <select title="שלב ייצור שהסריקה במחלקה זו מסמנת אוטומטית" onchange="setDeptStage('${escj(d)}',this.value)" style="font-size:11px;padding:3px 6px;border-radius:8px;border:1px solid var(--brd);background:var(--card);color:var(--txt);max-width:170px">
         <option value="">🔗 שלב ייצור — אין</option>
         ${PROD_STAGES.map(s=>`<option value="${s.id}" ${(S.deptStageMap?.[d])===s.id?'selected':''}>${esc(s.label)}</option>`).join('')}
       </select>
-      <button class="btn danger" style="font-size:11px;padding:4px 8px" onclick="delDept('${esc(d)}')">🗑</button></div>
+      <button class="btn danger" style="font-size:11px;padding:4px 8px" onclick="delDept('${escj(d)}')">🗑</button></div>
       <div style="display:flex;flex-wrap:wrap;gap:4px;align-items:center;padding:0 8px 6px">
-        ${sts.map(st=>`<span style="font-size:11px;background:var(--bg2);border:1px solid var(--brd);border-radius:10px;padding:2px 8px;display:inline-flex;align-items:center;gap:5px">🏷 ${esc(st)}<span onclick="delStation('${esc(d)}','${esc(st)}')" style="cursor:pointer;color:var(--red-txt);font-weight:700">✕</span></span>`).join('')}
+        ${sts.map(st=>`<span style="font-size:11px;background:var(--bg2);border:1px solid var(--brd);border-radius:10px;padding:2px 8px;display:inline-flex;align-items:center;gap:5px">🏷 ${esc(st)}<span onclick="delStation('${escj(d)}','${escj(st)}')" style="cursor:pointer;color:var(--red-txt);font-weight:700">✕</span></span>`).join('')}
         <span style="display:inline-flex;gap:4px;align-items:center">
-          <input placeholder="תחנה חדשה" style="width:100px;font-size:11px;padding:3px 8px;border-radius:10px;border:1px solid var(--brd);background:var(--card);color:var(--txt)" onkeydown="if(event.key==='Enter')addStation('${esc(d)}',this.nextElementSibling)">
-          <button class="btn" style="font-size:11px;padding:3px 8px" onclick="addStation('${esc(d)}',this)">+</button>
+          <input placeholder="תחנה חדשה" style="width:100px;font-size:11px;padding:3px 8px;border-radius:10px;border:1px solid var(--brd);background:var(--card);color:var(--txt)" onkeydown="if(event.key==='Enter')addStation('${escj(d)}',this.nextElementSibling)">
+          <button class="btn" style="font-size:11px;padding:3px 8px" onclick="addStation('${escj(d)}',this)">+</button>
         </span>
       </div>
     </div>`;
@@ -5871,7 +5885,7 @@ function renderAdmin(){
     custEl.innerHTML=entries.length?entries.sort((a,b)=>a[0].localeCompare(b[0])).map(([code,name])=>`
       <div class="row"><span class="bc-seg bc-c" style="flex-shrink:0">${esc(code)}</span>
       <span style="flex:1;font-size:13px;margin-right:8px">${esc(name)}</span>
-      <button class="btn danger" style="font-size:11px;padding:4px 8px" onclick="delCustomerName('${esc(code)}')">🗑</button></div>`).join('')
+      <button class="btn danger" style="font-size:11px;padding:4px 8px" onclick="delCustomerName('${escj(code)}')">🗑</button></div>`).join('')
       :'<div style="font-size:12px;color:var(--txt3);text-align:center;padding:8px">אין לקוחות מוגדרים</div>';
   }
   // צבעים
@@ -5881,7 +5895,7 @@ function renderAdmin(){
       <div class="row" style="padding:5px 0">
         <span class="bc-seg bc-col" style="flex-shrink:0;font-family:monospace">${esc(code)}</span>
         <span style="flex:1;font-size:13px;margin-right:8px">${esc(name)}</span>
-        <button class="btn danger" style="font-size:11px;padding:3px 7px" onclick="delCustomColor('${esc(code)}')">🗑</button>
+        <button class="btn danger" style="font-size:11px;padding:3px 7px" onclick="delCustomColor('${escj(code)}')">🗑</button>
       </div>`).join('');
   }
 }
@@ -6471,7 +6485,7 @@ function openShipModal(cust,prod){
     <input id="ship-qty-inp" type="number" inputmode="numeric" min="0" value="${cur}" style="width:100%;font-size:16px;padding:8px;margin-top:6px;border-radius:8px;border:1px solid var(--brd);background:var(--bg);color:var(--txt)"/>
     <div style="font-size:11px;color:var(--txt3);margin-top:4px">לפעמים הכמות הסופית שונה מהמתוכננת — עדכן לפי מה שבאמת נשלח.</div>
     <div style="display:flex;gap:8px;margin-top:16px">
-      <button class="btn primary" style="flex:1;font-size:14px" onclick="confirmShip('${esc(cust)}','${esc(prod)}')">✅ אשר יציאה</button>
+      <button class="btn primary" style="flex:1;font-size:14px" onclick="confirmShip('${escj(cust)}','${escj(prod)}')">✅ אשר יציאה</button>
       <button class="btn" style="flex:1;font-size:14px" onclick="closeShipModal()">ביטול</button>
     </div>
   </div>`;
@@ -7007,7 +7021,7 @@ function renderCostMonths(){
       <span style="width:70px;color:var(--txt2)">${esc(m.month)}</span>
       <span style="font-weight:600;color:var(--blue-txt)">₪${Number(m.variableTotal||0).toLocaleString()}</span>
       <span style="flex:1;font-size:11px;color:var(--txt3)">${m.source==='auto'?'🤖 אוטומטי':'📝 ידני'}</span>
-      <button onclick="delCostMonth('${esc(m.month)}')" style="background:none;border:none;color:var(--red-txt);cursor:pointer;font-size:14px">×</button>
+      <button onclick="delCostMonth('${escj(m.month)}')" style="background:none;border:none;color:var(--red-txt);cursor:pointer;font-size:14px">×</button>
     </div>`).join('');
 }
 function _upsertCostMonth(month,amount,source){
@@ -8483,7 +8497,7 @@ async function saveProduct(){
       if(newStages.length){
         const now=new Date().toLocaleTimeString('he-IL',{hour:'2-digit',minute:'2-digit'});
         for(const s of newStages){
-          const stageName=PROD_STAGES.find(x=>x.id===s.id)?.name||s.id;
+          const stageName=PROD_STAGES.find(x=>x.id===s.id)?.label||s.id;
           sendTelegram('📦 TextileOps — מוצר עבר שלב ייצור\n🏷 מוצר: '+name+' ('+cust+'-'+prod+')\n📍 שלב: '+stageName+'\n📅 תאריך: '+s.date+' '+s.time+'\n🕐 עודכן: '+now).catch(()=>{});
         }
       }
