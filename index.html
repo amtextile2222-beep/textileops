@@ -4418,7 +4418,9 @@ function buildStageReport(){
     const doneStages=log.length;
     const pct=totalStages?Math.round(doneStages/totalStages*100):0;
     const isDone=lastStage?.id===PROD_STAGES[PROD_STAGES.length-1].id;
-    return`<tr>
+    // מפתח מיון: 0=יצא מהמפעל, 1=בתהליך (מתקדם קודם), 2=טרם התחיל
+    const grp=isDone?0:doneStages>0?1:2;
+    return{grp,curIdx,pct,html:`<tr>
       <td><span class="bc-seg bc-c">${p.cust}</span> <span class="bc-seg bc-p">${p.prod}</span></td>
       <td style="font-size:13px">${esc(p.name||'—')}</td>
       <td>${lastStage?esc(lastStage.label):'טרם התחיל'}${isAuto?' <span title="עודכן אוטומטית מסריקת עובד" style="font-size:10px">🤖</span>':''}</td>
@@ -4430,8 +4432,8 @@ function buildStageReport(){
         <div style="font-size:10px;color:var(--txt3);margin-top:2px">${doneStages}/${totalStages} שלבים (${pct}%)</div>
       </td>
       <td><span class="badge ${isDone?'green':doneStages>0?'blue':'red'}">${isDone?T.completed:doneStages>0?T.status_in_progress:T.status_not_started}</span></td>
-    </tr>`;
-  }).join('');
+    </tr>`};
+  }).sort((a,b)=>a.grp-b.grp||b.curIdx-a.curIdx||b.pct-a.pct).map(r=>r.html).join('');
   el.innerHTML=`<div class="tbl-wrap"><table>
     <thead><tr><th>לקוח / מוצר</th><th>שם</th><th>שלב נוכחי</th><th>תאריך</th><th>התקדמות</th><th>סטטוס</th></tr></thead>
     <tbody>${rows}</tbody>
