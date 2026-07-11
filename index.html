@@ -1859,6 +1859,19 @@ const PROD_STAGES=[
   {id:'pack',      label:'🧥 אריזה + ביקורת',       optional:false},
   {id:'shipped',   label:'🚚 יצא ללקוח',            optional:false},
 ];
+// מוצר חוזר על עצמו יוצר רשומת מוצר חדשה עם אותו לקוח+מוצר. חובה לבחור את ההזמנה העדכנית
+// (createdAt המקסימלי) ולא את ההתאמה הראשונה — אחרת התמחור/שלבים/צפי נלקחים מרשומה ישנה שנגמרה
+// (בלי unitPrice/workSteps) והשלבים+הצפי לא מופיעים בסורקים. אותו קריטריון כמו prodStampFor
+// (חסימת סריקה כפולה) כדי שכל המערכת תסכים על אותה רשומה "נוכחית".
+function findProd(cust,prod){
+  let best=null,mx=-1;
+  for(const p of (S.products||[])){
+    if(p.cust!==cust||p.prod!==prod)continue;
+    const c=+p.createdAt||parseInt(String(p.id).replace(/\D/g,''))||0;
+    if(c>mx){mx=c;best=p;}
+  }
+  return best;
+}
 
 // ─── CONSTANTS ─────────────────────────────────────────────
 let COLORS={'01':'לבן','02':'שחור','03':'אדום','04':'כחול','05':'ירוק','06':'צהוב','07':'אפור','08':'ורוד','09':'חום','10':'כתום','11':'נייבי','12':'בז\'','13':'טורקיז','14':'בורדו','15':'זית','16':'לילך','17':'קרם','18':'כסוף','19':'זהב','20':'שחור מלנג\''};
@@ -1893,11 +1906,11 @@ function isTotalBc(raw){return raw&&raw.length===13&&raw.slice(7,8)==='9'&&raw.s
 // ברקוד "יצא ללקוח": size='9', col='99' (הצבעים 01-20 בלבד — אין התנגשות). מבנה: לקוח+מוצר+9+000+99
 function isShipBc(raw){return raw&&raw.length===13&&raw.slice(7,8)==='9'&&raw.slice(11,13)==='99';}
 function productHasDefinedQty(cust,prod){
-  const p=S.products.find(x=>x.cust===cust&&x.prod===prod);
+  const p=findProd(cust,prod);
   return p&&p.quantities&&p.quantities.some(q=>parseInt(q.qty)>0);
 }
 function getTotalQty(cust,prod){
-  const p=S.products.find(x=>x.cust===cust&&x.prod===prod);
+  const p=findProd(cust,prod);
   if(p&&p.quantities&&p.quantities.length)return p.quantities.reduce((s,q)=>s+(parseInt(q.qty)||0),0);
   if(window._bcLastGen&&window._bcLastGen.cust===cust&&window._bcLastGen.prod===prod)
     return window._bcLastGen.items.reduce((s,it)=>s+(parseInt(it.qty)||0),0);
@@ -1961,7 +1974,7 @@ function stepManualMin(s){return(s&&typeof s==='object'&&+s.manualMin>0)?+s.manu
 function stepBadge(s){const l=stepLevel(s);return(s&&typeof s==='object'&&s.quick?` <span style="font-size:11px;padding:1px 7px;border-radius:8px;background:var(--amber-bg);color:var(--amber-txt);border:1px solid var(--brd)">⚡ מהיר</span>`:'')+(l?` <span style="font-size:11px;padding:1px 7px;border-radius:8px;background:var(--bg2);color:var(--txt3);border:1px solid var(--brd)">${levelName(l)}</span>`:'');}
 // שלב "מהיר" ⚡ — פטור מהגבלת 2 שלבים/2 ברקודים בשני הסורקים
 function isQuickStep(cust,prod,stepNm){
-  const p=S.products.find(x=>x.cust===cust&&x.prod===prod);if(!p)return false;
+  const p=findProd(cust,prod);if(!p)return false;
   const s=(p.workSteps||[]).find(w=>stepName(w)===stepNm);
   return!!(s&&typeof s==='object'&&s.quick);
 }
@@ -1991,7 +2004,7 @@ function renderStepRecs(prefix){
   const listEl=document.getElementById(prefix+'-steps-list');
   if(!listEl){box.innerHTML='';return;}
   const checked=[...listEl.querySelectorAll('input[type="checkbox"]:checked')].map(cb=>cb.dataset.step);
-  const prodObj=S.products.find(x=>x.cust===listEl.dataset.cust&&x.prod===listEl.dataset.prod);
+  const prodObj=findProd(listEl.dataset.cust,listEl.dataset.prod);
   if(!checked.length||!prodObj){box.innerHTML='';return;}
   const recs=recommendWorkers(prodObj,checked);
   if(!recs){box.innerHTML='';return;}
@@ -2032,7 +2045,7 @@ function updateExpectedTime(prefix){
   if(!workerId||raw.length!==13||!checked.length||!listEl?.dataset.cust||!S.fbConnected||!window._fbFunctions){box.innerHTML='';return;}
   const cust=raw.slice(0,2),prod=raw.slice(2,7);
   if(cust!==listEl.dataset.cust||prod!==listEl.dataset.prod){box.innerHTML='';return;}
-  const prodObj=S.products.find(x=>x.cust===cust&&x.prod===prod);
+  const prodObj=findProd(cust,prod);
   if(!prodObj||!(+prodObj.unitPrice)){box.innerHTML='';return;} // אין תמחור — אין צפי
   const qty=isTotalBc(raw)?getTotalQty(cust,prod):parseInt(raw.slice(8,11))||0;
   if(!qty){box.innerHTML='';return;}
@@ -2065,7 +2078,7 @@ function updateExpectedTime(prefix){
 // מקבץ קריאות ל-CF לפי עובד+כמות; משימה ללא צפי מקבלת מחיקת expectedMin. שקט בכשל (הרשאה/רשת).
 async function recalcActiveExpected(cust,prod){
   if(!S.fbConnected||!window._fbFunctions)return;
-  const prodObj=S.products.find(x=>x.cust===cust&&x.prod===prod);if(!prodObj)return;
+  const prodObj=findProd(cust,prod);if(!prodObj)return;
   const affected=S.activeTasks.filter(t=>t.cust===cust&&t.prod===prod);if(!affected.length)return;
   const hasPricing=+prodObj.unitPrice>0;
   const allSteps=(prodObj.workSteps||[]).map(s=>stepName(s)).filter(Boolean);
@@ -3809,7 +3822,7 @@ function parseBc(v){
         <span class="bc-seg bc-col">צבע: ${COLORS[col]||col||'__'}</span>
       </div>`;
   if(v.length===13){
-    const prod=S.products.find(x=>x.cust===c&&x.prod===p);
+    const prod=findProd(c,p);
     const steps=prod?.workSteps||[];
     if(steps.length){
       bcShowTaskTypeField(false);
@@ -4440,7 +4453,7 @@ function buildBudgetReport(fl){
   const grp={};
   for(const t of fl){
     if(!t.done||!(t.duration>0))continue;
-    const p=S.products.find(x=>x.cust===t.cust&&x.prod===t.prod);if(!p)continue;
+    const p=findProd(t.cust,t.prod);if(!p)continue;
     const pb=_prodBudget(p,ctx);if(!pb||pb.budgetUnit<=0)continue;
     const st=pb.lvl.find(s=>stepName(s)===t.taskType);if(!st)continue;
     // מוקצב: עדיף הצפי שנשמר במשימה בפתיחה; אחרת חישוב מהתמחור לפי העובד שביצע
@@ -5089,7 +5102,7 @@ function parseMgrBc(v){
         <span class="bc-seg" style="background:var(--amber-bg);color:var(--amber-txt)">מידה: ${sz||'_'}</span>
         <span class="bc-seg bc-q">כמות: ${q.padEnd(3,'_')}</span><span class="bc-seg bc-col">צבע: ${COLORS[col]||col||'__'}</span></div>`;
   if(v.length===13){
-    const prod=S.products.find(x=>x.cust===c&&x.prod===p);
+    const prod=findProd(c,p);
     const steps=prod?.workSteps||[];
     if(steps.length){
       mgrShowTaskTypeField(false);
@@ -5284,7 +5297,7 @@ function tsParseBc(v){
         <span class="bc-seg bc-q">כמות: ${q.padEnd(3,'_')}</span><span class="bc-seg bc-col">צבע: ${COLORS[col]||col||'__'}</span></div>`;
   // אם המוצר מוגדר עם שלבי עבודה — הצג checkboxes
   if(v.length===13){
-    const prod=S.products.find(x=>x.cust===c&&x.prod===p);
+    const prod=findProd(c,p);
     const steps=prod?.workSteps||[];
     if(steps.length){
       tsShowTaskTypeField(false);
@@ -6426,7 +6439,7 @@ function setDeptStage(d,stageId){
 async function autoStampStage(cust,prod,dept){
   const stageId=S.deptStageMap?.[dept];
   if(!stageId)return;
-  const p=S.products.find(x=>String(x.cust)===String(cust)&&String(x.prod)===String(prod));
+  const p=findProd(String(cust),String(prod));
   if(!p)return;
   if(!Array.isArray(p.stageLog))p.stageLog=[];
   if(p.stageLog.some(s=>s.id===stageId))return; // השלב כבר מסומן — לא לדרוס תאריך ידני
