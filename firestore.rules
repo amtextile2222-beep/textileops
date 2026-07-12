@@ -50,13 +50,21 @@ service cloud.firestore {
       allow write: if isMgr() || (hasRole() && docId != 'telegramSettings');
     }
 
+    // תחנות עבודה (מצלמות/DVR): עובד קורא (לזיהוי סריקת STN), מנהל מגדיר
+    match /stations/{id} {
+      allow read: if hasRole();
+      allow write: if isMgr();
+    }
+
     // שאר האוספים — כל משתמש מחובר עם role
+    // (stationLog נשאר כאן בכוונה — עובדים כותבים רשומות שיוך לתחנה)
     match /{collection}/{docId} {
       allow read, write: if hasRole()
         && collection != 'credentials'
         && collection != 'adminSettings'
         && collection != 'workers'
-        && collection != 'appSettings';
+        && collection != 'appSettings'
+        && collection != 'stations';
     }
   }
 }

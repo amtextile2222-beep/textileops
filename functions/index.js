@@ -9,6 +9,7 @@ const FieldValue = admin.firestore.FieldValue;
 
 function hashPass(p) { return '$h:' + crypto.createHash('sha256').update(String(p), 'utf8').digest('hex'); }
 function ilTime() { return new Date().toLocaleTimeString('he-IL', { hour: '2-digit', minute: '2-digit', timeZone: 'Asia/Jerusalem' }); }
+function ilTimeOfIso(iso) { try { const d = new Date(iso); if (isNaN(d)) return ''; return d.toLocaleTimeString('he-IL', { hour: '2-digit', minute: '2-digit', timeZone: 'Asia/Jerusalem' }); } catch (e) { return ''; } }
 function callerRole(context) { return (context.auth && context.auth.token && context.auth.token.role) || ''; }
 
 // כתובת ה-IP האמיתית של הלקוח — האיבר הלפני-אחרון ב-x-forwarded-for
@@ -576,11 +577,26 @@ exports.longTaskMonitor = functions.pubsub.schedule('every 5 minutes').onRun(asy
       if (hasExpected) {
         const { token: tgT, chatId: tgC } = tgCfg();
         if (tgT && tgC) {
+          // תחנת העבודה של העובד + ערוץ המצלמה ב-DVR — קפיצה ישירה בהקלטה
+          let stationTxt = '';
+          try {
+            const cs = workerData.currentStation;
+            if (cs && cs.id) {
+              const stSnap = await db.collection('stations').doc(cs.id).get();
+              const st = stSnap.exists ? stSnap.data() : null;
+              const nm = (st && st.name) || cs.name || cs.id;
+              const ch = st && st.dvrChannel ? ' · 📹 ערוץ ' + st.dvrChannel : '';
+              const since = cs.since ? ' (מ-' + ilTimeOfIso(cs.since) + ')' : '';
+              stationTxt = '\n📍 תחנה: ' + nm + ch + since;
+            }
+          } catch (e) {}
           await sendTelegram(tgT, tgC,
             '⏱ TextileOps — חריגה מזמן מתוקצב\n👤 עובד: ' + (t.workerName || t.workerId) +
+            stationTxt +
             (t.taskType ? '\n🔧 שלב: ' + t.taskType : '') +
             '\n📦 מוצר: ' + (t.prod || '') + ' · ' + (t.qty || 0) + " יח'" +
             '\n🎯 מוקצב: ' + Math.round(t.expectedMin) + ' דק\' · בפועל: ' + mins + ' דק\'' +
+            '\n▶️ התחלה: ' + ilTimeOfIso(t.startTime) +
             '\n🕐 שעה: ' + ilTime()).catch(() => {});
         }
       }
@@ -835,6 +851,19 @@ async function runAttendanceCloser() {
     });
     repaired++;
   }
+
+  // 2.5) רישומי תחנה (stationLog) שנשארו פתוחים — סגירה בשעת סוף המשמרת של יום ההתחלה
+  try {
+    const openLogs = await db.collection('stationLog').where('to', '==', null).get();
+    for (const doc of openLogs.docs) {
+      const r = doc.data();
+      if (!r.from) { await doc.ref.set({ to: new Date().toISOString() }, { merge: true }); continue; }
+      const day = ilDateOf(r.from);
+      const cutISO = ilDateTime(day, shiftEnd).toISOString();
+      if (Date.now() < new Date(cutISO).getTime()) continue; // המשמרת עוד לא נגמרה
+      await doc.ref.set({ to: cutISO, autoClosed: true }, { merge: true });
+    }
+  } catch (e) { console.error('attendanceCloser stationLog:', e); }
 
   // 3) משימות שנשארו רצות — השהיה מהשרת (רשת הביטחון בלקוח רצה רק בדפדפן פתוח)
   const tasksSnap = await db.collection('activeTasks').get();

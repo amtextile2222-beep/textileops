@@ -1202,6 +1202,19 @@ code{background:var(--bg2);border:0.5px solid var(--b);border-radius:4px;padding
       <button class="btn primary" style="width:100%;justify-content:center;font-size:14px;padding:10px" onclick="renderWorkerBarcodes()">👤 צור ברקודים לעובדים</button>
       <div id="worker-bc-output" style="margin-top:1rem"></div>
     </div>
+    <div class="card" style="margin-top:1rem">
+      <div style="font-size:15px;font-weight:700;margin-bottom:10px">🏭 תחנות עבודה (מצלמות)</div>
+      <div style="font-size:12px;color:var(--txt3);margin-bottom:10px">עובד סורק את ברקוד התחנה כשהוא מתיישב בעמדה — התראת חריגה תציג את התחנה וערוץ המצלמה ב-DVR. סריקת תחנה חדשה סוגרת את הקודמת; חתימת יציאה סוגרת הכל</div>
+      <div style="display:flex;gap:8px;flex-wrap:wrap;align-items:flex-end;margin-bottom:10px">
+        <div class="field" style="margin:0;flex:2;min-width:130px"><label>שם תחנה</label><input id="stn-name" placeholder="מכונה 4 — תפירה" style="font-size:13px"/></div>
+        <div class="field" style="margin:0;flex:1;min-width:110px"><label>מחלקה</label><select id="stn-dept" style="font-size:13px"></select></div>
+        <div class="field" style="margin:0;width:90px"><label>ערוץ DVR</label><input id="stn-ch" inputmode="numeric" placeholder="3" style="font-size:13px"/></div>
+        <button class="btn primary" style="font-size:13px;padding:8px 14px" onclick="addWorkStation()">+ הוסף</button>
+      </div>
+      <div id="stn-list"></div>
+      <button class="btn primary" style="width:100%;justify-content:center;font-size:14px;padding:10px;margin-top:10px" onclick="renderStationBarcodes()">🏭 צור ברקודי תחנות</button>
+      <div id="station-bc-output" style="margin-top:1rem"></div>
+    </div>
   </div>
 
   <!-- מודל אישור כללי -->
@@ -1306,6 +1319,10 @@ const LANGS={
     scan_dup_done:'כבר בוצע',
     scan_not_added:'⛔ לא נוסף:',
     scan_added_cart:'➕ נוסף לסל',
+    st_scanned:'📍 תחנה נקלטה: ',
+    st_unknown:'⚠ תחנה לא מוכרת',
+    st_reminder:'📍 תזכורת: סרוק ברקוד תחנה כדי לשייך אותך לעמדה',
+    st_sel_worker:'⚠ בחר עובד לפני סריקת תחנה',
     scan_cart:'🛒 סל',
     scan_barcodes:'ברקודים',
     tr_no_workers:'אין עובדים אחרים נוכחים כרגע',
@@ -1506,6 +1523,10 @@ const LANGS={
     scan_dup_done:'تم تنفيذه مسبقاً',
     scan_not_added:'⛔ لم تتم الإضافة:',
     scan_added_cart:'➕ أُضيف إلى السلة',
+    st_scanned:'📍 تم تسجيل المحطة: ',
+    st_unknown:'⚠ محطة غير معروفة',
+    st_reminder:'📍 تذكير: امسح باركود المحطة لربطك بموقع العمل',
+    st_sel_worker:'⚠ اختر عاملاً قبل مسح المحطة',
     scan_cart:'🛒 السلة',
     scan_barcodes:'باركود',
     tr_no_workers:'لا يوجد عمال آخرون حاضرون حالياً',
@@ -1706,6 +1727,10 @@ const LANGS={
     scan_dup_done:'Already done',
     scan_not_added:'⛔ Not added:',
     scan_added_cart:'➕ Added to cart',
+    st_scanned:'📍 Station set: ',
+    st_unknown:'⚠ Unknown station',
+    st_reminder:'📍 Reminder: scan a station barcode to link you to a workstation',
+    st_sel_worker:'⚠ Select a worker before scanning a station',
     scan_cart:'🛒 Cart',
     scan_barcodes:'barcodes',
     tr_no_workers:'No other workers present now',
@@ -1962,6 +1987,7 @@ let S={
   customerNames:{},
   customColors:{},
   costTab:'prod',
+  workStations:[], // תחנות עבודה פיזיות (QR STN:{id}) — {id,name,dept,dvrChannel}; שונה מ-deptStations (תמחור)
 };
 
 // ─── תחנות, רמות קושי ומיומנויות — תמחור שלב א' ─────────────
@@ -2354,6 +2380,9 @@ function listenFb(){
           }
         }catch(e){}
         w.status='out';w.checkin=null;w.checkout=null;w.sessions=[];
+        // ניקוי שיוך תחנה מאתמול + סגירת רשומת ה-stationLog הפתוחה
+        if(w.stationLogId){try{fbSet('stationLog',w.stationLogId,{to:shiftEndDate(sessionDate).toISOString()});}catch(e){}}
+        w.currentStation=null;w.stationLogId=null;
         fbSet('workers',w.id,w);
       }
     });
@@ -2444,6 +2473,12 @@ function listenFb(){
       }
     });
     renderAll();
+  });
+  // תחנות עבודה פיזיות (מצלמות/DVR)
+  onSnapshot(collection(db,'stations'),snap=>{
+    S.workStations=snap.docs.map(d=>({id:d.id,...d.data()}));
+    saveLS();
+    try{renderStationsAdmin();}catch(e){}
   });
   onSnapshot(collection(db,'workerExpenses'),snap=>{
     S.workerExpenses=[];
@@ -3139,6 +3174,8 @@ function goPage(p){
     const rows=document.getElementById('bc-gen-rows');
     if(rows&&!rows.children.length)bcAddRow();
     bcFillProductSelect();
+    fillDeptSelects();
+    renderStationsAdmin();
   }
   if(p==='attrep')initAttRep();
   if(p==='costs')initCostsPage();
@@ -3430,6 +3467,7 @@ async function punchOut(){
     }
   }
   const pausedCount=await pauseWorkerTasks(w.id,now);
+  await closeWorkerStation(w,now); // חתימת יציאה סוגרת את שיוך התחנה
   const netMs=calcNetWork(w);
   const rec={workerId:w.id,workerName:w.name,dept:w.dept,date:todayStr(),sessions:w.sessions,checkin:w.sessions[0]?.in||'',checkout:now.toISOString(),breakStart:w.breakStart||'',breakEnd:w.breakEnd||'',breakActive:!!w.breakActive,netMs};
   S.attHistory.unshift(rec);
@@ -3947,12 +3985,14 @@ async function submitBc(){
     document.getElementById('bc-dept').value='';
     saveLS();renderScanActive();renderTasks();goPage('tasks');
     showToast('✅ '+(typesToCreate.length>1?typesToCreate.length+' משימות הותחלו':'משימה הותחלה'));
+    // מדיניות רכה: התחלת משימה בלי שיוך תחנה — תזכורת בלבד, לא חסימה
+    if(!wu.currentStation&&(S.workStations||[]).length)setTimeout(()=>showToast(T.st_reminder||'📍 תזכורת: סרוק ברקוד תחנה כדי לשייך אותך לעמדה','var(--amber-txt)',5000),1800);
   }catch(e){showToast('❌ שגיאה בפתיחת משימה: '+e.message,'var(--red-txt)',8000);}
 }
 function fillDeptSelects(){
   const selDept=LANGS[currentLang].sel_dept||'-- בחר מחלקה --';
   const opts=`<option value="">${selDept}</option>`+S.depts.map(d=>`<option value="${esc(d)}">${esc(d)}</option>`).join('');
-  ['bc-dept','mgr-dept','ts-dept'].forEach(id=>{const s=document.getElementById(id);if(s)s.innerHTML=opts;});
+  ['bc-dept','mgr-dept','ts-dept','stn-dept'].forEach(id=>{const s=document.getElementById(id);if(s){const prev=s.value;s.innerHTML=opts;if(prev)s.value=prev;}});
 }
 // "מצטבר קודם" לברקוד — מבוסס על חלון החי (HIST_WINDOW_DAYS). לברקוד עם היסטוריה
 // ישנה מהחלון הסכום עלול להיות חלקי; זה מידע-עזר בלבד (לא חישוב שכר/דוח).
@@ -5070,7 +5110,7 @@ function renderMgrTasks(){
         <div class="av" style="width:30px;height:30px;font-size:10px;flex-shrink:0">${esc(w.name.split(' ').map(n=>n[0]).join(''))}</div>
         <div style="flex:1;min-width:100px">
           <div style="font-size:13px;font-weight:500">${esc(w.name)}</div>
-          <div style="font-size:11px;color:var(--txt3)">${esc(w.dept)} · ▶${ciStr} ◀${coStr} · <span style="color:var(--blue-txt)">${netMs?fmtNetH(netMs):''}</span></div>
+          <div style="font-size:11px;color:var(--txt3)">${esc(w.dept)} · ▶${ciStr} ◀${coStr} · <span style="color:var(--blue-txt)">${netMs?fmtNetH(netMs):''}</span>${isIn&&w.currentStation?.name?` · <span style="color:var(--green-txt)">📍 ${esc(w.currentStation.name)}</span>`:''}</div>
         </div>
         ${!bulk?`<span class="badge ${isIn?'green':'red'}" style="align-self:center">${isIn?'<span class="pulse"></span> בעבודה':'יצא/ה'}</span>`:''}
         ${!bulk&&!isIn?`<button class="btn success" style="font-size:11px;padding:5px 12px" onclick="mgrPunchIn('${w.id}')">✅ כניסה</button>`:''}
@@ -5185,6 +5225,16 @@ function mgrStartDecoding(video,status){
       const img=ctx.getImageData(0,0,canvas.width,canvas.height);
       const code=jsQR(img.data,img.width,img.height,{inversionAttempts:'attemptBoth'});
       if(code){
+        // ברקוד תחנה (STN:) — שיוך העובד הנבחר לתחנה
+        if((code.data||'').startsWith('STN:')){
+          clearInterval(mgrCamInterval);
+          const _sid=code.data.slice(4).trim();
+          const _empId=document.getElementById('mgr-emp-sel')?.value;
+          setTimeout(()=>mgrStopCam(),400);
+          if(_empId)assignWorkerStation(_empId,_sid);
+          else showToast(LANGS[currentLang].st_sel_worker||'⚠ בחר עובד לפני סריקת תחנה','var(--red-txt)');
+          return;
+        }
         const text=code.data.replace(/\D/g,'');
         if(text.length>=13){
           const bc=text.slice(0,13);
@@ -5222,6 +5272,17 @@ async function tsStartWorkerCam(){
         const imageData=ctx.getImageData(0,0,canvas.width,canvas.height);
         const result=jsQR(imageData.data,imageData.width,imageData.height,{inversionAttempts:'attemptBoth'});
         const text=result?.data||'';
+        // ברקוד תחנה (STN:) נסרק בטעות במצלמת העובד — שיוך העובד הנבחר אם יש
+        if(text.startsWith('STN:')){
+          const _empId=document.getElementById('ts-emp-sel')?.value;
+          if(_empId){
+            clearInterval(tsEmpCamInterval);setTimeout(()=>tsStopWorkerCam(),600);
+            assignWorkerStation(_empId,text.slice(4).trim());
+          }else{
+            status.textContent=T.st_sel_worker||'⚠ בחר עובד לפני סריקת תחנה';
+          }
+          return;
+        }
         if(text.startsWith('EMP:')){
           const empId=text.slice(4);
           const sel=document.getElementById('ts-emp-sel');
@@ -5311,6 +5372,132 @@ function printWorkerBarcodes(){
     </body></html>`);
   },300);
 }
+// ─── תחנות עבודה פיזיות (QR STN:{id}) — שיוך עובד↔תחנה למצלמות DVR ─────
+function stationById(id){return (S.workStations||[]).find(s=>s.id===id);}
+async function assignWorkerStation(workerId,stationId){
+  const T=LANGS[currentLang];
+  const st=stationById(stationId);
+  if(!st){showToast(T.st_unknown||'⚠ תחנה לא מוכרת','var(--red-txt)');return false;}
+  const w=S.workers.find(x=>x.id===workerId);
+  if(!w){showToast(T.st_sel_worker||'⚠ בחר עובד לפני סריקת תחנה','var(--red-txt)');return false;}
+  const now=new Date().toISOString();
+  if(w.currentStation?.id===st.id){showToast((T.st_scanned||'📍 תחנה נקלטה: ')+st.name);return true;}
+  try{
+    // סריקת תחנה חדשה סוגרת את השיוך הקודם
+    if(w.stationLogId&&S.fbConnected){try{await fbSet('stationLog',w.stationLogId,{to:now});}catch(e){}}
+    const logId=w.id+'_'+Date.now().toString(36);
+    w.currentStation={id:st.id,name:st.name,since:now};
+    w.stationLogId=logId;
+    if(S.fbConnected){
+      await fbSet('stationLog',logId,{workerId:w.id,workerName:w.name,stationId:st.id,stationName:st.name,dept:st.dept||'',dvrChannel:st.dvrChannel||'',from:now,to:null});
+      await fbSet('workers',w.id,{currentStation:w.currentStation,stationLogId:logId});
+    }
+    saveLS();
+    showToast((T.st_scanned||'📍 תחנה נקלטה: ')+st.name+(st.dvrChannel?' · 📹 '+st.dvrChannel:''));
+    try{renderMgrTasks();}catch(e){}
+    return true;
+  }catch(e){showToast('❌ '+e.message,'var(--red-txt)');return false;}
+}
+// חתימת יציאה סוגרת את שיוך התחנה (וגם הניקוי היומי)
+async function closeWorkerStation(w,when){
+  if(!w||(!w.currentStation&&!w.stationLogId))return;
+  const iso=(when instanceof Date?when:new Date()).toISOString();
+  const logId=w.stationLogId;
+  w.currentStation=null;w.stationLogId=null;
+  if(S.fbConnected){
+    if(logId){try{await fbSet('stationLog',logId,{to:iso});}catch(e){}}
+    try{await fbSet('workers',w.id,{currentStation:null,stationLogId:null});}catch(e){}
+  }
+}
+function renderStationsAdmin(){
+  const el=document.getElementById('stn-list');if(!el)return;
+  if(!(S.workStations||[]).length){el.innerHTML='<div style="color:var(--txt3);font-size:12px">אין תחנות מוגדרות</div>';return;}
+  el.innerHTML=S.workStations.map(s=>`<div class="row" style="gap:8px">
+    <div style="flex:1;min-width:0">
+      <span style="font-size:13px;font-weight:600">${esc(s.name)}</span>
+      <span style="font-size:11px;color:var(--txt3)">${s.dept?' · '+esc(s.dept):''}${s.dvrChannel?' · 📹 ערוץ '+esc(String(s.dvrChannel)):''}</span>
+      <span style="font-size:10px;color:var(--txt3);font-family:monospace"> · STN:${esc(s.id)}</span>
+    </div>
+    <button class="btn danger" style="font-size:11px;padding:4px 10px" onclick="delWorkStation('${escj(s.id)}')">🗑</button>
+  </div>`).join('');
+}
+async function addWorkStation(){
+  const name=(document.getElementById('stn-name').value||'').trim();
+  const dept=(document.getElementById('stn-dept').value||'').trim();
+  const ch=(document.getElementById('stn-ch').value||'').trim();
+  if(!name){showToast('⚠ הזן שם תחנה','var(--red-txt)');return;}
+  if(!S.fbConnected){showToast('⚠ אין חיבור Firebase — לא ניתן לשמור תחנה','var(--red-txt)');return;}
+  const id='st'+Date.now().toString(36);
+  try{
+    await fbSet('stations',id,{name,dept,dvrChannel:ch,createdAt:new Date().toISOString()});
+    document.getElementById('stn-name').value='';document.getElementById('stn-ch').value='';
+    showToast('✅ תחנה נוספה: '+name);
+  }catch(e){showToast('❌ '+e.message,'var(--red-txt)');}
+}
+async function delWorkStation(id){
+  const st=stationById(id);
+  if(!await showConfirm('מחיקת תחנה','למחוק את התחנה "'+(st?.name||id)+'"? ברקודים מודפסים שלה יפסיקו לעבוד.','מחק','ביטול'))return;
+  try{await fbDel('stations',id);showToast('🗑 תחנה נמחקה');}catch(e){showToast('❌ '+e.message,'var(--red-txt)');}
+}
+function renderStationBarcodes(){
+  const out=document.getElementById('station-bc-output');if(!out)return;
+  const sts=S.workStations||[];
+  if(!sts.length){out.innerHTML='<div style="color:var(--txt3);font-size:13px">אין תחנות מוגדרות</div>';return;}
+  out.innerHTML=`<div style="display:grid;grid-template-columns:repeat(auto-fill,minmax(160px,1fr));gap:12px;margin-bottom:12px">
+    ${sts.map(s=>`<div style="background:var(--bg2);border:0.5px solid var(--b);border-radius:var(--rl);padding:12px;text-align:center;break-inside:avoid">
+      <div id="station-qr-${esc(s.id)}" style="display:flex;justify-content:center"></div>
+      <div style="font-size:13px;font-weight:600;margin-top:6px">${esc(s.name)}</div>
+      <div style="font-size:11px;color:var(--txt3)">${esc(s.dept||'')}${s.dvrChannel?' · 📹 ערוץ '+esc(String(s.dvrChannel)):''}</div>
+      <div style="font-size:10px;color:var(--txt3);font-family:monospace;margin-top:3px">STN:${esc(s.id)}</div>
+    </div>`).join('')}
+  </div>
+  <button class="btn" style="font-size:13px" onclick="printStationBarcodes()">🖨️ הדפס ברקודי תחנות</button>`;
+  sts.forEach(s=>{
+    const el=document.getElementById('station-qr-'+s.id);
+    if(el&&window.QRCode){new QRCode(el,{text:'STN:'+s.id,width:120,height:120,correctLevel:QRCode.CorrectLevel.M});}
+  });
+}
+function printStationBarcodes(){
+  const sts=S.workStations||[];
+  if(!sts.length){alert('אין תחנות מוגדרות');return;}
+  if(!window.QRCode){alert('ספריית QR לא נטענה');return;}
+  const tmpWrap=document.createElement('div');
+  tmpWrap.style.cssText='position:fixed;top:-9999px;left:-9999px;visibility:hidden';
+  document.body.appendChild(tmpWrap);
+  const divs=sts.map(s=>{
+    const d=document.createElement('div');
+    tmpWrap.appendChild(d);
+    new QRCode(d,{text:'STN:'+s.id,width:130,height:130,correctLevel:QRCode.CorrectLevel.M});
+    return d;
+  });
+  setTimeout(()=>{
+    const items=sts.map((s,i)=>{
+      const canvas=divs[i].querySelector('canvas');
+      const src=canvas?canvas.toDataURL('image/png'):'';
+      return {name:s.name,dept:s.dept||'',ch:s.dvrChannel||'',src};
+    });
+    document.body.removeChild(tmpWrap);
+    printViaIframe(`<!DOCTYPE html><html dir="rtl"><head><meta charset="UTF-8"><title>ברקודי תחנות</title>
+    <style>
+      *{box-sizing:border-box;margin:0;padding:0}
+      body{font-family:Arial,sans-serif;background:#fff;padding:10px}
+      .grid{display:grid;grid-template-columns:repeat(4,1fr);gap:10px}
+      .card{border:1px solid #ccc;border-radius:8px;padding:10px;text-align:center;break-inside:avoid}
+      .card img{width:120px;height:120px;display:block;margin:0 auto}
+      .name{font-size:13px;font-weight:700;margin-top:5px}
+      .sub{font-size:11px;color:#666}
+      @media print{@page{margin:10mm}body{padding:0}}
+    </style></head><body>
+    <div class="grid">
+      ${items.map(s=>`<div class="card">
+        ${s.src?`<img src="${s.src}"/>`:''}
+        <div class="name">🏭 ${s.name}</div>
+        <div class="sub">${s.dept}${s.ch?' · 📹 ערוץ '+s.ch:''}</div>
+      </div>`).join('')}
+    </div>
+    </body></html>`);
+  },300);
+}
 function tsParseBc(v){
   v=(v||'').replace(/\D/g,'');
   const el=document.getElementById('ts-bc-prev');if(!el)return;
@@ -5389,6 +5576,17 @@ async function tsStartCam(){
         const imageData=ctx.getImageData(0,0,canvas.width,canvas.height);
         const result=jsQR(imageData.data,imageData.width,imageData.height);
         const text=result?.data||'';
+        // ברקוד תחנה (STN:) — שיוך העובד הנבחר לתחנה
+        if(text.startsWith('STN:')){
+          const _empId=document.getElementById('ts-emp-sel')?.value;
+          if(_empId){
+            clearInterval(tsCamInterval);setTimeout(()=>tsStopCam(),400);
+            assignWorkerStation(_empId,text.slice(4).trim());
+          }else{
+            status.textContent=T.st_sel_worker||'⚠ בחר עובד לפני סריקת תחנה';
+          }
+          return;
+        }
         if(/^\d{13}$/.test(text)){
           document.getElementById('ts-bc-inp').value=text;tsParseBc(text);
           status.textContent='✅ נסרק: '+text;
@@ -5484,6 +5682,8 @@ async function tsStartTask(){
       await autoStampStage(b.cust,b.prod,b.taskDept||w.dept); // עדכון אוטומטי של שלב הייצור
     }
     showToast('✅ '+_tsBatch.length+' משימות התחילו עבור '+w.name);
+    // מדיניות רכה: התחלת משימה בלי שיוך תחנה — תזכורת בלבד, לא חסימה
+    if(!w.currentStation&&(S.workStations||[]).length)setTimeout(()=>showToast(T.st_reminder||'📍 תזכורת: סרוק ברקוד תחנה כדי לשייך אותך לעמדה','var(--amber-txt)',5000),1800);
     _tsBatch=[];renderTsBatchQueue();
     document.getElementById('ts-bc-inp').value='';document.getElementById('ts-bc-prev').innerHTML='';
     document.getElementById('ts-tasktype').value='';tsShowTaskTypeField(true);
@@ -5700,6 +5900,7 @@ async function mgrPunchOut(wId){
   w.sessions[openIdx].out=now.toISOString();
   w.status='out';w.checkout=now.toISOString();
   await pauseWorkerTasks(w.id,now);
+  await closeWorkerStation(w,now); // חתימת יציאה סוגרת את שיוך התחנה
   const netMs=calcNetWork(w);
   const rec={workerId:w.id,workerName:w.name,dept:w.dept,date:todayStr(),sessions:w.sessions,checkin:w.sessions[0]?.in||'',checkout:now.toISOString(),breakStart:w.breakStart||'',breakEnd:w.breakEnd||'',breakActive:!!w.breakActive,netMs};
   S.attHistory.unshift(rec);
@@ -6622,6 +6823,15 @@ function startDecoding(video,status){
       const img=ctx.getImageData(0,0,canvas.width,canvas.height);
       const code=jsQR(img.data,img.width,img.height,{inversionAttempts:'attemptBoth'});
       if(code){
+        // ברקוד תחנה (STN:) — שיוך העובד המחובר לתחנה, לפני חילוץ הספרות
+        if((code.data||'').startsWith('STN:')){
+          clearInterval(camInterval);
+          status.textContent='📍 '+code.data;
+          const _sid=code.data.slice(4).trim();
+          setTimeout(()=>stopCam(),400);
+          if(S.user)assignWorkerStation(S.user.id,_sid);
+          return;
+        }
         const text=code.data.replace(/\D/g,'');
         if(text.length>=13){
           const bc=text.slice(0,13);
