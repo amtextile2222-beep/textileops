@@ -165,6 +165,26 @@ exports.login = functions.https.onCall(async (data, context) => {
     }
   }
 
+  // ── חלון גישה מוקצב (ימים בשבוע + שעות) — פר-עובד, מנהל פטור ──
+  // days: מערך 0-6 (0=ראשון ... 6=שבת, כמו getDay). fail-open אם התצורה חסרה
+  // כדי למנוע נעילה בטעות — חסימה מלאה נעשית דרך disabled.
+  {
+    const aw = w.accessWindow;
+    if (w.role !== 'manager' && aw && aw.enabled
+        && Array.isArray(aw.days) && aw.days.length && aw.from && aw.to) {
+      const ilNow = new Date(new Date().toLocaleString('en-US', { timeZone: 'Asia/Jerusalem' }));
+      const day = ilNow.getDay();
+      const mins = ilNow.getHours() * 60 + ilNow.getMinutes();
+      const toMin = s => { const [h, m] = String(s).split(':').map(Number); return (h || 0) * 60 + (m || 0); };
+      const dayOk = aw.days.map(Number).includes(day);
+      const timeOk = mins >= toMin(aw.from) && mins <= toMin(aw.to);
+      if (!dayOk || !timeOk) {
+        await tg('⛔ TextileOps — כניסה מחוץ לחלון הזמן המותר\n👤 עובד: ' + w.name + '\n🕐 שעה: ' + ilTime() + '\nהעובד ניסה להיכנס מחוץ לימים/שעות שהוגדרו לו.');
+        throw new functions.https.HttpsError('permission-denied', 'time-window');
+      }
+    }
+  }
+
   // תבניות פנים: קודם credentials, אחרת שדות ישנים בworkers (טרום-מיגרציה)
   const faceSrc = storedDescriptors(creds).length ? creds : w;
   const hasFace = !!w.faceAuth && storedDescriptors(faceSrc).length > 0;

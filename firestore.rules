@@ -38,6 +38,7 @@ service cloud.firestore {
         && request.resource.data.get('requireFactoryIP', false) == resource.data.get('requireFactoryIP', false)
         && request.resource.data.get('disabled', false) == resource.data.get('disabled', false)
         && request.resource.data.get('faceUpdateAllowed', false) == resource.data.get('faceUpdateAllowed', false)
+        && request.resource.data.get('accessWindow', {}) == resource.data.get('accessWindow', {})
         && request.resource.data.get('permissions', []) == resource.data.get('permissions', []));
     }
 
