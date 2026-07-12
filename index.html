@@ -2076,6 +2076,23 @@ function updateExpectedTime(prefix){
     }catch(e){console.error('calcTaskExpected:',e);box.innerHTML='';}
   },600);
 }
+// מחזיר צפי (perStep) לעובד+כמות: קודם מה-cache (_expMap), אחרת מחשב מהשרת ושומר ל-cache.
+// חיוני ליצירת משימה בהעברה/סריקה מהירה: _expMap מתאכלס רק מתצוגת התצוגה המקדימה ומתאפס בכל שמירת תמחור,
+// אז בלי fallback לשרת משימה מועברת (עובד/כמות חדשים) לא מקבלת expectedMin. שקט בכשל (הרשאה/רשת).
+async function fetchExpected(cust,prod,workerId,qty){
+  const key=taskExpectedKey(cust,prod,workerId,qty);
+  if(_expMap[key])return _expMap[key];
+  const prodObj=findProd(cust,prod);
+  if(!prodObj||!(+prodObj.unitPrice)||!workerId||!qty||!S.fbConnected||!window._fbFunctions)return{ok:false};
+  const allSteps=(prodObj.workSteps||[]).map(s=>stepName(s)).filter(Boolean);
+  try{
+    const{httpsCallable}=window._fb;
+    const fn=httpsCallable(window._fbFunctions,'calcTaskExpected');
+    const r=await fn({cust,prod,workerId,qty,stepNames:allSteps});
+    _expMap[key]=r.data||{ok:false};
+  }catch(e){console.error('fetchExpected:',e);_expMap[key]={ok:false};}
+  return _expMap[key];
+}
 // עדכון צפי הזמן (expectedMin) למשימות פעילות/בהשהיה של מוצר אחרי שמירת שינוי תמחור/דק' ידני.
 // מקבץ קריאות ל-CF לפי עובד+כמות; משימה ללא צפי מקבלת מחיקת expectedMin. שקט בכשל (הרשאה/רשת).
 async function recalcActiveExpected(cust,prod){
@@ -3914,7 +3931,7 @@ async function submitBc(){
     if(!typesToCreate.length)return;
     const bcBatchId=typesToCreate.length>1?genBatchId():null; // כמה שלבים יחד = קבוצה אחת (טיימר משותף + מסגרת אחת)
     const bcStart=new Date();
-    const _bcExp=_expMap[taskExpectedKey(cust,prod,u.id,qty)]; // צפי זמן לפי התמחור
+    const _bcExp=await fetchExpected(cust,prod,u.id,qty); // צפי זמן לפי התמחור (fallback לשרת בקאש-מיס)
     for(const tt of typesToCreate){
       const newTask={id:String(Date.now())+Math.random().toString(36).slice(2,6),workerId:u.id,workerName:u.name,dept:taskDept||u.dept,cust,prod,size,qty,col,taskType:tt,bc:raw,isTotal:isTotal||false,startTime:bcStart,elapsed:0,prodStamp:stamp};
       if(bcBatchId)newTask.batchId=bcBatchId;
@@ -5456,7 +5473,7 @@ async function tsStartTask(){
     const startTime=new Date();
     for(const b of _tsBatch){
       const task={id:String(Date.now())+Math.random().toString(36).slice(2,6),workerId:w.id,workerName:w.name,dept:b.taskDept||w.dept,cust:b.cust,prod:b.prod,size:b.size,qty:b.qty,col:b.col,taskType:b.taskType,bc:b.raw,isTotal:b.isTotal||false,startTime,elapsed:0,accumulatedSec:0,prodStamp:b.prodStamp};
-      const exp=_expMap[taskExpectedKey(b.cust,b.prod,w.id,b.qty)];
+      const exp=await fetchExpected(b.cust,b.prod,w.id,b.qty);
       if(exp?.ok&&exp.perStep?.[b.taskType]!=null)task.expectedMin=exp.perStep[b.taskType];
       if(batchId)task.batchId=batchId;
       S.activeTasks.push(task);
@@ -5749,7 +5766,7 @@ async function mgrStartTask(){
   const startTime=new Date();
   for(const b of _mgrBatch){
     const newTask={id:String(Date.now())+Math.random().toString(36).slice(2,6),workerId:empId,workerName:w.name,dept:b.taskDept||w.dept,cust:b.cust,prod:b.prod,size:b.size,qty:b.qty,col:b.col,taskType:b.taskType,bc:b.raw,isTotal:b.isTotal||false,startTime,elapsed:0,accumulatedSec:0,prodStamp:b.prodStamp};
-    const expM=_expMap[taskExpectedKey(b.cust,b.prod,empId,b.qty)];
+    const expM=await fetchExpected(b.cust,b.prod,empId,b.qty);
     if(expM?.ok&&expM.perStep?.[b.taskType]!=null)newTask.expectedMin=expM.perStep[b.taskType];
     if(batchId)newTask.batchId=batchId;
     S.activeTasks.unshift(newTask);
@@ -5798,11 +5815,11 @@ async function transferTask(taskId){
     const splitId='sp'+Date.now().toString(36)+Math.random().toString(36).slice(2,5);
     const newTask={...t,id:String(Date.now())+Math.random().toString(36).slice(2,6),workerId:newWorker.id,workerName:newWorker.name,dept:newWorker.dept,qty:partQty,startTime:new Date(),elapsed:0,accumulatedSec:0,splitId};
     delete newTask.batchId;
-    const expN=_expMap[taskExpectedKey(t.cust,t.prod,newWorker.id,partQty)];
+    const expN=await fetchExpected(t.cust,t.prod,newWorker.id,partQty);
     if(expN?.ok&&expN.perStep?.[tt]!=null)newTask.expectedMin=expN.perStep[tt];else delete newTask.expectedMin;
     t.qty=totalQty-partQty;
-    const expO=_expMap[taskExpectedKey(t.cust,t.prod,t.workerId,t.qty)];
-    if(expO?.ok&&expO.perStep?.[tt]!=null)t.expectedMin=expO.perStep[tt];
+    const expO=await fetchExpected(t.cust,t.prod,t.workerId,t.qty);
+    if(expO?.ok&&expO.perStep?.[tt]!=null)t.expectedMin=expO.perStep[tt];else delete t.expectedMin;
     S.activeTasks.unshift(newTask);
     if(S.fbConnected){
       await fbSet('activeTasks',newTask.id,{...newTask,startTime:newTask.startTime.toISOString()});
@@ -5817,6 +5834,9 @@ async function transferTask(taskId){
   t.workerId=newWorker.id;
   t.workerName=newWorker.name;
   t.dept=newWorker.dept;
+  // חשב מחדש צפי לעובד החדש (שכר שונה); בכשל שרת — משאירים את הצפי הקיים כדי לא למחוק צפי תקין
+  const expF=await fetchExpected(t.cust,t.prod,newWorker.id,t.qty);
+  if(expF?.ok&&expF.perStep?.[tt]!=null)t.expectedMin=expF.perStep[tt];
   if(S.fbConnected)await fbSet('activeTasks',String(t.id),{...t,startTime:t.startTime instanceof Date?t.startTime.toISOString():t.startTime});
   saveLS();renderTasks();renderMgrTasks();
   showToast(`${T.tr_done_all}${newWorker.name}`);
