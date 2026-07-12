@@ -290,9 +290,17 @@ exports.calcTaskExpected = functions.https.onCall(async (data, context) => {
   const qty = Math.max(0, parseInt(d.qty) || 0);
   const stepNames = Array.isArray(d.stepNames) ? d.stepNames.map(String).slice(0, 60) : [];
   if (!cust || !prod || !workerId || !qty || !stepNames.length) return { ok: false, reason: 'missing' };
-  const pq = await db.collection('products').where('cust', '==', cust).where('prod', '==', prod).limit(1).get();
+  const pq = await db.collection('products').where('cust', '==', cust).where('prod', '==', prod).get();
   if (pq.empty) return { ok: false, reason: 'no-product' };
-  const p = pq.docs[0].data();
+  // כמו findProd בלקוח: בכפילות (מוצר ישן+חדש עם אותו cust/prod) בחר את הרשומה העדכנית ביותר
+  // (createdAt מקסימלי, fallback למספר ב-id) — אחרת הצפי מחושב מרשומה ישנה עם שלבים/תמחור שונים ולא מופיע
+  let p = null, mx = -1;
+  for (const doc of pq.docs) {
+    const x = doc.data();
+    const c = +x.createdAt || parseInt(String(x.id || doc.id).replace(/\D/g, '')) || 0;
+    if (c > mx) { mx = c; p = x; }
+  }
+  if (!p) return { ok: false, reason: 'no-product' };
   const price = +p.unitPrice || 0, profit = +p.targetProfitPct || 0, mats = +p.directMaterialsCost || 0;
   if (!price) return { ok: false, reason: 'no-pricing' };
   const budget = price * (1 - profit / 100) - mats;
