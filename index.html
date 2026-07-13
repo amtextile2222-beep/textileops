@@ -1296,6 +1296,8 @@ code{background:var(--bg2);border:0.5px solid var(--b);border-radius:4px;padding
 <!-- QR CODE GENERATOR -->
 <script src="https://cdn.jsdelivr.net/npm/qrcodejs@1.0.0/qrcode.min.js"></script>
 <script src="https://cdn.jsdelivr.net/npm/jsbarcode@3.11.6/dist/JsBarcode.all.min.js"></script>
+<!-- PDF GENERATOR (מדבקות A4 בגודל מדויק) -->
+<script src="https://cdn.jsdelivr.net/npm/jspdf@2.5.1/dist/jspdf.umd.min.js"></script>
 
 <!-- FIREBASE SDK -->
 <script type="module">
@@ -8010,6 +8012,7 @@ function bcGenerate(){
         <button class="btn success" onclick="bcExportNiimbot()" style="font-size:13px">📥 ייצא ל-NIIMBOT</button>
         <button class="btn" onclick="bcPrint()" style="font-size:13px">🖨️ הדפס הכל</button>
         <button class="btn" onclick="bcPrint('labels')" style="font-size:13px" title="רשת 105×56 מ&quot;מ (TW-2510), 10 מדבקות בדף A4">🏷️ הדפס למדבקות</button>
+        <button class="btn success" onclick="bcDownloadPDF()" style="font-size:13px" title="קובץ PDF מדויק A4 (105×56 מ&quot;מ) — להדפסה מהנייד בגודל נכון">📄 הורד PDF מדבקות</button>
       </div>
     </div>
     <div id="bc-print-area" style="display:grid;grid-template-columns:repeat(auto-fill,minmax(300px,1fr));gap:12px">
@@ -8151,6 +8154,72 @@ function bcPrint(mode){
     <style>${style}</style></head><body>
     ${body}
     </body></html>`);
+}
+// ─── ייצוא PDF מדבקות (A4 מדויק, 105×56 מ"מ) ─────────────────
+// מייצר PDF בגודל אמיתי כדי שאפשר להדפיס גם מהנייד (AirPrint מכווץ HTML, אבל PDF מודפס בגודל מקורי).
+function _bcQRCanvas(text,px){
+  try{const tmp=document.createElement('div');
+    new QRCode(tmp,{text,width:px,height:px,colorDark:'#000000',colorLight:'#ffffff',correctLevel:QRCode.CorrectLevel.M});
+    return tmp.querySelector('canvas');
+  }catch(e){return null;}
+}
+function _bcPdfCell(card){
+  const s=11.81; // px למ"מ (~300dpi)
+  const W=Math.round(105*s),H=Math.round(56*s);
+  const cv=document.createElement('canvas');cv.width=W;cv.height=H;
+  const ctx=cv.getContext('2d');
+  ctx.fillStyle='#fff';ctx.fillRect(0,0,W,H);
+  const qmm=32,qx=4,qy=(56-qmm)/2;
+  const qr=_bcQRCanvas(card.qr,440);
+  if(qr)ctx.drawImage(qr,Math.round(qx*s),Math.round(qy*s),Math.round(qmm*s),Math.round(qmm*s));
+  ctx.direction='rtl';ctx.textAlign='right';ctx.textBaseline='alphabetic';
+  const rightX=Math.round(101*s),lineMm=6.6,totalMm=card.lines.length*lineMm;
+  let y=(56-totalMm)/2;
+  card.lines.forEach(ln=>{
+    ctx.font=(ln.bold?'bold ':'')+Math.round(ln.mm*s)+'px Arial, sans-serif';
+    ctx.fillStyle=ln.color;
+    ctx.fillText(ln.t,rightX,Math.round((y+lineMm*0.75)*s));
+    y+=lineMm;
+  });
+  return cv;
+}
+function bcDownloadPDF(){
+  const g=window._bcLastGen;
+  if(!g){alert('צור ברקודים תחילה');return;}
+  const J=window.jspdf&&window.jspdf.jsPDF;
+  if(!J){alert('ספריית PDF עדיין נטענת — נסה שוב עוד רגע');return;}
+  if(!window.QRCode){alert('ספריית QR לא נטענה');return;}
+  const {cust,prod,items}=g;
+  const totalQty=items.reduce((s,it)=>s+(parseInt(it.qty)||0),0);
+  const totalCode=cust+prod+'900000';
+  const cards=[{qr:totalCode,lines:[
+    {t:'📦 כל הכמות',mm:4,bold:true,color:'#059669'},
+    {t:'לקוח: '+cust,mm:3.6,bold:true,color:'#000'},
+    {t:'מוצר: '+prod,mm:3.6,bold:true,color:'#000'},
+    {t:'סה"כ: '+totalQty+' יח׳',mm:4,bold:true,color:'#059669'},
+    {t:totalCode,mm:2.8,bold:false,color:'#555'}]}];
+  items.forEach(it=>{
+    const code=cust+prod+it.size+it.qty+it.col;
+    const colName=(COLORS_AR[it.col]||COLORS[it.col]||it.col);
+    cards.push({qr:code,lines:[
+      {t:'לקוח: '+cust,mm:3.6,bold:true,color:'#000'},
+      {t:'מוצר: '+prod,mm:3.6,bold:true,color:'#000'},
+      {t:'מידה: '+it.size,mm:3.6,bold:true,color:'#000'},
+      {t:'כמות: '+parseInt(it.qty),mm:3.6,bold:true,color:'#000'},
+      {t:'צבע: '+it.col+' · '+colName,mm:3.6,bold:true,color:'#000'},
+      {t:code,mm:2.8,bold:false,color:'#555'}]});
+  });
+  const doc=new J({unit:'mm',format:'a4',orientation:'portrait'});
+  const CW=105,CH=56,TOP=(297-5*CH)/2; // 8.5 מ"מ שוליים עליון/תחתון, 0 בצדדים
+  cards.forEach((card,i)=>{
+    const pos=i%10;
+    if(i>0&&pos===0)doc.addPage();
+    const row=Math.floor(pos/2),col=pos%2;
+    const x=col===0?CW:0; // RTL: הכרטיס הראשון בצד ימין
+    const y=TOP+row*CH;
+    doc.addImage(_bcPdfCell(card).toDataURL('image/png'),'PNG',x,y,CW,CH);
+  });
+  doc.save('מדבקות_'+cust+'_'+prod+'.pdf');
 }
 // ─── PDF IMPORT ──────────────────────────────────────────────
 function bcOpenPDF(){document.getElementById('bc-pdf-input')?.click();}
