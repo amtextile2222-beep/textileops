@@ -4149,6 +4149,8 @@ function renderTaskHist(){
     const stStr=pad2(st.getHours())+':'+pad2(st.getMinutes());
     const etStr=et?pad2(et.getHours())+':'+pad2(et.getMinutes()):'—';
     const dateStr=pad2(st.getDate())+'/'+pad2(st.getMonth()+1)+'/'+st.getFullYear();
+    const _expSec=(+t.expectedMin>0)?(+t.expectedMin)*60:0;
+    const _over=_expSec>0&&(t.duration||0)>_expSec;
     return`<div class="row">
       <div style="flex:1"><div style="font-size:12px;font-weight:500;color:var(--txt)">${esc(t.workerName)}</div>
       <div style="font-size:11px;color:var(--txt3)">${dateStr} | לקוח ${t.cust} | ${t.prod}${t.size?' | מידה '+t.size:''} | ${t.qty===0?'<span style="color:#d97706;font-weight:700">⏳ כמות פתוחה</span>':t.qty+' יח\''}${t.isTotal?' | <span style="color:#059669;font-weight:700">📦 כל הכמות</span>':' | '+(COLORS[t.col]||t.col)}${t.taskType?' | 📋 '+esc(t.taskType):''}</div>
@@ -4156,7 +4158,7 @@ function renderTaskHist(){
       ${(()=>{const prev=S.histTasks.filter(x=>x.bc===t.bc&&x.workerId===t.workerId&&x.id!==t.id);const tot=prev.reduce((s,x)=>s+(x.duration||0),0);const ses=prev.length;return ses>0?`<div style="font-size:11px;color:var(--blue-txt)">📊 מצטבר קודם: <b>${fmtM(tot)}</b> (${ses} ${ses===1?'משימה':'משימות'})</div>`:''})()}
       </div>
       <div style="display:flex;align-items:center;gap:6px">
-        <span class="badge blue">${fmtM(t.duration||0)}</span>
+        <span class="badge ${_over?'red':'blue'}"${_over?` title="חריגה מהצפי (${fmtM(_expSec)})"`:''}>${_over?'⚠ ':''}${fmtM(t.duration||0)}</span>
         ${(S.user?.role==='manager'||S.user?.role==='supervisor')?`<button class="btn" style="font-size:11px;padding:3px 8px" onclick="openEditTask('${t.id}',true)" title="עריכה">✏️</button><button class="btn" style="font-size:11px;padding:3px 8px;background:#dcfce7;color:#16a34a" onclick="restoreHistTask('${t.id}')" title="החזר למשימות פעילות">♻️</button><button class="btn" style="font-size:11px;padding:3px 8px;background:var(--red-bg,#fee2e2);color:var(--red-txt,#dc2626)" onclick="deleteHistTask('${t.id}')" title="מחיקה">🗑️</button>`:''}
       </div>
     </div>`;
