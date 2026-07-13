@@ -3521,22 +3521,12 @@ function taskFinalDur(t,endTime){
   return (t.accumulatedSec||0)+calcTaskDurSec(t.startTime,endTime,t.workerId);
 }
 function calcActualTaskTime(tasks){
-  // מחשב זמן עבודה אמיתי — משימות מקביל נספרות פעם אחת (union of intervals)
-  const byWorker={};
-  tasks.forEach(t=>{if(!byWorker[t.workerId])byWorker[t.workerId]=[];byWorker[t.workerId].push(t);});
-  let totalMs=0;
-  Object.values(byWorker).forEach(wt=>{
-    const ivs=wt.map(t=>[new Date(t.startTime).getTime(),t.endTime?new Date(t.endTime).getTime():new Date(t.startTime).getTime()+(t.elapsed||0)*1000])
-      .filter(([s,e])=>e>s).sort((a,b)=>a[0]-b[0]);
-    let cs=null,ce=null;
-    for(const[s,e]of ivs){
-      if(cs===null){cs=s;ce=e;}
-      else if(s<=ce){ce=Math.max(ce,e);}
-      else{totalMs+=ce-cs;cs=s;ce=e;}
-    }
-    if(cs!==null)totalMs+=ce-cs;
-  });
-  return totalMs/1000;
+  // זמן עבודה נקי (שניות): מסכם duration מתוקן דרך normalizeBatchDurations —
+  // batch מקביל (סריקת אצווה) נספר פעם אחת, והפסקות/לילות/השהיות כבר מנוכים ב-duration.
+  // קודם: union של [start,end] = שעון-קיר, שספר גם לילות/הפסקות/סריקות "כל הכמות"
+  // שנשארו פתוחות שעות → שעות מנופחות (לא עקבי עם דוחות שלב/רווח/מאזן שכבר על duration נקי).
+  const nd=normalizeBatchDurations(tasks);
+  return Object.values(nd).reduce((s,v)=>s+(v||0),0);
 }
 // ─── BATCH STATE ─────────────────────────────────────────────
 let _tsBatch=[];  // {raw,cust,prod,size,qty,col,isTotal,taskType,taskDept,prodStamp}
