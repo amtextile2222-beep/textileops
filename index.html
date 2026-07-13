@@ -8017,7 +8017,7 @@ function bcGenerate(){
       <div style="display:flex;gap:8px;flex-wrap:wrap">
         <button class="btn success" onclick="bcExportNiimbot()" style="font-size:13px">📥 ייצא ל-NIIMBOT</button>
         <button class="btn" onclick="bcPrint()" style="font-size:13px">🖨️ הדפס הכל</button>
-        <button class="btn" onclick="bcPrint('labels')" style="font-size:13px" title="רשת 105×57 מ&quot;מ, 10 מדבקות בדף A4">🏷️ הדפס למדבקות</button>
+        <button class="btn" onclick="bcPrint('labels')" style="font-size:13px" title="רשת 105×56 מ&quot;מ (TW-2510), 10 מדבקות בדף A4">🏷️ הדפס למדבקות</button>
       </div>
     </div>
     <div id="bc-print-area" style="display:grid;grid-template-columns:repeat(auto-fill,minmax(300px,1fr));gap:12px">
@@ -8090,7 +8090,7 @@ function printViaIframe(html){
   setTimeout(go,600);
 }
 function bcPrint(mode){
-  const labels=mode==='labels'; // מצב מדבקות: רשת 105×57 מ"מ קבועה, 10 בדף A4, בלי מרווח/כותרות
+  const labels=mode==='labels'; // מצב מדבקות: רשת 105×56 מ"מ קבועה (TW-2510), 10 בדף A4, בלי מרווח/כותרות
   const area=document.getElementById('bc-print-area');
   if(!area)return;
   // קבץ לפי צבע (למצב רגיל) + רשימה רציפה של כל הכרטיסים (למצב מדבקות)
@@ -8147,9 +8147,9 @@ function bcPrint(mode){
   const style=labels
     ?`body{margin:0;font-family:Arial,sans-serif;background:#fff}
       .grid{display:grid!important;grid-template-columns:repeat(2,105mm)!important;gap:0!important;padding:0!important}
-      .bc-card{width:105mm!important;height:57mm!important;box-sizing:border-box!important;padding:4mm!important;border:none!important;border-radius:0!important;gap:8px!important;grid-column:auto!important;overflow:hidden!important}
-      .bc-card img{width:34mm!important;height:34mm!important;flex-shrink:0}
-      @media print{@page{size:A4 portrait;margin:6mm 0}}`
+      .bc-card{width:105mm!important;height:56mm!important;box-sizing:border-box!important;padding:4mm!important;border:none!important;border-radius:0!important;gap:8px!important;grid-column:auto!important;overflow:hidden!important}
+      .bc-card img{width:32mm!important;height:32mm!important;flex-shrink:0}
+      @media print{@page{size:A4 portrait;margin:8.5mm 0}}`
     :`body{margin:0;font-family:Arial,sans-serif;background:#fff}
       .grid{display:grid;grid-template-columns:repeat(2,1fr);gap:10px;padding:6px 10px}
       .bc-card{border:2px solid #333;border-radius:6px;padding:10px;display:flex;align-items:center;gap:12px;break-inside:avoid}
