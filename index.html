@@ -8123,8 +8123,9 @@ function bcPrint(mode){
   }
   let body;
   if(labels){
-    // רשת אחת רציפה — כל הכרטיסים + "יצא ללקוח" נופלים על גבולות המדבקות בלי כותרות/מעברי-עמוד
-    body=`<div class="grid">${allCards.join('')}${shipCard}</div>`;
+    // רשת אחת רציפה — 10 מדבקות בדיוק בדף A4 (TW-2510). כרטיס "יצא ללקוח" לא נכלל כאן
+    // כדי לא לגלוש לגיליון מדבקות שני; מדפיסים אותו דרך "הדפס הכל" הרגיל.
+    body=`<div class="grid">${allCards.join('')}</div>`;
   }else{
     // רצף אחד בלי עמוד נפרד לכל צבע — רק כותרת מפרידה בין צבעים
     const pages=[...byColor.entries()].map(([col,cards])=>{
