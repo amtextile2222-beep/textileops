@@ -298,6 +298,7 @@ code{background:var(--bg2);border:0.5px solid var(--b);border-radius:4px;padding
       <button class="nb hidden" onclick="goPage('attrep')" id="nb-attrep">📋 <span data-i18n="nav_attrep">דוח נוכחות</span></button>
       <button class="nb" onclick="goPage('scan')" id="nb-scan">📷 <span data-i18n="nav_scan">סריקה</span></button>
       <button class="nb" onclick="goPage('tasks')" id="nb-tasks">✅ <span data-i18n="nav_tasks">משימות</span></button>
+      <button class="nb hidden" onclick="openKiosk()" id="nb-kiosk">📺 <span data-i18n="nav_kiosk">מסך תצוגה</span></button>
       <button class="nb" onclick="goPage('reports')" id="nb-reports">📈 <span data-i18n="nav_reports">דוחות</span></button>
       <button class="nb" onclick="goPage('alerts')" id="nb-alerts">🔔 <span id="al-cnt" class="cnt hidden">0</span><span data-i18n="nav_alerts">התראות</span></button>
       <button class="nb hidden" onclick="goPage('admin')" id="nb-admin">⚙️ <span data-i18n="nav_admin">ניהול</span></button>
@@ -1338,6 +1339,12 @@ const LANGS={
     bc_start_all:'▶ התחל את כל המשימות',
     bc_pending_scan:'⚠ יש ברקוד סרוק שטרם נוסף לסל — לחץ "התחל / משימה" כדי להוסיפו, או נקה את השדה',
     bc_tasks_in_cart:'משימות בסל',
+    nav_kiosk:'מסך תצוגה',
+    kiosk_title:'📺 מסך תצוגה — משימות פעילות',
+    kiosk_active:'פעילות',
+    kiosk_over:'חריגות',
+    kiosk_none:'אין משימות פעילות כרגע',
+    kiosk_exit:'✕ יציאה',
     tr_no_workers:'אין עובדים אחרים נוכחים כרגע',
     tr_title:'🔄 העברת משימה',
     tr_of_worker:'משימה של',
@@ -1552,6 +1559,12 @@ const LANGS={
     bc_start_all:'▶ ابدأ جميع المهام',
     bc_pending_scan:'⚠ يوجد باركود ممسوح لم يُضف إلى السلة — اضغط "ابدأ / المهمة" لإضافته، أو امسح الحقل',
     bc_tasks_in_cart:'مهام في السلة',
+    nav_kiosk:'شاشة العرض',
+    kiosk_title:'📺 شاشة العرض — المهام النشطة',
+    kiosk_active:'نشطة',
+    kiosk_over:'تجاوزات',
+    kiosk_none:'لا توجد مهام نشطة حالياً',
+    kiosk_exit:'✕ خروج',
     tr_no_workers:'لا يوجد عمال آخرون حاضرون حالياً',
     tr_title:'🔄 نقل المهمة',
     tr_of_worker:'مهمة',
@@ -1766,6 +1779,12 @@ const LANGS={
     bc_start_all:'▶ Start all tasks',
     bc_pending_scan:'⚠ A scanned barcode was not added to the cart — press "Start / task" to add it, or clear the field',
     bc_tasks_in_cart:'tasks in cart',
+    nav_kiosk:'Display board',
+    kiosk_title:'📺 Display board — active tasks',
+    kiosk_active:'active',
+    kiosk_over:'overruns',
+    kiosk_none:'No active tasks right now',
+    kiosk_exit:'✕ Exit',
     tr_no_workers:'No other workers present now',
     tr_title:'🔄 Transfer task',
     tr_of_worker:'Task of',
@@ -2902,6 +2921,9 @@ function applyPerms(w){
       if(btn){(availPages.includes(p)&&perms.includes(p))?btn.classList.remove('hidden'):btn.classList.add('hidden');}
     });
   }
+  // מסך תצוגה (Kiosk) — למנהל ולאחראי בלבד
+  const showKiosk=w.role==='manager'||w.role==='supervisor';
+  document.getElementById('nb-kiosk')?.classList.toggle('hidden',!showKiosk);
 }
 
 // ─── LOGIN ──────────────────────────────────────────────────
@@ -3173,6 +3195,8 @@ async function sendAIMsg(){
 }
 function doLogout(){
   S.user=null;
+  if(typeof _kioskOpen!=='undefined'&&_kioskOpen)closeKiosk();
+  document.getElementById('nb-kiosk')?.classList.add('hidden');
   [...ALL_WORKER_PAGE_IDS,'admin','mgrtasks','attrep','setup','costs'].forEach(p=>document.getElementById('nb-'+p)?.classList.add('hidden'));
   document.getElementById('login-screen').classList.remove('hidden');
   document.getElementById('app-screen').classList.add('hidden');
@@ -3230,6 +3254,7 @@ function renderAll(){
   if(id==='attrep')initAttRep();
   if(id==='alerts'){checkAlerts();renderAlerts();loadWaSettings();loadPushSettings();}
   if(id==='expenses')renderExpenses();
+  if(typeof _kioskOpen!=='undefined'&&_kioskOpen)renderKiosk(); // מסך התצוגה מתעדכן בזמן אמת עם כל שינוי נתונים
 }
 
 // ─── ATTENDANCE REPORT ──────────────────────────────────────
@@ -3671,11 +3696,15 @@ async function bcStartBatch(){
   try{
     const bcBatchId=items.length>1?genBatchId():null; // כמה משימות יחד = קבוצה אחת (טיימר משותף + מסגרת אחת)
     const bcStart=new Date();
+    const dupSkip=[];let created=0;
     for(const b of items){
+      // חסימה חוזרת ברגע הפתיחה (לא רק בהוספה לסל): סוגר מרוץ של סריקה כפולה מהירה —
+      // סריקה שנייה שעברה את בדיקת הסל לפני שהמשימה הראשונה נוצרה. אותו עובד+ברקוד+שלב פעיל = דילוג.
+      if(S.activeTasks.some(x=>x.workerId===u.id&&taskBc(x)===b.raw&&(x.taskType||'')===(b.taskType||'')&&!x.paused)){dupSkip.push((b.taskType||b.prod)+' — '+(T.scan_dup_active||'פעיל כעת'));continue;}
       const newTask={id:String(Date.now())+Math.random().toString(36).slice(2,6),workerId:u.id,workerName:u.name,dept:b.taskDept||u.dept,cust:b.cust,prod:b.prod,size:b.size,qty:b.qty,col:b.col,taskType:b.taskType,bc:b.raw,isTotal:b.isTotal||false,startTime:bcStart,elapsed:0,prodStamp:b.prodStamp};
       if(bcBatchId)newTask.batchId=bcBatchId;
       if(b.expMin!=null)newTask.expectedMin=b.expMin;
-      S.activeTasks.unshift(newTask);
+      S.activeTasks.unshift(newTask);created++;
       if(S.fbConnected)await fbSet('activeTasks',newTask.id,{...newTask,startTime:bcStart.toISOString()});
       tgTask(newTask,true);
       await autoStampStage(b.cust,b.prod,b.taskDept||u.dept); // עדכון אוטומטי של שלב הייצור
@@ -3685,7 +3714,8 @@ async function bcStartBatch(){
     document.getElementById('bc-tasktype').value='';
     document.getElementById('bc-dept').value='';
     saveLS();renderScanActive();renderTasks();goPage('tasks');
-    showToast('✅ '+(items.length>1?items.length+' משימות הותחלו':'משימה הותחלה'));
+    if(dupSkip.length)showToast((T.scan_not_added||'לא נוסף')+' '+dupSkip.join(' · '),'var(--red-txt)',7000);
+    if(created>0)showToast('✅ '+(created>1?created+' משימות הותחלו':'משימה הותחלה'));
     // מדיניות רכה: התחלת משימה בלי שיוך תחנה — תזכורת בלבד, לא חסימה
     if(!wu.currentStation&&(S.workStations||[]).length)setTimeout(()=>showToast(T.st_reminder||'📍 תזכורת: סרוק ברקוד תחנה כדי לשייך אותך לעמדה','var(--amber-txt)',5000),1800);
   }catch(e){showToast('❌ שגיאה בפתיחת משימה: '+e.message,'var(--red-txt)',8000);}
@@ -4258,6 +4288,143 @@ function renderTaskHist(){
   }
 }
 
+// ─── KIOSK / מסך תצוגה גדול ──────────────────────────────────
+// לוח מסך-מלא למסך גדול במפעל: כל המשימות הפעילות בכרטיסים גדולים, טיימר חי,
+// צפי + ספירה לאחור, צבע לפי חריגה. מתעדכן בזמן אמת (renderAll + tick 1 שנ').
+let _kioskOpen=false;
+function _kioskCls(cls){return cls==='late'?'k-late':(cls==='warn'||cls==='over')?'k-warn':'k-ok';}
+function openKiosk(){
+  if(!document.getElementById('kiosk-screen'))buildKioskDom();
+  const T=LANGS[currentLang];
+  const scr=document.getElementById('kiosk-screen');
+  document.querySelector('#kiosk-bar .kiosk-brand').textContent=T.kiosk_title||'📺 מסך תצוגה — משימות פעילות';
+  document.getElementById('kiosk-exit').textContent=T.kiosk_exit||'✕ יציאה';
+  _kioskOpen=true;
+  scr.style.display='flex';
+  renderKiosk();
+  try{scr.requestFullscreen&&scr.requestFullscreen();}catch(e){}
+}
+function closeKiosk(){
+  _kioskOpen=false;
+  const scr=document.getElementById('kiosk-screen');if(scr)scr.style.display='none';
+  try{if(document.fullscreenElement)document.exitFullscreen();}catch(e){}
+}
+function buildKioskDom(){
+  injectKioskCss();
+  const d=document.createElement('div');
+  d.id='kiosk-screen';d.style.display='none';
+  d.innerHTML=`<div id="kiosk-bar">
+      <div class="kiosk-brand"></div>
+      <div class="kiosk-stats">
+        <span id="kiosk-count" class="k-stat">0</span>
+        <span id="kiosk-over" class="k-stat">0</span>
+        <span id="kiosk-clock" class="k-clock">00:00:00</span>
+      </div>
+      <button id="kiosk-exit" onclick="closeKiosk()">✕</button>
+    </div>
+    <div id="kiosk-grid"></div>`;
+  document.body.appendChild(d);
+  document.addEventListener('keydown',e=>{if(e.key==='Escape'&&_kioskOpen)closeKiosk();});
+}
+function renderKiosk(){
+  if(!_kioskOpen)return;
+  const grid=document.getElementById('kiosk-grid');if(!grid)return;
+  const T=LANGS[currentLang];
+  const thresh=S.settings.thresh*60;
+  const groups=_taskGroups(S.activeTasks);
+  if(!groups.length){grid.innerHTML=`<div class="kiosk-empty">🟢 ${T.kiosk_none||'אין משימות פעילות כרגע'}</div>`;updateKioskStats(0,0);return;}
+  grid.innerHTML=groups.map(g=>{
+    const tasks=g.tasks,lead=tasks[0],multi=tasks.length>1;
+    const allPaused=tasks.every(t=>t.paused);
+    const {elapsedSec,expSec,hasExp}=_groupTiming(tasks);
+    const cls=allPaused?'':_tmrClass(elapsedSec,expSec,thresh);
+    const kcls=allPaused?'k-paused':_kioskCls(cls);
+    const ids=tasks.map(t=>t.id).join(',');
+    const chips=`<span class="k-chip">לקוח ${lead.cust}</span><span class="k-chip k-p">${esc(lead.prod)}</span>${lead.size?`<span class="k-chip k-s">מידה ${esc(lead.size)}</span>`:''}<span class="k-chip k-q">${lead.qty} יח'</span><span class="k-chip k-col">${COLORS[lead.col]||esc(lead.col)}</span>`;
+    const steps=multi
+      ?`<div class="k-steps">${tasks.map(t=>`<span class="k-step">📋 ${esc(t.taskType||'—')}</span>`).join('')}</div>`
+      :(lead.taskType?`<div class="k-steps"><span class="k-step">📋 ${esc(lead.taskType)}</span></div>`:'');
+    const exp=hasExp?`<div class="k-exp">🎯 צפי ${fmtExpMin(expSec/60)}</div>`:'';
+    const timer=allPaused
+      ?`<div class="k-tmr k-tmr-paused">⏸ ${fmtS(lead.accumulatedSec||0)}</div>`
+      :`<div class="k-tmr kiosk-tmr" data-ids="${ids}" data-exp="${expSec}" data-lead="${lead.id}">${fmtS(elapsedSec)}</div>${hasExp?`<div class="k-cd" id="kcd-${lead.id}">${fmtCountdown(expSec-elapsedSec)}</div>`:''}`;
+    return`<div class="kiosk-card ${kcls}" id="kcard-${lead.id}">
+      <div class="k-head"><div class="k-worker">${esc(lead.workerName)}</div><div class="k-dept">${esc(lead.dept||'')}${multi?` · ${tasks.length} שלבים`:''}</div></div>
+      <div class="k-chips">${chips}</div>
+      ${steps}
+      <div class="k-timerwrap">${timer}</div>
+      ${exp}
+    </div>`;
+  }).join('');
+  kioskTick();
+}
+function updateKioskStats(active,over){
+  const T=LANGS[currentLang];
+  const a=document.getElementById('kiosk-count');if(a)a.textContent=active+' '+(T.kiosk_active||'פעילות');
+  const o=document.getElementById('kiosk-over');if(o){o.textContent=over+' '+(T.kiosk_over||'חריגות');o.classList.toggle('k-has-over',over>0);}
+}
+function kioskTick(){
+  if(!_kioskOpen)return;
+  const now=new Date();
+  const ck=document.getElementById('kiosk-clock');if(ck)ck.textContent=pad2(now.getHours())+':'+pad2(now.getMinutes())+':'+pad2(now.getSeconds());
+  const thresh=S.settings.thresh*60;
+  let over=0;
+  document.querySelectorAll('.kiosk-tmr[data-ids]').forEach(el=>{
+    const gts=el.dataset.ids.split(',').map(id=>S.activeTasks.find(t=>t.id===id)).filter(Boolean);
+    if(!gts.length)return;
+    const elapsedSec=Math.max(0,...gts.map(t=>t.elapsed||0));
+    const expSec=+el.dataset.exp||0;
+    const cls=_tmrClass(elapsedSec,expSec,thresh);
+    el.textContent=fmtS(elapsedSec);
+    const cd=document.getElementById('kcd-'+el.dataset.lead);
+    if(cd)cd.textContent=fmtCountdown(expSec-elapsedSec);
+    const card=document.getElementById('kcard-'+el.dataset.lead);
+    if(card)card.className='kiosk-card '+_kioskCls(cls);
+    if(cls==='late')over++;
+  });
+  updateKioskStats(document.querySelectorAll('.kiosk-card').length,over);
+}
+function injectKioskCss(){
+  if(document.getElementById('kiosk-css'))return;
+  const s=document.createElement('style');s.id='kiosk-css';
+  s.textContent=`
+  #kiosk-screen{position:fixed;inset:0;z-index:9999;background:#0f172a;color:#e2e8f0;display:flex;flex-direction:column;direction:rtl;font-family:inherit}
+  #kiosk-bar{display:flex;align-items:center;gap:16px;padding:14px 22px;background:#1e293b;border-bottom:2px solid #334155;flex-wrap:wrap}
+  .kiosk-brand{font-size:24px;font-weight:800;color:#fff;flex:1}
+  .kiosk-stats{display:flex;align-items:center;gap:12px;font-size:20px;font-weight:700}
+  .k-stat{background:#334155;padding:6px 14px;border-radius:10px;font-variant-numeric:tabular-nums}
+  #kiosk-over.k-has-over{background:#dc2626;color:#fff;animation:kpulse 1.2s infinite}
+  .k-clock{color:#38bdf8;font-variant-numeric:tabular-nums}
+  #kiosk-exit{background:#475569;color:#fff;border:none;border-radius:10px;padding:8px 18px;font-size:17px;font-weight:700;cursor:pointer}
+  #kiosk-exit:hover{background:#64748b}
+  #kiosk-grid{flex:1;overflow-y:auto;display:grid;grid-template-columns:repeat(auto-fill,minmax(300px,1fr));gap:16px;padding:18px;align-content:start}
+  .kiosk-card{background:#1e293b;border-radius:16px;padding:16px 18px;border:3px solid #334155;display:flex;flex-direction:column;gap:8px;box-shadow:0 4px 14px rgba(0,0,0,.35)}
+  .kiosk-card.k-ok{border-color:#22c55e}
+  .kiosk-card.k-warn{border-color:#f59e0b;background:#2a2410}
+  .kiosk-card.k-late{border-color:#ef4444;background:#2a1414;animation:kpulse 1.4s infinite}
+  .kiosk-card.k-paused{border-color:#475569;opacity:.6}
+  .k-head{display:flex;justify-content:space-between;align-items:baseline;gap:8px}
+  .k-worker{font-size:26px;font-weight:800;color:#fff;line-height:1.1}
+  .k-dept{font-size:14px;color:#94a3b8;text-align:end}
+  .k-chips,.k-steps{display:flex;flex-wrap:wrap;gap:6px}
+  .k-chip{font-size:15px;font-weight:700;padding:3px 10px;border-radius:8px;background:#334155;color:#e2e8f0;font-variant-numeric:tabular-nums}
+  .k-chip.k-p{background:#0ea5e9;color:#fff}
+  .k-chip.k-s{background:#6366f1;color:#fff}
+  .k-chip.k-col{background:#475569}
+  .k-step{font-size:15px;font-weight:700;padding:3px 10px;border-radius:8px;background:#3730a3;color:#e0e7ff}
+  .k-timerwrap{margin-top:4px}
+  .k-tmr{font-size:46px;font-weight:800;font-variant-numeric:tabular-nums;color:#fff;line-height:1.05}
+  .kiosk-card.k-warn .k-tmr{color:#fbbf24}
+  .kiosk-card.k-late .k-tmr{color:#f87171}
+  .k-tmr-paused{color:#94a3b8;font-size:34px}
+  .k-cd{font-size:17px;font-weight:700;color:#94a3b8;font-variant-numeric:tabular-nums}
+  .kiosk-card.k-late .k-cd{color:#fca5a5}
+  .k-exp{font-size:14px;color:#94a3b8}
+  .kiosk-empty{grid-column:1/-1;text-align:center;font-size:28px;color:#64748b;padding:60px}
+  @keyframes kpulse{0%,100%{opacity:1}50%{opacity:.55}}`;
+  document.head.appendChild(s);
+}
+
 // ─── TIMER TICK ─────────────────────────────────────────────
 setInterval(()=>{
   if(document.hidden)return;
@@ -4281,6 +4448,7 @@ setInterval(()=>{
   // live net hours update in attendance
   const tnEl=document.getElementById('att-total-net');
   if(tnEl){const totalNet=S.workers.filter(w=>w.checkin).reduce((s,w)=>s+calcNetWork(w),0);tnEl.textContent=fmtNetH(totalNet)||'—';}
+  if(_kioskOpen)kioskTick(); // עדכון חי לטיימרים+שעון במסך התצוגה
   checkAlerts();
 },1000);
 
@@ -5774,18 +5942,21 @@ async function tsStartTask(){
   try{
     const batchId=_tsBatch.length>1?genBatchId():null;
     const startTime=new Date();
+    let created=0;
     for(const b of _tsBatch){
+      // חסימה חוזרת ברגע הפתיחה — סוגר מרוץ של פתיחה כפולה של אותה משימה (עובד+ברקוד+שלב פעיל)
+      if(S.activeTasks.some(x=>x.workerId===w.id&&taskBc(x)===b.raw&&(x.taskType||'')===(b.taskType||'')&&!x.paused))continue;
       const task={id:String(Date.now())+Math.random().toString(36).slice(2,6),workerId:w.id,workerName:w.name,dept:b.taskDept||w.dept,cust:b.cust,prod:b.prod,size:b.size,qty:b.qty,col:b.col,taskType:b.taskType,bc:b.raw,isTotal:b.isTotal||false,startTime,elapsed:0,accumulatedSec:0,prodStamp:b.prodStamp};
       const exp=await fetchExpected(b.cust,b.prod,w.id,b.qty);
       if(exp?.ok&&exp.perStep?.[b.taskType]!=null)task.expectedMin=exp.perStep[b.taskType];
       if(batchId)task.batchId=batchId;
-      S.activeTasks.push(task);
+      S.activeTasks.push(task);created++;
       if(S.fbConnected)await fbSet('activeTasks',String(task.id),{...task,startTime:task.startTime.toISOString()});
       tgTask(task,true);
       if(w.pushPrefs?.task_assigned!==false)sendPushToWorker(w.id,'📋 משימה חדשה',`${task.prod}${task.taskType?' · '+task.taskType:''} · ${task.qty} יח'`).catch(()=>{});
       await autoStampStage(b.cust,b.prod,b.taskDept||w.dept); // עדכון אוטומטי של שלב הייצור
     }
-    showToast('✅ '+_tsBatch.length+' משימות התחילו עבור '+w.name);
+    showToast('✅ '+created+' משימות התחילו עבור '+w.name);
     // מדיניות רכה: התחלת משימה בלי שיוך תחנה — תזכורת בלבד, לא חסימה
     if(!w.currentStation&&(S.workStations||[]).length)setTimeout(()=>showToast(T.st_reminder||'📍 תזכורת: סרוק ברקוד תחנה כדי לשייך אותך לעמדה','var(--amber-txt)',5000),1800);
     _tsBatch=[];renderTsBatchQueue();
