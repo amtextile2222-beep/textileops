@@ -553,25 +553,39 @@ exports.longTaskMonitor = functions.pubsub.schedule('every 5 minutes').onRun(asy
 
     const tasksSnap = await db.collection('activeTasks').get();
     const now = Date.now();
+    // קיבוץ לפי batchId: משימות שנפתחו יחד רצות על טיימר שעון-קיר אחד, ולכן הסף הקובע
+    // הוא סכום הצפי של כל הקבוצה (כמו הכרטיס הקבוצתי בלקוח) — לא צפי פר-משימה
+    const units = {};
     for (const doc of tasksSnap.docs) {
       const t = doc.data();
       if (!t.startTime || !t.workerId || t.paused) continue;
-      const start = new Date(t.startTime).getTime();
+      const key = t.batchId ? ('B_' + t.workerId + '_' + t.batchId) : ('S_' + doc.id);
+      if (!units[key]) units[key] = { docId: doc.id, tasks: [] };
+      units[key].tasks.push(t);
+    }
+    for (const unit of Object.values(units)) {
+      const tasks = unit.tasks;
+      const lead = tasks[0];
+      const start = Math.min(...tasks.map(t => new Date(t.startTime).getTime()));
       const elapsed = now - start;
-      // סף פר-משימה: אם יש צפי מהתמחור (expectedMin) — הוא הקובע; אחרת הסף הקבוע
-      const hasExpected = typeof t.expectedMin === 'number' && t.expectedMin > 0;
-      const limitMs = hasExpected ? t.expectedMin * 60000 : threshMs;
+      // סף לקבוצה: סכום הצפי מהתמחור של כל המשימות; בלי צפי — הסף הקבוע
+      const expSum = tasks.reduce((s, t) => s + ((typeof t.expectedMin === 'number' && t.expectedMin > 0) ? t.expectedMin : 0), 0);
+      const hasExpected = expSum > 0;
+      const limitMs = hasExpected ? expSum * 60000 : threshMs;
       if (elapsed < limitMs) continue;
 
-      // שלח רק פעם אחת — בדוק אם כבר שלחנו התראה
-      const alertKey = 'longAlert_' + doc.id;
+      // שלח רק פעם אחת — לקבוצה מפתח לפי ה-batch (לא פר-משימה)
+      const alertKey = 'longAlert_' + (tasks.length > 1 ? lead.workerId + '_' + lead.batchId : unit.docId);
       const alertSnap = await db.collection('taskAlerts').doc(alertKey).get();
       if (alertSnap.exists) continue;
 
-      const workerSnap = await db.collection('workers').doc(t.workerId).get();
+      const workerSnap = await db.collection('workers').doc(lead.workerId).get();
       if (!workerSnap.exists) continue;
       const workerData = workerSnap.data();
       const mins = Math.round(elapsed / 60000);
+      const stepsTxt = tasks.map(t => t.taskType).filter(Boolean).join(', ');
+      const prodsTxt = [...new Set(tasks.map(t => t.prod || ''))].join(', ');
+      const qtySum = tasks.reduce((s, t) => s + (t.qty || 0), 0);
 
       // חריגה מצפי התמחור — גם טלגרם למנהל (לא רק push לעובד)
       if (hasExpected) {
@@ -591,12 +605,13 @@ exports.longTaskMonitor = functions.pubsub.schedule('every 5 minutes').onRun(asy
             }
           } catch (e) {}
           await sendTelegram(tgT, tgC,
-            '⏱ TextileOps — חריגה מזמן מתוקצב\n👤 עובד: ' + (t.workerName || t.workerId) +
+            '⏱ TextileOps — חריגה מזמן מתוקצב\n👤 עובד: ' + (lead.workerName || lead.workerId) +
             stationTxt +
-            (t.taskType ? '\n🔧 שלב: ' + t.taskType : '') +
-            '\n📦 מוצר: ' + (t.prod || '') + ' · ' + (t.qty || 0) + " יח'" +
-            '\n🎯 מוקצב: ' + Math.round(t.expectedMin) + ' דק\' · בפועל: ' + mins + ' דק\'' +
-            '\n▶️ התחלה: ' + ilTimeOfIso(t.startTime) +
+            (stepsTxt ? '\n🔧 שלב: ' + stepsTxt : '') +
+            '\n📦 מוצר: ' + prodsTxt + ' · ' + qtySum + " יח'" +
+            (tasks.length > 1 ? '\n🧺 ' + tasks.length + ' משימות במקביל — צפי מסוכם' : '') +
+            '\n🎯 מוקצב: ' + Math.round(expSum) + ' דק\' · בפועל: ' + mins + ' דק\'' +
+            '\n▶️ התחלה: ' + ilTimeOfIso(lead.startTime) +
             '\n🕐 שעה: ' + ilTime()).catch(() => {});
         }
       }
@@ -609,15 +624,15 @@ exports.longTaskMonitor = functions.pubsub.schedule('every 5 minutes').onRun(asy
           notification: {
             title: hasExpected ? '⏱ חריגה מהזמן המוקצב' : '⚠️ משימה ארוכה',
             body: hasExpected
-              ? 'למשימה הוקצבו ' + Math.round(t.expectedMin) + ' דקות — עברו כבר ' + mins + ' דקות'
+              ? 'הוקצבו ' + Math.round(expSum) + ' דקות' + (tasks.length > 1 ? ' ל-' + tasks.length + ' המשימות' : ' למשימה') + ' — עברו כבר ' + mins + ' דקות'
               : 'המשימה שלך פעילה כבר ' + mins + ' דקות'
           },
           android: { priority: 'high', notification: { sound: 'default', channelId: 'textileops' } },
           webpush: { notification: { icon: 'https://amtextile2222-beep.github.io/textileops/icon-192.png', requireInteraction: true } }
         });
       }
-      await db.collection('taskAlerts').doc(alertKey).set({ sent: true, ts: now, taskId: doc.id, expected: hasExpected ? t.expectedMin : null });
-      console.log('longTaskMonitor: sent alert for task', doc.id);
+      await db.collection('taskAlerts').doc(alertKey).set({ sent: true, ts: now, taskId: unit.docId, batchId: lead.batchId || null, expected: hasExpected ? expSum : null });
+      console.log('longTaskMonitor: sent alert for', alertKey);
     }
   } catch (e) {
     console.error('longTaskMonitor error:', e);

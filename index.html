@@ -461,6 +461,7 @@ code{background:var(--bg2);border:0.5px solid var(--b);border-radius:4px;padding
             <label style="font-size:12px;color:var(--txt2);margin-bottom:5px;display:block" data-i18n="lbl_dept">מחלקה</label>
             <select id="bc-dept" style="font-size:13px"><option value="">-- בחר מחלקה --</option></select>
           </div>
+          <div id="bc-batch-queue" style="margin-top:.75rem"></div>
           <div style="display:flex;gap:8px;margin-top:.75rem">
             <button class="btn primary full" onclick="submitBc()">▶ <span data-i18n="scan_start">התחל / עבור למשימה</span></button>
             <button class="btn" onclick="document.getElementById('bc-inp').value='';parseBc('')">✕</button>
@@ -1328,6 +1329,14 @@ const LANGS={
     st_sel_worker:'⚠ בחר עובד לפני סריקת תחנה',
     scan_cart:'🛒 סל',
     scan_barcodes:'ברקודים',
+    bc_cart_q_title:'לצרף עוד משימות?',
+    bc_cart_q_msg:'סרוק עוד ברקוד לאותו טיימר (צפי משותף לכל המשימות), או התחל עכשיו',
+    bc_start_now:'▶ התחל עכשיו',
+    bc_add_more:'➕ סרוק עוד',
+    bc_scan_next:'📷 סרוק את הברקוד הבא',
+    bc_total_exp:'🎯 צפי כולל',
+    bc_start_all:'▶ התחל את כל המשימות',
+    bc_tasks_in_cart:'משימות בסל',
     tr_no_workers:'אין עובדים אחרים נוכחים כרגע',
     tr_title:'🔄 העברת משימה',
     tr_of_worker:'משימה של',
@@ -1533,6 +1542,14 @@ const LANGS={
     st_sel_worker:'⚠ اختر عاملاً قبل مسح المحطة',
     scan_cart:'🛒 السلة',
     scan_barcodes:'باركود',
+    bc_cart_q_title:'إضافة مهام أخرى؟',
+    bc_cart_q_msg:'امسح باركوداً آخر على نفس المؤقّت (وقت متوقع مشترك لكل المهام)، أو ابدأ الآن',
+    bc_start_now:'▶ ابدأ الآن',
+    bc_add_more:'➕ امسح المزيد',
+    bc_scan_next:'📷 امسح الباركود التالي',
+    bc_total_exp:'🎯 الوقت المتوقع الإجمالي',
+    bc_start_all:'▶ ابدأ جميع المهام',
+    bc_tasks_in_cart:'مهام في السلة',
     tr_no_workers:'لا يوجد عمال آخرون حاضرون حالياً',
     tr_title:'🔄 نقل المهمة',
     tr_of_worker:'مهمة',
@@ -1738,6 +1755,14 @@ const LANGS={
     st_sel_worker:'⚠ Select a worker before scanning a station',
     scan_cart:'🛒 Cart',
     scan_barcodes:'barcodes',
+    bc_cart_q_title:'Add more tasks?',
+    bc_cart_q_msg:'Scan another barcode on the same timer (shared expected time), or start now',
+    bc_start_now:'▶ Start now',
+    bc_add_more:'➕ Scan more',
+    bc_scan_next:'📷 Scan the next barcode',
+    bc_total_exp:'🎯 Total expected',
+    bc_start_all:'▶ Start all tasks',
+    bc_tasks_in_cart:'tasks in cart',
     tr_no_workers:'No other workers present now',
     tr_title:'🔄 Transfer task',
     tr_of_worker:'Task of',
@@ -3533,6 +3558,7 @@ function calcActualTaskTime(tasks){
 // ─── BATCH STATE ─────────────────────────────────────────────
 let _tsBatch=[];  // {raw,cust,prod,size,qty,col,isTotal,taskType,taskDept,prodStamp}
 let _mgrBatch=[];
+let _bcBatch=[];  // סל הסורק האישי (bc) — כמו _tsBatch + expMin לתצוגת צפי כולל
 // ─── חסימת סריקה כפולה של אותו שלב (ברקוד+שלב) ─────────────────
 // חותמת מופע-מוצר = תאריך הקמת המוצר (הרשומה העדכנית ביותר ללקוח+מוצר).
 // הזמנה חדשה נכנסת כרשומת מוצר חדשה עם תאריך חדש ⇒ אינה נחסמת מול היסטוריה ישנה.
@@ -3595,6 +3621,68 @@ function renderMgrBatchQueue(){
       <button onclick="_mgrBatch.splice(${i},1);renderMgrBatchQueue()" style="background:none;border:none;cursor:pointer;color:var(--red-txt);font-size:14px;padding:0 4px">✕</button>
     </div>`).join('')}
   </div>`;
+}
+// סל הסורק האישי (bc): כמו addStepsToBatch אבל בסמנטיקת bc — כפילות "פעיל" נבדקת רק אצל אותו עובד
+// (עובד אחר על אותו שלב = הצטרפות מותרת דרך אישור otherSame), ושומר צפי לשלב (expMin) לתצוגת סה"כ.
+function addStepsToBcCart(base,types,exp){
+  const T=LANGS[currentLang];
+  const stamp=prodStampFor(base.cust,base.prod);
+  const skipped=[];
+  for(const t of types){
+    const tt=t||'';const label=tt||T.scan_dup_no_step;
+    if(_bcBatch.some(b=>b.raw===base.raw&&(b.taskType||'')===tt)){skipped.push(label+' — '+T.scan_dup_in_cart);continue;}
+    if(S.histTasks.some(x=>x.bc===base.raw&&(x.taskType||'')===tt&&(x.prodStamp==null||x.prodStamp===stamp))){skipped.push(label+' — '+T.scan_dup_done);continue;}
+    if(S.activeTasks.some(x=>x.workerId===S.user?.id&&taskBc(x)===base.raw&&(x.taskType||'')===tt&&!x.paused)){skipped.push(label+' — '+T.scan_dup_active);continue;}
+    const entry={...base,taskType:tt,prodStamp:stamp};
+    if(exp?.ok&&exp.perStep?.[tt]!=null)entry.expMin=exp.perStep[tt];
+    _bcBatch.push(entry);
+  }
+  return skipped;
+}
+function renderBcBatchQueue(){
+  const el=document.getElementById('bc-batch-queue');if(!el)return;
+  const T=LANGS[currentLang];
+  if(!_bcBatch.length){el.innerHTML='';return;}
+  const totExp=_bcBatch.reduce((s,b)=>s+(+b.expMin||0),0);
+  el.innerHTML=`<div style="background:var(--card);border:1px solid var(--brd);border-radius:8px;padding:8px;font-size:12px">
+    <div style="font-weight:600;margin-bottom:6px;color:var(--txt)">${T.scan_cart} (${_bcBatch.length} ${T.bc_tasks_in_cart||'משימות בסל'})${totExp>0?` · <span style="font-weight:400;color:var(--txt3)">${T.bc_total_exp||'🎯 צפי כולל'}: ${fmtExpMin(totExp)}</span>`:''}</div>
+    ${_bcBatch.map((b,i)=>`<div style="display:flex;justify-content:space-between;align-items:center;padding:3px 0;border-bottom:1px solid var(--brd)">
+      <span style="color:var(--txt)">${b.prod}${b.size?' · מידה '+esc(b.size):''} · ${b.qty} יח' · ${COLORS[b.col]||b.col}${b.taskType?' · '+esc(b.taskType):''}${b.expMin?` · 🎯 ${fmtExpMin(+b.expMin)}`:''}</span>
+      <button onclick="_bcBatch.splice(${i},1);renderBcBatchQueue()" style="background:none;border:none;cursor:pointer;color:var(--red-txt);font-size:14px;padding:0 4px">✕</button>
+    </div>`).join('')}
+    <button class="btn primary full" style="margin-top:8px" onclick="bcStartBatch()">${T.bc_start_all||'▶ התחל את כל המשימות'}</button>
+  </div>`;
+}
+// התחלת כל משימות הסל בבת אחת: batchId משותף = טיימר אחד + צפי מסוכם בכרטיס הקבוצתי
+// (כמו שקורה בסורק המשימות) — במקום 5 טיימרים מקביליים שכל אחד "חורג" מצפי של משימה בודדת.
+async function bcStartBatch(){
+  const T=LANGS[currentLang];
+  if(!_bcBatch.length)return;
+  const u=S.user;if(!u)return;
+  const wu=S.workers.find(x=>x.id===u.id);
+  if(!wu||wu.status!=='in'){alert('לא ניתן להתחיל משימה — יש להירשם כנוכח תחילה (כניסה לעבודה בלשונית נוכחות)');return;}
+  const items=_bcBatch.slice();
+  try{
+    const bcBatchId=items.length>1?genBatchId():null; // כמה משימות יחד = קבוצה אחת (טיימר משותף + מסגרת אחת)
+    const bcStart=new Date();
+    for(const b of items){
+      const newTask={id:String(Date.now())+Math.random().toString(36).slice(2,6),workerId:u.id,workerName:u.name,dept:b.taskDept||u.dept,cust:b.cust,prod:b.prod,size:b.size,qty:b.qty,col:b.col,taskType:b.taskType,bc:b.raw,isTotal:b.isTotal||false,startTime:bcStart,elapsed:0,prodStamp:b.prodStamp};
+      if(bcBatchId)newTask.batchId=bcBatchId;
+      if(b.expMin!=null)newTask.expectedMin=b.expMin;
+      S.activeTasks.unshift(newTask);
+      if(S.fbConnected)await fbSet('activeTasks',newTask.id,{...newTask,startTime:bcStart.toISOString()});
+      tgTask(newTask,true);
+      await autoStampStage(b.cust,b.prod,b.taskDept||u.dept); // עדכון אוטומטי של שלב הייצור
+    }
+    _bcBatch=[];renderBcBatchQueue();
+    document.getElementById('bc-inp').value='';parseBc('');
+    document.getElementById('bc-tasktype').value='';
+    document.getElementById('bc-dept').value='';
+    saveLS();renderScanActive();renderTasks();goPage('tasks');
+    showToast('✅ '+(items.length>1?items.length+' משימות הותחלו':'משימה הותחלה'));
+    // מדיניות רכה: התחלת משימה בלי שיוך תחנה — תזכורת בלבד, לא חסימה
+    if(!wu.currentStation&&(S.workStations||[]).length)setTimeout(()=>showToast(T.st_reminder||'📍 תזכורת: סרוק ברקוד תחנה כדי לשייך אותך לעמדה','var(--amber-txt)',5000),1800);
+  }catch(e){showToast('❌ שגיאה בפתיחת משימה: '+e.message,'var(--red-txt)',8000);}
 }
 
 // סגירת batch עם חלוקת זמן יחסית לפי כמות.
@@ -3910,6 +3998,7 @@ function tryDemo(){
 async function submitBc(){
   const raw=(document.getElementById('bc-inp').value||'').replace(/\D/g,'');
   const T=LANGS[currentLang];
+  if(!raw&&_bcBatch.length){await bcStartBatch();return;} // שדה ריק + סל ממתין = התחל את כל הסל
   if(raw.length!==13){alert('ברקוד חייב להיות 13 ספרות בדיוק');return;}
   if(!S.user){alert('יש להתחבר תחילה');return;}
   if(isShipBc(raw)){openShipModal(raw.slice(0,2),raw.slice(2,7));document.getElementById('bc-inp').value='';parseBc('');return;} // ברקוד "יצא ללקוח" — לא משימה
@@ -3925,63 +4014,51 @@ async function submitBc(){
   const u=S.user;
   const wu=S.workers.find(x=>x.id===u.id);
   if(!wu||wu.status!=='in'){alert('לא ניתן להתחיל משימה — יש להירשם כנוכח תחילה (כניסה לעבודה בלשונית נוכחות)');return;}
+  if(bcUseSteps&&!bcCheckedSteps.length){showToast(T.err_sel_step||'⚠ בחר לפחות שלב עבודה אחד','var(--red-txt)');return;}
   // ברקוד שכבר בעבודה אצל עובד אחר באותו שלב — אישור הצטרפות
   const otherSame=S.activeTasks.find(t=>t.workerId!==u.id&&taskBc(t)===raw&&(t.taskType||'').trim().toLowerCase()===taskType.toLowerCase());
   if(otherSame&&!await showConfirm(T.cfm_join_title||'הצטרפות למשימה',T.cfm_join_msg+otherSame.workerName+(otherSame.taskType?' ('+otherSame.taskType+')':'')+T.cfm_join_msg2,T.cfm_join_ok||'הצטרף',T.cancel||'ביטול'))return;
-  // משימה פעילה קיימת — לסגור את כולן או לעבוד במקביל
-  const existTasks=S.activeTasks.filter(t=>t.workerId===u.id);
-  if(existTasks.length>0){
-    const prev=existTasks[0];
-    const msg=existTasks.length>1?existTasks.length+' משימות פעילות — '+existTasks.map(t=>t.prod).join(', ')+T.cfm_existing_msg:'מוצר '+prev.prod+T.cfm_existing_msg;
-    const parallel=await showConfirm(T.cfm_existing_title||'משימה קיימת',msg,T.cfm_parallel||'עבודה במקביל',T.cfm_close_old||'סגור ישנה + התחל חדשה');
-    if(!parallel){
-      await closeTasksBatchAware(existTasks,new Date());
-      S.activeTasks=S.activeTasks.filter(t=>t.workerId!==u.id);
+  // משימה פעילה קיימת — לסגור את כולן או לעבוד במקביל. נשאל רק בסריקה הראשונה של הסל (ההחלטה תקפה לכולו)
+  if(!_bcBatch.length){
+    const existTasks=S.activeTasks.filter(t=>t.workerId===u.id);
+    if(existTasks.length>0){
+      const prev=existTasks[0];
+      const msg=existTasks.length>1?existTasks.length+' משימות פעילות — '+existTasks.map(t=>t.prod).join(', ')+T.cfm_existing_msg:'מוצר '+prev.prod+T.cfm_existing_msg;
+      const parallel=await showConfirm(T.cfm_existing_title||'משימה קיימת',msg,T.cfm_parallel||'עבודה במקביל',T.cfm_close_old||'סגור ישנה + התחל חדשה');
+      if(!parallel){
+        await closeTasksBatchAware(existTasks,new Date());
+        S.activeTasks=S.activeTasks.filter(t=>t.workerId!==u.id);
+      }
     }
   }
-  if(bcUseSteps&&!bcCheckedSteps.length){showToast(T.err_sel_step||'⚠ בחר לפחות שלב עבודה אחד','var(--red-txt)');return;}
-  // הגבלת סריקה לאחראי/עובד/עוזר (מנהל — ללא הגבלה): עד 2 שלבים לברקוד ועד 2 ברקודים פעילים
+  // הגבלת סריקה לאחראי/עובד/עוזר (מנהל — ללא הגבלה): עד 2 שלבים לברקוד ועד 2 ברקודים פעילים (כולל הסל)
   if(u.role!=='manager'){
     const nonQuickSteps=bcUseSteps?bcCheckedSteps.filter(st=>!isQuickStep(cust,prod,st)):[];
     if(bcUseSteps&&nonQuickSteps.length>2){showToast(T.lim_steps||'⚠ ניתן לבחור עד 2 שלבים לכל ברקוד','var(--red-txt)');return;}
     // ברקודים שכל משימותיהם הפעילות הן שלבי ⚡ מהיר אינם נספרים; סריקה כולה-מהירה לא נחסמת
     const addingNonQuick=bcUseSteps?nonQuickSteps.length>0:true;
-    const nonQuickBc=new Set(S.activeTasks.filter(t=>t.workerId===u.id&&!isQuickStep(t.cust,t.prod,t.taskType)).map(t=>taskBc(t)));
+    const nonQuickBc=new Set([
+      ...S.activeTasks.filter(t=>t.workerId===u.id&&!isQuickStep(t.cust,t.prod,t.taskType)).map(t=>taskBc(t)),
+      ..._bcBatch.filter(b=>!isQuickStep(b.cust,b.prod,b.taskType)).map(b=>b.raw)
+    ]);
     if(addingNonQuick&&!nonQuickBc.has(raw)&&nonQuickBc.size>=2){showToast(T.lim_bc||'⚠ ניתן לסרוק עד 2 ברקודים','var(--red-txt)');return;}
   }
   try{
-    // חסימת סריקה כפולה ([[feature-dup-scan-block]]) — חובה גם בעמוד "סריקה" (submitBc), לא רק בסורק המשימות ([[two-scanners-gotcha]]).
-    const stamp=prodStampFor(cust,prod);
-    const dupSkipped=[];
-    const typesToCreate=(bcUseSteps?bcCheckedSteps:[taskType||'']).filter(tt=>{
-      const ttv=tt||'';
-      // כבר בוצע עבור מופע-מוצר זה (או היסטוריה ישנה בלי חותמת) — חסום
-      if(S.histTasks.some(t=>t.bc===raw&&(t.taskType||'')===ttv&&(t.prodStamp==null||t.prodStamp===stamp))){dupSkipped.push((ttv||T.scan_dup_no_step)+' — '+T.scan_dup_done);return false;}
-      // אותו עובד כבר מבצע שלב זה כעת — כפילות עצמית (עובד אחר = הצטרפות, מותר דרך otherSame)
-      if(S.activeTasks.some(t=>t.workerId===u.id&&taskBc(t)===raw&&(t.taskType||'')===ttv&&!t.paused)){dupSkipped.push((ttv||T.scan_dup_no_step)+' — '+T.scan_dup_active);return false;}
-      return true;
-    });
-    if(dupSkipped.length)showToast(T.scan_not_added+' '+dupSkipped.join(' · '),'var(--red-txt)',7000);
-    if(!typesToCreate.length)return;
-    const bcBatchId=typesToCreate.length>1?genBatchId():null; // כמה שלבים יחד = קבוצה אחת (טיימר משותף + מסגרת אחת)
-    const bcStart=new Date();
+    // הוספה לסל עם חסימת סריקה כפולה ([[feature-dup-scan-block]]) — חובה גם כאן, לא רק בסורק המשימות ([[two-scanners-gotcha]])
     const _bcExp=await fetchExpected(cust,prod,u.id,qty); // צפי זמן לפי התמחור (fallback לשרת בקאש-מיס)
-    for(const tt of typesToCreate){
-      const newTask={id:String(Date.now())+Math.random().toString(36).slice(2,6),workerId:u.id,workerName:u.name,dept:taskDept||u.dept,cust,prod,size,qty,col,taskType:tt,bc:raw,isTotal:isTotal||false,startTime:bcStart,elapsed:0,prodStamp:stamp};
-      if(bcBatchId)newTask.batchId=bcBatchId;
-      if(_bcExp?.ok&&_bcExp.perStep?.[tt]!=null)newTask.expectedMin=_bcExp.perStep[tt];
-      S.activeTasks.unshift(newTask);
-      if(S.fbConnected)await fbSet('activeTasks',newTask.id,{...newTask,startTime:newTask.startTime.toISOString()});
-      tgTask(newTask,true);
-    }
-    await autoStampStage(cust,prod,taskDept||u.dept); // עדכון אוטומטי של שלב הייצור
+    const types=bcUseSteps?bcCheckedSteps:[taskType||''];
+    const dupSkipped=addStepsToBcCart({raw,cust,prod,size,qty,col,isTotal,taskDept},types,_bcExp);
+    if(dupSkipped.length)showToast(T.scan_not_added+' '+dupSkipped.join(' · '),'var(--red-txt)',7000);
+    if(dupSkipped.length>=types.length){renderBcBatchQueue();return;} // כלום לא נוסף — נשאר במצב הנוכחי
     document.getElementById('bc-inp').value='';parseBc('');
     document.getElementById('bc-tasktype').value='';
-    document.getElementById('bc-dept').value='';
-    saveLS();renderScanActive();renderTasks();goPage('tasks');
-    showToast('✅ '+(typesToCreate.length>1?typesToCreate.length+' משימות הותחלו':'משימה הותחלה'));
-    // מדיניות רכה: התחלת משימה בלי שיוך תחנה — תזכורת בלבד, לא חסימה
-    if(!wu.currentStation&&(S.workStations||[]).length)setTimeout(()=>showToast(T.st_reminder||'📍 תזכורת: סרוק ברקוד תחנה כדי לשייך אותך לעמדה','var(--amber-txt)',5000),1800);
+    renderBcBatchQueue();
+    // שאלה: לצרף עוד משימות לאותו טיימר? (הגבלות 2 ברקודים/2 שלבים נאכפות על כל סריקה נוספת)
+    const totExp=_bcBatch.reduce((s,b)=>s+(+b.expMin||0),0);
+    const qMsg=`🛒 ${_bcBatch.length} ${T.bc_tasks_in_cart||'משימות בסל'}`+(totExp>0?` · ${T.bc_total_exp||'🎯 צפי כולל'}: ${fmtExpMin(totExp)}`:'')+`\n${T.bc_cart_q_msg||'סרוק עוד ברקוד לאותו טיימר (צפי משותף לכל המשימות), או התחל עכשיו'}`;
+    const startNow=await showConfirm(T.bc_cart_q_title||'לצרף עוד משימות?',qMsg,T.bc_start_now||'▶ התחל עכשיו',T.bc_add_more||'➕ סרוק עוד');
+    if(!startNow){showToast(T.bc_scan_next||'📷 סרוק את הברקוד הבא');document.getElementById('bc-inp').focus();return;}
+    await bcStartBatch();
   }catch(e){showToast('❌ שגיאה בפתיחת משימה: '+e.message,'var(--red-txt)',8000);}
 }
 function fillDeptSelects(){
