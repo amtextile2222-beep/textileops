@@ -2991,6 +2991,8 @@ function finishLogin(w,autoPunch){
   const firstPage=(w.permissions&&w.permissions.length)?w.permissions[0]:'dash';
   goPage(w.role==='manager'?'dash':firstPage);
   if(autoPunch)setTimeout(autoPunchIn,300);
+  // כתובת שפותחת ישר את לוח התצוגה (למסך הקיר / התאוששות מהפסקת חשמל): ?kiosk=1
+  if((w.role==='manager'||w.role==='supervisor')&&/[?&#]kiosk=1\b/.test(location.href))setTimeout(openKiosk,500);
 }
 async function emergencyLogin(){
   const code=document.getElementById('l-emergency').value.trim();
@@ -4303,9 +4305,11 @@ function openKiosk(){
   scr.style.display='flex';
   renderKiosk();
   try{scr.requestFullscreen&&scr.requestFullscreen();}catch(e){}
+  startKioskScroll();
 }
 function closeKiosk(){
   _kioskOpen=false;
+  stopKioskScroll();
   const scr=document.getElementById('kiosk-screen');if(scr)scr.style.display='none';
   try{if(document.fullscreenElement)document.exitFullscreen();}catch(e){}
 }
@@ -4325,6 +4329,8 @@ function buildKioskDom(){
     <div id="kiosk-grid"></div>`;
   document.body.appendChild(d);
   document.addEventListener('keydown',e=>{if(e.key==='Escape'&&_kioskOpen)closeKiosk();});
+  const g=document.getElementById('kiosk-grid');
+  if(g){g.addEventListener('mouseenter',()=>_kioskHover=true);g.addEventListener('mouseleave',()=>_kioskHover=false);}
 }
 function renderKiosk(){
   if(!_kioskOpen)return;
@@ -4384,6 +4390,29 @@ function kioskTick(){
   });
   updateKioskStats(document.querySelectorAll('.kiosk-card').length,over);
 }
+// ─── גלילה אוטומטית ללוח התצוגה ─────────────────────────────
+// גולל למטה לאט → משהה בתחתית → חוזר למעלה → משהה למעלה → חוזר חלילה.
+// אם הכל נכנס במסך (אין גלישה) — לא גולל. עצירה בזמן ריחוף עכבר (לקריאה).
+let _kioskScrollTimer=null,_kioskScrollSt=null,_kioskHover=false;
+const _KS_INT=33,_KS_DOWN=1,_KS_UP=5,_KS_PAUSE_TOP=90,_KS_PAUSE_BOT=120; // ~30px/ש' מטה, השהיה ~3ש'/4ש'
+function startKioskScroll(){
+  stopKioskScroll();
+  _kioskScrollSt={phase:'pauseTop',t:0};
+  _kioskScrollTimer=setInterval(()=>{
+    if(!_kioskOpen){stopKioskScroll();return;}
+    const g=document.getElementById('kiosk-grid');if(!g||_kioskHover)return;
+    const max=g.scrollHeight-g.clientHeight;
+    if(max<=4){g.scrollTop=0;return;} // הכל נכנס במסך — אין צורך לגלול
+    const st=_kioskScrollSt;
+    switch(st.phase){
+      case 'pauseTop':  if(++st.t>=_KS_PAUSE_TOP){st.phase='down';} break;
+      case 'down':      g.scrollTop=Math.min(max,g.scrollTop+_KS_DOWN); if(g.scrollTop>=max-1){st.phase='pauseBot';st.t=0;} break;
+      case 'pauseBot':  if(++st.t>=_KS_PAUSE_BOT){st.phase='up';} break;
+      case 'up':        g.scrollTop=Math.max(0,g.scrollTop-_KS_UP); if(g.scrollTop<=1){st.phase='pauseTop';st.t=0;} break;
+    }
+  },_KS_INT);
+}
+function stopKioskScroll(){if(_kioskScrollTimer){clearInterval(_kioskScrollTimer);_kioskScrollTimer=null;}}
 function injectKioskCss(){
   if(document.getElementById('kiosk-css'))return;
   const s=document.createElement('style');s.id='kiosk-css';
