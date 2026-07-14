@@ -1336,6 +1336,7 @@ const LANGS={
     bc_scan_next:'📷 סרוק את הברקוד הבא',
     bc_total_exp:'🎯 צפי כולל',
     bc_start_all:'▶ התחל את כל המשימות',
+    bc_pending_scan:'⚠ יש ברקוד סרוק שטרם נוסף לסל — לחץ "התחל / משימה" כדי להוסיפו, או נקה את השדה',
     bc_tasks_in_cart:'משימות בסל',
     tr_no_workers:'אין עובדים אחרים נוכחים כרגע',
     tr_title:'🔄 העברת משימה',
@@ -1549,6 +1550,7 @@ const LANGS={
     bc_scan_next:'📷 امسح الباركود التالي',
     bc_total_exp:'🎯 الوقت المتوقع الإجمالي',
     bc_start_all:'▶ ابدأ جميع المهام',
+    bc_pending_scan:'⚠ يوجد باركود ممسوح لم يُضف إلى السلة — اضغط "ابدأ / المهمة" لإضافته، أو امسح الحقل',
     bc_tasks_in_cart:'مهام في السلة',
     tr_no_workers:'لا يوجد عمال آخرون حاضرون حالياً',
     tr_title:'🔄 نقل المهمة',
@@ -1762,6 +1764,7 @@ const LANGS={
     bc_scan_next:'📷 Scan the next barcode',
     bc_total_exp:'🎯 Total expected',
     bc_start_all:'▶ Start all tasks',
+    bc_pending_scan:'⚠ A scanned barcode was not added to the cart — press "Start / task" to add it, or clear the field',
     bc_tasks_in_cart:'tasks in cart',
     tr_no_workers:'No other workers present now',
     tr_title:'🔄 Transfer task',
@@ -3658,6 +3661,9 @@ function renderBcBatchQueue(){
 async function bcStartBatch(){
   const T=LANGS[currentLang];
   if(!_bcBatch.length)return;
+  // ברקוד שנסרק אך לא נוסף לסל — לא לזרוק בשקט. מזהיר ומחזיר, כדי שהמשתמש יוסיף/ינקה קודם.
+  const pend=(document.getElementById('bc-inp')?.value||'').replace(/\D/g,'');
+  if(pend.length===13){showToast(T.bc_pending_scan||'⚠ יש ברקוד סרוק שטרם נוסף לסל — לחץ "התחל / משימה" כדי להוסיפו, או נקה את השדה','var(--red-txt)',7000);document.getElementById('bc-inp')?.focus();return;}
   const u=S.user;if(!u)return;
   const wu=S.workers.find(x=>x.id===u.id);
   if(!wu||wu.status!=='in'){alert('לא ניתן להתחיל משימה — יש להירשם כנוכח תחילה (כניסה לעבודה בלשונית נוכחות)');return;}
