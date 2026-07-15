@@ -9103,7 +9103,18 @@ async function saveProduct(){
   });
   closeProdCamera();
   const {stageLog,stageSkipped}=readStagesFromModal();
-  const workSteps=[...document.querySelectorAll('#pm-tasksteps-list .ts-row')].map(r=>({
+  // בדיקה: שורת שלב עבודה שמולאה (רמה/תחנה/דקות/מהיר) אך ללא שם — לא לזרוק בשקט
+  const _stepRows=[...document.querySelectorAll('#pm-tasksteps-list .ts-row')];
+  const _namelessFilled=_stepRows.some(r=>{
+    const nm=(r.querySelector('[data-f="name"]')?.value||'').trim();
+    const lvl=parseInt(r.querySelector('[data-f="level"]')?.value)||0;
+    const stn=r.querySelector('[data-f="station"]')?.value||'';
+    const mm=parseFloat(r.querySelector('[data-f="manualMin"]')?.value)||0;
+    const qk=!!r.querySelector('[data-f="quick"]')?.checked;
+    return !nm&&(lvl||stn||mm||qk);
+  });
+  if(_namelessFilled){alert('⚠️ יש שלב עבודה ללא שם — מלא שם בשדה הראשון (עברית) או מחק את השורה, ואז שמור שוב.');return;}
+  const workSteps=_stepRows.map(r=>({
     name:r.querySelector('[data-f="name"]')?.value.trim()||'',
     nameAr:r.querySelector('[data-f="nameAr"]')?.value.trim()||'',
     level:parseInt(r.querySelector('[data-f="level"]')?.value)||0,
