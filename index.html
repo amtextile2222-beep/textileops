@@ -564,6 +564,7 @@ code{background:var(--bg2);border:0.5px solid var(--b);border-radius:4px;padding
       <label style="display:flex;align-items:center;gap:6px;font-size:13px;cursor:pointer"><input type="radio" name="print-choice" value="detail" checked style="width:auto"/> פירוט משימות</label>
       <label style="display:flex;align-items:center;gap:6px;font-size:13px;cursor:pointer"><input type="radio" name="print-choice" value="summary" style="width:auto"/> דוח מרוכז</label>
       <label style="display:flex;align-items:center;gap:6px;font-size:13px;cursor:pointer"><input type="radio" name="print-choice" value="stages" style="width:auto"/> דוח ייצור לפי שלב</label>
+      <label style="display:flex;align-items:center;gap:6px;font-size:13px;cursor:pointer"><input type="radio" name="print-choice" value="stepqty" style="width:auto"/> כמות לפי שלב עבודה</label>
       <label style="display:flex;align-items:center;gap:6px;font-size:13px;cursor:pointer"><input type="radio" name="print-choice" value="all" style="width:auto"/> הכל</label>
       <button class="btn primary" onclick="doPrintChoice()">🖨 הדפס</button>
       <button class="btn" onclick="document.getElementById('print-choice-panel').classList.add('hidden')">ביטול</button>
@@ -591,6 +592,10 @@ code{background:var(--bg2);border:0.5px solid var(--b);border-radius:4px;padding
     <div class="card" style="margin-top:1rem">
       <div class="sec">📦 דוח ייצור לפי שלב</div>
       <div id="rp-stages-body"></div>
+    </div>
+    <div class="card" style="margin-top:1rem">
+      <div class="sec">🧵 כמות שהושלמה לפי שלב עבודה</div>
+      <div id="rp-stepqty-body"></div>
     </div>
     <!-- תמחור שלב ה' — דוחות (מנהל בלבד, דורש נתוני עלות) -->
     <div class="card hidden" style="margin-top:1rem" id="rp-budget-card">
@@ -4686,6 +4691,7 @@ async function buildRep(){
   rfp.innerHTML='<option value="">כל המוצרים</option>'+pOpts.map(p=>`<option value="${p}" ${p===pf?'selected':''}>מוצר ${p}</option>`).join('');
   buildSummaryReport(fl);
   buildStageReport();
+  buildStepQtyReport();
   buildBudgetReport(fl);
   buildProfitReport(fl);
 }
@@ -4773,6 +4779,45 @@ function buildStageReport(){
     <thead><tr><th>לקוח / מוצר</th><th>שם</th><th>שלב נוכחי</th><th>תאריך</th><th>התקדמות</th><th>סטטוס</th></tr></thead>
     <tbody>${rows}</tbody>
   </table></div>`;
+}
+// כמות שהושלמה לכל שלב עבודה (מהתמחור) מול הכמות שהוזמנה — לכל מוצר. טוען היסטוריה מלאה (לא תלוי בטווח התאריכים של הדוחות)
+// כי התקדמות ייצור מצטברת ולא אמורה "להיעלם" כשמסננים לטווח קצר.
+async function buildStepQtyReport(){
+  const el=document.getElementById('rp-stepqty-body');if(!el)return;
+  const prods=S.products.filter(p=>(p.workSteps||[]).some(s=>stepName(s)));
+  if(!prods.length){el.innerHTML='<div style="color:var(--txt3);font-size:13px;padding:8px">אין מוצרים עם שלבי עבודה מוגדרים</div>';return;}
+  el.innerHTML='<div style="color:var(--txt3);font-size:12px;padding:.5rem 0">⏳ טוען…</div>';
+  const hist=await loadHistRange('','');
+  const cards=prods.map(p=>{
+    const steps=(p.workSteps||[]).map(s=>stepName(s)).filter(Boolean);
+    const total=getTotalQty(p.cust,p.prod);
+    const rows=steps.map(stepNm=>{
+      const tasks=hist.filter(t=>t.cust===p.cust&&t.prod===p.prod&&(t.taskType||'')===stepNm&&(t.duration||0)>0);
+      const done=sumUnitsDedup(tasks);
+      const pct=total?Math.min(100,Math.round(done/total*100)):0;
+      return{stepNm,done,pct};
+    });
+    const anyProgress=rows.some(r=>r.done>0);
+    return{p,total,rows,anyProgress};
+  }).sort((a,b)=>(b.anyProgress?1:0)-(a.anyProgress?1:0));
+  if(!document.getElementById('page-reports')?.classList.contains('active'))return; // המשתמש עזב את הדף בזמן הטעינה
+  el.innerHTML=cards.map(c=>`
+    <div style="margin-bottom:14px">
+      <div style="font-size:13px;font-weight:600;margin-bottom:4px"><span class="bc-seg bc-c">${c.p.cust}</span> <span class="bc-seg bc-p">${c.p.prod}</span> ${esc(c.p.name||'')} <span style="color:var(--txt3);font-weight:400">(סה"כ ${c.total||'?'} יח')</span></div>
+      <div class="tbl-wrap"><table>
+        <thead><tr><th>שלב</th><th>בוצע</th><th>התקדמות</th></tr></thead>
+        <tbody>${c.rows.map(r=>`<tr>
+          <td style="font-size:12px">${esc(r.stepNm)}</td>
+          <td>${r.done}${c.total?'/'+c.total:''}</td>
+          <td style="min-width:140px">
+            ${c.total?`<div style="background:var(--bg2);border-radius:4px;height:8px;overflow:hidden">
+              <div style="background:${r.pct>=100?'var(--green)':'var(--blue)'};width:${r.pct}%;height:100%;border-radius:4px"></div>
+            </div>
+            <div style="font-size:10px;color:var(--txt3);margin-top:2px">${r.pct}%</div>`:'<span style="color:var(--txt3);font-size:11px">אין כמות מוגדרת</span>'}
+          </td>
+        </tr>`).join('')}</tbody>
+      </table></div>
+    </div>`).join('');
 }
 // ─── תמחור שלב ה': דוחות מוקצב מול בפועל + רווח מול יעד ─────
 // מנהל בלבד: החישוב דורש שכר עובדים מ-adminSettings/costs שאחראי לא רשאי לקרוא.
@@ -9200,6 +9245,9 @@ function doPrintChoice(){
   }
   if(val==='stages'||val==='all'){
     html+=`<div class="card" style="margin-top:12px"><div class="sec">📦 דוח ייצור לפי שלב</div>${document.getElementById('rp-stages-body')?.innerHTML||''}</div>`;
+  }
+  if(val==='stepqty'||val==='all'){
+    html+=`<div class="card" style="margin-top:12px"><div class="sec">🧵 כמות שהושלמה לפי שלב עבודה</div>${document.getElementById('rp-stepqty-body')?.innerHTML||''}</div>`;
   }
   printViaIframe(`<!DOCTYPE html><html dir="rtl" lang="he"><head><meta charset="UTF-8"/><title>דוח משימות</title><style>*{box-sizing:border-box;margin:0;padding:0}body{font-family:Arial,sans-serif;padding:20px;color:#000;background:#fff;font-size:13px}h1{font-size:18px;margin-bottom:4px;color:#185FA5}.print-date{font-size:11px;color:#666;margin-bottom:16px}.card{background:#fff;border:1px solid #ddd;border-radius:8px;padding:12px 16px;margin-bottom:12px}.sec{font-size:14px;font-weight:700;margin-bottom:8px}table{width:100%;border-collapse:collapse;font-size:12px}th{background:#f0f0f0;padding:7px 8px;text-align:right;font-weight:600;border-bottom:2px solid #ddd}td{padding:6px 8px;border-bottom:1px solid #eee}.badge{display:inline-block;padding:2px 8px;border-radius:999px;font-size:11px;font-weight:600}@media print{body{padding:10px}}</style></head><body><h1>TextileOps — דוח משימות</h1><div class="print-date">${now}</div>${html}</body></html>`);
 }
