@@ -2731,7 +2731,7 @@ async function runDailyReset(){
     S.tgAbsentSig='';
     saveLS();
     localStorage.setItem('txops3_lastdate',today);
-    window.location.href=window.location.pathname+'?t='+Date.now();
+    doAppUpdate(); // דרך doAppUpdate כדי לשמר ?kiosk=1 — אחרת מסך הקיר מאבד את הפתיחה האוטומטית כל בוקר
     return;
   }
   localStorage.setItem('txops3_lastdate',today);
@@ -10001,7 +10001,12 @@ function cancelFaceReg(){
 }
 
 /* ── AUTO UPDATE CHECK ── */
-function doAppUpdate(){window.location.href=window.location.pathname+'?t='+Date.now();}
+// שומר את ?kiosk=1 דרך הרענון — בלעדיו מסך הקיר נטען בלי הדגל, וגם אחרי כניסה מחדש
+// הלוח לא נפתח אוטומטית וצריך ללחוץ 📺 ידנית.
+function doAppUpdate(){
+  const k=/[?&#]kiosk=1\b/.test(location.href)?'&kiosk=1':'';
+  window.location.href=window.location.pathname+'?t='+Date.now()+k;
+}
 let _appVerSize=null;
 let _appVerStale=false;
 function showUpdateBanner(){
@@ -10018,7 +10023,15 @@ async function checkVersion(){
     if(!res.ok)return _appVerStale;
     const text=await res.text();
     if(_appVerSize===null){_appVerSize=text.length;return false;}
-    if(text.length!==_appVerSize){_appVerStale=true;showUpdateBanner();}
+    if(text.length!==_appVerSize){
+      _appVerStale=true;
+      // מסך התצוגה = לוח קיר בלי מפעיל: באנר העדכון (z-index 200) מרונדר *מאחורי* ה-overlay
+      // של הלוח (z-index 9999) ⇒ בלתי נראה, ואין בלוח כניסה/חתימה/סריקה שהחסימות היו תופסות.
+      // בלי זה הלוח נשאר על קוד ישן עד הרענון של יום חדש. הרענון מחזיר למסך כניסה (אין שמירת
+      // התחברות) — כמו כל בוקר; ?kiosk=1 נשמר כדי שהלוח ייפתח שוב מיד אחרי הכניסה.
+      if(typeof _kioskOpen!=='undefined'&&_kioskOpen){doAppUpdate();return true;}
+      showUpdateBanner();
+    }
     return _appVerStale;
   }catch(e){return _appVerStale;}
 }
