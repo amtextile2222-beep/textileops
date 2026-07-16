@@ -2031,10 +2031,17 @@ function sumUnitsDedup(tasks){
   tasks.forEach(t=>{const k=unitKey(t);if(seen.has(k))return;seen.add(k);total+=(t.qty||0);});
   return total;
 }
-// כמות שהושלמה פר לקוח|מוצר|שלב-עבודה. אותה סמנטיקת דה-דופ כמו sumUnitsDedup (unitKey כולל
-// את השלב, לכן דה-דופ גלובלי ואז פיצול לדליים = זהה לסינון-ואז-דה-דופ פר שלב).
-// משותף לדוח "כמות שהושלמה לפי שלב" ולמסך התצוגה — כדי ששניהם יספרו אותו דבר.
+// כמות שהושלמה פר לקוח|מוצר|שלב-עבודה. משותף לדוח "כמות שהושלמה לפי שלב" ולמסך התצוגה.
+//
+// coverKey = "אילו יחידות כוסו" = ברקוד+שלב (+splitId, כי פיצול כמות מחלק את היחידות בין
+// שני עובדים ושני החלקים נספרים בנפרד). ⚠️ **בלי היום** — בכוונה, וזה ההבדל מ-unitKey:
+// unitKey כולל את היום כי הוא נועד ל"יחידות שנעשו ביום X" בדוחות. להתקדמות מצטברת זה שגוי —
+// משימה שנמשכת כמה ימים (השהיה/חידוש) נשמרת כרשומה נפרדת ליום, וכל אחת נושאת את הכמות
+// המלאה של הברקוד ⇒ אותן יחידות נספרות שוב בכל יום.
+// נצפה בנתונים: 00243 / تنظيف وفحص — 5 רשומות של אותו ברקוד ב-27-29/06, כולן qty=225,
+// היו נספרות 675 מתוך הזמנה של 225.
 const stepDoneKey=(cust,prod,stepNm)=>cust+'|'+prod+'|'+String(stepNm||'').trim();
+const coverKey=t=>taskBc(t)+'|'+String(t.taskType||'').trim().toLowerCase()+(t.splitId?'|'+t.splitId:'');
 function stepDoneMap(tasks){
   const seen=new Set(),map={},stampCache={};
   for(const t of tasks){
@@ -2045,7 +2052,7 @@ function stepDoneMap(tasks){
     const ck=t.cust+'|'+t.prod;
     const stamp=(ck in stampCache)?stampCache[ck]:(stampCache[ck]=prodStampFor(t.cust,t.prod));
     if(t.prodStamp!=null&&stamp&&t.prodStamp!==stamp)continue;
-    const k=unitKey(t);if(seen.has(k))continue;seen.add(k);
+    const k=coverKey(t);if(seen.has(k))continue;seen.add(k);
     const mk=stepDoneKey(t.cust,t.prod,t.taskType);
     map[mk]=(map[mk]||0)+(t.qty||0);
   }
