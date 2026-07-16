@@ -6188,7 +6188,7 @@ async function mgrPunchIn(wId){
   const w=S.workers.find(x=>x.id===wId);if(!w)return;
   if(!w.sessions)w.sessions=[];
   if(w.sessions.find(s=>!s.out)){alert(w.name+' כבר רשום/ת כנוכח/ת');return;}
-  const now=new Date();
+  const now=roundAttTime(new Date(),true);
   w.sessions.push({in:now.toISOString(),out:null});
   w.status='in';w.checkin=w.sessions[0].in;
   if(S.fbConnected)await fbSet('workers',w.id,w);
@@ -6200,7 +6200,7 @@ async function mgrPunchOut(wId){
   if(!w.sessions)w.sessions=[];
   const openIdx=w.sessions.findIndex(s=>!s.out);
   if(openIdx===-1){alert(w.name+' כבר רשום/ת כיצא/ה');return;}
-  const now=new Date();
+  const now=roundAttTime(new Date(),false);
   w.sessions[openIdx].out=now.toISOString();
   w.status='out';w.checkout=now.toISOString();
   await pauseWorkerTasks(w.id,now);
