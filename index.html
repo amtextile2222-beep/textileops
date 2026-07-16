@@ -1350,6 +1350,10 @@ const LANGS={
     kiosk_over:'חריגות',
     kiosk_none:'אין משימות פעילות כרגע',
     kiosk_exit:'✕ יציאה',
+    kiosk_cust:'לקוח',
+    kiosk_units:"יח'",
+    kiosk_prod_progress:'התקדמות מוצרים פעילים',
+    kiosk_prog_note:'14 הימים האחרונים',
     tr_no_workers:'אין עובדים אחרים נוכחים כרגע',
     tr_title:'🔄 העברת משימה',
     tr_of_worker:'משימה של',
@@ -1570,6 +1574,10 @@ const LANGS={
     kiosk_over:'تجاوزات',
     kiosk_none:'لا توجد مهام نشطة حالياً',
     kiosk_exit:'✕ خروج',
+    kiosk_cust:'عميل',
+    kiosk_units:'قطعة',
+    kiosk_prod_progress:'تقدّم المنتجات النشطة',
+    kiosk_prog_note:'آخر 14 يوماً',
     tr_no_workers:'لا يوجد عمال آخرون حاضرون حالياً',
     tr_title:'🔄 نقل المهمة',
     tr_of_worker:'مهمة',
@@ -1790,6 +1798,10 @@ const LANGS={
     kiosk_over:'overruns',
     kiosk_none:'No active tasks right now',
     kiosk_exit:'✕ Exit',
+    kiosk_cust:'Customer',
+    kiosk_units:'pcs',
+    kiosk_prod_progress:'Active product progress',
+    kiosk_prog_note:'last 14 days',
     tr_no_workers:'No other workers present now',
     tr_title:'🔄 Transfer task',
     tr_of_worker:'Task of',
@@ -2012,6 +2024,26 @@ function sumUnitsDedup(tasks){
   const seen=new Set();let total=0;
   tasks.forEach(t=>{const k=unitKey(t);if(seen.has(k))return;seen.add(k);total+=(t.qty||0);});
   return total;
+}
+// כמות שהושלמה פר לקוח|מוצר|שלב-עבודה. אותה סמנטיקת דה-דופ כמו sumUnitsDedup (unitKey כולל
+// את השלב, לכן דה-דופ גלובלי ואז פיצול לדליים = זהה לסינון-ואז-דה-דופ פר שלב).
+// משותף לדוח "כמות שהושלמה לפי שלב" ולמסך התצוגה — כדי ששניהם יספרו אותו דבר.
+const stepDoneKey=(cust,prod,stepNm)=>cust+'|'+prod+'|'+String(stepNm||'').trim();
+function stepDoneMap(tasks){
+  const seen=new Set(),map={},stampCache={};
+  for(const t of tasks){
+    if(!(t.duration>0))continue;
+    // הזמנה חוזרת = רשומת מוצר חדשה עם אותו לקוח+מוצר (אותו ברקוד). סופרים רק את ההזמנה
+    // הנוכחית לפי prodStamp, אחרת היסטוריית ההזמנה הקודמת מנפחת את הכמות מול הכמות שהוזמנה.
+    // משימה ישנה בלי prodStamp נחשבת לנוכחית — אותה תאימות לאחור כמו stepAlreadyTaken.
+    const ck=t.cust+'|'+t.prod;
+    const stamp=(ck in stampCache)?stampCache[ck]:(stampCache[ck]=prodStampFor(t.cust,t.prod));
+    if(t.prodStamp!=null&&stamp&&t.prodStamp!==stamp)continue;
+    const k=unitKey(t);if(seen.has(k))continue;seen.add(k);
+    const mk=stepDoneKey(t.cust,t.prod,t.taskType);
+    map[mk]=(map[mk]||0)+(t.qty||0);
+  }
+  return map;
 }
 
 // ─── STATE ──────────────────────────────────────────────────
@@ -4344,6 +4376,7 @@ function renderKiosk(){
   const thresh=S.settings.thresh*60;
   const groups=_taskGroups(S.activeTasks);
   if(!groups.length){grid.innerHTML=`<div class="kiosk-empty">🟢 ${T.kiosk_none||'אין משימות פעילות כרגע'}</div>`;updateKioskStats(0,0);return;}
+  const dm=_kioskStepDone(); // נבנה פעם אחת לרינדור — לא פר כרטיס
   grid.innerHTML=groups.map(g=>{
     const tasks=g.tasks,lead=tasks[0],multi=tasks.length>1;
     const allPaused=tasks.every(t=>t.paused);
@@ -4352,9 +4385,8 @@ function renderKiosk(){
     const kcls=allPaused?'k-paused':_kioskCls(cls);
     const ids=tasks.map(t=>t.id).join(',');
     const chips=`<span class="k-chip">לקוח ${lead.cust}</span><span class="k-chip k-p">${esc(lead.prod)}</span>${lead.size?`<span class="k-chip k-s">מידה ${esc(lead.size)}</span>`:''}<span class="k-chip k-q">${lead.qty} יח'</span><span class="k-chip k-col">${COLORS[lead.col]||esc(lead.col)}</span>`;
-    const steps=multi
-      ?`<div class="k-steps">${tasks.map(t=>`<span class="k-step">📋 ${esc(t.taskType||'—')}</span>`).join('')}</div>`
-      :(lead.taskType?`<div class="k-steps"><span class="k-step">📋 ${esc(lead.taskType)}</span></div>`:'');
+    const stepTasks=multi?tasks:(lead.taskType?[lead]:[]);
+    const steps=stepTasks.length?`<div class="k-steps">${stepTasks.map(t=>_kStepRow(t.cust,t.prod,t.taskType,dm)).join('')}</div>`:'';
     const exp=hasExp?`<div class="k-exp">🎯 צפי ${fmtExpMin(expSec/60)}</div>`:'';
     const timer=allPaused
       ?`<div class="k-tmr k-tmr-paused">⏸ ${fmtS(lead.accumulatedSec||0)}</div>`
@@ -4366,8 +4398,49 @@ function renderKiosk(){
       <div class="k-timerwrap">${timer}</div>
       ${exp}
     </div>`;
-  }).join('');
+  }).join('')+_kioskProdPanel(dm);
   kioskTick();
+}
+// ─── כמות שהושלמה לפי שלב עבודה — במסך התצוגה ────────────────
+// ⚠️ מבוסס על S.histTasks בלבד = החלון החי בזיכרון (HIST_WINDOW_DAYS=14 יום), אפס קריאות
+// Firestore נוספות. מכוון: הלוח רץ כל היום ומתרנדר בכל שינוי נתונים — שליפת היסטוריה מלאה
+// כאן (כמו בדוח buildStepQtyReport) הייתה עולה מאות אלפי קריאות ביום. אותה החלטה שהתקבלה
+// ל"מצטבר קודם" בסורק. המשמעות: הזמנה שרצה מעל 14 יום תוצג כאן נמוך מהדוח שבלשונית דוחות.
+function _kioskStepDone(){return stepDoneMap(S.histTasks);}
+function _kProgHtml(done,total){
+  if(!total)return `<span class="k-progtxt">${done}</span>`;
+  const pct=Math.min(100,Math.round(done/total*100));
+  return `<span class="k-prog"><span class="k-progbar"><i class="${pct>=100?'k-full':''}" style="width:${pct}%"></i></span><span class="k-progtxt">${done}/${total}</span></span>`;
+}
+function _kStepRow(cust,prod,stepNm,dm){
+  const done=dm[stepDoneKey(cust,prod,stepNm)]||0;
+  return `<div class="k-steprow"><span class="k-step">📋 ${esc(stepNm||'—')}</span>${_kProgHtml(done,getTotalQty(cust,prod))}</div>`;
+}
+// פאנל מסכם: כל מוצר שיש לו עכשיו משימה פעילה — עם כל שלבי העבודה שלו וההתקדמות.
+// נכנס כפריט ברוחב מלא בתוך #kiosk-grid כדי שהגלילה האוטומטית תכסה אותו כמו שאר הכרטיסים.
+function _kioskProdPanel(dm){
+  const T=LANGS[currentLang];
+  const seen=new Set(),blocks=[];
+  for(const t of S.activeTasks){
+    const key=t.cust+'|'+t.prod;
+    if(seen.has(key))continue;seen.add(key);
+    const p=findProd(t.cust,t.prod);if(!p)continue;
+    const steps=(p.workSteps||[]).map(s=>stepName(s)).filter(Boolean);
+    if(!steps.length)continue;
+    const total=getTotalQty(p.cust,p.prod);
+    blocks.push(`<div class="k-pp-card">
+      <div class="k-pp-head"><span class="k-chip">${T.kiosk_cust||'לקוח'} ${esc(p.cust)}</span><span class="k-chip k-p">${esc(p.prod)}</span>${p.name?`<span class="k-pp-nm">${esc(p.name)}</span>`:''}${total?`<span class="k-pp-tot">${total} ${T.kiosk_units||"יח'"}</span>`:''}</div>
+      <div class="k-pp-steps">${steps.map(nm=>{
+        const done=dm[stepDoneKey(p.cust,p.prod,nm)]||0;
+        return `<div class="k-pp-row"><span class="k-pp-step">${esc(nm)}</span>${_kProgHtml(done,total)}</div>`;
+      }).join('')}</div>
+    </div>`);
+  }
+  if(!blocks.length)return '';
+  return `<div class="kiosk-prodpanel">
+    <div class="k-pp-title">📊 ${T.kiosk_prod_progress||'התקדמות מוצרים פעילים'}<span class="k-pp-note">${T.kiosk_prog_note||'14 הימים האחרונים'}</span></div>
+    <div class="k-pp-grid">${blocks.join('')}</div>
+  </div>`;
 }
 function updateKioskStats(active,over){
   const T=LANGS[currentLang];
@@ -4440,12 +4513,19 @@ function injectKioskCss(){
   .k-head{display:flex;justify-content:space-between;align-items:baseline;gap:8px}
   .k-worker{font-size:26px;font-weight:800;color:#fff;line-height:1.1}
   .k-dept{font-size:14px;color:#94a3b8;text-align:end}
-  .k-chips,.k-steps{display:flex;flex-wrap:wrap;gap:6px}
+  .k-chips{display:flex;flex-wrap:wrap;gap:6px}
   .k-chip{font-size:15px;font-weight:700;padding:3px 10px;border-radius:8px;background:#334155;color:#e2e8f0;font-variant-numeric:tabular-nums}
   .k-chip.k-p{background:#0ea5e9;color:#fff}
   .k-chip.k-s{background:#6366f1;color:#fff}
   .k-chip.k-col{background:#475569}
+  .k-steps{display:flex;flex-direction:column;gap:5px}
+  .k-steprow{display:flex;align-items:center;gap:8px;flex-wrap:wrap}
   .k-step{font-size:15px;font-weight:700;padding:3px 10px;border-radius:8px;background:#3730a3;color:#e0e7ff}
+  .k-prog{display:flex;align-items:center;gap:7px;flex:1;min-width:96px}
+  .k-progbar{flex:1;min-width:44px;height:7px;background:#334155;border-radius:4px;overflow:hidden}
+  .k-progbar i{display:block;height:100%;background:#38bdf8;border-radius:4px;transition:width .3s}
+  .k-progbar i.k-full{background:#22c55e}
+  .k-progtxt{font-size:14px;font-weight:700;color:#94a3b8;font-variant-numeric:tabular-nums;white-space:nowrap}
   .k-timerwrap{margin-top:4px}
   .k-tmr{font-size:46px;font-weight:800;font-variant-numeric:tabular-nums;color:#fff;line-height:1.05}
   .kiosk-card.k-warn .k-tmr{color:#fbbf24}
@@ -4455,6 +4535,17 @@ function injectKioskCss(){
   .kiosk-card.k-late .k-cd{color:#fca5a5}
   .k-exp{font-size:14px;color:#94a3b8}
   .kiosk-empty{grid-column:1/-1;text-align:center;font-size:28px;color:#64748b;padding:60px}
+  .kiosk-prodpanel{grid-column:1/-1;margin-top:6px;border-top:2px solid #334155;padding-top:14px}
+  .k-pp-title{display:flex;align-items:baseline;gap:10px;font-size:22px;font-weight:800;color:#fff;margin-bottom:12px}
+  .k-pp-note{font-size:14px;font-weight:600;color:#64748b}
+  .k-pp-grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(300px,1fr));gap:14px}
+  .k-pp-card{background:#1e293b;border:2px solid #334155;border-radius:14px;padding:12px 14px;display:flex;flex-direction:column;gap:9px}
+  .k-pp-head{display:flex;align-items:center;flex-wrap:wrap;gap:6px}
+  .k-pp-nm{font-size:14px;color:#cbd5e1}
+  .k-pp-tot{font-size:14px;font-weight:700;color:#94a3b8;margin-inline-start:auto;font-variant-numeric:tabular-nums}
+  .k-pp-steps{display:flex;flex-direction:column;gap:7px}
+  .k-pp-row{display:flex;align-items:center;gap:8px;flex-wrap:wrap}
+  .k-pp-step{font-size:15px;color:#e2e8f0}
   @keyframes kpulse{0%,100%{opacity:1}50%{opacity:.55}}`;
   document.head.appendChild(s);
 }
@@ -4788,12 +4879,12 @@ async function buildStepQtyReport(){
   if(!prods.length){el.innerHTML='<div style="color:var(--txt3);font-size:13px;padding:8px">אין מוצרים עם שלבי עבודה מוגדרים</div>';return;}
   el.innerHTML='<div style="color:var(--txt3);font-size:12px;padding:.5rem 0">⏳ טוען…</div>';
   const hist=await loadHistRange('','');
+  const dm=stepDoneMap(hist);
   const cards=prods.map(p=>{
     const steps=(p.workSteps||[]).map(s=>stepName(s)).filter(Boolean);
     const total=getTotalQty(p.cust,p.prod);
     const rows=steps.map(stepNm=>{
-      const tasks=hist.filter(t=>t.cust===p.cust&&t.prod===p.prod&&(t.taskType||'')===stepNm&&(t.duration||0)>0);
-      const done=sumUnitsDedup(tasks);
+      const done=dm[stepDoneKey(p.cust,p.prod,stepNm)]||0;
       const pct=total?Math.min(100,Math.round(done/total*100)):0;
       return{stepNm,done,pct};
     });
