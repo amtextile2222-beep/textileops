@@ -4318,14 +4318,33 @@ function renderTasks(){
 }
 
 let _tkHistLimit=20;
+// חיפוש מורחב (מעבר לחלון החי של HIST_WINDOW_DAYS) — נשלף לפי דרישה בלבד (ראה loadHistRange),
+// כדי לא לייקר כל רינדור של הטאב הזה. _tkHistExtra מצטבר בין חיפושים; _tkHistSearchedKey מונע חיפוש חוזר לאותו סינון.
+let _tkHistExtra=[],_tkHistSearchedKey=null,_tkHistSearching=false;
+function _tkFilterKey(){
+  return['tk-f-name','tk-f-prod','tk-f-type','tk-f-date'].map(id=>(document.getElementById(id)?.value||'').trim().toLowerCase()).join('|');
+}
+async function searchOlderHist(){
+  const fDate=(document.getElementById('tk-f-date')?.value||'').trim();
+  _tkHistSearching=true;renderTaskHist();
+  const from=fDate||new Date(Date.now()-180*86400000).toISOString().slice(0,10);
+  const to=fDate||new Date().toISOString().slice(0,10);
+  const extra=await loadHistRange(from,to);
+  const seen=new Set(_tkHistExtra.map(t=>t.id));
+  extra.forEach(t=>{if(!seen.has(t.id)){_tkHistExtra.push(t);seen.add(t.id);}});
+  _tkHistSearchedKey=_tkFilterKey();
+  _tkHistSearching=false;renderTaskHist();
+}
 function renderTaskHist(){
   _tkHistLimit=_tkHistLimit||20;
   const fName=(document.getElementById('tk-f-name')?.value||'').trim().toLowerCase();
   const fProd=(document.getElementById('tk-f-prod')?.value||'').trim().toLowerCase();
   const fType=(document.getElementById('tk-f-type')?.value||'').trim().toLowerCase();
   const fDate=(document.getElementById('tk-f-date')?.value||'').trim();
+  const hasFilter=!!(fName||fProd||fType||fDate);
   const isMgr=S.user?.role==='manager'||S.user?.role==='supervisor';
-  const base=isMgr?S.histTasks:S.histTasks.filter(t=>t.workerId===S.user?.id);
+  const src=hasFilter&&_tkHistExtra.length?S.histTasks.concat(_tkHistExtra.filter(t=>!S.histTasks.some(h=>h.id===t.id))):S.histTasks;
+  const base=isMgr?src:src.filter(t=>t.workerId===S.user?.id);
   const filtered=base.filter(t=>{
     if(fName&&!t.workerName?.toLowerCase().includes(fName))return false;
     if(fProd&&!String(t.prod||'').toLowerCase().includes(fProd))return false;
@@ -4352,7 +4371,15 @@ function renderTaskHist(){
         ${(S.user?.role==='manager'||S.user?.role==='supervisor')?`<button class="btn" style="font-size:11px;padding:3px 8px" onclick="openEditTask('${t.id}',true)" title="עריכה">✏️</button><button class="btn" style="font-size:11px;padding:3px 8px;background:#dcfce7;color:#16a34a" onclick="restoreHistTask('${t.id}')" title="החזר למשימות פעילות">♻️</button><button class="btn" style="font-size:11px;padding:3px 8px;background:var(--red-bg,#fee2e2);color:var(--red-txt,#dc2626)" onclick="deleteHistTask('${t.id}')" title="מחיקה">🗑️</button>`:''}
       </div>
     </div>`;
-  }).join('')||'<div style="color:var(--txt3);font-size:12px;padding:.75rem 0;text-align:center">אין היסטוריה עדיין</div>';
+  }).join('')||(()=>{
+    if(_tkHistSearching)return'<div style="color:var(--txt3);font-size:12px;padding:.75rem 0;text-align:center">🔍 מחפש בהיסטוריה ישנה יותר...</div>';
+    if(hasFilter&&_tkHistSearchedKey===_tkFilterKey())return'<div style="color:var(--txt3);font-size:12px;padding:.75rem 0;text-align:center">אין היסטוריה — גם בחיפוש המורחב</div>';
+    if(hasFilter)return`<div style="text-align:center;padding:.75rem 0">
+      <div style="color:var(--txt3);font-size:12px;margin-bottom:6px">אין היסטוריה ב-14 הימים האחרונים</div>
+      <button class="btn" style="font-size:11px;padding:4px 10px" onclick="searchOlderHist()">🔍 חפש גם בהיסטוריה ישנה יותר</button>
+    </div>`;
+    return'<div style="color:var(--txt3);font-size:12px;padding:.75rem 0;text-align:center">אין היסטוריה עדיין</div>';
+  })();
   const more=document.getElementById('tk-hist-more');
   if(more){
     if(filtered.length>_tkHistLimit){
@@ -4995,16 +5022,17 @@ function buildBudgetReport(fl){
     const p=findProd(t.cust,t.prod);if(!p)continue;
     const pb=_prodBudget(p,ctx);if(!pb||pb.budgetUnit<=0)continue;
     const st=pb.lvl.find(s=>stepName(s)===t.taskType);if(!st)continue;
-    // מוקצב: עדיף הצפי שנשמר במשימה בפתיחה; אחרת חישוב מהתמחור לפי העובד שביצע
-    let alloc=+t.expectedMin;
-    if(!(alloc>0)){
-      const mm=stepManualMin(st);
-      if(mm>0){alloc=mm*(t.qty||0);} // דקות ידניות — צפי = דקות×כמות
-      else{
-        const rate=(loadedHourlyRate(t.workerId)||ctx.avgAll)+ctx.oh;
-        alloc=rate>0&&pb.totW>0?(pb.budgetUnit*(+ctx.weights[stepLevel(st)]||1)/pb.totW*(t.qty||0))/rate*60:0;
-      }
+    // מוקצב: עדיף חישוב מהתמחור הנוכחי (מתעדכן רטרואקטיבית אם נוספו/הוסרו שלבים למוצר
+    // אחרי שהמשימה נפתחה — אחרת שלב שהיה לבד בזמן הפתיחה "בולע" את כל התקציב).
+    // ליפול לצפי השמור במשימה רק אם אין תעריף שעה זמין לחישוב.
+    let alloc=0;
+    const mm=stepManualMin(st);
+    if(mm>0){alloc=mm*(t.qty||0);} // דקות ידניות — צפי = דקות×כמות
+    else{
+      const rate=(loadedHourlyRate(t.workerId)||ctx.avgAll)+ctx.oh;
+      alloc=rate>0&&pb.totW>0?(pb.budgetUnit*(+ctx.weights[stepLevel(st)]||1)/pb.totW*(t.qty||0))/rate*60:0;
     }
+    if(!(alloc>0))alloc=+t.expectedMin;
     if(!(alloc>0))continue;
     const actual=(nd[t.id]||0)/60;
     const key=t.workerId+'|'+t.cust+'|'+t.prod+'|'+t.taskType;
