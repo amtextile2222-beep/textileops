@@ -565,6 +565,7 @@ code{background:var(--bg2);border:0.5px solid var(--b);border-radius:4px;padding
       <label style="display:flex;align-items:center;gap:6px;font-size:13px;cursor:pointer"><input type="radio" name="print-choice" value="summary" style="width:auto"/> דוח מרוכז</label>
       <label style="display:flex;align-items:center;gap:6px;font-size:13px;cursor:pointer"><input type="radio" name="print-choice" value="stages" style="width:auto"/> דוח ייצור לפי שלב</label>
       <label style="display:flex;align-items:center;gap:6px;font-size:13px;cursor:pointer"><input type="radio" name="print-choice" value="stepqty" style="width:auto"/> כמות לפי שלב עבודה</label>
+      <label style="display:flex;align-items:center;gap:6px;font-size:13px;cursor:pointer"><input type="radio" name="print-choice" value="profit" style="width:auto"/> 💰 רווח מול יעד</label>
       <label style="display:flex;align-items:center;gap:6px;font-size:13px;cursor:pointer"><input type="radio" name="print-choice" value="all" style="width:auto"/> הכל</label>
       <button class="btn primary" onclick="doPrintChoice()">🖨 הדפס</button>
       <button class="btn" onclick="document.getElementById('print-choice-panel').classList.add('hidden')">ביטול</button>
@@ -5006,7 +5007,20 @@ function _prodBudget(p,ctx){
   const budgetUnit=price*(1-(+p.targetProfitPct||0)/100)-(+p.directMaterialsCost||0);
   // רק שלבים אוטומטיים (קושי בלי override ידני) מתחלקים את התקציב לפי משקל
   const totW=lvl.filter(s=>stepLevel(s)&&!(stepManualMin(s)>0)).reduce((s,x)=>s+(+ctx.weights[stepLevel(x)]||1),0);
-  return{price,budgetUnit,totW,lvl,materials:+p.directMaterialsCost||0,targetPct:+p.targetProfitPct||0};
+  // תקצוב פר-שלב ליחידה (₪ ודקות) — אותו מנוע כמו פאנל התמחור במוצר:
+  // שלב ידני = דקות×תעריף השלב; עלות הידניים יורדת מהתקציב לפני החלוקה לאוטומטיים
+  const rates=lvl.map(s=>_pricingStepRate(stepStation(s),stepLevel(s),ctx.avgAll)+ctx.oh);
+  const manualCost=lvl.reduce((t,s,i)=>stepManualMin(s)>0?t+stepManualMin(s)/60*rates[i]:t,0);
+  const autoBudget=Math.max(budgetUnit-manualCost,0);
+  const stepBud=lvl.map((s,i)=>{
+    const mm=stepManualMin(s);
+    if(mm>0)return{ils:mm/60*rates[i],min:mm};
+    const ils=totW>0?autoBudget*(+ctx.weights[stepLevel(s)]||1)/totW:0;
+    return{ils,min:rates[i]>0?ils/rates[i]*60:0};
+  });
+  const budMinUnit=stepBud.reduce((t,b)=>t+b.min,0);
+  const budCostUnit=(+p.directMaterialsCost||0)+stepBud.reduce((t,b)=>t+b.ils,0);
+  return{price,budgetUnit,autoBudget,totW,lvl,stepBud,budMinUnit,budCostUnit,materials:+p.directMaterialsCost||0,targetPct:+p.targetProfitPct||0};
 }
 function buildBudgetReport(fl){
   const card=document.getElementById('rp-budget-card'),el=document.getElementById('rp-budget-body');
@@ -5031,7 +5045,7 @@ function buildBudgetReport(fl){
     if(mm>0){alloc=mm*(t.qty||0);} // דקות ידניות — צפי = דקות×כמות
     else{
       const rate=(loadedHourlyRate(t.workerId)||ctx.avgAll)+ctx.oh;
-      alloc=rate>0&&pb.totW>0?(pb.budgetUnit*(+ctx.weights[stepLevel(st)]||1)/pb.totW*(t.qty||0))/rate*60:0;
+      alloc=rate>0&&pb.totW>0?(pb.autoBudget*(+ctx.weights[stepLevel(st)]||1)/pb.totW*(t.qty||0))/rate*60:0;
     }
     if(!(alloc>0))alloc=+t.expectedMin;
     if(!(alloc>0))continue;
@@ -5074,16 +5088,17 @@ function buildProfitReport(fl){
     const pb=_prodBudget(p,ctx);if(!pb||pb.budgetUnit<=0)continue;
     const pTasks=done.filter(t=>t.cust===p.cust&&t.prod===p.prod);
     if(!pTasks.length)continue;
-    let costUnit=pb.materials,withData=0;
-    const stepRows=pb.lvl.map(s=>{
-      const mm=stepManualMin(s);
-      const budPU=mm>0?mm/60*(ctx.avgAll+ctx.oh):(pb.totW>0?pb.budgetUnit*(+ctx.weights[stepLevel(s)]||1)/pb.totW:0); // ידני: ₪ = דקות/60×עלות שעה ממוצעת
+    let costUnit=pb.materials,withData=0,budMinDone=0,actMinTot=0;
+    const stepRows=pb.lvl.map((s,i)=>{
+      const budPU=pb.stepBud[i].ils; // מהמנוע המשותף — מכבד דקות ידניות ותעריף לפי תחנה
       const ts=pTasks.filter(t=>t.taskType===stepName(s));
       const units=ts.reduce((sum,t)=>sum+(t.qty||0),0);
       let actPU=null;
       if(units>0){
         const cost=ts.reduce((sum,t)=>sum+((nd[t.id]||0)/3600)*((loadedHourlyRate(t.workerId)||ctx.avgAll)+ctx.oh),0);
         actPU=cost/units;withData++;
+        budMinDone+=pb.stepBud[i].min*units;
+        actMinTot+=ts.reduce((sum,t)=>sum+(nd[t.id]||0)/60,0);
       }
       costUnit+=actPU!=null?actPU:budPU;
       return{name:stepName(s),budPU,actPU,units};
@@ -5093,7 +5108,7 @@ function buildProfitReport(fl){
     // כמות שיצאה בפועל (מברקוד "יצא ללקוח") — לרווח האמיתי של ההזמנה: הכנסה רק על מה שיצא
     const shipped=p.shippedQty!=null?Math.max(0,+p.shippedQty||0):null;
     const planned=getTotalQty(p.cust,p.prod)||0;
-    blocks.push({p,pb,stepRows,withData,profit,profitPct,shipped,planned});
+    blocks.push({p,pb,stepRows,withData,profit,profitPct,shipped,planned,budMinDone,actMinTot});
   }
   if(!blocks.length){el.innerHTML='<div style="color:var(--txt3);font-size:12px;padding:.5rem 0">אין מוצרים מתומחרים עם משימות שהושלמו בטווח הנבחר</div>';return;}
   el.innerHTML=`<div style="font-size:11px;color:var(--txt3);margin-bottom:6px">רווח בפועל ליחידה = מחיר − חומרים − עלות עבודה+תקורה בפועל · שלבים בלי נתונים מחושבים לפי המוקצב · 🚚 אמיתי = הכנסה רק על הכמות שיצאה ללקוח בפועל</div>`+blocks.map(b=>{
@@ -5102,7 +5117,13 @@ function buildProfitReport(fl){
       <summary style="cursor:pointer;display:flex;align-items:center;gap:8px;flex-wrap:wrap;list-style:none">
         <span style="font-weight:600;font-size:13px"><span class="bc-seg bc-c">${b.p.cust}</span> <span class="bc-seg bc-p">${b.p.prod}</span>${b.p.name?' '+esc(b.p.name):''}</span>
         <span style="font-size:12px;color:var(--txt3)">מחיר ₪${b.pb.price.toFixed(2)} · יעד ${b.pb.targetPct}%</span>
+        ${(()=>{ // רווח מתוקצב לפי הזמנים שהוזנו (ידני) — מוצג רק כשהוא סוטה מהיעד
+          const budProfit=b.pb.price-b.pb.budCostUnit,budPct=b.pb.price>0?budProfit/b.pb.price*100:0;
+          if(Math.abs(budPct-b.pb.targetPct)<0.1)return'';
+          return`<span class="badge ${budPct>=b.pb.targetPct-1?'gray':'amber'}" title="הרווח שנשאר אחרי תקצוב הזמנים שהוזנו ידנית לשלבים">מתוקצב ${budPct.toFixed(1)}% (₪${budProfit.toFixed(2)})</span>`;
+        })()}
         <span class="badge ${ok?'green':'red'}">בפועל ${b.profitPct.toFixed(1)}% (₪${b.profit.toFixed(2)})</span>
+        <span style="font-size:12px;font-weight:600;${b.actMinTot>b.budMinDone?'color:var(--red-txt)':'color:var(--txt2)'}" title="מתוקצב = דקות לשלב × יחידות שבוצעו · דקות ליחידה לפי התמחור: ${b.pb.budMinUnit.toFixed(1)} דק'">⏱ מתוקצב ${fmtExpMin(b.budMinDone)} · בפועל ${fmtExpMin(b.actMinTot)}</span>
         ${(()=>{ // רווח אמיתי לפי כמות שיצאה: הכנסה על מה שיצא בלבד, עלות על כל מה שיוצר (המקסימום מתוכנן/יצא)
           if(b.shipped==null)return'';
           const base=Math.max(b.planned,b.shipped);
@@ -9445,7 +9466,12 @@ function doPrintChoice(){
   if(val==='stepqty'||val==='all'){
     html+=`<div class="card" style="margin-top:12px"><div class="sec">🧵 כמות שהושלמה לפי שלב עבודה</div>${document.getElementById('rp-stepqty-body')?.innerHTML||''}</div>`;
   }
-  printViaIframe(`<!DOCTYPE html><html dir="rtl" lang="he"><head><meta charset="UTF-8"/><title>דוח משימות</title><style>*{box-sizing:border-box;margin:0;padding:0}body{font-family:Arial,sans-serif;padding:20px;color:#000;background:#fff;font-size:13px}h1{font-size:18px;margin-bottom:4px;color:#185FA5}.print-date{font-size:11px;color:#666;margin-bottom:16px}.card{background:#fff;border:1px solid #ddd;border-radius:8px;padding:12px 16px;margin-bottom:12px}.sec{font-size:14px;font-weight:700;margin-bottom:8px}table{width:100%;border-collapse:collapse;font-size:12px}th{background:#f0f0f0;padding:7px 8px;text-align:right;font-weight:600;border-bottom:2px solid #ddd}td{padding:6px 8px;border-bottom:1px solid #eee}.badge{display:inline-block;padding:2px 8px;border-radius:999px;font-size:11px;font-weight:600}@media print{body{padding:10px}}</style></head><body><h1>TextileOps — דוח משימות</h1><div class="print-date">${now}</div>${html}</body></html>`);
+  if(val==='profit'||val==='all'){
+    // details נסגרים בהדפסה — פותחים את כולם כדי שפירוט השלבים יודפס
+    const body=(document.getElementById('rp-profit-body')?.innerHTML||'').replace(/<details/g,'<details open');
+    if(body)html+=`<div class="card" style="margin-top:12px"><div class="sec">💰 רווח בפועל מול יעד — לפי מוצר</div>${body}</div>`;
+  }
+  printViaIframe(`<!DOCTYPE html><html dir="rtl" lang="he"><head><meta charset="UTF-8"/><title>דוח משימות</title><style>*{box-sizing:border-box;margin:0;padding:0}body{font-family:Arial,sans-serif;padding:20px;color:#000;background:#fff;font-size:13px;-webkit-print-color-adjust:exact;print-color-adjust:exact}h1{font-size:18px;margin-bottom:4px;color:#185FA5}.print-date{font-size:11px;color:#666;margin-bottom:16px}.card{background:#fff;border:1px solid #ddd;border-radius:8px;padding:12px 16px;margin-bottom:12px}.sec{font-size:14px;font-weight:700;margin-bottom:8px}table{width:100%;border-collapse:collapse;font-size:12px}th{background:#f0f0f0;padding:7px 8px;text-align:right;font-weight:600;border-bottom:2px solid #ddd}td{padding:6px 8px;border-bottom:1px solid #eee}.badge{display:inline-block;padding:2px 8px;border-radius:999px;font-size:11px;font-weight:600;border:1px solid #ccc}.badge.green{background:#dcfce7;color:#166534}.badge.red{background:#fee2e2;color:#b91c1c}.badge.amber{background:#fef3c7;color:#92400e}.badge.gray{background:#f0f0f0;color:#555}.bc-seg{display:inline-block;padding:1px 6px;border-radius:6px;background:#eef2ff;font-weight:700;font-size:11px}summary{list-style:none}details{page-break-inside:avoid}@media print{body{padding:10px}}</style></head><body><h1>TextileOps — דוח משימות</h1><div class="print-date">${now}</div>${html}</body></html>`);
 }
 function printPage(pageId, title){
   const content=document.getElementById(pageId)?.innerHTML||'';
