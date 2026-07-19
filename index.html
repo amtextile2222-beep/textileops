@@ -9113,18 +9113,21 @@ function renderProductPricing(){
       <div style="font-size:11px;color:var(--amber-txt);margin-top:4px">⚠ אין נתוני עלות שעה — הזן שכר לעובדים בלשונית עלויות</div></div>`;
     return;
   }
-  let totalMin=0,tooShortCnt=0;
+  // עלות השלבים הידניים יורדת מהתקציב לפני שהוא מתחלק לשלבים האוטומטיים
+  const manualCost=shownSteps.reduce((t,s)=>s.manualMin>0?t+s.manualMin/60*(_pricingStepRate(s.station,s.level,avgAll)+oh):t,0);
+  const autoBudget=Math.max(budget-manualCost,0);
+  let totalMin=0,totalCost=0,tooShortCnt=0;
   const rows=shownSteps.map(s=>{
     const rate=_pricingStepRate(s.station,s.level,avgAll)+oh;
     let min,share,manual=s.manualMin>0;
-    if(manual){ // דקות ידניות דורסות את החישוב; ה-₪ מחושב לצורך מידע בלבד
+    if(manual){ // דקות ידניות דורסות את החישוב
       min=s.manualMin;
       share=min/60*rate;
     }else{
-      share=totW?budget*(+weights[s.level]||1)/totW:0;
+      share=totW?autoBudget*(+weights[s.level]||1)/totW:0;
       min=rate>0?share/rate*60:0;
     }
-    totalMin+=min;
+    totalMin+=min;totalCost+=share;
     const tooShort=!manual&&min*60<s.level*30; // היוריסטיקה: פחות מ-30 שנ' לרמת קושי = לא ריאלי
     if(tooShort)tooShortCnt++;
     const tag=manual?` <span style="font-size:10px;color:var(--txt3)">✎ ידני</span>`:(s.level?` <span style="font-size:10px;color:var(--txt3)">(${levelName(s.level,'he')})</span>`:'');
@@ -9135,10 +9138,16 @@ function renderProductPricing(){
     </div>`;
   }).join('');
   const shortWarn=tooShortCnt?`<div style="font-size:12px;color:var(--red-txt);font-weight:600;margin-top:6px;background:var(--red-bg,#fee2e2);padding:6px 10px;border-radius:8px">⚠ ${tooShortCnt} שלבים עם זמן לא ריאלי — המחיר כנראה לא מחזיק את יעד הרווח</div>`:'';
+  // רווח בפועל — רלוונטי רק כשיש דקות ידניות (אחרת העלות שווה לתקציב והרווח = היעד)
+  const actProfit=price-materials-totalCost;
+  const actPct=price>0?actProfit/price*100:0;
+  const below=actPct<profitPct-0.05;
+  const actualLine=shownSteps.some(s=>s.manualMin>0)?`<div style="font-size:12px;font-weight:700;margin-top:2px;color:${below?'var(--red-txt)':'var(--green-txt)'}">💰 רווח בפועל לפי הזמנים שהוזנו: ${actPct.toFixed(1)}% (₪${actProfit.toFixed(2)})${below?' — מתחת ליעד':''}</div>`:'';
   box.innerHTML=`<div style="background:var(--bg2);border-radius:8px;padding:8px 10px">${head}
     <div style="font-size:11px;color:var(--txt3);margin:4px 0 2px">תקצוב זמן לשלב (לפי משקל קושי ÷ עלות שעה עמוסה+תקורה ₪${oh.toFixed(2)}):</div>
     ${rows}
     <div style="font-size:13px;font-weight:700;color:var(--green-txt);margin-top:6px">⏱ סה"כ זמן עבודה מתוקצב ליחידה: ${totalMin.toFixed(1)} דק'</div>
+    ${actualLine}
     ${shortWarn}</div>`;
 }
 function addQtyRow(){
