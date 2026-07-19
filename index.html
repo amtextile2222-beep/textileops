@@ -8679,11 +8679,11 @@ function _bcPdfCell(card){
   const cv=document.createElement('canvas');cv.width=W;cv.height=H;
   const ctx=cv.getContext('2d');
   ctx.fillStyle='#fff';ctx.fillRect(0,0,W,H);
-  const qmm=32,qx=4,qy=(56-qmm)/2;
+  const qmm=32,qx=10,qy=(56-qmm)/2; // 10 מ"מ שוליים פנימיים — עמידות להיסט מדפסת בנייד
   const qr=_bcQRCanvas(card.qr,440);
   if(qr)ctx.drawImage(qr,Math.round(qx*s),Math.round(qy*s),Math.round(qmm*s),Math.round(qmm*s));
   ctx.direction='rtl';ctx.textAlign='right';ctx.textBaseline='alphabetic';
-  const rightX=Math.round(101*s),lineMm=6.6,totalMm=card.lines.length*lineMm;
+  const rightX=Math.round(95*s),lineMm=6.6,totalMm=card.lines.length*lineMm;
   let y=(56-totalMm)/2;
   card.lines.forEach(ln=>{
     ctx.font=(ln.bold?'bold ':'')+Math.round(ln.mm*s)+'px Arial, sans-serif';
