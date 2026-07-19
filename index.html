@@ -4861,7 +4861,7 @@ async function buildRep(){
   rfp.innerHTML='<option value="">כל המוצרים</option>'+pOpts.map(p=>`<option value="${p}" ${p===pf?'selected':''}>מוצר ${p}</option>`).join('');
   buildSummaryReport(fl);
   buildStageReport();
-  buildStepQtyReport();
+  buildStepQtyReport(cf,pf);
   buildBudgetReport(fl);
   buildProfitReport(fl);
 }
@@ -4952,9 +4952,10 @@ function buildStageReport(){
 }
 // כמות שהושלמה לכל שלב עבודה (מהתמחור) מול הכמות שהוזמנה — לכל מוצר. טוען היסטוריה מלאה (לא תלוי בטווח התאריכים של הדוחות)
 // כי התקדמות ייצור מצטברת ולא אמורה "להיעלם" כשמסננים לטווח קצר.
-async function buildStepQtyReport(){
+async function buildStepQtyReport(cf,pf){
   const el=document.getElementById('rp-stepqty-body');if(!el)return;
-  const prods=S.products.filter(p=>(p.workSteps||[]).some(s=>stepName(s)));
+  // מכבד את בוררי לקוח/מוצר של לשונית הדוחות (טווח תאריכים במכוון לא — התקדמות מצטברת)
+  const prods=S.products.filter(p=>(p.workSteps||[]).some(s=>stepName(s))&&(!cf||p.cust===cf)&&(!pf||p.prod===pf));
   if(!prods.length){el.innerHTML='<div style="color:var(--txt3);font-size:13px;padding:8px">אין מוצרים עם שלבי עבודה מוגדרים</div>';return;}
   el.innerHTML='<div style="color:var(--txt3);font-size:12px;padding:.5rem 0">⏳ טוען…</div>';
   const hist=await loadHistRange('','');
