@@ -2502,7 +2502,14 @@ function listenFb(){
       const stale=S.activeTasks.filter(t=>localDate(t)<today&&!t.paused);
       stale.forEach(t=>{
         const d=t.startTime instanceof Date?t.startTime:new Date(t.startTime);
-        const pausedAt=new Date(d.getFullYear(),d.getMonth(),d.getDate(),23,59,59);
+        // עוגן ההשהיה: היציאה האחרונה של העובד באותו יום (attHistory), לא חצות —
+        // אחרת המשימה צוברת ב-accumulatedSec את כל הערב עד 23:59 כזמן עבודה
+        // (כך נולדו משימות עם duration גדול מהחלון שלהן). fallback לחצות אם אין רשומה.
+        let pausedAt=new Date(d.getFullYear(),d.getMonth(),d.getDate(),23,59,59);
+        const rec=(S.attHistory||[]).find(r=>r.workerId===t.workerId&&r.date===localDate(t));
+        const sess=rec?.sessions&&rec.sessions.length?rec.sessions:(rec?.checkin?[{in:rec.checkin,out:rec.checkout||null}]:[]);
+        const lastOut=sess.reduce((mx,s)=>{const o=s.out?new Date(s.out).getTime():0;return o>mx?o:mx;},0);
+        if(lastOut>d.getTime()&&lastOut<pausedAt.getTime())pausedAt=new Date(lastOut);
         t.paused=true;t.pausedAt=pausedAt.toISOString();
         t.accumulatedSec=(t.accumulatedSec||0)+calcTaskDurSec(d,pausedAt,t.workerId);
         t.elapsed=t.accumulatedSec;
@@ -3850,6 +3857,35 @@ function normalizeBatchDurations(tasks){
       const totQ=g.reduce((s,t)=>s+(t.qty||0),0);
       g.forEach(t=>{out[t.id]=totQ>0?Math.round(clock*(t.qty||0)/totQ):Math.round(clock/g.length);});
     }else g.forEach(t=>{out[t.id]=t.duration||0;}); // כבר חולק נכון
+  }
+  // שלב ב': משימות חופפות של אותו עובד גם בלי batchId משותף — עובד שפתח כמה
+  // משימות במקביל (סריקות נפרדות) צובר את אותו זמן שעון על כל אחת. מקבצים חלונות
+  // [start,end] חופפים (טרנזיטיבית) פר-עובד; אם סכום ה-duration בצביר עולה על זמן
+  // השעון של החלון המאוחד — מכווצים את כולן יחסית. משימה שהושהתה וחודשה
+  // (duration>חלון של עצמה, כי startTime מתאפס בחידוש) אינה חופפת אחרות ולכן לא
+  // נפגעת; רשומות בלי endTime תקין (או endTime<startTime) לא משתתפות.
+  const byW={};
+  tasks.forEach(t=>{
+    const s=new Date(t.startTime).getTime(),e=t.endTime?new Date(t.endTime).getTime():NaN;
+    if(!isFinite(s)||!isFinite(e)||e<=s)return;
+    (byW[t.workerId]=byW[t.workerId]||[]).push({id:t.id,w:t.workerId,s,e});
+  });
+  for(const arr of Object.values(byW)){
+    if(arr.length<2)continue;
+    arr.sort((a,b)=>a.s-b.s);
+    let cl=[arr[0]],clEnd=arr[0].e;
+    const clip=()=>{
+      if(cl.length<2)return;
+      const clock=calcTaskDurSec(new Date(cl[0].s),new Date(Math.max(...cl.map(x=>x.e))),cl[0].w);
+      const sum=cl.reduce((s2,x)=>s2+(out[x.id]||0),0);
+      if(clock>0&&sum>clock){const f=clock/sum;cl.forEach(x=>{out[x.id]=Math.round((out[x.id]||0)*f);});}
+    };
+    for(let i=1;i<arr.length;i++){
+      const x=arr[i];
+      if(x.s<clEnd){cl.push(x);clEnd=Math.max(clEnd,x.e);}
+      else{clip();cl=[x];clEnd=x.e;}
+    }
+    clip();
   }
   return out;
 }
