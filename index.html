@@ -5088,7 +5088,8 @@ function buildProfitReport(fl){
     const pb=_prodBudget(p,ctx);if(!pb||pb.budgetUnit<=0)continue;
     const pTasks=done.filter(t=>t.cust===p.cust&&t.prod===p.prod);
     if(!pTasks.length)continue;
-    let costUnit=pb.materials,withData=0,budMinDone=0,actMinTot=0;
+    let costUnit=pb.materials,withData=0;
+    const actMinTot=pTasks.reduce((s,t)=>s+(nd[t.id]||0)/60,0); // כל שעות העבודה על המוצר בטווח
     const stepRows=pb.lvl.map((s,i)=>{
       const budPU=pb.stepBud[i].ils; // מהמנוע המשותף — מכבד דקות ידניות ותעריף לפי תחנה
       const ts=pTasks.filter(t=>t.taskType===stepName(s));
@@ -5097,8 +5098,6 @@ function buildProfitReport(fl){
       if(units>0){
         const cost=ts.reduce((sum,t)=>sum+((nd[t.id]||0)/3600)*((loadedHourlyRate(t.workerId)||ctx.avgAll)+ctx.oh),0);
         actPU=cost/units;withData++;
-        budMinDone+=pb.stepBud[i].min*units;
-        actMinTot+=ts.reduce((sum,t)=>sum+(nd[t.id]||0)/60,0);
       }
       costUnit+=actPU!=null?actPU:budPU;
       return{name:stepName(s),budPU,actPU,units};
@@ -5108,7 +5107,7 @@ function buildProfitReport(fl){
     // כמות שיצאה בפועל (מברקוד "יצא ללקוח") — לרווח האמיתי של ההזמנה: הכנסה רק על מה שיצא
     const shipped=p.shippedQty!=null?Math.max(0,+p.shippedQty||0):null;
     const planned=getTotalQty(p.cust,p.prod)||0;
-    blocks.push({p,pb,stepRows,withData,profit,profitPct,shipped,planned,budMinDone,actMinTot});
+    blocks.push({p,pb,stepRows,withData,profit,profitPct,shipped,planned,actMinTot});
   }
   if(!blocks.length){el.innerHTML='<div style="color:var(--txt3);font-size:12px;padding:.5rem 0">אין מוצרים מתומחרים עם משימות שהושלמו בטווח הנבחר</div>';return;}
   el.innerHTML=`<div style="font-size:11px;color:var(--txt3);margin-bottom:6px">רווח בפועל ליחידה = מחיר − חומרים − עלות עבודה+תקורה בפועל · שלבים בלי נתונים מחושבים לפי המוקצב · 🚚 אמיתי = הכנסה רק על הכמות שיצאה ללקוח בפועל</div>`+blocks.map(b=>{
@@ -5123,7 +5122,13 @@ function buildProfitReport(fl){
           return`<span class="badge ${budPct>=b.pb.targetPct-1?'gray':'amber'}" title="הרווח שנשאר אחרי תקצוב הזמנים שהוזנו ידנית לשלבים">מתוקצב ${budPct.toFixed(1)}% (₪${budProfit.toFixed(2)})</span>`;
         })()}
         <span class="badge ${ok?'green':'red'}">בפועל ${b.profitPct.toFixed(1)}% (₪${b.profit.toFixed(2)})</span>
-        <span style="font-size:12px;font-weight:600;${b.actMinTot>b.budMinDone?'color:var(--red-txt)':'color:var(--txt2)'}" title="מתוקצב = דקות לשלב × יחידות שבוצעו · דקות ליחידה לפי התמחור: ${b.pb.budMinUnit.toFixed(1)} דק'">⏱ מתוקצב ${fmtExpMin(b.budMinDone)} · בפועל ${fmtExpMin(b.actMinTot)}</span>
+        ${(()=>{ // סה"כ זמן להזמנה = כמות המוצר × דקות ליחידה לפי התמחור, מול מה שנעבד עד היום
+          const base=Math.max(b.planned,b.shipped||0);
+          const totBud=b.pb.budMinUnit*base;
+          if(!(totBud>0))return'';
+          const left=totBud-b.actMinTot;
+          return`<span style="font-size:12px;font-weight:600;color:${left<0?'var(--red-txt)':'var(--txt2)'}" title="${base} יח' × ${b.pb.budMinUnit.toFixed(1)} דק'/יח'">⏱ סה"כ להזמנה ${fmtExpMin(totBud)} · בפועל ${fmtExpMin(b.actMinTot)} · ${left<0?'חריגה ':'נותר '}${fmtExpMin(Math.abs(left))}</span>`;
+        })()}
         ${(()=>{ // רווח אמיתי לפי כמות שיצאה: הכנסה על מה שיצא בלבד, עלות על כל מה שיוצר (המקסימום מתוכנן/יצא)
           if(b.shipped==null)return'';
           const base=Math.max(b.planned,b.shipped);
