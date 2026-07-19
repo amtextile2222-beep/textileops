@@ -8653,8 +8653,11 @@ function bcPrint(mode){
   const style=labels
     ?`body{margin:0;font-family:Arial,sans-serif;background:#fff}
       .grid{display:grid!important;grid-template-columns:repeat(2,105mm)!important;gap:0!important;padding:0!important}
-      .bc-card{width:105mm!important;height:56mm!important;box-sizing:border-box!important;padding:4mm!important;border:none!important;border-radius:0!important;gap:8px!important;grid-column:auto!important;overflow:hidden!important}
-      .bc-card img{width:32mm!important;height:32mm!important;flex-shrink:0}
+      .bc-card{width:105mm!important;height:56mm!important;box-sizing:border-box!important;padding:0!important;border:none!important;border-radius:0!important;grid-column:auto!important;overflow:hidden!important;display:block!important;position:relative!important}
+      /* QR ממורכז במרכז המדבקה — היסט מדפסת לא חותך אותו; הטקסט בעמודה מימין */
+      .bc-card>div:first-child{position:absolute!important;left:50%!important;top:50%!important;transform:translate(-50%,-50%)!important;width:32mm!important;height:32mm!important;overflow:hidden!important}
+      .bc-card img{width:32mm!important;height:32mm!important}
+      .bc-card>div:last-child{position:absolute!important;right:5mm!important;top:50%!important;transform:translateY(-50%)!important;width:29mm!important;flex:none!important;text-align:right!important;line-height:1.8!important}
       @media print{@page{size:A4 portrait;margin:8.5mm 0}}`
     :`body{margin:0;font-family:Arial,sans-serif;background:#fff}
       .grid{display:grid;grid-template-columns:repeat(2,1fr);gap:10px;padding:6px 10px}
@@ -8679,16 +8682,17 @@ function _bcPdfCell(card){
   const cv=document.createElement('canvas');cv.width=W;cv.height=H;
   const ctx=cv.getContext('2d');
   ctx.fillStyle='#fff';ctx.fillRect(0,0,W,H);
-  const qmm=32,qx=10,qy=(56-qmm)/2; // 10 מ"מ שוליים פנימיים — עמידות להיסט מדפסת בנייד
+  const qmm=32,qx=(105-qmm)/2,qy=(56-qmm)/2; // QR ממורכז במרכז המדבקה — היסט מדפסת לא חותך אותו
   const qr=_bcQRCanvas(card.qr,440);
   if(qr)ctx.drawImage(qr,Math.round(qx*s),Math.round(qy*s),Math.round(qmm*s),Math.round(qmm*s));
   ctx.direction='rtl';ctx.textAlign='right';ctx.textBaseline='alphabetic';
-  const rightX=Math.round(95*s),lineMm=6.6,totalMm=card.lines.length*lineMm;
+  // הטקסט בעמודה שמימין ל-QR; maxW מכווץ שורה ארוכה כדי שלא תיכנס לתוך ה-QR
+  const rightX=Math.round(99*s),maxW=Math.round((99-(qx+qmm+2))*s),lineMm=6.6,totalMm=card.lines.length*lineMm;
   let y=(56-totalMm)/2;
   card.lines.forEach(ln=>{
     ctx.font=(ln.bold?'bold ':'')+Math.round(ln.mm*s)+'px Arial, sans-serif';
     ctx.fillStyle=ln.color;
-    ctx.fillText(ln.t,rightX,Math.round((y+lineMm*0.75)*s));
+    ctx.fillText(ln.t,rightX,Math.round((y+lineMm*0.75)*s),maxW);
     y+=lineMm;
   });
   return cv;
