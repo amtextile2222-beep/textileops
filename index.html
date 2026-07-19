@@ -3876,7 +3876,7 @@ function normalizeBatchDurations(tasks){
     let cl=[arr[0]],clEnd=arr[0].e;
     const clip=()=>{
       if(cl.length<2)return;
-      const clock=calcTaskDurSec(new Date(cl[0].s),new Date(Math.max(...cl.map(x=>x.e))),cl[0].w);
+      const clock=_clusterClock(cl[0].s,Math.max(...cl.map(x=>x.e)),cl[0].w);
       const sum=cl.reduce((s2,x)=>s2+(out[x.id]||0),0);
       if(clock>0&&sum>clock){const f=clock/sum;cl.forEach(x=>{out[x.id]=Math.round((out[x.id]||0)*f);});}
     };
@@ -3888,6 +3888,39 @@ function normalizeBatchDurations(tasks){
     clip();
   }
   return out;
+}
+
+// זמן שעון אפקטיבי לצביר משימות חופפות: חיתוך החלון [ws,we] עם רצפי הנוכחות של
+// העובד (attHistory + היום מ-S.workers, בניכוי הפסקה) — צביר שנמשך ללילה (משימות
+// שנשארו פתוחות ונסגרו למחרת) לא מזכה בשעות שהעובד לא היה נוכח בהן.
+// אין נתוני נוכחות חופפים לחלון → fallback לשעון קיר (calcTaskDurSec).
+function _clusterClock(ws,we,wid){
+  const w=S.workers.find(x=>x.id===wid);
+  const sess=[];const seen=new Set();
+  const addRec=r=>{
+    const ss=r.sessions&&r.sessions.length?r.sessions:(r.checkin?[{in:r.checkin,out:r.checkout||null}]:[]);
+    ss.forEach(s=>{if(s.in&&!seen.has(s.in)){seen.add(s.in);sess.push(s);}});
+  };
+  (S.attHistory||[]).forEach(r=>{if(r.workerId===wid)addRec(r);});
+  if(w)addRec(w);
+  let tot=0,found=false;
+  for(const s of sess){
+    const si=new Date(s.in).getTime();
+    // session פתוח (אין out): נספר עד עכשיו אבל לא מעבר לסוף היום שלו — יש רשומות
+    // עזובות עם out:null מלפני שבועות שאחרת היו "נמשכות" עד היום ומנפחות כל חלון.
+    const di=new Date(s.in);const eod=new Date(di.getFullYear(),di.getMonth(),di.getDate(),23,59,59).getTime();
+    const so=s.out?new Date(s.out).getTime():Math.min(Date.now(),eod);
+    const os=Math.max(si,ws),oe=Math.min(so,we);
+    if(oe<=os)continue;
+    found=true;let ms=oe-os;
+    if(w&&w.breakActive&&w.breakStart&&w.breakEnd){
+      const ref=new Date(s.in).toDateString();
+      const bs=new Date(ref+' '+w.breakStart).getTime(),be=new Date(ref+' '+w.breakEnd).getTime();
+      if(be>bs){const bo=Math.max(os,bs),bo2=Math.min(oe,be);if(bo2>bo)ms-=(bo2-bo);}
+    }
+    tot+=ms;
+  }
+  return found?Math.round(tot/1000):calcTaskDurSec(new Date(ws),new Date(we),wid);
 }
 
 // השהיית כל המשימות הפעילות של עובד
