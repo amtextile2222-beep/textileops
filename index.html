@@ -196,6 +196,15 @@ code{background:var(--bg2);border:0.5px solid var(--b);border-radius:4px;padding
     <div class="field"><label data-i18n="username">שם משתמש</label><input id="l-user" type="text" placeholder="שם משתמש" data-i18n-ph="username" autocomplete="username" oninput="onUserInput(this.value)"/></div>
     <div class="field" id="l-pass-wrap"><label data-i18n="password">סיסמה</label><input id="l-pass" type="password" placeholder="סיסמה" data-i18n-ph="password" autocomplete="current-password" onkeydown="if(event.key==='Enter')doLogin()"/></div>
     <div id="l-face-hint" style="display:none;text-align:center;font-size:13px;color:var(--green-txt);margin-bottom:8px">📷 זיהוי פנים — לחץ כניסה</div>
+    <div id="l-bc-hint" style="display:none;text-align:center;margin-bottom:8px">
+      <button class="btn primary" style="width:100%;justify-content:center;font-size:16px;padding:12px" onclick="startBcLogin()">📷 סרוק את הברקוד שבתחנה שלך</button>
+      <div style="font-size:13px;color:var(--txt3);margin-top:5px">כוון את המצלמה אל המדבקה עם השם שלך</div>
+    </div>
+    <div id="l-bc-cam" style="display:none;margin-bottom:8px">
+      <video id="l-bc-video" playsinline muted style="width:100%;border-radius:10px;background:#000"></video>
+      <div id="l-bc-status" style="text-align:center;font-size:15px;font-weight:600;margin-top:6px;min-height:20px"></div>
+      <button class="btn" style="width:100%;justify-content:center;margin-top:6px;font-size:14px" onclick="stopBcLogin()">ביטול</button>
+    </div>
     <div id="l-switch-user" style="display:none;text-align:center;margin-bottom:8px"><button class="btn" style="font-size:12px;padding:4px 10px" onclick="switchUser()">🔄 לא אתה? החלף משתמש</button></div>
     <button class="btn primary full" onclick="doLogin()" data-i18n="login_btn">כניסה</button>
     <div id="l-err" style="color:var(--red-txt);font-size:12px;text-align:center;margin-top:8px;min-height:18px"></div>
@@ -382,6 +391,14 @@ code{background:var(--bg2);border:0.5px solid var(--b);border-radius:4px;padding
         <div style="display:flex;gap:8px">
           <button class="btn success" onclick="punchIn()">✅ <span data-i18n="att_in">כניסה</span></button>
           <button class="btn danger" onclick="punchOut()">🚪 <span data-i18n="att_out">יציאה</span></button>
+        </div>
+        <div id="att-bc-box" style="display:none;width:100%">
+          <button class="btn primary" style="width:100%;justify-content:center;font-size:15px;padding:11px" onclick="startBcPunch()">📷 סרוק ברקוד לחתימת יציאה</button>
+          <div id="att-bc-cam" style="display:none;margin-top:6px">
+            <video id="att-bc-video" playsinline muted style="width:100%;border-radius:10px;background:#000"></video>
+            <div id="att-bc-status" style="font-size:15px;font-weight:600;margin-top:6px;min-height:20px"></div>
+            <button class="btn" style="width:100%;justify-content:center;margin-top:6px;font-size:14px" onclick="stopBcPunch()">ביטול</button>
+          </div>
         </div>
         <div class="sep" style="width:100%"></div>
         <div id="att-face-update-box" class="hidden" style="width:100%">
@@ -3016,7 +3033,10 @@ function _loginErrMsg(code){
     'device-unknown':'⛔ לא ניתן לזהות את המכשיר — גישה נדחית',
     'face-mismatch':'זיהוי פנים נכשל',
     'no-face-update':'אין אישור לעדכון פנים — פנה למנהל',
-    'emergency-wrong':'קוד חירום שגוי'
+    'emergency-wrong':'קוד חירום שגוי',
+    'barcode-wrong':'⛔ הברקוד שסרקת שייך לעובד אחר — סרוק את הברקוד שבתחנה שלך',
+    'barcode-not-allowed':'⛔ כניסה בברקוד לא מופעלת עבורך — פנה למנהל',
+    'barcode-needs-setup':'הכניסה הראשונה במכשיר הזה חייבת להיות עם סיסמה — הזן סיסמה פעם אחת, ומהפעם הבאה תיכנס בסריקה'
   }[code]||'שגיאת חיבור לשרת — נסה שוב';
 }
 // סיום כניסה מוצלחת — משותף לסיסמה/פנים/חירום
@@ -3079,11 +3099,24 @@ async function emergencyLogin(){
     document.getElementById('l-err').textContent=_loginErrMsg(c);
   }
 }
+// כשיר לכניסה בסריקת ברקוד: אין לו זיהוי פנים, יש נעילת מכשיר, והמכשיר כבר נרשם.
+// רמז מקומי מה-cache בלבד — השרת אוכף את אותם תנאים בעצמו (ראה exports.login).
+function _bcLoginEligible(u){
+  const w=S.workers.find(x=>x.user===u.trim());
+  if(!w||w.role==='manager')return null;
+  const hasFace=w.faceAuth&&(w.faceRegistered||w.faceDescriptor||w.faceDescriptors&&Object.keys(w.faceDescriptors).length);
+  if(hasFace)return null;
+  if(!w.deviceBinding||!(w.deviceRegistered||w.deviceId))return null;
+  return w;
+}
 function onUserInput(u){
   // רמז מקומי בלבד (מה-cache): לעובד עם פנים רשומות מוסתר שדה הסיסמה. ההכרעה האמיתית בשרת.
   const w=S.workers.find(x=>x.user===u.trim()&&x.faceAuth&&(x.faceRegistered||x.faceDescriptor||x.faceDescriptors&&Object.keys(x.faceDescriptors).length));
-  document.getElementById('l-pass-wrap').style.display=w?'none':'';
+  const bcw=w?null:_bcLoginEligible(u);
+  document.getElementById('l-pass-wrap').style.display=(w||bcw)?'none':'';
   document.getElementById('l-face-hint').style.display=w?'block':'none';
+  document.getElementById('l-bc-hint').style.display=bcw?'block':'none';
+  if(!bcw)stopBcLogin();
   if(w)loadFaceModels(); // טעינה מוקדמת ברקע — שהמודלים יהיו מוכנים כשהעובד ילחץ כניסה
 }
 // טעינה מוקדמת בעליית הדף אם יש בכלל עובדים עם זיהוי פנים (מה-cache המקומי) — במקום להטעין כשהעובד כבר עומד מול המצלמה
@@ -3097,10 +3130,12 @@ window.addEventListener('load',()=>{setTimeout(()=>{
     onUserInput(lu);
     document.getElementById('l-switch-user').style.display='';
     _autoFaceLogin(lu);
+    _autoBcLogin(lu);
   }
 },1500);});
 function switchUser(){
   try{localStorage.removeItem('txops_last_user');}catch(e){}
+  stopBcLogin();
   document.getElementById('l-user').value='';
   document.getElementById('l-pass').value='';
   onUserInput('');
@@ -3118,6 +3153,92 @@ function _autoFaceLogin(u){
     if(S.user||!ls||ls.classList.contains('hidden')){clearInterval(t);return;}
     if(S.fbConnected&&window._fbFunctions){clearInterval(t);doLogin();}
     else if(++tries>20)clearInterval(t); // ~10 שנ' בלי חיבור — ממשיכים ידנית כרגיל
+  },500);
+}
+// ─── כניסה בסריקת ברקוד העובד (מסלול חלופי לעובד בלי זיהוי פנים) ───
+// מצלמה אחורית → EMP:{id} → loginCall({user,empBarcode,deviceId}) → כניסה + החתמת כניסה.
+// הברקוד אינו סוד (מודבק בתחנה); ההגנה היא נעילת המכשיר + Wi-Fi מפעל, שנאכפות בשרת.
+let _bcLoginStream=null,_bcLoginInt=null;
+async function startBcLogin(){
+  const u=document.getElementById('l-user').value.trim();
+  if(!u){document.getElementById('l-err').textContent='נא למלא שם משתמש';return;}
+  if(_bcLoginStream)return; // כבר פתוח
+  // אותן חסימות כמו doLogin — לא לפתוח מצלמה על גרסה ישנה או חשבון נעול
+  if(loginLocked){document.getElementById('l-err').textContent='חשבון נעול ל-30 שניות עקב ניסיונות כושלים';return;}
+  if(await checkVersion()){document.getElementById('l-err').textContent='🔄 יש גרסה חדשה — לחץ "עדכן עכשיו" למעלה ונסה שוב';return;}
+  const video=document.getElementById('l-bc-video');
+  const status=document.getElementById('l-bc-status');
+  const err=document.getElementById('l-err');
+  err.textContent='';
+  try{
+    _bcLoginStream=await navigator.mediaDevices.getUserMedia({video:{facingMode:'environment',width:{ideal:1280},height:{ideal:720}},audio:false});
+    video.srcObject=_bcLoginStream;
+    document.getElementById('l-bc-hint').style.display='none';
+    document.getElementById('l-bc-cam').style.display='block';
+    status.textContent='מחפש ברקוד...';
+    await video.play();
+  }catch(e){
+    _bcLoginStream=null;
+    err.textContent='⛔ לא ניתן לפתוח את המצלמה — אשר גישה למצלמה בהגדרות';
+    return;
+  }
+  const canvas=document.createElement('canvas'),ctx=canvas.getContext('2d');
+  let busy=false;
+  _bcLoginInt=setInterval(async()=>{
+    if(busy||!_bcLoginStream||video.readyState<2)return;
+    canvas.width=video.videoWidth;canvas.height=video.videoHeight;
+    ctx.drawImage(video,0,0);
+    let text='';
+    try{
+      const img=ctx.getImageData(0,0,canvas.width,canvas.height);
+      text=jsQR(img.data,img.width,img.height,{inversionAttempts:'attemptBoth'})?.data||'';
+    }catch(e){return;}
+    if(!text)return;
+    if(!text.startsWith('EMP:')){status.textContent='⚠ זה לא ברקוד עובד — סרוק את המדבקה שבתחנה שלך';return;}
+    busy=true;
+    status.textContent='✅ נסרק — מאמת...';
+    try{
+      const devId=await getDeviceId();
+      const res=await loginCall({user:u,empBarcode:text.trim(),deviceId:devId||undefined});
+      if(res.needFace){ // המנהל הפעיל זיהוי פנים בינתיים — נופלים חזרה לפנים
+        stopBcLogin();
+        S._pendingUser={user:u,name:res.name,faceUpdateAllowed:!!res.faceUpdateAllowed};
+        startFaceAuth();
+        return;
+      }
+      await fbSignInWithToken(res.token);
+      stopBcLogin();
+      finishLogin(res.worker,true); // כניסה + החתמת כניסה אוטומטית
+    }catch(e){
+      const c=_loginErrCode(e);
+      stopBcLogin();
+      // מסלול הברקוד חסום לעובד הזה — מחזירים את שדה הסיסמה כדי שלא ייתקע בלי דרך להיכנס
+      if(c==='barcode-not-allowed'||c==='barcode-needs-setup'){
+        document.getElementById('l-pass-wrap').style.display='';
+        document.getElementById('l-bc-hint').style.display='none';
+      }
+      document.getElementById('l-err').textContent=_loginErrMsg(c);
+    }
+  },200);
+}
+function stopBcLogin(){
+  if(_bcLoginInt){clearInterval(_bcLoginInt);_bcLoginInt=null;}
+  if(_bcLoginStream){_bcLoginStream.getTracks().forEach(t=>t.stop());_bcLoginStream=null;}
+  const c=document.getElementById('l-bc-cam');if(c)c.style.display='none';
+  const v=document.getElementById('l-bc-video');if(v)v.srcObject=null;
+  // מחזירים את כפתור הסריקה כל עוד העובד כשיר — אחרת סריקה שנכשלה משאירה מסך בלי שום דרך להיכנס
+  const h=document.getElementById('l-bc-hint');
+  if(h&&!S.user)h.style.display=_bcLoginEligible(document.getElementById('l-user')?.value||'')?'block':'none';
+}
+// "זכור אותי" לעובד ברקוד: מחכה לחיבור ופותח את המצלמה לבד — העובד רק מכוון אותה למדבקה.
+function _autoBcLogin(u){
+  if(!_bcLoginEligible(u))return;
+  let tries=0;
+  const t=setInterval(()=>{
+    const ls=document.getElementById('login-screen');
+    if(S.user||!ls||ls.classList.contains('hidden')){clearInterval(t);return;}
+    if(S.fbConnected&&window._fbFunctions){clearInterval(t);startBcLogin();}
+    else if(++tries>20)clearInterval(t); // ~10 שנ' בלי חיבור — ממשיכים ידנית
   },500);
 }
 async function doLogin(){
@@ -3636,6 +3757,51 @@ async function punchOut(){
   const roundedOut=now.getTime()!==nowRaw.getTime();
   document.getElementById('att-msg').textContent='🚪 '+T.att_out+': '+pad2(now.getHours())+':'+pad2(now.getMinutes())+(roundedOut?' (עוגל)':'')+(pausedCount?' | '+pausedCount+' '+T.tasks_paused_msg:'');
 }
+// ─── חתימת יציאה בסריקת ברקוד העובד ───
+// כאן העובד כבר מאומת (יש טוקן) — הסריקה רק מאשרת שהוא פיזית בתחנה שלו,
+// ולכן ההשוואה המקומית מול S.user.id מספיקה; אין כאן הסלמת הרשאות.
+let _bcPunchStream=null,_bcPunchInt=null;
+async function startBcPunch(){
+  if(!S.user||_bcPunchStream)return;
+  const video=document.getElementById('att-bc-video');
+  const status=document.getElementById('att-bc-status');
+  try{
+    _bcPunchStream=await navigator.mediaDevices.getUserMedia({video:{facingMode:'environment',width:{ideal:1280},height:{ideal:720}},audio:false});
+    video.srcObject=_bcPunchStream;
+    document.getElementById('att-bc-cam').style.display='block';
+    status.textContent='מחפש ברקוד...';
+    await video.play();
+  }catch(e){
+    _bcPunchStream=null;
+    document.getElementById('att-msg').textContent='⛔ לא ניתן לפתוח את המצלמה — אשר גישה למצלמה בהגדרות';
+    return;
+  }
+  const canvas=document.createElement('canvas'),ctx=canvas.getContext('2d');
+  let busy=false;
+  _bcPunchInt=setInterval(async()=>{
+    if(busy||!_bcPunchStream||video.readyState<2)return;
+    canvas.width=video.videoWidth;canvas.height=video.videoHeight;
+    ctx.drawImage(video,0,0);
+    let text='';
+    try{
+      const img=ctx.getImageData(0,0,canvas.width,canvas.height);
+      text=jsQR(img.data,img.width,img.height,{inversionAttempts:'attemptBoth'})?.data||'';
+    }catch(e){return;}
+    if(!text)return;
+    if(!text.startsWith('EMP:')){status.textContent='⚠ זה לא ברקוד עובד — סרוק את המדבקה שבתחנה שלך';return;}
+    if(text.trim()!=='EMP:'+S.user.id){status.textContent='⛔ זה הברקוד של עובד אחר — סרוק את שלך';return;}
+    busy=true;
+    status.textContent='✅ נסרק — חותם יציאה...';
+    stopBcPunch();
+    await punchOut();
+  },200);
+}
+function stopBcPunch(){
+  if(_bcPunchInt){clearInterval(_bcPunchInt);_bcPunchInt=null;}
+  if(_bcPunchStream){_bcPunchStream.getTracks().forEach(t=>t.stop());_bcPunchStream=null;}
+  const c=document.getElementById('att-bc-cam');if(c)c.style.display='none';
+  const v=document.getElementById('att-bc-video');if(v)v.srcObject=null;
+}
 // רשומה בלי חתימת יציאה נחתכת בשעת סוף המשמרת של אותו יום — לא ב"עכשיו"
 // (חישוב עד "עכשיו" בבוקר שאחרי ניפח רשומות ל-22-30 שעות ועיוות סיכומי שכר)
 function shiftEndDate(dateStr){return new Date(dateStr+'T'+(S.settings.shiftEnd||'15:00'));}
@@ -4126,6 +4292,14 @@ function renderAtt(){
   if(faceBox&&S.user){
     const me=S.workers.find(x=>x.id===S.user.id);
     faceBox.classList.toggle('hidden',!(me&&me.faceUpdateAllowed));
+  }
+  // סריקת ברקוד ליציאה — רק לעובד שנכנס במסלול הברקוד (בלי פנים, עם נעילת מכשיר) וכרגע נוכח
+  const bcBox=document.getElementById('att-bc-box');
+  if(bcBox){
+    const me=S.user?S.workers.find(x=>x.id===S.user.id):null;
+    const show=!!(me&&me.status==='in'&&_bcLoginEligible(me.user||''));
+    bcBox.style.display=show?'':'none';
+    if(!show)stopBcPunch();
   }
   const inW=S.workers.filter(w=>w.status==='in');
   const outW=S.workers.filter(w=>w.status==='out');
@@ -6994,6 +7168,8 @@ function openModal(action,id){
           📱 נעילת מכשיר — כניסה ממכשיר קבוע בלבד
         </label>
         ${(w?.deviceRegistered||w?.deviceId)?`<div style="font-size:11px;color:var(--green-txt);margin-top:4px">✅ מכשיר רשום</div>`:(w?'<div style="font-size:11px;color:var(--txt3);margin-top:4px">⚪ מכשיר לא רשום עדיין — יירשם בכניסה הראשונה</div>':'')}
+        ${w&&w.deviceBinding&&(w.deviceRegistered||w.deviceId)&&!w.faceAuth?`<div style="font-size:11px;color:var(--green-txt);margin-top:4px">🏷️ כניסה בסריקת ברקוד פעילה — העובד סורק את המדבקה שבתחנה שלו במקום סיסמה</div>`:''}
+        ${w&&!w.deviceBinding&&!w.faceAuth?`<div style="font-size:11px;color:var(--txt3);margin-top:4px">💡 הפעל נעילת מכשיר כדי לאפשר לעובד להיכנס בסריקת הברקוד שלו במקום סיסמה</div>`:''}
       </div>
       <div class="field" style="background:var(--bg2);border-radius:var(--r);padding:10px 12px">
         <label style="display:flex;align-items:center;gap:10px;cursor:pointer;font-size:13px;color:var(--txt)">

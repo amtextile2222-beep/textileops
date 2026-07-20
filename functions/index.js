@@ -77,9 +77,10 @@ async function sendTelegramDocument(token, chatId, filename, buffer, caption) {
 }
 
 // ─── LOGIN — אימות בצד שרת + Custom Token עם role claim (שלב 2 אבטחה) ───
-// קלט: {user, pass?} | {user, faceDescriptor?} | {user, registerDescriptors?} | {emergencyCode} | {user, faceFailAlert, photoB64?}
+// קלט: {user, pass?} | {user, faceDescriptor?} | {user, registerDescriptors?} | {user, empBarcode?} | {emergencyCode} | {user, faceFailAlert, photoB64?}
 // פלט הצלחה: {token, worker, needFaceRegister?} | {needFace:true, name, faceUpdateAllowed}
 // קודי שגיאה (ב-message): wrong | disabled | locked | ip | device | device-unknown | face-mismatch | no-face-update | emergency-wrong
+//                          | barcode-wrong | barcode-not-allowed | barcode-needs-setup
 async function regFail(credRef, creds) {
   try { await credRef.set({ failCount: (creds.failCount || 0) + 1, lastFail: Date.now() }, { merge: true }); } catch (e) {}
 }
@@ -205,6 +206,34 @@ exports.login = functions.https.onCall(async (data, context) => {
     if (!w.faceUpdateAllowed) throw new functions.https.HttpsError('permission-denied', 'no-face-update');
     await credRef.set({ faceDescriptors: Object.fromEntries(d.registerDescriptors.map((s, i) => [i, s.map(Number)])), faceDescriptor: FieldValue.delete() }, { merge: true });
     await wDoc.ref.set({ faceUpdateAllowed: false, faceRegistered: true, faceDescriptor: FieldValue.delete(), faceDescriptors: FieldValue.delete() }, { merge: true });
+  } else if (d.empBarcode !== undefined) {
+    // ── כניסה בסריקת ברקוד העובד (EMP:{id}) — מסלול חלופי לעובד בלי זיהוי פנים ──
+    // הברקוד מודבק בתחנה וגלוי לכולם, ולכן הוא *לא* סוד: הוא רק אומר "מי אני".
+    // הזיהוי האמיתי = נעילת מכשיר. לכן המסלול פתוח רק לעובד עם deviceBinding
+    // ומכשיר שכבר נרשם — ובמכוון בלי רישום-מכשיר-אוטומטי (בניגוד לסיסמה למטה),
+    // אחרת הראשון שיסרוק מדבקה של חבר היה כובל את הטלפון שלו לחשבון הזר.
+    if (w.faceAuth && hasFace) {
+      // למי שמוגדר זיהוי פנים — הפנים נשארות חובה, אין עקיפה בברקוד
+      return { needFace: true, name: w.name, faceUpdateAllowed: !!w.faceUpdateAllowed };
+    }
+    if (!w.deviceBinding || w.role === 'manager') {
+      throw new functions.https.HttpsError('failed-precondition', 'barcode-not-allowed');
+    }
+    const bdev = String(d.deviceId || '');
+    if (!bdev) throw new functions.https.HttpsError('failed-precondition', 'device-unknown');
+    if (!creds.deviceId) {
+      // כניסה ראשונה חייבת להיות בסיסמה — שם המכשיר נרשם תחת אימות אמיתי
+      throw new functions.https.HttpsError('failed-precondition', 'barcode-needs-setup');
+    }
+    if (creds.deviceId !== bdev) {
+      await tg('⛔ TextileOps — סריקת ברקוד עובד ממכשיר לא מורשה\n👤 עובד: ' + w.name + '\n🕐 שעה: ' + ilTime());
+      throw new functions.https.HttpsError('permission-denied', 'device');
+    }
+    // הברקוד חייב להתאים בדיוק לעובד שהוזן/נשמר בשם המשתמש
+    if (String(d.empBarcode).trim() !== 'EMP:' + w.id) {
+      await regFail(credRef, creds);
+      throw new functions.https.HttpsError('permission-denied', 'barcode-wrong');
+    }
   } else if (d.pass !== undefined && String(d.pass).length) {
     // ── אימות סיסמה ──
     const stored = creds.pass !== undefined ? creds.pass : (w.pass || '');
