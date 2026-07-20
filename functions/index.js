@@ -196,7 +196,7 @@ exports.login = functions.https.onCall(async (data, context) => {
     if (!hasFace) throw new functions.https.HttpsError('failed-precondition', 'wrong');
     const live = d.faceDescriptor.map(Number);
     const dist = Math.min(...storedDescriptors(faceSrc).map(s => euclidean(live, s)));
-    if (!(dist < 0.55)) {
+    if (!(dist < 0.6)) {
       await regFail(credRef, creds);
       throw new functions.https.HttpsError('permission-denied', 'face-mismatch');
     }

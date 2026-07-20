@@ -3081,7 +3081,10 @@ function onUserInput(u){
   const w=S.workers.find(x=>x.user===u.trim()&&x.faceAuth&&(x.faceRegistered||x.faceDescriptor||x.faceDescriptors&&Object.keys(x.faceDescriptors).length));
   document.getElementById('l-pass-wrap').style.display=w?'none':'';
   document.getElementById('l-face-hint').style.display=w?'block':'none';
+  if(w)loadFaceModels(); // טעינה מוקדמת ברקע — שהמודלים יהיו מוכנים כשהעובד ילחץ כניסה
 }
+// טעינה מוקדמת בעליית הדף אם יש בכלל עובדים עם זיהוי פנים (מה-cache המקומי) — במקום להטעין כשהעובד כבר עומד מול המצלמה
+window.addEventListener('load',()=>{setTimeout(()=>{if((S.workers||[]).some(x=>x.faceAuth))loadFaceModels();},1500);});
 async function doLogin(){
   if(loginLocked){document.getElementById('l-err').textContent='חשבון נעול ל-30 שניות עקב ניסיונות כושלים';return;}
   if(await checkVersion()){document.getElementById('l-err').textContent='🔄 יש גרסה חדשה — לחץ "עדכן עכשיו" למעלה ונסה שוב';return;}
@@ -9719,16 +9722,30 @@ async function _runFaceAuthLoop(){
   const opts=new faceapi.TinyFaceDetectorOptions({inputSize:224,scoreThreshold:0.5});
   const _u=S._pendingUser?.user||'';
   let busy=false;
+  // שער איכות: פריים מטושטש/רחוק שנשלח לשרת שורף ניסיון (face-mismatch) — אוספים 2 פריימים
+  // טובים ברצף (ציון זיהוי + גודל פנים בפריים), ממצעים את ה-descriptors לניקוי רעש, ורק אז שולחים
+  let goodFrames=[];
+  const GOOD_NEEDED=2,MIN_SCORE=0.6,MIN_FACE_RATIO=0.22;
   _faceAuthLoop=setInterval(async()=>{
     if(busy||video.readyState<2||!S._pendingUser)return;
     busy=true;
     try{
       const det=await faceapi.detectSingleFace(video,opts).withFaceLandmarks(true).withFaceDescriptor();
-      if(!det){document.getElementById('face-auth-status').textContent='לא זוהו פנים — קרב/י למצלמה';return;}
+      if(!det){goodFrames=[];document.getElementById('face-auth-status').textContent='לא זוהו פנים — קרב/י למצלמה';return;}
+      const ratio=(det.detection?.box?.width||0)/(video.videoWidth||1);
+      if((det.detection?.score||0)<MIN_SCORE||ratio<MIN_FACE_RATIO){
+        goodFrames=[];
+        document.getElementById('face-auth-status').textContent=ratio<MIN_FACE_RATIO?'קרב/י את הטלפון לפנים':'החזק/י יציב מול המצלמה';
+        return;
+      }
+      goodFrames.push(Array.from(det.descriptor));
+      if(goodFrames.length<GOOD_NEEDED){document.getElementById('face-auth-status').textContent='החזק/י יציב...';return;}
+      const avg=goodFrames[0].map((_,i)=>goodFrames.reduce((s,f)=>s+f[i],0)/goodFrames.length);
+      goodFrames=[];
       document.getElementById('face-auth-status').textContent='מאמת...';
       const devId=await getDeviceId();
       try{
-        const res=await loginCall({user:S._pendingUser.user,faceDescriptor:Array.from(det.descriptor),deviceId:devId||undefined});
+        const res=await loginCall({user:S._pendingUser.user,faceDescriptor:avg,deviceId:devId||undefined});
         if(res&&res.token){
           delete _faceFailPersist[_u];
           await fbSignInWithToken(res.token);
@@ -9760,7 +9777,7 @@ async function _runFaceAuthLoop(){
         }
       }
     }finally{busy=false;}
-  },900);
+  },600);
 }
 function _stopFaceAuthUI(){
   clearInterval(_faceAuthLoop);_faceAuthLoop=null;
