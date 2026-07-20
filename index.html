@@ -3551,7 +3551,7 @@ async function autoPunchIn(){
   const today=todayStr();
   w.sessions=w.sessions.filter(s=>{if(!s.in)return false;const d=new Date(s.in);return d.getFullYear()+'-'+pad2(d.getMonth()+1)+'-'+pad2(d.getDate())>=today;});
   if(w.sessions.find(s=>!s.out))return; // כבר נכנס
-  const now=roundAttTime(new Date(),true); // עיגול לשעת משמרת — עקביות עם כניסה ידנית (punchIn)
+  const now=roundAttTime(srvNow(),true); // עיגול לשעת משמרת — עקביות עם כניסה ידנית (punchIn)
   w.sessions.push({in:now.toISOString(),out:null});
   w.status='in';
   w.checkin=w.sessions[0].in;
@@ -3585,7 +3585,7 @@ async function punchIn(){
   const today=todayStr();
   w.sessions=w.sessions.filter(s=>{if(!s.in)return false;const d=new Date(s.in);return d.getFullYear()+'-'+pad2(d.getMonth()+1)+'-'+pad2(d.getDate())>=today;});
   if(w.sessions.find(s=>!s.out)){document.getElementById('att-msg').textContent='כבר רשום/ת כנוכח/ת';return;}
-  const nowRaw=new Date();
+  const nowRaw=srvNow();
   const now=roundAttTime(nowRaw,true);
   w.sessions.push({in:now.toISOString(),out:null});
   w.status='in';
@@ -3606,7 +3606,7 @@ async function punchOut(){
   if(!w.sessions)w.sessions=[];
   const openIdx=w.sessions.findIndex(s=>!s.out);
   if(openIdx===-1){document.getElementById('att-msg').textContent='כבר רשום/ת כיצא/ה';return;}
-  const nowRaw=new Date();
+  const nowRaw=srvNow();
   const now=roundAttTime(nowRaw,false);
   const prevOut=w.sessions[openIdx].out,prevStatus=w.status,prevCheckout=w.checkout;
   w.sessions[openIdx].out=now.toISOString();
@@ -3819,7 +3819,7 @@ async function bcStartBatch(){
   const items=_bcBatch.slice();
   try{
     const bcBatchId=items.length>1?genBatchId():null; // כמה משימות יחד = קבוצה אחת (טיימר משותף + מסגרת אחת)
-    const bcStart=new Date();
+    const bcStart=srvNow();
     const dupSkip=[];let created=0;
     for(const b of items){
       // חסימה חוזרת ברגע הפתיחה (לא רק בהוספה לסל): סוגר מרוץ של סריקה כפולה מהירה —
@@ -3996,7 +3996,7 @@ async function handlePausedTasks(workerId,newBarcodes){
       if(resumed===null)return false;
       if(resumed){
         // חידוש — עדכן startTime לעכשיו
-        const now=new Date();
+        const now=srvNow();
         for(const t of bTasks){
           t.paused=false;t.pausedAt=null;t.startTime=now;
           if(S.fbConnected)await fbSet('activeTasks',String(t.id),{...t,startTime:now.toISOString()});
@@ -4006,7 +4006,7 @@ async function handlePausedTasks(workerId,newBarcodes){
         return false; // לא לפתוח חדשה
       }else{
         // חדשה — סגור את המושהות
-        const closeTime=new Date(bTasks[0].pausedAt||new Date());
+        const closeTime=new Date(bTasks[0].pausedAt||srvNow());
         if(bTasks.length>1&&bTasks[0].batchId)await closeBatchProportional(bTasks,closeTime);
         else{for(const t of bTasks){const dur=(t.accumulatedSec||0);const done={...t,endTime:closeTime,duration:dur};delete done.paused;delete done.pausedAt;delete done.accumulatedSec;S.histTasks.unshift(done);S.activeTasks=S.activeTasks.filter(x=>x.id!==t.id);if(S.fbConnected){await fbDel('activeTasks',String(t.id));await fbSet('histTasks',String(t.id),{...done,startTime:done.startTime instanceof Date?done.startTime.toISOString():done.startTime,endTime:closeTime.toISOString()});}}}
       }
@@ -4016,7 +4016,7 @@ async function handlePausedTasks(workerId,newBarcodes){
         `${bTasks.map(t=>t.prod+' ('+fmtM(t.accumulatedSec||0)+')').join(', ')}`,
         '✅ הושלמו','🔄 הועברו לעובד אחר','⏭ השאר מושהות');
       if(choice===0){
-        const closeTime=new Date(bTasks[0].pausedAt||new Date());
+        const closeTime=new Date(bTasks[0].pausedAt||srvNow());
         if(bTasks.length>1&&bTasks[0].batchId)await closeBatchProportional(bTasks,closeTime);
         else{for(const t of bTasks){const dur=(t.accumulatedSec||0);const done={...t,endTime:closeTime,duration:dur};delete done.paused;delete done.pausedAt;delete done.accumulatedSec;S.histTasks.unshift(done);S.activeTasks=S.activeTasks.filter(x=>x.id!==t.id);if(S.fbConnected){await fbDel('activeTasks',String(t.id));await fbSet('histTasks',String(t.id),{...done,startTime:done.startTime instanceof Date?done.startTime.toISOString():done.startTime,endTime:closeTime.toISOString()});}}}
       }else if(choice===1){
@@ -4027,7 +4027,7 @@ async function handlePausedTasks(workerId,newBarcodes){
         const idx=parseInt(sel)-1;
         if(isNaN(idx)||!eligible[idx])continue;
         const newW=eligible[idx];
-        const now=new Date();
+        const now=srvNow();
         for(const t of bTasks){
           t.workerId=newW.id;t.workerName=newW.name;t.dept=newW.dept;t.paused=false;t.pausedAt=null;t.startTime=now;
           if(S.fbConnected)await fbSet('activeTasks',String(t.id),{...t,startTime:now.toISOString()});
@@ -4061,7 +4061,7 @@ function showConfirm3(title,msg,btn1,btn2,btn3){
 
 function calcTaskDurSec(startTime,endTime,workerId){
   const st=startTime instanceof Date?startTime:new Date(startTime);
-  const et=endTime instanceof Date?endTime:(endTime?new Date(endTime):new Date());
+  const et=endTime instanceof Date?endTime:(endTime?new Date(endTime):srvNow());
   const w=S.workers.find(x=>x.id===workerId);
   let ms=et-st;
   if(w&&w.breakActive&&w.breakStart&&w.breakEnd){
@@ -6327,7 +6327,7 @@ async function tsStartTask(){
   // סגירת משימות פעילות (לא מושהות) אם יש
   const activeCurrent=S.activeTasks.filter(t=>t.workerId===w.id&&!t.paused);
   if(activeCurrent.length>0){
-    const endTime=new Date();
+    const endTime=srvNow();
     const batches={};activeCurrent.forEach(t=>{const bid=t.batchId||t.id;if(!batches[bid])batches[bid]=[];batches[bid].push(t);});
     for(const bTasks of Object.values(batches)){
       if(bTasks.length>1)await closeBatchProportional(bTasks,endTime);
@@ -6336,7 +6336,7 @@ async function tsStartTask(){
   }
   try{
     const batchId=_tsBatch.length>1?genBatchId():null;
-    const startTime=new Date();
+    const startTime=srvNow();
     let created=0;
     for(const b of _tsBatch){
       // חסימה חוזרת ברגע הפתיחה — סוגר מרוץ של פתיחה כפולה של אותה משימה (עובד+ברקוד+שלב פעיל)
@@ -6554,7 +6554,7 @@ async function mgrPunchIn(wId){
   const w=S.workers.find(x=>x.id===wId);if(!w)return;
   if(!w.sessions)w.sessions=[];
   if(w.sessions.find(s=>!s.out)){alert(w.name+' כבר רשום/ת כנוכח/ת');return;}
-  const now=roundAttTime(new Date(),true);
+  const now=roundAttTime(srvNow(),true);
   w.sessions.push({in:now.toISOString(),out:null});
   w.status='in';w.checkin=w.sessions[0].in;
   if(S.fbConnected)await fbSet('workers',w.id,w);
@@ -6566,7 +6566,7 @@ async function mgrPunchOut(wId){
   if(!w.sessions)w.sessions=[];
   const openIdx=w.sessions.findIndex(s=>!s.out);
   if(openIdx===-1){alert(w.name+' כבר רשום/ת כיצא/ה');return;}
-  const now=roundAttTime(new Date(),false);
+  const now=roundAttTime(srvNow(),false);
   w.sessions[openIdx].out=now.toISOString();
   w.status='out';w.checkout=now.toISOString();
   await pauseWorkerTasks(w.id,now);
@@ -6627,7 +6627,7 @@ async function mgrStartTask(){
   if(!canProceed){_mgrBatch=[];renderMgrBatchQueue();saveLS();return;}
   const activeCurrent=S.activeTasks.filter(t=>t.workerId===empId&&!t.paused);
   if(activeCurrent.length>0){
-    const endTime=new Date();
+    const endTime=srvNow();
     const batches={};activeCurrent.forEach(t=>{const bid=t.batchId||t.id;if(!batches[bid])batches[bid]=[];batches[bid].push(t);});
     for(const bTasks of Object.values(batches)){
       if(bTasks.length>1)await closeBatchProportional(bTasks,endTime);
@@ -6635,7 +6635,7 @@ async function mgrStartTask(){
     }
   }
   const batchId=_mgrBatch.length>1?genBatchId():null;
-  const startTime=new Date();
+  const startTime=srvNow();
   for(const b of _mgrBatch){
     const newTask={id:String(Date.now())+Math.random().toString(36).slice(2,6),workerId:empId,workerName:w.name,dept:b.taskDept||w.dept,cust:b.cust,prod:b.prod,size:b.size,qty:b.qty,col:b.col,taskType:b.taskType,bc:b.raw,isTotal:b.isTotal||false,startTime,elapsed:0,accumulatedSec:0,prodStamp:b.prodStamp};
     const expM=await fetchExpected(b.cust,b.prod,empId,b.qty);
@@ -6685,7 +6685,7 @@ async function transferTask(taskId){
   if(partQty>0){
     // ── פיצול כמות: משימה חדשה לעובד הנבחר, המקורי נשאר עם היתרה (שני עובדים במקביל = עוזר) ──
     const splitId='sp'+Date.now().toString(36)+Math.random().toString(36).slice(2,5);
-    const newTask={...t,id:String(Date.now())+Math.random().toString(36).slice(2,6),workerId:newWorker.id,workerName:newWorker.name,dept:newWorker.dept,qty:partQty,startTime:new Date(),elapsed:0,accumulatedSec:0,splitId};
+    const newTask={...t,id:String(Date.now())+Math.random().toString(36).slice(2,6),workerId:newWorker.id,workerName:newWorker.name,dept:newWorker.dept,qty:partQty,startTime:srvNow(),elapsed:0,accumulatedSec:0,splitId};
     delete newTask.batchId;
     const expN=await fetchExpected(t.cust,t.prod,newWorker.id,partQty);
     if(expN?.ok&&expN.perStep?.[tt]!=null)newTask.expectedMin=expN.perStep[tt];else delete newTask.expectedMin;
@@ -6715,7 +6715,7 @@ async function transferTask(taskId){
 }
 async function mgrEndTask(taskId){
   const t=S.activeTasks.find(x=>x.id===taskId);if(!t)return;
-  const endTime=new Date();
+  const endTime=srvNow();
   // אם המשימה חלק מ-batch (עבדו במקביל) — סוגר את כל ה-batch יחד כדי שהזמן יתחלק נכון
   const group=t.batchId?S.activeTasks.filter(x=>x.batchId===t.batchId&&x.workerId===t.workerId):[t];
   await closeTasksBatchAware(group,endTime);
@@ -10226,6 +10226,10 @@ function doAppUpdate(){
 }
 let _appVerSize=null;
 let _appVerStale=false;
+// שעון שרת: offset מכותרת Date של checkVersion. חותמות זמן קריטיות (נוכחות/משימות) עוברות
+// דרך srvNow() כדי ששעון מכשיר שגוי (מוגדר ידני) לא יעוות היסטוריה ודוחות.
+let _clockOffsetMs=0;
+function srvNow(){return new Date(Date.now()+_clockOffsetMs);}
 function showUpdateBanner(){
   const b=document.getElementById('update-banner');if(!b)return;
   const T=typeof LANGS!=='undefined'&&typeof currentLang!=='undefined'?LANGS[currentLang]:{};
@@ -10238,6 +10242,8 @@ async function checkVersion(){
   try{
     const res=await fetch(location.pathname+'?t='+Date.now(),{cache:'no-store'});
     if(!res.ok)return _appVerStale;
+    // זמן שרת מכותרת Date — מתקן שעון מכשיר שגוי (עובד עם שעון ידני שמפגר). אפס בקשות נוספות.
+    try{const sd=res.headers.get('date');if(sd){const stMs=new Date(sd).getTime();if(stMs)_clockOffsetMs=stMs-Date.now();}}catch(e){}
     const text=await res.text();
     if(_appVerSize===null){_appVerSize=text.length;return false;}
     if(text.length!==_appVerSize){
