@@ -196,6 +196,7 @@ code{background:var(--bg2);border:0.5px solid var(--b);border-radius:4px;padding
     <div class="field"><label data-i18n="username">שם משתמש</label><input id="l-user" type="text" placeholder="שם משתמש" data-i18n-ph="username" autocomplete="username" oninput="onUserInput(this.value)"/></div>
     <div class="field" id="l-pass-wrap"><label data-i18n="password">סיסמה</label><input id="l-pass" type="password" placeholder="סיסמה" data-i18n-ph="password" autocomplete="current-password" onkeydown="if(event.key==='Enter')doLogin()"/></div>
     <div id="l-face-hint" style="display:none;text-align:center;font-size:13px;color:var(--green-txt);margin-bottom:8px">📷 זיהוי פנים — לחץ כניסה</div>
+    <div id="l-switch-user" style="display:none;text-align:center;margin-bottom:8px"><button class="btn" style="font-size:12px;padding:4px 10px" onclick="switchUser()">🔄 לא אתה? החלף משתמש</button></div>
     <button class="btn primary full" onclick="doLogin()" data-i18n="login_btn">כניסה</button>
     <div id="l-err" style="color:var(--red-txt);font-size:12px;text-align:center;margin-top:8px;min-height:18px"></div>
     <div id="emrg-box" class="hidden" style="margin-top:12px;border-top:0.5px solid var(--b);padding-top:12px;text-align:center">
@@ -3021,6 +3022,8 @@ function _loginErrMsg(code){
 // סיום כניסה מוצלחת — משותף לסיסמה/פנים/חירום
 function finishLogin(w,autoPunch){
   S.user=w;
+  // "זכור אותי": שם המשתמש נשמר במכשיר — בבוקר הבא ממולא מראש ולעובד-פנים הכניסה מתחילה לבד
+  try{if(w.user)localStorage.setItem('txops_last_user',w.user);}catch(e){}
   if(w.role!=='manager'){
     // עותקי עלויות ישנים לא נשארים במכשירי עובדים
     S.costs={workerRates:{},workerUnitRates:{},fixedDaily:0,fixedMonthly:0,workDaysMonth:22,fixedAnnual:0,workDaysYear:250,variableExpenses:[],workerTransport:{},workerInsurance:{},severancePct:8.33,holidayDays:4,giftsAnnual:0,tripAnnual:0,overheadBufferPct:10,costMonths:[],difficultyWeights:{1:1,2:1.5,3:2,4:2.5,5:3.5}};
@@ -3084,7 +3087,39 @@ function onUserInput(u){
   if(w)loadFaceModels(); // טעינה מוקדמת ברקע — שהמודלים יהיו מוכנים כשהעובד ילחץ כניסה
 }
 // טעינה מוקדמת בעליית הדף אם יש בכלל עובדים עם זיהוי פנים (מה-cache המקומי) — במקום להטעין כשהעובד כבר עומד מול המצלמה
-window.addEventListener('load',()=>{setTimeout(()=>{if((S.workers||[]).some(x=>x.faceAuth))loadFaceModels();},1500);});
+// + "זכור אותי": השם האחרון ממולא מראש; לעובד עם פנים רשומות הכניסה מתחילה לבד (אפס הקלדה)
+window.addEventListener('load',()=>{setTimeout(()=>{
+  if((S.workers||[]).some(x=>x.faceAuth))loadFaceModels();
+  const lu=localStorage.getItem('txops_last_user')||'';
+  const inp=document.getElementById('l-user');
+  if(lu&&!S.user&&inp&&!inp.value.trim()){
+    inp.value=lu;
+    onUserInput(lu);
+    document.getElementById('l-switch-user').style.display='';
+    _autoFaceLogin(lu);
+  }
+},1500);});
+function switchUser(){
+  try{localStorage.removeItem('txops_last_user');}catch(e){}
+  document.getElementById('l-user').value='';
+  document.getElementById('l-pass').value='';
+  onUserInput('');
+  document.getElementById('l-switch-user').style.display='none';
+  document.getElementById('l-err').textContent='';
+}
+// כניסה אוטומטית רק כשהשם השמור שייך לעובד עם פנים רשומות (לפי ה-cache) — מחכה לחיבור לשרת ואז doLogin.
+// בטוח מהבית: השרת ממילא אוכף Wi-Fi מפעל/חלון גישה לעובדים; כשל בבדיקות = נשאר מסך כניסה רגיל.
+function _autoFaceLogin(u){
+  const w=S.workers.find(x=>x.user===u&&x.faceAuth&&(x.faceRegistered||x.faceDescriptor||x.faceDescriptors&&Object.keys(x.faceDescriptors).length));
+  if(!w)return;
+  let tries=0;
+  const t=setInterval(()=>{
+    const ls=document.getElementById('login-screen');
+    if(S.user||!ls||ls.classList.contains('hidden')){clearInterval(t);return;}
+    if(S.fbConnected&&window._fbFunctions){clearInterval(t);doLogin();}
+    else if(++tries>20)clearInterval(t); // ~10 שנ' בלי חיבור — ממשיכים ידנית כרגיל
+  },500);
+}
 async function doLogin(){
   if(loginLocked){document.getElementById('l-err').textContent='חשבון נעול ל-30 שניות עקב ניסיונות כושלים';return;}
   if(await checkVersion()){document.getElementById('l-err').textContent='🔄 יש גרסה חדשה — לחץ "עדכן עכשיו" למעלה ונסה שוב';return;}
@@ -3266,6 +3301,9 @@ function doLogout(){
   document.getElementById('l-user').value='';
   document.getElementById('l-pass').value='';
   document.getElementById('l-err').textContent='';
+  // השם הזכור נשאר ממולא גם אחרי התנתקות — בלי כניסה אוטומטית (התנתקות = בחירה מפורשת לצאת)
+  const _lu=localStorage.getItem('txops_last_user')||'';
+  if(_lu){document.getElementById('l-user').value=_lu;onUserInput(_lu);document.getElementById('l-switch-user').style.display='';}
 }
 
 
