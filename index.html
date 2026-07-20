@@ -6139,13 +6139,23 @@ function renderWorkerBarcodes(){
       <div style="font-size:10px;color:var(--txt3);font-family:monospace;margin-top:3px">EMP:${w.id}</div>
     </div>`).join('')}
   </div>
-  <button class="btn" style="font-size:13px" onclick="printWorkerBarcodes()">🖨️ הדפס ברקודים</button>`;
+  <div style="display:flex;gap:8px;flex-wrap:wrap">
+    <button class="btn" style="font-size:13px" onclick="printWorkerBarcodes()">🖨️ הדפס ברקודים</button>
+    <button class="btn" style="font-size:13px;border-color:var(--amber-txt);color:var(--amber-txt)" title="רשת 105×56 מ&quot;מ (TW-2510), 10 מדבקות בדף A4 — אותן מדבקות של ברקודי המשימות" onclick="printWorkerBarcodes('labels')">🏷️ הדפס למדבקות</button>
+    <button class="btn success" style="font-size:13px" title="קובץ PDF מדויק A4 (105×56 מ&quot;מ) — להדפסה מהנייד בגודל נכון" onclick="workerBcDownloadPDF()">📄 הורד PDF מדבקות</button>
+  </div>`;
   workers.forEach(w=>{
     const el=document.getElementById('worker-qr-'+w.id);
     if(el&&window.QRCode){new QRCode(el,{text:'EMP:'+w.id,width:120,height:120,correctLevel:QRCode.CorrectLevel.M});}
   });
 }
-function printWorkerBarcodes(){
+// roleName — אותו ניסוח בכל נתיבי ההדפסה של ברקודי העובדים
+function _wbRole(w){return w.role==='supervisor'?'אחראי':w.role==='helper'?'עוזר':'עובד';}
+// mode==='labels' — רשת TW-2510 (105×56 מ"מ, 10 בדף A4), אותן מדבקות של ברקודי המשימות.
+// מבנה הכרטיס ומחלקות ה-CSS זהים ל-bcPrint('labels') בכוונה, כדי שהמדבקה תיפול
+// בדיוק באותו מקום פיזי שהמדפסת כבר מכוילת אליו.
+function printWorkerBarcodes(mode){
+  const labels=mode==='labels';
   const workers=S.workers.filter(w=>w.role!=='manager');
   if(!workers.length){alert('אין עובדים');return;}
   if(!window.QRCode){alert('ספריית QR לא נטענה');return;}
@@ -6156,7 +6166,9 @@ function printWorkerBarcodes(){
   const divs=workers.map(w=>{
     const d=document.createElement('div');
     tmpWrap.appendChild(d);
-    new QRCode(d,{text:'EMP:'+w.id,width:130,height:130,correctLevel:QRCode.CorrectLevel.M});
+    // במצב מדבקות ה-QR נמתח ל-32 מ"מ (~378px ב-300dpi) — מקור 130px היה מטושטש ונסרק גרוע
+    const qpx=labels?400:130;
+    new QRCode(d,{text:'EMP:'+w.id,width:qpx,height:qpx,correctLevel:QRCode.CorrectLevel.M});
     return d;
   });
   // המתן שה-QR יסיים לצייר (canvas/img נוצרים סינכרונית בספרייה זו, אבל img.src טוען async)
@@ -6164,9 +6176,31 @@ function printWorkerBarcodes(){
     const items=workers.map((w,i)=>{
       const canvas=divs[i].querySelector('canvas');
       const src=canvas?canvas.toDataURL('image/png'):'';
-      return {name:w.name,dept:w.dept||'',role:w.role==='supervisor'?'אחראי':w.role==='helper'?'עוזר':'עובד',id:w.id,src};
+      return {name:w.name,dept:w.dept||'',role:_wbRole(w),id:w.id,src};
     });
     document.body.removeChild(tmpWrap);
+    if(labels){
+      // אותו CSS בדיוק כמו bcPrint('labels') — QR ממורכז 32 מ"מ, טקסט בעמודה מימין
+      const body=`<div class="grid">${items.map(w=>`<div class="bc-card">
+        <div>${w.src?`<img src="${w.src}"/>`:''}</div>
+        <div>
+          <div style="font-size:15px;font-weight:800;color:#000">${w.name}</div>
+          <div style="font-size:11px;color:#555">${w.dept}</div>
+          <div style="font-size:11px;color:#555">${w.role}</div>
+        </div>
+      </div>`).join('')}</div>`;
+      printViaIframe(`<!DOCTYPE html><html dir="rtl"><head><meta charset="UTF-8"><title>מדבקות עובדים</title>
+      <style>
+        body{margin:0;font-family:Arial,sans-serif;background:#fff}
+        .grid{display:grid!important;grid-template-columns:repeat(2,105mm)!important;gap:0!important;padding:0!important}
+        .bc-card{width:105mm!important;height:56mm!important;box-sizing:border-box!important;padding:0!important;border:none!important;border-radius:0!important;overflow:hidden!important;display:block!important;position:relative!important}
+        .bc-card>div:first-child{position:absolute!important;left:50%!important;top:50%!important;transform:translate(-50%,-50%)!important;width:32mm!important;height:32mm!important;overflow:hidden!important}
+        .bc-card img{width:32mm!important;height:32mm!important}
+        .bc-card>div:last-child{position:absolute!important;right:5mm!important;top:50%!important;transform:translateY(-50%)!important;width:29mm!important;text-align:right!important;line-height:1.8!important}
+        @media print{@page{size:A4 portrait;margin:8.5mm 0}}
+      </style></head><body>${body}</body></html>`);
+      return;
+    }
     printViaIframe(`<!DOCTYPE html><html dir="rtl"><head><meta charset="UTF-8"><title>ברקודים עובדים</title>
     <style>
       *{box-sizing:border-box;margin:0;padding:0}
@@ -6188,6 +6222,29 @@ function printWorkerBarcodes(){
     </div>
     </body></html>`);
   },300);
+}
+// ─── PDF מדבקות עובדים (A4 מדויק, 105×56 מ"מ) ───
+// אותו מנוע של מדבקות המשימות (_bcPdfCell) — להדפסה מהנייד, שם AirPrint מכווץ HTML
+function workerBcDownloadPDF(){
+  const workers=S.workers.filter(w=>w.role!=='manager');
+  if(!workers.length){alert('אין עובדים');return;}
+  const J=window.jspdf&&window.jspdf.jsPDF;
+  if(!J){alert('ספריית PDF עדיין נטענת — נסה שוב עוד רגע');return;}
+  if(!window.QRCode){alert('ספריית QR לא נטענה');return;}
+  const cards=workers.map(w=>({qr:'EMP:'+w.id,lines:[
+    {t:w.name,mm:5,bold:true,color:'#000'},
+    {t:w.dept||'',mm:3.4,bold:false,color:'#555'},
+    {t:_wbRole(w),mm:3.4,bold:false,color:'#555'}]}));
+  const doc=new J({unit:'mm',format:'a4',orientation:'portrait'});
+  const CW=105,CH=56,TOP=(297-5*CH)/2; // 8.5 מ"מ שוליים עליון/תחתון, 0 בצדדים
+  cards.forEach((card,i)=>{
+    const pos=i%10;
+    if(i>0&&pos===0)doc.addPage();
+    const row=Math.floor(pos/2),col=pos%2;
+    const x=col===0?CW:0; // RTL: הכרטיס הראשון בצד ימין
+    doc.addImage(_bcPdfCell(card).toDataURL('image/png'),'PNG',x,TOP+row*CH,CW,CH);
+  });
+  doc.save('מדבקות_עובדים.pdf');
 }
 // ─── תחנות עבודה פיזיות (QR STN:{id}) — שיוך עובד↔תחנה למצלמות DVR ─────
 function stationById(id){return (S.workStations||[]).find(s=>s.id===id);}
