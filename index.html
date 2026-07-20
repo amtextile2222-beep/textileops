@@ -4911,6 +4911,8 @@ async function buildRep(){
     const stStr=pad2(st.getHours())+':'+pad2(st.getMinutes());
     const et=t.endTime?new Date(t.endTime):null;
     const etStr=et?pad2(et.getHours())+':'+pad2(et.getMinutes()):'—';
+    const expSec=(+t.expectedMin>0)?(+t.expectedMin)*60:0;
+    const over=expSec>0&&(t.done?(t.duration||0):(t.elapsed||0))>expSec;
     return`<tr><td>${esc(t.workerName)}</td><td>${esc(t.dept)}</td>
     <td>${esc(t.taskType||'—')}</td>
     <td><span class="bc-seg bc-c">${t.cust}</span></td>
@@ -4918,7 +4920,7 @@ async function buildRep(){
     <td>${t.size?`<span class="bc-seg bc-s">${t.size}</span>`:'—'}</td>
     <td>${t.qty}</td><td>${COLORS[t.col]||t.col}</td>
     <td>${stStr}</td><td>${etStr}</td>
-    <td>${t.done?fmtM(t.duration||0):'<span class="badge amber">'+fmtS(t.elapsed||0)+'</span>'}</td>
+    <td>${t.done?`<span class="badge ${over?'red':'blue'}"${over?` title="חריגה מהצפי (${fmtM(expSec)})"`:''}>${over?'⚠ ':''}${fmtM(t.duration||0)}</span>`:`<span class="badge ${over?'red':'amber'}"${over?` title="חריגה מהצפי (${fmtM(expSec)})"`:''}>${over?'⚠ ':''}${fmtS(t.elapsed||0)}</span>`}</td>
     <td><span class="badge ${t.done?'green':'blue'}">${t.done?T.completed:T.active}</span></td></tr>`;
   }).join('');
   // update filters
