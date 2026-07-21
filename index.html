@@ -1328,11 +1328,11 @@ code{background:var(--bg2);border:0.5px solid var(--b);border-radius:4px;padding
 <!-- FIREBASE SDK -->
 <script type="module">
 import{initializeApp}from'https://www.gstatic.com/firebasejs/10.12.0/firebase-app.js';
-import{getFirestore,collection,doc,getDoc,getDocs,setDoc,onSnapshot,query,where,orderBy,limit,serverTimestamp,deleteDoc,updateDoc,addDoc,runTransaction}from'https://www.gstatic.com/firebasejs/10.12.0/firebase-firestore.js';
+import{getFirestore,collection,doc,getDoc,getDocs,getDocsFromServer,setDoc,onSnapshot,query,where,orderBy,limit,serverTimestamp,deleteDoc,updateDoc,addDoc,runTransaction}from'https://www.gstatic.com/firebasejs/10.12.0/firebase-firestore.js';
 import{getAuth,signInAnonymously,signInWithCustomToken,onAuthStateChanged}from'https://www.gstatic.com/firebasejs/10.12.0/firebase-auth.js';
 import{getMessaging,getToken,onMessage}from'https://www.gstatic.com/firebasejs/10.12.0/firebase-messaging.js';
 import{getFunctions,httpsCallable}from'https://www.gstatic.com/firebasejs/10.12.0/firebase-functions.js';
-window._fb={initializeApp,getFirestore,collection,doc,getDoc,getDocs,setDoc,onSnapshot,query,where,orderBy,limit,serverTimestamp,deleteDoc,updateDoc,addDoc,runTransaction,getAuth,signInAnonymously,signInWithCustomToken,onAuthStateChanged,getMessaging,getToken,onMessage,getFunctions,httpsCallable};
+window._fb={initializeApp,getFirestore,collection,doc,getDoc,getDocs,getDocsFromServer,setDoc,onSnapshot,query,where,orderBy,limit,serverTimestamp,deleteDoc,updateDoc,addDoc,runTransaction,getAuth,signInAnonymously,signInWithCustomToken,onAuthStateChanged,getMessaging,getToken,onMessage,getFunctions,httpsCallable};
 window._fbReady=true;
 document.dispatchEvent(new Event('fbSDKReady'));
 </script>
@@ -3875,6 +3875,62 @@ function stepAlreadyTaken(raw,taskType,stamp){
   if(S.histTasks.some(t=>same(t)&&(t.prodStamp==null||t.prodStamp===stamp)))return 'done';
   return '';
 }
+// ─── חסימת כפילות חוצת-מכשירים ────────────────────────────────
+// כל הבדיקות שמעל קוראות את S.activeTasks — עותק *פר-מכשיר*. שני מכשירים שפותחים
+// את אותה משימה בהפרש שניות לא רואים זה את זה, ומזהה המסמך אקראי (Date.now+random)
+// ⇒ גם שתי הכתיבות ל-Firestore לא מתנגשות. נצפה חי 21/07: هنيه · 0114695105514 ·
+// تركيب عيبود נפתחה פעמיים בהפרש 4.2 שנ' (offset שעון +801ms מול +7ms = שני מכשירים).
+// שכבה 1 — קריאת שרת טרייה לפני הפתיחה: סוגרת בעירות cache של שניות.
+// שכבה 2 — טרנזקציה על taskGuards במזהה דטרמיניסטי: אטומית גם למרוץ מילישניות.
+// חלון חסד לשומר שנתפס אך מסמך המשימה שלו טרם נכתב (ראה claimTaskGuard).
+// גדול בהרבה מסטיית שעון שנמדדה בין מכשירים (~0.8 שנ'), וקצר מכדי לתקוע עובד.
+const GUARD_GRACE_MS=20000;
+function _dupHash(s){let h=5381;for(let i=0;i<s.length;i++)h=((h*33)^s.charCodeAt(i))>>>0;return h.toString(36);}
+// מזהה מסמך חוקי תמיד (שם שלב בערבית עלול להכיל '/' שאסור במזהה Firestore)
+function taskGuardKey(workerId,bc,taskType,stamp){
+  return 'g'+_dupHash(String(workerId)+'|'+String(bc)+'|'+String(taskType||'')+'|'+String(stamp||0));
+}
+// המשימות הפעילות של העובד ישירות מהשרת (לא מה-cache). כשל רשת ⇒ null = לא חוסמים.
+async function serverActiveTasks(workerId){
+  if(!db||!S.fbConnected)return null;
+  try{
+    const{collection,query,where,getDocsFromServer}=window._fb;
+    const snap=await getDocsFromServer(query(collection(db,'activeTasks'),where('workerId','==',workerId)));
+    return snap.docs.map(d=>({...d.data(),id:d.id}));
+  }catch(e){return null;} // fail-open: תקלת רשת לא תעצור עבודה במפעל
+}
+function findDupIn(list,bc,taskType){
+  if(!list)return null;
+  const tt=String(taskType||'');
+  return list.find(t=>!t.paused&&String(taskBc(t))===String(bc)&&String(t.taskType||'')===tt)||null;
+}
+// "תופס" את הצמד עובד+ברקוד+שלב בטרנזקציה. מחזיר {ok:false} רק כשקיימת משימה חיה ולא מושהית.
+// אין סכנת "נעילה תקועה": השומר תקף רק כל עוד המשימה שהוא מצביע עליה קיימת —
+// ברגע שהיא נסגרת/נמחקת הוא מיושן ונדרס מאליו, ולכן גם אין צורך לנקות שומרים.
+async function claimTaskGuard(task){
+  if(!db||!S.fbConnected)return{ok:true};
+  const{doc,runTransaction}=window._fb;
+  const key=taskGuardKey(task.workerId,task.bc,task.taskType,task.prodStamp);
+  try{
+    await runTransaction(db,async tx=>{
+      const gRef=doc(db,'taskGuards',key);
+      const g=await tx.get(gRef); // כל הקריאות לפני הכתיבה — דרישת Firestore
+      const prevId=g.exists()?g.data().taskId:null;
+      if(prevId&&String(prevId)!==String(task.id)){
+        const prev=await tx.get(doc(db,'activeTasks',String(prevId)));
+        // מסמך המשימה נכתב *אחרי* תפיסת השומר. בלי חלון החסד הזה, מרוץ אמיתי של
+        // מילישניות היה רואה שומר טרי בלי משימה מאחוריו, פוסל אותו כמיושן ומכניס כפילות.
+        const fresh=Date.now()-(+g.data().at||0)<GUARD_GRACE_MS;
+        if(prev.exists()?!prev.data().paused:fresh){const e=new Error('dup-active');e.code='dup-active';throw e;}
+      }
+      tx.set(gRef,{taskId:task.id,workerId:task.workerId,bc:task.bc,taskType:task.taskType||'',prodStamp:task.prodStamp||0,at:Date.now()});
+    });
+    return{ok:true};
+  }catch(e){
+    if(e&&e.code==='dup-active')return{ok:false};
+    return{ok:true}; // כל תקלה אחרת (רשת/הרשאה) — fail-open, כמו שאר המערכת
+  }
+}
 // ─── התנגשות "כל הכמות" מול מידה בודדת, לאותו שלב ────────────
 // ברקוד "כל הכמות" (size='9', col='00') מייצג את *כל* יחידות ההזמנה לשלב. סריקת מידה בודדת
 // לאותו שלב סופרת שוב יחידות שכבר נכללות בו — וגם ההפך. chk: stepAlreadyTaken חוסם רק ברקוד
@@ -3987,13 +4043,16 @@ async function bcStartBatch(){
     const bcBatchId=items.length>1?genBatchId():null; // כמה משימות יחד = קבוצה אחת (טיימר משותף + מסגרת אחת)
     const bcStart=srvNow();
     const dupSkip=[];let created=0;
+    const srvActive=await serverActiveTasks(u.id); // קריאה אחת לכל הסל, לא לכל פריט
     for(const b of items){
       // חסימה חוזרת ברגע הפתיחה (לא רק בהוספה לסל): סוגר מרוץ של סריקה כפולה מהירה —
       // סריקה שנייה שעברה את בדיקת הסל לפני שהמשימה הראשונה נוצרה. אותו עובד+ברקוד+שלב פעיל = דילוג.
       if(S.activeTasks.some(x=>x.workerId===u.id&&taskBc(x)===b.raw&&(x.taskType||'')===(b.taskType||'')&&!x.paused)){dupSkip.push((b.taskType||b.prod)+' — '+(T.scan_dup_active||'פעיל כעת'));continue;}
+      if(findDupIn(srvActive,b.raw,b.taskType)){dupSkip.push((b.taskType||b.prod)+' — '+(T.scan_dup_active||'פעיל כעת'));continue;}
       const newTask={id:String(Date.now())+Math.random().toString(36).slice(2,6),workerId:u.id,workerName:u.name,dept:b.taskDept||u.dept,cust:b.cust,prod:b.prod,size:b.size,qty:b.qty,col:b.col,taskType:b.taskType,bc:b.raw,isTotal:b.isTotal||false,startTime:bcStart,elapsed:0,prodStamp:b.prodStamp};
       if(bcBatchId)newTask.batchId=bcBatchId;
       if(b.expMin!=null)newTask.expectedMin=b.expMin;
+      if(!(await claimTaskGuard(newTask)).ok){dupSkip.push((b.taskType||b.prod)+' — '+(T.scan_dup_active||'פעיל כעת'));continue;}
       S.activeTasks.unshift(newTask);created++;
       if(S.fbConnected)await fbSet('activeTasks',newTask.id,{...newTask,startTime:bcStart.toISOString()});
       tgTask(newTask,true);
@@ -6569,20 +6628,25 @@ async function tsStartTask(){
     const batchId=_tsBatch.length>1?genBatchId():null;
     const startTime=srvNow();
     let created=0;
+    const tsDupSkip=[];
+    const tsSrvActive=await serverActiveTasks(w.id); // קריאה אחת לכל הסל, לא לכל פריט
     for(const b of _tsBatch){
       // חסימה חוזרת ברגע הפתיחה — סוגר מרוץ של פתיחה כפולה של אותה משימה (עובד+ברקוד+שלב פעיל)
       if(S.activeTasks.some(x=>x.workerId===w.id&&taskBc(x)===b.raw&&(x.taskType||'')===(b.taskType||'')&&!x.paused))continue;
+      if(findDupIn(tsSrvActive,b.raw,b.taskType)){tsDupSkip.push((b.taskType||b.prod)+' — '+(T.scan_dup_active||'פעיל כעת'));continue;}
       const task={id:String(Date.now())+Math.random().toString(36).slice(2,6),workerId:w.id,workerName:w.name,dept:b.taskDept||w.dept,cust:b.cust,prod:b.prod,size:b.size,qty:b.qty,col:b.col,taskType:b.taskType,bc:b.raw,isTotal:b.isTotal||false,startTime,elapsed:0,accumulatedSec:0,prodStamp:b.prodStamp};
       const exp=await fetchExpected(b.cust,b.prod,w.id,b.qty);
       if(exp?.ok&&exp.perStep?.[b.taskType]!=null)task.expectedMin=exp.perStep[b.taskType];
       if(batchId)task.batchId=batchId;
+      if(!(await claimTaskGuard(task)).ok){tsDupSkip.push((b.taskType||b.prod)+' — '+(T.scan_dup_active||'פעיל כעת'));continue;}
       S.activeTasks.push(task);created++;
       if(S.fbConnected)await fbSet('activeTasks',String(task.id),{...task,startTime:task.startTime.toISOString()});
       tgTask(task,true);
       if(w.pushPrefs?.task_assigned!==false)sendPushToWorker(w.id,'📋 משימה חדשה',`${task.prod}${task.taskType?' · '+task.taskType:''} · ${task.qty} יח'`).catch(()=>{});
       await autoStampStage(b.cust,b.prod,b.taskDept||w.dept); // עדכון אוטומטי של שלב הייצור
     }
-    showToast('✅ '+created+' משימות התחילו עבור '+w.name);
+    if(tsDupSkip.length)showToast((T.scan_not_added||'לא נוסף')+' '+tsDupSkip.join(' · '),'var(--red-txt)',7000);
+    if(created>0)showToast('✅ '+created+' משימות התחילו עבור '+w.name);
     // מדיניות רכה: התחלת משימה בלי שיוך תחנה — תזכורת בלבד, לא חסימה
     if(!w.currentStation&&(S.workStations||[]).length)setTimeout(()=>showToast(T.st_reminder||'📍 תזכורת: סרוק ברקוד תחנה כדי לשייך אותך לעמדה','var(--amber-txt)',5000),1800);
     _tsBatch=[];renderTsBatchQueue();
@@ -6867,17 +6931,24 @@ async function mgrStartTask(){
   }
   const batchId=_mgrBatch.length>1?genBatchId():null;
   const startTime=srvNow();
+  const mgrDupSkip=[];let mgrCreated=0;
+  const mgrSrvActive=await serverActiveTasks(empId); // קריאה אחת לכל הסל, לא לכל פריט
   for(const b of _mgrBatch){
+    // המסלול הזה סוגר קודם את המשימות הפעילות שב-cache המקומי — אבל משימה שנפתחה
+    // ממכשיר אחר לא נמצאת שם כלל, ולכן לא נסגרה ולא נחסמה. כאן היא נתפסת.
+    if(findDupIn(mgrSrvActive,b.raw,b.taskType)){mgrDupSkip.push((b.taskType||b.prod)+' — '+(T.scan_dup_active||'פעיל כעת'));continue;}
     const newTask={id:String(Date.now())+Math.random().toString(36).slice(2,6),workerId:empId,workerName:w.name,dept:b.taskDept||w.dept,cust:b.cust,prod:b.prod,size:b.size,qty:b.qty,col:b.col,taskType:b.taskType,bc:b.raw,isTotal:b.isTotal||false,startTime,elapsed:0,accumulatedSec:0,prodStamp:b.prodStamp};
     const expM=await fetchExpected(b.cust,b.prod,empId,b.qty);
     if(expM?.ok&&expM.perStep?.[b.taskType]!=null)newTask.expectedMin=expM.perStep[b.taskType];
     if(batchId)newTask.batchId=batchId;
-    S.activeTasks.unshift(newTask);
+    if(!(await claimTaskGuard(newTask)).ok){mgrDupSkip.push((b.taskType||b.prod)+' — '+(T.scan_dup_active||'פעיל כעת'));continue;}
+    S.activeTasks.unshift(newTask);mgrCreated++;
     if(S.fbConnected)await fbSet('activeTasks',newTask.id,{...newTask,startTime:newTask.startTime.toISOString()});
     tgTask(newTask,true);
     await autoStampStage(b.cust,b.prod,b.taskDept||w.dept); // עדכון אוטומטי של שלב הייצור
   }
-  showToast('✅ '+_mgrBatch.length+' משימות התחילו עבור '+w.name);
+  if(mgrDupSkip.length)showToast((T.scan_not_added||'לא נוסף')+' '+mgrDupSkip.join(' · '),'var(--red-txt)',7000);
+  if(mgrCreated>0)showToast('✅ '+mgrCreated+' משימות התחילו עבור '+w.name);
   _mgrBatch=[];renderMgrBatchQueue();
   document.getElementById('mgr-bc-inp').value='';parseMgrBc('');
   document.getElementById('mgr-tasktype').value='';document.getElementById('mgr-dept').value='';
