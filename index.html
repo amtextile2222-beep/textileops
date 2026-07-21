@@ -1347,6 +1347,7 @@ const LANGS={
     scan_dup_done:'כבר בוצע',
     scan_dup_total:'כבר נסרק "כל הכמות" לשלב הזה',
     scan_dup_sizes:'כבר נסרקו מידות לשלב הזה — "כל הכמות" ייצור כפילות',
+    busy_wait:'⏳ כבר מתחיל — רגע, אל תלחץ שוב',
     scan_not_added:'⛔ לא נוסף:',
     scan_added_cart:'➕ נוסף לסל',
     scan_cam_all:'סרוק עובד / תחנה / משימה',
@@ -1573,6 +1574,7 @@ const LANGS={
     scan_dup_done:'تم تنفيذه مسبقاً',
     scan_dup_total:'تم مسح "كل الكمية" لهذه المرحلة مسبقاً',
     scan_dup_sizes:'تم مسح مقاسات لهذه المرحلة — "كل الكمية" سيُكرّر العدّ',
+    busy_wait:'⏳ جارٍ البدء — لحظة، لا تضغط مرة أخرى',
     scan_not_added:'⛔ لم تتم الإضافة:',
     scan_added_cart:'➕ أُضيف إلى السلة',
     scan_cam_all:'امسح عامل / محطة / مهمة',
@@ -1799,6 +1801,7 @@ const LANGS={
     scan_dup_done:'Already done',
     scan_dup_total:'"All quantity" already scanned for this step',
     scan_dup_sizes:'Sizes already scanned for this step — "all quantity" would double-count',
+    busy_wait:'⏳ Already starting — one moment, don\'t press again',
     scan_not_added:'⛔ Not added:',
     scan_added_cart:'➕ Added to cart',
     scan_cam_all:'Scan worker / station / task',
@@ -3931,6 +3934,32 @@ async function claimTaskGuard(task){
     return{ok:true}; // כל תקלה אחרת (רשת/הרשאה) — fail-open, כמו שאר המערכת
   }
 }
+// ─── נעילת ריצה כפולה (re-entrancy) ───────────────────────────
+// הכפתורים קוראים ישירות לפונקציות async, והשורה הראשונה בהן היא checkVersion()
+// שמוריד את כל הדף (~665KB). על Wi-Fi איטי זה נתקע שניות *בלי שום חיווי* — אין
+// ספינר ואין כפתור מושבת — המשתמש מסיק שהלחיצה לא נקלטה ולוחץ שוב, ושתי הריצות
+// עוברות את בדיקת הכפילות לפני שאחת מהן הספיקה ליצור משימה.
+// נצפה חי 21/07: האחראי פתח ל-هنيه את אותה משימה פעמיים מסורק המשימות (הפרש 4.2 שנ').
+// claimTaskGuard תופס את זה בשרת, אבל כאן זה נחסם במקור — בלי round-trip מיותר.
+const _busyOps={};
+function _guardReentrant(fnName,key){
+  const orig=window[fnName];
+  if(typeof orig!=='function')return;
+  window[fnName]=async function(...a){
+    if(_busyOps[key]){ // הלחיצה השנייה: להגיד למשתמש שזה בעבודה, לא להתעלם בשקט
+      try{showToast(LANGS[currentLang].busy_wait||'⏳ כבר מתחיל — רגע','var(--amber-txt)',2500);}catch(e){}
+      return;
+    }
+    _busyOps[key]=true;
+    try{return await orig.apply(this,a);}
+    finally{delete _busyOps[key];}
+  };
+}
+// מפתח נפרד לכל מסלול: submitBc קורא ל-bcStartBatch, ומפתח משותף היה חוסם את הקריאה הפנימית
+_guardReentrant('tsStartTask','ts');
+_guardReentrant('mgrStartTask','mgr');
+_guardReentrant('submitBc','submitBc');
+_guardReentrant('bcStartBatch','bcStartBatch');
 // ─── התנגשות "כל הכמות" מול מידה בודדת, לאותו שלב ────────────
 // ברקוד "כל הכמות" (size='9', col='00') מייצג את *כל* יחידות ההזמנה לשלב. סריקת מידה בודדת
 // לאותו שלב סופרת שוב יחידות שכבר נכללות בו — וגם ההפך. chk: stepAlreadyTaken חוסם רק ברקוד
