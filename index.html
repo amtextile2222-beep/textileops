@@ -1441,6 +1441,7 @@ const LANGS={
     resume_new:'🆕 התחל חדשה',
     task_paused:'מושהית',
     tasks_paused_msg:'משימות הושהו',
+    tasks_resumed_msg:'משימות חודשו אוטומטית',
     dash_active:'עובדים פעילים',
     dash_tasks:'משימות פעילות',
     dash_done:'הושלמו היום',
@@ -1668,6 +1669,7 @@ const LANGS={
     resume_new:'🆕 بدء جديدة',
     task_paused:'معلقة',
     tasks_paused_msg:'مهام معلقة',
+    tasks_resumed_msg:'مهام استؤنفت تلقائيًا',
     dash_active:'العمال النشطون',
     dash_tasks:'المهام النشطة',
     dash_done:'أُنجز اليوم',
@@ -3683,6 +3685,8 @@ async function autoPunchIn(){
   try{if(S.fbConnected)await fbSet('workers',w.id,w);}catch(e){}
   if(w.requireFactoryIP&&S.fbConnected){try{const r=await fetch('https://api.ipify.org?format=json');const ip=(await r.json()).ip||'';await fbSet('workerWifi',w.id,{ip,lastSeen:Date.now(),name:w.name,dept:w.dept});}catch(e){}}
   tgPunch(w.name,w.dept,true,now,w.id);
+  const autoResumed=await resumeWorkerTasksOnPunchIn(w.id,now);
+  if(autoResumed)showToast('▶ '+autoResumed+' '+(LANGS[currentLang].tasks_resumed_msg||'משימות חודשו אוטומטית'),'var(--green-txt)',5000);
   try{renderAdmin();}catch(e){}
   try{renderAtt();}catch(e){}
 }
@@ -3717,9 +3721,11 @@ async function punchIn(){
   if(S.fbConnected)await fbSet('workers',w.id,w);
   if(w.requireFactoryIP&&S.fbConnected){try{const r=await fetch('https://api.ipify.org?format=json');const ip=(await r.json()).ip||'';await fbSet('workerWifi',w.id,{ip,lastSeen:Date.now(),name:w.name,dept:w.dept});}catch(e){}}
   tgPunch(w.name,w.dept,true,now,w.id);
+  const resumedCount=await resumeWorkerTasksOnPunchIn(w.id,now);
   saveLS();renderAtt();
   const rounded=now.getTime()!==nowRaw.getTime();
-  document.getElementById('att-msg').textContent='✅ כניסה '+(w.sessions.length>1?w.sessions.length+': ':'')+pad2(now.getHours())+':'+pad2(now.getMinutes())+(rounded?' (עוגל)':'');
+  const T2=LANGS[currentLang];
+  document.getElementById('att-msg').textContent='✅ כניסה '+(w.sessions.length>1?w.sessions.length+': ':'')+pad2(now.getHours())+':'+pad2(now.getMinutes())+(rounded?' (עוגל)':'')+(resumedCount?' | ▶ '+resumedCount+' '+(T2.tasks_resumed_msg||'משימות חודשו אוטומטית'):'');
 }
 async function punchOut(){
   if(!S.user)return;
@@ -4230,6 +4236,20 @@ async function pauseWorkerTasks(workerId,pausedAt){
     if(S.fbConnected)await fbSet('activeTasks',String(t.id),{...t,startTime:t.startTime instanceof Date?t.startTime.toISOString():t.startTime});
   }
   return tasks.length;
+}
+
+// חידוש אוטומטי של המשימות המושהות בחתימת כניסה — במקום לסרוק את הברקוד מחדש בבוקר.
+// עובד שלא הגיע: אין חתימת כניסה ⇒ המשימה נשארת מושהית (או שמנהל מעביר בכפתור 🔄).
+// אותה מכניקה כמו "📅 המשך" ב-handlePausedTasks: startTime מהכניסה, הנצבר נשמר ב-accumulatedSec.
+// ההשלמה נשארת דרך הזרימה הקיימת: סריקת המשימה הבאה סוגרת את הרצות (כולל המחודשות).
+async function resumeWorkerTasksOnPunchIn(workerId,now){
+  const paused=S.activeTasks.filter(t=>t.workerId===workerId&&t.paused);
+  for(const t of paused){
+    t.paused=false;t.pausedAt=null;t.startTime=now;
+    try{if(S.fbConnected)await fbSet('activeTasks',String(t.id),{...t,startTime:now.toISOString()});}catch(e){}
+  }
+  if(paused.length){saveLS();try{renderTasks();}catch(e){}}
+  return paused.length;
 }
 
 // בדיקת משימות מושהות כשפותחים משימה חדשה לעובד
@@ -6863,13 +6883,16 @@ async function mgrBulkPunchIn(){
   });
   if(!selected.length){alert('לא נבחרו עובדים');return;}
   const today=todayStr();
+  let bulkResumed=0;
   for(const w of selected){
     if(!w.sessions)w.sessions=[];
     const dt=new Date(today+'T'+pad2(hh)+':'+pad2(mm)+':00');
     w.sessions.push({in:dt.toISOString(),out:null});
     w.status='in';w.checkin=w.sessions[0].in;
     if(S.fbConnected)await fbSet('workers',w.id,w);
+    bulkResumed+=await resumeWorkerTasksOnPunchIn(w.id,dt);
   }
+  if(bulkResumed)showToast('▶ '+bulkResumed+' '+(LANGS[currentLang].tasks_resumed_msg||'משימות חודשו אוטומטית'),'var(--green-txt)',5000);
   saveLS();
   mgrBulkCancel();
   renderMgrTasks();renderAtt();
@@ -6883,6 +6906,8 @@ async function mgrPunchIn(wId){
   w.status='in';w.checkin=w.sessions[0].in;
   if(S.fbConnected)await fbSet('workers',w.id,w);
   tgPunch(w.name,w.dept,true,now,w.id);
+  const mgrResumed=await resumeWorkerTasksOnPunchIn(w.id,now);
+  if(mgrResumed)showToast('▶ '+mgrResumed+' '+(LANGS[currentLang].tasks_resumed_msg||'משימות חודשו אוטומטית'),'var(--green-txt)',5000);
   saveLS();renderMgrTasks();renderAtt();
 }
 async function mgrPunchOut(wId){
