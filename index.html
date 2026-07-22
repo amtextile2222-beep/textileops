@@ -10557,7 +10557,7 @@ function doAppUpdate(){
   const k=/[?&#]kiosk=1\b/.test(location.href)?'&kiosk=1':'';
   window.location.href=window.location.pathname+'?t='+Date.now()+k;
 }
-let _appVerSize=null;
+let _appVerTag=null;
 let _appVerStale=false;
 // שעון שרת: offset מכותרת Date של checkVersion. חותמות זמן קריטיות (נוכחות/משימות) עוברות
 // דרך srvNow() כדי ששעון מכשיר שגוי (מוגדר ידני) לא יעוות היסטוריה ודוחות.
@@ -10571,15 +10571,29 @@ function showUpdateBanner(){
   b.classList.remove('hidden');
 }
 // בודק אם יש גרסה חדשה בשרת. מחזיר true אם זוהתה גרסה ישנה (stale) בטאב הזה.
+// HEAD בלבד (~200 בייט) במקום הורדת כל index.html — ה-ETag של GitHub Pages הוא "mtime-size" (הקס).
+// ⚠️ ה-mtime שונה ב±1-2 שניות בין רפליקות ה-CDN (נצפה חי: a7 מול a8 לאותו deploy) — השוואת מחרוזת
+// תמימה תיצור באנר-שווא כשלקוח קופץ בין שרתים. לכן: גרסה חדשה רק אם ה-size השתנה או ה-mtime זז
+// ביותר מ-60 שנ' (deploys מרוחקים דקות; כך נתפס גם deploy נדיר ששומר בדיוק על אותו גודל קובץ).
+// W/ (weak ETag) נחתך — Fastly מוסיף אותו רק כשהתשובה דחוסה, אותו קובץ.
+function _verFingerprint(res){
+  const et=(res.headers.get('etag')||'').replace(/^W\//,'').replace(/"/g,'');
+  const m=et.match(/^([0-9a-f]+)-([0-9a-f]+)$/);
+  if(m)return{mt:parseInt(m[1],16),sz:m[2]};
+  if(et)return{mt:0,sz:et};
+  const cl=res.headers.get('content-length');
+  return cl?{mt:0,sz:'cl:'+cl}:null;
+}
 async function checkVersion(){
   try{
-    const res=await fetch(location.pathname+'?t='+Date.now(),{cache:'no-store'});
+    const res=await fetch(location.pathname+'?t='+Date.now(),{method:'HEAD',cache:'no-store'});
     if(!res.ok)return _appVerStale;
     // זמן שרת מכותרת Date — מתקן שעון מכשיר שגוי (עובד עם שעון ידני שמפגר). אפס בקשות נוספות.
     try{const sd=res.headers.get('date');if(sd){const stMs=new Date(sd).getTime();if(stMs)_clockOffsetMs=stMs-Date.now();}}catch(e){}
-    const text=await res.text();
-    if(_appVerSize===null){_appVerSize=text.length;return false;}
-    if(text.length!==_appVerSize){
+    const tag=_verFingerprint(res);
+    if(!tag)return _appVerStale;
+    if(_appVerTag===null){_appVerTag=tag;return false;}
+    if(tag.sz!==_appVerTag.sz||(tag.mt&&_appVerTag.mt&&Math.abs(tag.mt-_appVerTag.mt)>60)){
       _appVerStale=true;
       // מסך התצוגה = לוח קיר בלי מפעיל: באנר העדכון (z-index 200) מרונדר *מאחורי* ה-overlay
       // של הלוח (z-index 9999) ⇒ בלתי נראה, ואין בלוח כניסה/חתימה/סריקה שהחסימות היו תופסות.
