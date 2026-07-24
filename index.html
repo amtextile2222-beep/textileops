@@ -3930,7 +3930,8 @@ async function claimTaskGuard(task){
         // מסמך המשימה נכתב *אחרי* תפיסת השומר. בלי חלון החסד הזה, מרוץ אמיתי של
         // מילישניות היה רואה שומר טרי בלי משימה מאחוריו, פוסל אותו כמיושן ומכניס כפילות.
         const fresh=Date.now()-(+g.data().at||0)<GUARD_GRACE_MS;
-        if(prev.exists()?!prev.data().paused:fresh){const e=new Error('dup-active');e.code='dup-active';throw e;}
+        // שומר שהמשימה שלו הועברה לעובד אחר (transferTask) מיושן — העובד שבמפתח כבר לא הבעלים
+        if(prev.exists()?(!prev.data().paused&&String(prev.data().workerId)===String(task.workerId)):fresh){const e=new Error('dup-active');e.code='dup-active';throw e;}
       }
       tx.set(gRef,{taskId:task.id,workerId:task.workerId,bc:task.bc,taskType:task.taskType||'',prodStamp:task.prodStamp||0,at:Date.now()});
     });
@@ -7043,6 +7044,8 @@ async function transferTask(taskId){
     const splitId='sp'+Date.now().toString(36)+Math.random().toString(36).slice(2,5);
     const newTask={...t,id:String(Date.now())+Math.random().toString(36).slice(2,6),workerId:newWorker.id,workerName:newWorker.name,dept:newWorker.dept,qty:partQty,startTime:srvNow(),elapsed:0,accumulatedSec:0,splitId};
     delete newTask.batchId;
+    // לעובד היעד כבר יש משימה חיה על אותו ברקוד+שלב ⇒ הפיצול ייצור כפילות
+    if(!(await claimTaskGuard(newTask)).ok){showToast((tt||t.prod)+' — '+(T.scan_dup_active||'פעיל כעת'),'var(--red-txt)');return;}
     const expN=await fetchExpected(t.cust,t.prod,newWorker.id,partQty);
     if(expN?.ok&&expN.perStep?.[tt]!=null)newTask.expectedMin=expN.perStep[tt];else delete newTask.expectedMin;
     t.qty=totalQty-partQty;
@@ -7059,6 +7062,9 @@ async function transferTask(taskId){
     return;
   }
   // ── העברה מלאה (התנהגות קיימת) ──
+  // תפיסת שומר על צמד עובד-היעד+ברקוד+שלב לפני שינוי הבעלות; השומר הישן של העובד
+  // הקודם מתיישן מאליו (בדיקת workerId ב-claimTaskGuard)
+  if(!(await claimTaskGuard({...t,workerId:newWorker.id})).ok){showToast((tt||t.prod)+' — '+(T.scan_dup_active||'פעיל כעת'),'var(--red-txt)');return;}
   t.workerId=newWorker.id;
   t.workerName=newWorker.name;
   t.dept=newWorker.dept;
