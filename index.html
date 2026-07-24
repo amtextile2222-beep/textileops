@@ -1350,6 +1350,12 @@ const LANGS={
     st_unknown:'⚠ תחנה לא מוכרת',
     st_reminder:'📍 תזכורת: סרוק ברקוד תחנה כדי לשייך אותך לעמדה',
     st_sel_worker:'⚠ בחר עובד לפני סריקת תחנה',
+    sc_emp_ok:'✅ עובד זוהה: ',
+    sc_emp_next:'סרוק תחנה או משימה',
+    sc_emp_notfound:'⚠ עובד לא נמצא',
+    sc_st_next:'📍 תחנה שויכה — סרוק ברקוד משימה',
+    sc_scanned:'✅ נסרק: ',
+    sc_short:'⚠ קוד קצר מדי (צריך 13 ספרות): ',
     scan_cart:'🛒 סל',
     scan_barcodes:'ברקודים',
     bc_cart_q_title:'לצרף עוד משימות?',
@@ -1578,6 +1584,12 @@ const LANGS={
     st_unknown:'⚠ محطة غير معروفة',
     st_reminder:'📍 تذكير: امسح باركود المحطة لربطك بموقع العمل',
     st_sel_worker:'⚠ اختر عاملاً قبل مسح المحطة',
+    sc_emp_ok:'✅ تم التعرف على العامل: ',
+    sc_emp_next:'امسح محطة أو مهمة',
+    sc_emp_notfound:'⚠ العامل غير موجود',
+    sc_st_next:'📍 تم ربط المحطة — امسح باركود المهمة',
+    sc_scanned:'✅ تم المسح: ',
+    sc_short:'⚠ الرمز قصير جداً (يلزم 13 رقماً): ',
     scan_cart:'🛒 السلة',
     scan_barcodes:'باركود',
     bc_cart_q_title:'إضافة مهام أخرى؟',
@@ -1806,6 +1818,12 @@ const LANGS={
     st_unknown:'⚠ Unknown station',
     st_reminder:'📍 Reminder: scan a station barcode to link you to a workstation',
     st_sel_worker:'⚠ Select a worker before scanning a station',
+    sc_emp_ok:'✅ Worker: ',
+    sc_emp_next:'scan a station or task',
+    sc_emp_notfound:'⚠ Worker not found',
+    sc_st_next:'📍 Station assigned — scan task barcode',
+    sc_scanned:'✅ Scanned: ',
+    sc_short:'⚠ Code too short (13 digits needed): ',
     scan_cart:'🛒 Cart',
     scan_barcodes:'barcodes',
     bc_cart_q_title:'Add more tasks?',
@@ -6136,6 +6154,7 @@ async function mgrStartCam(){
   }
 }
 function mgrStartDecoding(video,status){
+  const T=LANGS[currentLang];
   const canvas=document.createElement('canvas');
   const ctx=canvas.getContext('2d');
   mgrCamInterval=setInterval(()=>{
@@ -6161,11 +6180,11 @@ function mgrStartDecoding(video,status){
           const bc=text.slice(0,13);
           document.getElementById('mgr-bc-inp').value=bc;
           parseMgrBc(bc);
-          status.textContent='✅ נסרק: '+bc;
+          status.textContent=(T.sc_scanned||'✅ נסרק: ')+bc;
           clearInterval(mgrCamInterval);
           setTimeout(()=>mgrStopCam(),600);
         } else if(text.length>0){
-          status.textContent='⚠ קוד קצר מדי: '+text+' (צריך 13 ספרות)';
+          status.textContent=(T.sc_short||'⚠ קוד קצר מדי (צריך 13 ספרות): ')+text;
         }
       }
     }catch(e){}
@@ -6210,13 +6229,13 @@ async function tsStartWorkerCam(){
           const w=S.workers.find(x=>x.id===empId);
           if(sel)sel.value=empId;
           if(w){
-            status.textContent='✅ עובד: '+w.name;
-            showToast('✅ עובד זוהה: '+w.name,'var(--green-txt)');
+            status.textContent=(T.sc_emp_ok||'✅ עובד זוהה: ')+w.name;
+            showToast((T.sc_emp_ok||'✅ עובד זוהה: ')+w.name,'var(--green-txt)');
             clearInterval(tsEmpCamInterval);
             setTimeout(()=>{tsStopWorkerCam();tsStartCam();},800);// עבור אוטומטית לסריקת מוצר
           }else{
-            status.textContent='⚠ עובד לא נמצא';
-            showToast('⚠ עובד לא נמצא','var(--red-txt)');
+            status.textContent=T.sc_emp_notfound||'⚠ עובד לא נמצא';
+            showToast(T.sc_emp_notfound||'⚠ עובד לא נמצא','var(--red-txt)');
             clearInterval(tsEmpCamInterval);setTimeout(()=>tsStopWorkerCam(),800);
           }
         }
@@ -6650,10 +6669,10 @@ async function tsStartCam(){
           const w=S.workers.find(x=>x.id===empId);
           if(w){
             if(sel&&!sel.disabled){sel.value=empId;renderStepRecs('ts');}
-            status.textContent='✅ עובד: '+w.name+' — סרוק תחנה או משימה';
-            showToast('✅ עובד זוהה: '+w.name,'var(--green-txt)');
+            status.textContent=(T.sc_emp_ok||'✅ עובד זוהה: ')+w.name+' — '+(T.sc_emp_next||'סרוק תחנה או משימה');
+            showToast((T.sc_emp_ok||'✅ עובד זוהה: ')+w.name,'var(--green-txt)');
           }else{
-            status.textContent='⚠ עובד לא נמצא';showToast('⚠ עובד לא נמצא','var(--red-txt)');
+            status.textContent=T.sc_emp_notfound||'⚠ עובד לא נמצא';showToast(T.sc_emp_notfound||'⚠ עובד לא נמצא','var(--red-txt)');
           }
           return;
         }
@@ -6662,7 +6681,7 @@ async function tsStartCam(){
           const _empId=document.getElementById('ts-emp-sel')?.value;
           if(_empId){
             assignWorkerStation(_empId,text.slice(4).trim());
-            status.textContent='📍 תחנה שויכה — סרוק ברקוד משימה';
+            status.textContent=T.sc_st_next||'📍 תחנה שויכה — סרוק ברקוד משימה';
           }else{
             status.textContent=T.st_sel_worker||'⚠ בחר עובד לפני סריקת תחנה';
             lastCode=''; // אפשר לנסות שוב מיד אחרי בחירת עובד
@@ -6673,7 +6692,7 @@ async function tsStartCam(){
         const digits=text.replace(/\D/g,'');
         if(/^\d{13}$/.test(digits)){
           document.getElementById('ts-bc-inp').value=digits;tsParseBc(digits);
-          status.textContent='✅ נסרק: '+digits;
+          status.textContent=(T.sc_scanned||'✅ נסרק: ')+digits;
           clearInterval(tsCamInterval);setTimeout(()=>tsStopCam(),600);
         }
       }catch(e){}
@@ -7999,6 +8018,7 @@ async function startCam(){
 }
 
 function startDecoding(video,status){
+  const T=LANGS[currentLang];
   const canvas=document.createElement('canvas');
   const ctx=canvas.getContext('2d');
   camInterval=setInterval(()=>{
@@ -8023,11 +8043,11 @@ function startDecoding(video,status){
           const bc=text.slice(0,13);
           document.getElementById('bc-inp').value=bc;
           parseBc(bc);
-          status.textContent='✅ נסרק: '+bc;
+          status.textContent=(T.sc_scanned||'✅ נסרק: ')+bc;
           clearInterval(camInterval);
           setTimeout(()=>{stopCam();submitBc();},600);
         } else if(text.length>0){
-          status.textContent='⚠ קוד קצר מדי: '+text+' (צריך 13 ספרות)';
+          status.textContent=(T.sc_short||'⚠ קוד קצר מדי (צריך 13 ספרות): ')+text;
         }
       }
     }catch(e){}
