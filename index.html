@@ -1230,13 +1230,8 @@ code{background:var(--bg2);border:0.5px solid var(--b);border-radius:4px;padding
     </div>
     <div class="card" style="margin-top:1rem">
       <div style="font-size:15px;font-weight:700;margin-bottom:10px">🏭 תחנות עבודה (מצלמות)</div>
-      <div style="font-size:12px;color:var(--txt3);margin-bottom:10px">עובד סורק את ברקוד התחנה כשהוא מתיישב בעמדה — התראת חריגה תציג את התחנה וערוץ המצלמה ב-DVR. סריקת תחנה חדשה סוגרת את הקודמת; חתימת יציאה סוגרת הכל</div>
-      <div style="display:flex;gap:8px;flex-wrap:wrap;align-items:flex-end;margin-bottom:10px">
-        <div class="field" style="margin:0;flex:2;min-width:130px"><label>שם תחנה</label><input id="stn-name" placeholder="מכונה 4 — תפירה" style="font-size:13px"/></div>
-        <div class="field" style="margin:0;flex:1;min-width:110px"><label>מחלקה</label><select id="stn-dept" style="font-size:13px"></select></div>
-        <div class="field" style="margin:0;width:90px"><label>ערוץ DVR</label><input id="stn-ch" inputmode="numeric" placeholder="3" style="font-size:13px"/></div>
-        <button class="btn primary" style="font-size:13px;padding:8px 14px" onclick="addWorkStation()">+ הוסף</button>
-      </div>
+      <div style="font-size:12px;color:var(--txt3);margin-bottom:10px">עובד סורק את ברקוד התחנה כשהוא מתיישב בעמדה — השיוך למחלקה ולתחנה נעשה אוטומטית ונרשם על המשימות. סריקת תחנה חדשה סוגרת את הקודמת; חתימת יציאה סוגרת הכל. הרשימה נלקחת מהמחלקות והתחנות שבלשונית <b>ניהול</b> — ערוץ DVR נקבע כאן (אותו ערוץ יכול לשמש כמה תחנות)</div>
+      <button class="btn" style="font-size:13px;margin-bottom:10px" onclick="syncStationsFromDepts()">🔄 סנכרן תחנות מלשונית הניהול</button>
       <div id="stn-list"></div>
       <button class="btn primary" style="width:100%;justify-content:center;font-size:14px;padding:10px;margin-top:10px" onclick="renderStationBarcodes()">🏭 צור ברקודי תחנות</button>
       <div id="station-bc-output" style="margin-top:1rem"></div>
@@ -4085,14 +4080,14 @@ async function bcStartBatch(){
       // סריקה שנייה שעברה את בדיקת הסל לפני שהמשימה הראשונה נוצרה. אותו עובד+ברקוד+שלב פעיל = דילוג.
       if(S.activeTasks.some(x=>x.workerId===u.id&&taskBc(x)===b.raw&&(x.taskType||'')===(b.taskType||'')&&!x.paused)){dupSkip.push((b.taskType||b.prod)+' — '+(T.scan_dup_active||'פעיל כעת'));continue;}
       if(findDupIn(srvActive,b.raw,b.taskType)){dupSkip.push((b.taskType||b.prod)+' — '+(T.scan_dup_active||'פעיל כעת'));continue;}
-      const newTask={id:String(Date.now())+Math.random().toString(36).slice(2,6),workerId:u.id,workerName:u.name,dept:b.taskDept||u.dept,cust:b.cust,prod:b.prod,size:b.size,qty:b.qty,col:b.col,taskType:b.taskType,bc:b.raw,isTotal:b.isTotal||false,startTime:bcStart,elapsed:0,prodStamp:b.prodStamp};
+      const newTask={id:String(Date.now())+Math.random().toString(36).slice(2,6),workerId:u.id,workerName:u.name,dept:b.taskDept||effDept(u),station:u.currentStation?.name||'',cust:b.cust,prod:b.prod,size:b.size,qty:b.qty,col:b.col,taskType:b.taskType,bc:b.raw,isTotal:b.isTotal||false,startTime:bcStart,elapsed:0,prodStamp:b.prodStamp};
       if(bcBatchId)newTask.batchId=bcBatchId;
       if(b.expMin!=null)newTask.expectedMin=b.expMin;
       if(!(await claimTaskGuard(newTask)).ok){dupSkip.push((b.taskType||b.prod)+' — '+(T.scan_dup_active||'פעיל כעת'));continue;}
       S.activeTasks.unshift(newTask);created++;
       if(S.fbConnected)await fbSet('activeTasks',newTask.id,{...newTask,startTime:bcStart.toISOString()});
       tgTask(newTask,true);
-      await autoStampStage(b.cust,b.prod,b.taskDept||u.dept); // עדכון אוטומטי של שלב הייצור
+      await autoStampStage(b.cust,b.prod,b.taskDept||effDept(u)); // עדכון אוטומטי של שלב הייצור
     }
     _bcBatch=[];renderBcBatchQueue();
     document.getElementById('bc-inp').value='';parseBc('');
@@ -4569,7 +4564,7 @@ async function submitBc(){
 function fillDeptSelects(){
   const selDept=LANGS[currentLang].sel_dept||'-- בחר מחלקה --';
   const opts=`<option value="">${selDept}</option>`+S.depts.map(d=>`<option value="${esc(d)}">${esc(d)}</option>`).join('');
-  ['bc-dept','mgr-dept','ts-dept','stn-dept'].forEach(id=>{const s=document.getElementById(id);if(s){const prev=s.value;s.innerHTML=opts;if(prev)s.value=prev;}});
+  ['bc-dept','mgr-dept','ts-dept'].forEach(id=>{const s=document.getElementById(id);if(s){const prev=s.value;s.innerHTML=opts;if(prev)s.value=prev;}});
 }
 // "מצטבר קודם" לברקוד — מבוסס על חלון החי (HIST_WINDOW_DAYS). לברקוד עם היסטוריה
 // ישנה מהחלון הסכום עלול להיות חלקי; זה מידע-עזר בלבד (לא חישוב שכר/דוח).
@@ -6357,6 +6352,8 @@ function workerBcDownloadPDF(){
 }
 // ─── תחנות עבודה פיזיות (QR STN:{id}) — שיוך עובד↔תחנה למצלמות DVR ─────
 function stationById(id){return (S.workStations||[]).find(s=>s.id===id);}
+// המחלקה האפקטיבית: תחנה סרוקה גוברת זמנית על מחלקת הבית (עד סריקה אחרת/יציאה)
+function effDept(w){return w?.currentStation?.dept||w?.dept||'';}
 async function assignWorkerStation(workerId,stationId){
   const T=LANGS[currentLang];
   const st=stationById(stationId);
@@ -6369,7 +6366,8 @@ async function assignWorkerStation(workerId,stationId){
     // סריקת תחנה חדשה סוגרת את השיוך הקודם
     if(w.stationLogId&&S.fbConnected){try{await fbSet('stationLog',w.stationLogId,{to:now});}catch(e){}}
     const logId=w.id+'_'+Date.now().toString(36);
-    w.currentStation={id:st.id,name:st.name,since:now};
+    // dept על השיוך: סריקת תחנה מחליפה זמנית את המחלקה (עד סריקה אחרת/יציאה)
+    w.currentStation={id:st.id,name:st.name,dept:st.dept||'',since:now};
     w.stationLogId=logId;
     if(S.fbConnected){
       await fbSet('stationLog',logId,{workerId:w.id,workerName:w.name,stationId:st.id,stationName:st.name,dept:st.dept||'',dvrChannel:st.dvrChannel||'',from:now,to:null});
@@ -6394,29 +6392,50 @@ async function closeWorkerStation(w,when){
 }
 function renderStationsAdmin(){
   const el=document.getElementById('stn-list');if(!el)return;
-  if(!(S.workStations||[]).length){el.innerHTML='<div style="color:var(--txt3);font-size:12px">אין תחנות מוגדרות</div>';return;}
+  if(!(S.workStations||[]).length){el.innerHTML='<div style="color:var(--txt3);font-size:12px">אין תחנות מוגדרות — לחץ "🔄 סנכרן תחנות מלשונית הניהול"</div>';return;}
   el.innerHTML=S.workStations.map(s=>`<div class="row" style="gap:8px">
     <div style="flex:1;min-width:0">
       <span style="font-size:13px;font-weight:600">${esc(s.name)}</span>
-      <span style="font-size:11px;color:var(--txt3)">${s.dept?' · '+esc(s.dept):''}${s.dvrChannel?' · 📹 ערוץ '+esc(String(s.dvrChannel)):''}</span>
+      <span style="font-size:11px;color:var(--txt3)">${s.dept?' · '+esc(s.dept):''}</span>
       <span style="font-size:10px;color:var(--txt3);font-family:monospace"> · STN:${esc(s.id)}</span>
+      ${s.key&&!_stationKeyValid(s.key)?'<span style="font-size:10px;color:var(--red-txt)"> · ⚠ לא ברשימת הניהול</span>':''}
     </div>
+    <label style="font-size:11px;color:var(--txt3);display:inline-flex;align-items:center;gap:4px">📹 ערוץ
+      <input value="${esc(String(s.dvrChannel||''))}" inputmode="numeric" style="width:46px;font-size:12px;padding:3px 6px;border-radius:8px;border:1px solid var(--brd);background:var(--card);color:var(--txt)" onchange="setStationDvr('${escj(s.id)}',this.value)"></label>
     <button class="btn danger" style="font-size:11px;padding:4px 10px" onclick="delWorkStation('${escj(s.id)}')">🗑</button>
   </div>`).join('');
 }
-async function addWorkStation(){
-  const name=(document.getElementById('stn-name').value||'').trim();
-  const dept=(document.getElementById('stn-dept').value||'').trim();
-  const ch=(document.getElementById('stn-ch').value||'').trim();
-  if(!name){showToast('⚠ הזן שם תחנה','var(--red-txt)');return;}
-  if(!S.fbConnected){showToast('⚠ אין חיבור Firebase — לא ניתן לשמור תחנה','var(--red-txt)');return;}
-  const id='st'+Date.now().toString(36);
-  try{
-    await fbSet('stations',id,{name,dept,dvrChannel:ch,createdAt:new Date().toISOString()});
-    document.getElementById('stn-name').value='';document.getElementById('stn-ch').value='';
-    showToast('✅ תחנה נוספה: '+name);
-  }catch(e){showToast('❌ '+e.message,'var(--red-txt)');}
+function _stationKeyValid(key){
+  const i=key.indexOf('::');if(i<0)return false;
+  return ((S.deptStations||{})[key.slice(0,i)]||[]).includes(key.slice(i+2));
 }
+// סנכרון התחנות הפיזיות (QR) מרשימת המחלקות/תחנות של לשונית הניהול —
+// הגדרה אחת בניהול, ברקוד וערוץ DVR כאן. קישור עמיד לפי key="מחלקה::תחנה";
+// ה-id של הברקוד נשאר קבוע גם בשינוי שם (הברקודים המודפסים ממשיכים לעבוד).
+async function syncStationsFromDepts(){
+  if(!S.fbConnected){showToast('⚠ אין חיבור Firebase','var(--red-txt)');return;}
+  let created=0,linked=0;
+  for(const[d,sts]of Object.entries(S.deptStations||{})){
+    for(const st of(sts||[])){
+      const key=d+'::'+st;
+      let doc=(S.workStations||[]).find(x=>x.key===key);
+      if(!doc){
+        // קישור רשומה ישנה שנוצרה ידנית לפי שם+מחלקה
+        doc=(S.workStations||[]).find(x=>!x.key&&x.name===st&&(x.dept||'')===d);
+        if(doc){await fbSet('stations',doc.id,{key});linked++;continue;}
+        const id='st'+Date.now().toString(36)+Math.random().toString(36).slice(2,5);
+        await fbSet('stations',id,{name:st,dept:d,key,dvrChannel:'',createdAt:new Date().toISOString()});
+        created++;
+      }
+    }
+  }
+  showToast('✅ סנכרון תחנות: '+created+' נוצרו'+(linked?', '+linked+' קושרו':'')+' — הגדר ערוצי DVR ולחץ "צור ברקודי תחנות"','var(--green-txt)',5000);
+}
+async function setStationDvr(id,val){
+  try{await fbSet('stations',id,{dvrChannel:String(val||'').trim()});showToast('📹 ערוץ עודכן');}
+  catch(e){showToast('❌ '+e.message,'var(--red-txt)');}
+}
+_guardReentrant('syncStationsFromDepts','syncStations');
 async function delWorkStation(id){
   const st=stationById(id);
   if(!await showConfirm('מחיקת תחנה','למחוק את התחנה "'+(st?.name||id)+'"? ברקודים מודפסים שלה יפסיקו לעבוד.','מחק','ביטול'))return;
@@ -6684,7 +6703,7 @@ async function tsStartTask(){
       // חסימה חוזרת ברגע הפתיחה — סוגר מרוץ של פתיחה כפולה של אותה משימה (עובד+ברקוד+שלב פעיל)
       if(S.activeTasks.some(x=>x.workerId===w.id&&taskBc(x)===b.raw&&(x.taskType||'')===(b.taskType||'')&&!x.paused))continue;
       if(findDupIn(tsSrvActive,b.raw,b.taskType)){tsDupSkip.push((b.taskType||b.prod)+' — '+(T.scan_dup_active||'פעיל כעת'));continue;}
-      const task={id:String(Date.now())+Math.random().toString(36).slice(2,6),workerId:w.id,workerName:w.name,dept:b.taskDept||w.dept,cust:b.cust,prod:b.prod,size:b.size,qty:b.qty,col:b.col,taskType:b.taskType,bc:b.raw,isTotal:b.isTotal||false,startTime,elapsed:0,accumulatedSec:0,prodStamp:b.prodStamp};
+      const task={id:String(Date.now())+Math.random().toString(36).slice(2,6),workerId:w.id,workerName:w.name,dept:b.taskDept||effDept(w),station:w.currentStation?.name||'',cust:b.cust,prod:b.prod,size:b.size,qty:b.qty,col:b.col,taskType:b.taskType,bc:b.raw,isTotal:b.isTotal||false,startTime,elapsed:0,accumulatedSec:0,prodStamp:b.prodStamp};
       const exp=await fetchExpected(b.cust,b.prod,w.id,b.qty);
       if(exp?.ok&&exp.perStep?.[b.taskType]!=null)task.expectedMin=exp.perStep[b.taskType];
       if(batchId)task.batchId=batchId;
@@ -6693,7 +6712,7 @@ async function tsStartTask(){
       if(S.fbConnected)await fbSet('activeTasks',String(task.id),{...task,startTime:task.startTime.toISOString()});
       tgTask(task,true);
       if(w.pushPrefs?.task_assigned!==false)sendPushToWorker(w.id,'📋 משימה חדשה',`${task.prod}${task.taskType?' · '+task.taskType:''} · ${task.qty} יח'`).catch(()=>{});
-      await autoStampStage(b.cust,b.prod,b.taskDept||w.dept); // עדכון אוטומטי של שלב הייצור
+      await autoStampStage(b.cust,b.prod,b.taskDept||effDept(w)); // עדכון אוטומטי של שלב הייצור
     }
     if(tsDupSkip.length)showToast((T.scan_not_added||'לא נוסף')+' '+tsDupSkip.join(' · '),'var(--red-txt)',7000);
     if(created>0)showToast('✅ '+created+' משימות התחילו עבור '+w.name);
@@ -6992,7 +7011,7 @@ async function mgrStartTask(){
     // המסלול הזה סוגר קודם את המשימות הפעילות שב-cache המקומי — אבל משימה שנפתחה
     // ממכשיר אחר לא נמצאת שם כלל, ולכן לא נסגרה ולא נחסמה. כאן היא נתפסת.
     if(findDupIn(mgrSrvActive,b.raw,b.taskType)){mgrDupSkip.push((b.taskType||b.prod)+' — '+(T.scan_dup_active||'פעיל כעת'));continue;}
-    const newTask={id:String(Date.now())+Math.random().toString(36).slice(2,6),workerId:empId,workerName:w.name,dept:b.taskDept||w.dept,cust:b.cust,prod:b.prod,size:b.size,qty:b.qty,col:b.col,taskType:b.taskType,bc:b.raw,isTotal:b.isTotal||false,startTime,elapsed:0,accumulatedSec:0,prodStamp:b.prodStamp};
+    const newTask={id:String(Date.now())+Math.random().toString(36).slice(2,6),workerId:empId,workerName:w.name,dept:b.taskDept||effDept(w),station:w.currentStation?.name||'',cust:b.cust,prod:b.prod,size:b.size,qty:b.qty,col:b.col,taskType:b.taskType,bc:b.raw,isTotal:b.isTotal||false,startTime,elapsed:0,accumulatedSec:0,prodStamp:b.prodStamp};
     const expM=await fetchExpected(b.cust,b.prod,empId,b.qty);
     if(expM?.ok&&expM.perStep?.[b.taskType]!=null)newTask.expectedMin=expM.perStep[b.taskType];
     if(batchId)newTask.batchId=batchId;
@@ -7000,7 +7019,7 @@ async function mgrStartTask(){
     S.activeTasks.unshift(newTask);mgrCreated++;
     if(S.fbConnected)await fbSet('activeTasks',newTask.id,{...newTask,startTime:newTask.startTime.toISOString()});
     tgTask(newTask,true);
-    await autoStampStage(b.cust,b.prod,b.taskDept||w.dept); // עדכון אוטומטי של שלב הייצור
+    await autoStampStage(b.cust,b.prod,b.taskDept||effDept(w)); // עדכון אוטומטי של שלב הייצור
   }
   if(mgrDupSkip.length)showToast((T.scan_not_added||'לא נוסף')+' '+mgrDupSkip.join(' · '),'var(--red-txt)',7000);
   if(mgrCreated>0)showToast('✅ '+mgrCreated+' משימות התחילו עבור '+w.name);
@@ -7844,7 +7863,10 @@ async function renameDept(oldD){
     if(ch&&S.fbConnected)await fbSet('products',p.id,{...p});
   }
   for(const st of (S.workStations||[])){
-    if(st.dept===oldD){st.dept=newD;if(S.fbConnected)await fbSet('stations',st.id,st);}
+    let sch=false;
+    if(st.dept===oldD){st.dept=newD;sch=true;}
+    if(typeof st.key==='string'&&st.key.startsWith(pre)){st.key=newD+'::'+st.key.slice(pre.length);sch=true;}
+    if(sch&&S.fbConnected)await fbSet('stations',st.id,{dept:st.dept,key:st.key||''});
   }
   saveDepts();try{fillDeptSelects();}catch(e){}
   renderAdmin();
@@ -7867,6 +7889,12 @@ async function renameStation(d,oldSt){
     let ch=false;
     (p.workSteps||[]).forEach(s=>{if(s&&typeof s==='object'&&s.station===oldKey){s.station=newKey;ch=true;}});
     if(ch&&S.fbConnected)await fbSet('products',p.id,{...p});
+  }
+  for(const st of (S.workStations||[])){
+    if(st.key===oldKey||(!st.key&&st.name===oldSt&&(st.dept||'')===d)){
+      st.name=newSt;st.key=newKey;
+      if(S.fbConnected)await fbSet('stations',st.id,{name:newSt,key:newKey});
+    }
   }
   saveDepts();renderAdmin();
   showToast('✅ שם התחנה עודכן: '+oldSt+' ← '+newSt+' (כולל מיומנויות ושלבי מוצרים)','var(--green-txt)',4500);
