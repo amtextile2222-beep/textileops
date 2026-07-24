@@ -7708,7 +7708,15 @@ async function delWorker(id){
 }
 function saveDepts(){
   saveLS();
-  if(S.fbConnected)fbSet('appSettings','depts',{list:S.depts,stations:S.deptStations||{},stageMap:S.deptStageMap||{}});
+  // setDoc בלי merge: fbSet (merge) משאיר מפתחות מחלקה ישנים בתוך המפות stations/stageMap אחרי שינוי שם
+  if(S.fbConnected&&db){const{doc,setDoc}=window._fb;setDoc(doc(db,'appSettings','depts'),{list:S.depts,stations:S.deptStations||{},stageMap:S.deptStageMap||{}}).catch(e=>console.error('saveDepts:',e.message));}
+}
+// עדכון שדות ספציפיים עם החלפה מלאה של ערכם (updateDoc) — בניגוד ל-fbSet (merge:true)
+// שממזג מפות ומשאיר בהן מפתחות ישנים. חובה בשינוי שם: מפת skills חייבת החלפה, לא מיזוג.
+async function fbReplaceFields(col,id,fields){
+  if(!db)return;
+  const{doc,updateDoc}=window._fb;
+  await updateDoc(doc(db,col,id),fields);
 }
 function addDept(){
   const v=document.getElementById('new-dept').value.trim();
@@ -7828,7 +7836,7 @@ async function renameDept(oldD){
       const ns={};for(const k in w.skills)ns[k.startsWith(pre)?newD+'::'+k.slice(pre.length):k]=w.skills[k];
       w.skills=ns;ch=true;
     }
-    if(ch&&S.fbConnected)await fbSet('workers',w.id,w);
+    if(ch&&S.fbConnected)await fbReplaceFields('workers',w.id,{dept:w.dept,...(w.skills?{skills:w.skills}:{})});
   }
   for(const p of (S.products||[])){
     let ch=false;
@@ -7852,7 +7860,7 @@ async function renameStation(d,oldSt){
   for(const w of S.workers){
     if(w.skills&&Object.prototype.hasOwnProperty.call(w.skills,oldKey)){
       w.skills[newKey]=w.skills[oldKey];delete w.skills[oldKey];
-      if(S.fbConnected)await fbSet('workers',w.id,w);
+      if(S.fbConnected)await fbReplaceFields('workers',w.id,{skills:w.skills});
     }
   }
   for(const p of (S.products||[])){
@@ -7863,8 +7871,9 @@ async function renameStation(d,oldSt){
   saveDepts();renderAdmin();
   showToast('✅ שם התחנה עודכן: '+oldSt+' ← '+newSt+' (כולל מיומנויות ושלבי מוצרים)','var(--green-txt)',4500);
 }
-_guardReentrant('renameDept','renameDept');
-_guardReentrant('renameStation','renameStation');
+// מפתח משותף: שני שינויי שם לא רצים במקביל — הלולאות האסינכרוניות שלהם משתלבות ומשחיתות מפתחות
+_guardReentrant('renameDept','rename');
+_guardReentrant('renameStation','rename');
 
 // ─── REFRESH DASH EVERY 5s ──────────────────────────────────
 setInterval(()=>{
