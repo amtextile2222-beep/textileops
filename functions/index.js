@@ -89,6 +89,21 @@ function sanitizeWorker(w) {
   delete out.pass; delete out.faceDescriptor; delete out.faceDescriptors; delete out.deviceId;
   return out;
 }
+
+// ─── מצב גיבוי לבדיקת IP המפעל ───────────────────────────────
+// בנפילת אינטרנט (מעבר לקו גיבוי/סים) ה-IP הציבורי משתנה, וכל עובד עם
+// requireFactoryIP נחסם + מנטר ה-WiFi מציף התראות שווא. המתג משהה את הבדיקה
+// לחלון קצוב במקום למחוק את factoryIP — הערך נשאר שמור וההגנה חוזרת לבד.
+// החלון נמדד מול שעון השרת בלבד (ipBypassStart הוא serverTimestamp), כדי ששעון
+// מכשיר סוטה לא יוכל להאריך או לקצר אותו. מחזיר מילישניות שנותרו, 0 = לא פעיל.
+function ipBypassMsLeft(s) {
+  const mins = Number((s || {}).ipBypassMin) || 0;
+  const st = (s || {}).ipBypassStart;
+  if (!mins || !st) return 0;
+  const startMs = typeof st.toMillis === 'function' ? st.toMillis() : Number(st) || 0;
+  if (!startMs) return 0;
+  return Math.max(0, startMs + mins * 60000 - Date.now());
+}
 exports.login = functions.https.onCall(async (data, context) => {
   const d = data || {};
   // ── ping לחימום הפונקציה (keepLoginWarm) — חוזר מיד, לפני כל לוגיקת אימות/נעילה/Firestore ──
@@ -159,9 +174,10 @@ exports.login = functions.https.onCall(async (data, context) => {
   // ── בדיקת רשת המפעל (IP בצד שרת — לא ניתן לעקיפה מהלקוח) ──
   if (w.requireFactoryIP) {
     const tgSet = await db.collection('appSettings').doc('telegramSettings').get();
-    const factoryIP = (tgSet.exists && tgSet.data().factoryIP) || '';
+    const tgData = (tgSet.exists && tgSet.data()) || {};
+    const factoryIP = tgData.factoryIP || '';
     const ip = callerIp(context);
-    if (factoryIP && ip && ip !== factoryIP) {
+    if (factoryIP && ip && ip !== factoryIP && !ipBypassMsLeft(tgData)) {
       await tg('⛔ TextileOps — ניסיון כניסה מחוץ למפעל\n👤 עובד: ' + w.name + '\n🌐 IP: ' + ip + '\n🕐 שעה: ' + ilTime() + '\nהעובד ניסה להיכנס מרשת שאינה רשת המפעל.');
       throw new functions.https.HttpsError('permission-denied', 'ip');
     }
@@ -679,6 +695,19 @@ exports.wifiMonitor = functions.pubsub.schedule('every 5 minutes').onRun(async (
     const { factoryIP, waEnabled } = settings;
     const { token: waToken, chatId: waChatId } = tgCfg();
     if (!waEnabled || !waToken || !waChatId || !factoryIP) return null;
+
+    // ── מצב גיבוי: בזמן failover ה-IP הציבורי אינו זה של המפעל, וכל התראה כאן
+    // היא שווא. כשהחלון נסגר מודיעים פעם אחת שההגנה חזרה — כדי שלא יישאר ספק. ──
+    if (ipBypassMsLeft(settings)) {
+      if (settings.ipBypassEnded) await settingsSnap.ref.update({ ipBypassEnded: false });
+      return null;
+    }
+    if (settings.ipBypassMin && !settings.ipBypassEnded) {
+      await settingsSnap.ref.update({ ipBypassEnded: true });
+      await sendTelegram(waToken, waChatId,
+        `🔒 TextileOps — מצב גיבוי הסתיים\n🏭 בדיקת IP המפעל חזרה לפעול (${factoryIP})\n🕐 שעה: ${ilTime()}`
+      );
+    }
 
     // קרא את כל העובדים שבפנים
     const workersSnap = await db.collection('workers').where('status', '==', 'in').get();

@@ -661,6 +661,17 @@ code{background:var(--bg2);border:0.5px solid var(--b);border-radius:4px;padding
             <input id="factory-ip" type="text" placeholder="188.225.231.120" oninput="saveSettings()" dir="ltr" style="font-family:monospace"/>
             <div style="font-size:11px;color:var(--txt3);margin-top:4px">רק עובדים עם "חייב WiFi מפעל" יבדקו מול כתובת זו</div>
           </div>
+          <div id="ipbp-wrap" class="field" style="margin-top:10px;padding:10px 12px;border-radius:var(--r);background:var(--bg2)">
+            <label style="display:block;margin-bottom:6px">🛟 מצב גיבוי — השהיית בדיקת ה-IP</label>
+            <div id="ipbp-status" style="font-size:12px;line-height:1.6;margin-bottom:8px"></div>
+            <div style="display:flex;gap:8px;align-items:flex-end;flex-wrap:wrap">
+              <div style="flex:0 0 82px"><label style="font-size:11px;color:var(--txt3)">שעות</label><input type="number" id="ipbp-h" value="8" min="0" max="72"/></div>
+              <div style="flex:0 0 82px"><label style="font-size:11px;color:var(--txt3)">דקות</label><input type="number" id="ipbp-m" value="0" min="0" max="59"/></div>
+              <button id="ipbp-start" class="btn warn" onclick="startIpBypass()">🛟 הפעל</button>
+              <button id="ipbp-cancel" class="btn success" onclick="cancelIpBypass()" style="display:none">🔒 בטל עכשיו</button>
+            </div>
+            <div style="font-size:11px;color:var(--txt3);margin-top:6px">לשימוש בנפילת אינטרנט/מעבר לקו גיבוי. ה-IP נשאר שמור — בתום הזמן ההגנה חוזרת לבד, בלי להקליד אותו מחדש.</div>
+          </div>
           <div style="font-size:11px;color:var(--txt3);margin-bottom:12px;line-height:1.6">
             הבוט: <strong>@TextileOpsAlert_bot</strong> — Token ו-Chat ID כבר מוגדרים
           </div>
@@ -2107,7 +2118,7 @@ let S={
   activeTasks:[],
   histTasks:[],
   alerts:[],
-  settings:{thresh:60,absent:5,waEnabled:false,waInterval:60,waFrom:'07:00',waTo:'18:00',waLong:true,waAbsent:true,factoryIP:'188.225.231.120',shiftStart:'06:30',shiftEnd:'15:00',roundMinutes:5,endOfDayTime:'15:05'},
+  settings:{thresh:60,absent:5,waEnabled:false,waInterval:60,waFrom:'07:00',waTo:'18:00',waLong:true,waAbsent:true,factoryIP:'188.225.231.120',shiftStart:'06:30',shiftEnd:'15:00',roundMinutes:5,endOfDayTime:'15:05',ipBypassMin:0,ipBypassStartMs:0},
   waLastSent:0,
   wifiAlertSent:{},
   tgSentAlerts:{},
@@ -2603,6 +2614,10 @@ function listenFb(){
         if(data.shiftStart)S.settings.shiftStart=data.shiftStart;
         if(data.shiftEnd)S.settings.shiftEnd=data.shiftEnd;
         if(data.roundMinutes!==undefined)S.settings.roundMinutes=data.roundMinutes;
+        // מצב גיבוי — ipBypassStart הוא Timestamp מהשרת; ממירים למספר לתצוגה בלבד
+        S.settings.ipBypassMin=Number(data.ipBypassMin)||0;
+        const _bs=data.ipBypassStart;
+        S.settings.ipBypassStartMs=_bs?(typeof _bs.toMillis==='function'?_bs.toMillis():Number(_bs)||0):0;
         // אם שדות חסרים ב-Firebase — המנהל דוחף את ההגדרות המקומיות שלו
         const missingFields=data.waInterval===undefined||!data.waFrom||!data.shiftStart;
         if(missingFields&&S.user?.role==='manager'){
@@ -5729,6 +5744,62 @@ function saveSettings(){
     });
   }
 }
+// ─── מצב גיבוי לבדיקת IP המפעל ───────────────────────────────
+// משהה את בדיקת ה-IP לחלון קצוב במקום למחוק את factoryIP: הכתובת נשארת שמורה
+// וההגנה חוזרת לבד בתום הזמן. האכיפה האמיתית היא בשרת (login + wifiMonitor)
+// מול שעון השרת; כאן זה תצוגה והשתקת ההתראות של מנטר המנהל בדפדפן בלבד.
+function ipBypassLeftMs(){
+  const mins=Number(S.settings.ipBypassMin)||0;
+  const st=Number(S.settings.ipBypassStartMs)||0;
+  if(!mins||!st)return 0;
+  return Math.max(0,st+mins*60000-Date.now());
+}
+function _fmtBypassLeft(ms){
+  const tot=Math.ceil(ms/60000),h=Math.floor(tot/60),m=tot%60;
+  return (h?h+' שע\' ':'')+m+' דק\'';
+}
+function renderIpBypass(){
+  const box=document.getElementById('ipbp-status');if(!box)return;
+  const left=ipBypassLeftMs(),on=left>0;
+  const wrap=document.getElementById('ipbp-wrap');
+  if(wrap)wrap.style.background=on?'var(--red-bg)':'var(--bg2)';
+  if(on){
+    const until=new Date(Date.now()+left).toLocaleTimeString('he-IL',{hour:'2-digit',minute:'2-digit'});
+    box.innerHTML='<strong style="color:var(--red-txt)">🛟 מצב גיבוי פעיל</strong> — בדיקת ה-IP מושהית עד '+until+' (נותרו '+_fmtBypassLeft(left)+')';
+  }else{
+    box.innerHTML='<strong style="color:var(--green-txt)">🔒 בדיקת IP פעילה</strong> — עובדים עם 🏭 חייבים להיות ברשת המפעל';
+  }
+  const b1=document.getElementById('ipbp-start'),b2=document.getElementById('ipbp-cancel');
+  if(b1)b1.style.display=on?'none':'';
+  if(b2)b2.style.display=on?'':'none';
+}
+async function startIpBypass(){
+  if(S.user?.role!=='manager'){showToast('רק מנהל יכול להפעיל מצב גיבוי','var(--red-txt)');return;}
+  const h=parseInt(document.getElementById('ipbp-h')?.value)||0;
+  const m=parseInt(document.getElementById('ipbp-m')?.value)||0;
+  const mins=h*60+m;
+  if(mins<1){showToast('בחר משך — לפחות דקה אחת','var(--red-txt)');return;}
+  if(mins>72*60){showToast('משך מקסימלי — 72 שעות','var(--red-txt)');return;}
+  if(!confirm('להשהות את בדיקת IP המפעל ל-'+_fmtBypassLeft(mins*60000)+'?\nבזמן הזה עובדים יוכלו להיכנס מכל רשת. ההגנה תחזור לבד בתום הזמן.'))return;
+  try{
+    const{serverTimestamp}=window._fb;
+    await fbSet('appSettings','telegramSettings',{ipBypassMin:mins,ipBypassStart:serverTimestamp(),ipBypassEnded:false});
+    showToast('🛟 מצב גיבוי הופעל ל-'+_fmtBypassLeft(mins*60000),'var(--green-txt)',5000);
+    sendTelegram('🛟 TextileOps — מצב גיבוי הופעל\n🏭 בדיקת IP המפעל מושהית ל-'+_fmtBypassLeft(mins*60000)+'\n👤 הופעל ע"י: '+(S.user?.name||'מנהל')+'\n🕐 שעה: '+new Date().toLocaleTimeString('he-IL',{hour:'2-digit',minute:'2-digit'})+'\nההגנה תחזור לפעול לבד בתום הזמן.');
+  }catch(e){showToast('❌ שמירה נכשלה: '+e.message,'var(--red-txt)',5000);}
+}
+async function cancelIpBypass(){
+  if(S.user?.role!=='manager')return;
+  if(!confirm('להחזיר את בדיקת ה-IP עכשיו?'))return;
+  try{
+    await fbSet('appSettings','telegramSettings',{ipBypassMin:0,ipBypassEnded:true});
+    showToast('🔒 מצב גיבוי בוטל — בדיקת IP פעילה','var(--green-txt)',4000);
+    sendTelegram('🔒 TextileOps — מצב גיבוי בוטל ידנית\n🏭 בדיקת IP המפעל פעילה שוב\n🕐 שעה: '+new Date().toLocaleTimeString('he-IL',{hour:'2-digit',minute:'2-digit'}));
+  }catch(e){showToast('❌ ביטול נכשל: '+e.message,'var(--red-txt)',5000);}
+}
+// רענון הספירה לאחור בזמן שהלשונית פתוחה
+setInterval(()=>{try{renderIpBypass();}catch(e){}},30000);
+
 function loadWaSettings(){
   const s=S.settings;
   const set=(id,v)=>{const el=document.getElementById(id);if(!el)return;if(el.type==='checkbox')el.checked=v;else el.value=v;};
@@ -5747,6 +5818,7 @@ function loadWaSettings(){
   set('al-thresh',s.thresh||60);
   set('al-absent',s.absent||5);
   set('al-endofday',s.endOfDayTime||'15:05');
+  renderIpBypass();
 }
 /* ── PUSH NOTIFICATIONS (FCM) ── */
 async function workerEnableNotif(){
@@ -10261,6 +10333,9 @@ setInterval(async()=>{
 
   // --- צד מנהל: קרא מ-Firebase ובדוק כל עובד ---
   if(u.role!=='manager')return;
+  // מצב גיבוי — ה-IP הציבורי אינו זה של המפעל וכל התראה כאן תהיה שווא.
+  // (צד העובד ממשיך לדווח IP, כדי שתראה את הכתובת של קו הגיבוי.)
+  if(ipBypassLeftMs())return;
   const activeWorkers=S.workers.filter(w=>w.status==='in'&&w.requireFactoryIP);
   if(!activeWorkers.length)return;
   const now=new Date().toLocaleTimeString('he-IL',{hour:'2-digit',minute:'2-digit'});
