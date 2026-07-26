@@ -2828,6 +2828,23 @@ function scheduleMidnightReset(){
   },msUntil);
 }
 scheduleMidnightReset();
+// נעילה אטומית ב-Firestore — אותו דפוס כמו _claimDailyReport, מונעת התראה כפולה משני מכשירים
+async function _claimEndOfDayAlert(){
+  const today=todayStr();
+  if(localStorage.getItem('txops_eod_alert_sent')===today)return false;
+  if(!S.fbConnected||!db)return false;
+  try{
+    const{runTransaction,doc}=window._fb;
+    await runTransaction(db,async tx=>{
+      const ref=doc(db,'appSettings','endOfDayAlert');
+      const snap=await tx.get(ref);
+      if(snap.exists()&&snap.data().date===today)throw new Error('already-sent');
+      tx.set(ref,{date:today});
+    });
+  }catch(e){return false;}
+  localStorage.setItem('txops_eod_alert_sent',today);
+  return true;
+}
 function scheduleEndOfDayAlert(){
   const time=S.settings.endOfDayTime||'15:05';
   const[h,m]=time.split(':').map(Number);
@@ -2835,8 +2852,12 @@ function scheduleEndOfDayAlert(){
   let next=new Date(now.getFullYear(),now.getMonth(),now.getDate(),h,m,0);
   if(next<=now)next.setDate(next.getDate()+1);
   setTimeout(async()=>{
+    // מכשיר שנרדם: setTimeout יורה בהתעוררות, שעות אחרי היעד — לפעול רק בטווח ±10 דק' מסביב לשעת היעד
+    const fireDelta=Math.abs(Date.now()-next.getTime());
     const stillIn=S.workers.filter(w=>w.status==='in');
-    if(stillIn.length>0){
+    // הנעילה נתפסת רק כשבאמת יש מה לשלוח — אחרת מכשיר עם רשימה ריקה היה תופס את
+    // הנעילה ליום כולו ומשתיק מכשיר אחר שכן רואה עובדים פתוחים
+    if(fireDelta<=10*60*1000&&stillIn.length>0&&await _claimEndOfDayAlert()){
       const names=stillIn.map(w=>w.name+' ('+w.dept+')').join(', ');
       sendTelegram(`⚠️ שעת סיום עבודה ${time} — לא חתמו יציאה:\n${names}`).catch(()=>{});
     }
