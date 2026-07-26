@@ -4770,7 +4770,7 @@ function renderTasks(){
     const prodChips=`<span class="bc-seg bc-c">לקוח ${lead.cust}</span><span class="bc-seg bc-p">${lead.prod}</span>${lead.size?`<span class="bc-seg bc-s">מידה ${lead.size}</span>`:''}<span class="bc-seg bc-q">${lead.qty} יח'</span><span class="bc-seg bc-col">${COLORS[lead.col]||lead.col}</span>`;
     const pausedBadge=allPaused?`<span class="badge" style="background:#e0e7ff;color:#4338ca">⏸ ${T.task_paused}${pausedStr?' '+pausedStr:''}</span>`:'';
     const header=`<div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:6px">
-        <div><div style="font-size:13px;font-weight:500;color:var(--txt)">${esc(lead.workerName)}${multi?` <span class="badge gray" style="font-size:10px">${tasks.length} שלבים</span>`:''}</div><div style="font-size:11px;color:var(--txt3)">${esc(lead.dept)}</div></div>
+        <div><div style="font-size:13px;font-weight:500;color:var(--txt)">${esc(lead.workerName)}${multi?` <span class="badge gray" style="font-size:10px">${tasks.length} שלבים</span>`:''}</div><div style="font-size:11px;color:var(--txt3)">${esc(lead.dept)}${lead.station?` · <span style="color:var(--green-txt)">📍 ${esc(lead.station)}</span>`:''}</div></div>
         <div style="display:flex;align-items:center;gap:6px">${timerBlock}${multi?'':_taskActions(lead)}</div>
       </div>`;
     if(!multi){
@@ -4791,7 +4791,7 @@ function renderTasks(){
         ${tasks.map(t=>`<div class="task-stage-row">
           <span class="badge gray">📋 ${esc(t.taskType||'—')}</span>
           <span style="font-size:11px;color:var(--txt3)">${t.qty} יח'${t.prod!==lead.prod?' · '+esc(t.prod):''}</span>
-          ${t.size&&t.size!==lead.size?`<span class="bc-seg bc-s">מידה ${esc(t.size)}</span>`:''}${t.col!==lead.col?`<span class="bc-seg bc-col">${COLORS[t.col]||esc(t.col)}</span>`:''}
+          ${t.size&&t.size!==lead.size?`<span class="bc-seg bc-s">מידה ${esc(t.size)}</span>`:''}${t.col!==lead.col?`<span class="bc-seg bc-col">${COLORS[t.col]||esc(t.col)}</span>`:''}${t.station&&t.station!==lead.station?`<span style="font-size:11px;color:var(--green-txt)">📍 ${esc(t.station)}</span>`:''}
           <div style="margin-inline-start:auto;display:flex;gap:6px">${_taskActions(t)}</div>
         </div>`).join('')}
       </div>
@@ -4846,7 +4846,7 @@ function renderTaskHist(){
     const _over=_expSec>0&&(t.duration||0)>_expSec;
     return`<div class="row">
       <div style="flex:1"><div style="font-size:12px;font-weight:500;color:var(--txt)">${esc(t.workerName)}</div>
-      <div style="font-size:11px;color:var(--txt3)">${dateStr} | לקוח ${t.cust} | ${t.prod}${t.size?' | מידה '+t.size:''} | ${t.qty===0?'<span style="color:#d97706;font-weight:700">⏳ כמות פתוחה</span>':t.qty+' יח\''}${t.isTotal?' | <span style="color:#059669;font-weight:700">📦 כל הכמות</span>':' | '+(COLORS[t.col]||t.col)}${t.taskType?' | 📋 '+esc(t.taskType):''}</div>
+      <div style="font-size:11px;color:var(--txt3)">${dateStr} | לקוח ${t.cust} | ${t.prod}${t.size?' | מידה '+t.size:''} | ${t.qty===0?'<span style="color:#d97706;font-weight:700">⏳ כמות פתוחה</span>':t.qty+' יח\''}${t.isTotal?' | <span style="color:#059669;font-weight:700">📦 כל הכמות</span>':' | '+(COLORS[t.col]||t.col)}${t.taskType?' | 📋 '+esc(t.taskType):''}${t.station?' | <span style="color:var(--green-txt)">📍 '+esc(t.station)+'</span>':''}</div>
       <div style="font-size:11px;color:var(--txt3)">▶ ${stStr} → ◀ ${etStr}</div>
       ${(()=>{const prev=S.histTasks.filter(x=>x.bc===t.bc&&x.workerId===t.workerId&&x.id!==t.id);const tot=prev.reduce((s,x)=>s+(x.duration||0),0);const ses=prev.length;return ses>0?`<div style="font-size:11px;color:var(--blue-txt)">📊 מצטבר קודם: <b>${fmtM(tot)}</b> (${ses} ${ses===1?'משימה':'משימות'})</div>`:''})()}
       </div>
@@ -4939,7 +4939,7 @@ function renderKiosk(){
       ?`<div class="k-tmr k-tmr-paused">⏸ ${fmtS(lead.accumulatedSec||0)}</div>`
       :`<div class="k-tmr kiosk-tmr" data-ids="${ids}" data-exp="${expSec}" data-lead="${lead.id}">${fmtS(elapsedSec)}</div>${hasExp?`<div class="k-cd" id="kcd-${lead.id}">${fmtCountdown(expSec-elapsedSec)}</div>`:''}`;
     return`<div class="kiosk-card ${kcls}" id="kcard-${lead.id}">
-      <div class="k-head"><div class="k-worker">${esc(lead.workerName)}</div><div class="k-dept">${esc(lead.dept||'')}${multi?` · ${tasks.length} שלבים`:''}</div></div>
+      <div class="k-head"><div class="k-worker">${esc(lead.workerName)}</div><div class="k-dept">${esc(lead.dept||'')}${multi?` · ${tasks.length} שלבים`:''}${lead.station?`<div class="k-stn">📍 ${esc(lead.station)}</div>`:''}</div></div>
       <div class="k-chips">${chips}</div>
       ${steps}
       <div class="k-timerwrap">${timer}</div>
@@ -5076,6 +5076,7 @@ function injectKioskCss(){
   .k-head{display:flex;justify-content:space-between;align-items:baseline;gap:8px}
   .k-worker{font-size:26px;font-weight:800;color:#fff;line-height:1.1}
   .k-dept{font-size:14px;color:#94a3b8;text-align:end}
+  .k-stn{font-size:15px;font-weight:700;color:#4ade80;margin-top:2px}
   .k-chips{display:flex;flex-wrap:wrap;gap:6px}
   .k-chip{font-size:15px;font-weight:700;padding:3px 10px;border-radius:8px;background:#334155;color:#e2e8f0;font-variant-numeric:tabular-nums}
   .k-chip.k-p{background:#0ea5e9;color:#fff}
@@ -7272,7 +7273,9 @@ async function transferTask(taskId){
   if(partQty>0){
     // ── פיצול כמות: משימה חדשה לעובד הנבחר, המקורי נשאר עם היתרה (שני עובדים במקביל = עוזר) ──
     const splitId='sp'+Date.now().toString(36)+Math.random().toString(36).slice(2,5);
-    const newTask={...t,id:String(Date.now())+Math.random().toString(36).slice(2,6),workerId:newWorker.id,workerName:newWorker.name,dept:newWorker.dept,qty:partQty,startTime:srvNow(),elapsed:0,accumulatedSec:0,splitId};
+    // dept/station נלקחים מהעובד המקבל — בלי זה ה-spread משאיר את התחנה של העובד
+    // הקודם על המשימה, והלוח מראה אותה יושבת במקום הלא נכון
+    const newTask={...t,id:String(Date.now())+Math.random().toString(36).slice(2,6),workerId:newWorker.id,workerName:newWorker.name,dept:effDept(newWorker),station:newWorker.currentStation?.name||'',qty:partQty,startTime:srvNow(),elapsed:0,accumulatedSec:0,splitId};
     delete newTask.batchId;
     // לעובד היעד כבר יש משימה חיה על אותו ברקוד+שלב ⇒ הפיצול ייצור כפילות
     if(!(await claimTaskGuard(newTask)).ok){showToast((tt||t.prod)+' — '+(T.scan_dup_active||'פעיל כעת'),'var(--red-txt)');return;}
@@ -7297,7 +7300,8 @@ async function transferTask(taskId){
   if(!(await claimTaskGuard({...t,workerId:newWorker.id})).ok){showToast((tt||t.prod)+' — '+(T.scan_dup_active||'פעיל כעת'),'var(--red-txt)');return;}
   t.workerId=newWorker.id;
   t.workerName=newWorker.name;
-  t.dept=newWorker.dept;
+  t.dept=effDept(newWorker);
+  t.station=newWorker.currentStation?.name||'';
   // חשב מחדש צפי לעובד החדש (שכר שונה); בכשל שרת — משאירים את הצפי הקיים כדי לא למחוק צפי תקין
   const expF=await fetchExpected(t.cust,t.prod,newWorker.id,t.qty);
   if(expF?.ok&&expF.perStep?.[tt]!=null)t.expectedMin=expF.perStep[tt];
