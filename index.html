@@ -2283,7 +2283,7 @@ async function recalcActiveExpected(cust,prod){
     let taskChanged=false;
     if(newExp!=null){if(t.expectedMin!==newExp){t.expectedMin=newExp;taskChanged=true;}}
     else if(t.expectedMin!=null){delete t.expectedMin;taskChanged=true;}
-    if(taskChanged){changed=true;if(S.fbConnected)await fbSet('activeTasks',String(t.id),{...t,startTime:t.startTime instanceof Date?t.startTime.toISOString():t.startTime});}
+    if(taskChanged){changed=true;if(S.fbConnected)await fbUpdateOnly('activeTasks',String(t.id),{...t,startTime:t.startTime instanceof Date?t.startTime.toISOString():t.startTime});}
   }
   if(changed){saveLS();renderTasks();if(typeof renderMgrTasks==='function')renderMgrTasks();}
 }
@@ -2549,7 +2549,7 @@ function listenFb(){
         t.paused=true;t.pausedAt=pausedAt.toISOString();
         t.accumulatedSec=(t.accumulatedSec||0)+calcTaskDurSec(d,pausedAt,t.workerId);
         t.elapsed=t.accumulatedSec;
-        fbSet('activeTasks',String(t.id),{...t,startTime:d.toISOString()});
+        fbUpdateOnly('activeTasks',String(t.id),{...t,startTime:d.toISOString()});
       });
       if(stale.length){S.activeTasks=S.activeTasks.filter(t=>!stale.includes(t));saveLS();}
       // עובד שסטטוסו 'out' ויש לו משימה פעילה היום — השהה אוטומטית
@@ -2560,7 +2560,7 @@ function listenFb(){
           t.paused=true;t.pausedAt=pausedAt.toISOString();
           t.accumulatedSec=(t.accumulatedSec||0)+calcTaskDurSec(t.startTime,pausedAt,t.workerId);
           t.elapsed=t.accumulatedSec;
-          fbSet('activeTasks',String(t.id),{...t,startTime:t.startTime instanceof Date?t.startTime.toISOString():t.startTime});
+          fbUpdateOnly('activeTasks',String(t.id),{...t,startTime:t.startTime instanceof Date?t.startTime.toISOString():t.startTime});
         }
       });
     }
@@ -2644,6 +2644,19 @@ async function fbDel(col,id){
   const{doc,deleteDoc}=window._fb;
   await deleteDoc(doc(db,col,id));
 }
+// ─── שומר נגד "משימות רפאים" ────────────────────────────────
+// fbSet הוא setDoc(merge) — הוא *יוצר* מסמך שלא קיים. חידוש/השהיה פועלים מעצם
+// הגדרתם על משימה קיימת, ולכן טאב ישן שמחזיק בזיכרון משימה שנסגרה במקום אחר
+// היה מחיה אותה בשרת (ندوه 00084: נסגרה 16/07, קמה לתחייה שוב ושוב וצברה 227 שע').
+// fbUpdateOnly נכשל בשקט כשהמסמך לא קיים — הרפאים פשוט לא נכתבת.
+async function fbUpdateOnly(col,id,data){
+  if(!db)return false;
+  const{doc,updateDoc}=window._fb;
+  try{await updateDoc(doc(db,col,id),data);return true;}
+  catch(e){return false;} // not-found ⇒ המשימה כבר נסגרה/נמחקה במקום אחר
+}
+// משימה שכבר נסגרה (קיימת בהיסטוריה המקומית) לא תיכתב חזרה לפעילות
+function _isClosedTask(id){return (S.histTasks||[]).some(h=>String(h.id)===String(id));}
 
 // init firebase if config saved
 document.addEventListener('fbSDKReady',()=>{
@@ -3861,8 +3874,25 @@ function calcNetWorkRaw(checkin,checkout,breakActive,breakStart,breakEnd,refDate
 // משך סופי של משימה בסגירה: מושהית → הזמן שנצבר בלבד; רצה → נצבר + הריצה הנוכחית.
 // חישוב לפי endTime-startTime ספר גם לילות והפסקות — כך נולדו משימות של 18+ שעות בדוחות.
 function taskFinalDur(t,endTime){
-  if(t.paused)return t.accumulatedSec||0;
-  return (t.accumulatedSec||0)+calcTaskDurSec(t.startTime,endTime,t.workerId);
+  if(t.paused)return _capByAttendance(t,t.accumulatedSec||0);
+  return _capByAttendance(t,(t.accumulatedSec||0)+calcTaskDurSec(t.startTime,endTime,t.workerId));
+}
+// תקרת שפיות: משך משימה לא יכול לעבור את סך הנוכחות של העובד מאז שנפתחה.
+// בלי זה משימה שנשכחה פתוחה נסגרת עם מאות שעות ומזהמת את כל הדוחות
+// (ندوه 00084: 13,617 דק' על עובדת שנכחה 6,763 דק' באותה תקופה).
+function _capByAttendance(t,sec){
+  try{
+    const w=S.workers.find(x=>x.id===t.workerId);if(!w)return sec;
+    const st=t.startTime instanceof Date?t.startTime:new Date(t.startTime);
+    // היום המוקדם ביותר שהמשימה יכלה להתחיל בו: ההשהיה הראשונה או ההתחלה הנוכחית
+    const firstDay=(t.pausedAt?new Date(Math.min(new Date(t.pausedAt).getTime(),st.getTime())):st);
+    const fromDate=firstDay.getFullYear()+'-'+pad2(firstDay.getMonth()+1)+'-'+pad2(firstDay.getDate());
+    let capMs=(S.attHistory||[]).filter(r=>r.workerId===t.workerId&&r.date>=fromDate)
+      .reduce((s,r)=>s+(r.netMs||0),0);
+    capMs+=calcNetWork(w); // היום הנוכחי עדיין לא בהיסטוריה
+    if(capMs>0&&sec>capMs/1000)return Math.round(capMs/1000);
+  }catch(e){}
+  return sec;
 }
 function calcActualTaskTime(tasks){
   // זמן עבודה נקי (שניות): מסכם duration מתוקן דרך normalizeBatchDurations —
@@ -4124,7 +4154,7 @@ async function bcStartBatch(){
 async function closeBatchProportional(tasks,endTime){
   const totalQty=tasks.reduce((s,t)=>s+(t.qty||0),0);
   const lead=tasks[0];
-  const baseSec=lead.paused?(lead.accumulatedSec||0):(lead.accumulatedSec||0)+calcTaskDurSec(lead.startTime,endTime,lead.workerId);
+  const baseSec=_capByAttendance(lead,lead.paused?(lead.accumulatedSec||0):(lead.accumulatedSec||0)+calcTaskDurSec(lead.startTime,endTime,lead.workerId));
   for(const t of tasks){
     const proportion=totalQty>0?(t.qty||0)/totalQty:1/tasks.length;
     const duration=Math.round(baseSec*proportion);
@@ -4240,14 +4270,18 @@ function _clusterClock(ws,we,wid){
 
 // השהיית כל המשימות הפעילות של עובד
 async function pauseWorkerTasks(workerId,pausedAt){
-  const tasks=S.activeTasks.filter(t=>t.workerId===workerId&&!t.paused);
+  const tasks=S.activeTasks.filter(t=>t.workerId===workerId&&!t.paused&&!_isClosedTask(t.id));
   for(const t of tasks){
     const addSec=calcTaskDurSec(t.startTime,pausedAt,t.workerId);
     t.paused=true;
     t.pausedAt=pausedAt.toISOString();
     t.accumulatedSec=(t.accumulatedSec||0)+addSec;
     t.elapsed=t.accumulatedSec;
-    if(S.fbConnected)await fbSet('activeTasks',String(t.id),{...t,startTime:t.startTime instanceof Date?t.startTime.toISOString():t.startTime});
+    // עדכון-בלבד: משימה שנסגרה במקום אחר לא תיווצר מחדש (ראה fbUpdateOnly)
+    if(S.fbConnected){
+      const ok=await fbUpdateOnly('activeTasks',String(t.id),{...t,startTime:t.startTime instanceof Date?t.startTime.toISOString():t.startTime});
+      if(!ok)S.activeTasks=S.activeTasks.filter(x=>x.id!==t.id); // נסגרה בשרת — נקה מהזיכרון המקומי
+    }
   }
   return tasks.length;
 }
@@ -4257,13 +4291,38 @@ async function pauseWorkerTasks(workerId,pausedAt){
 // אותה מכניקה כמו "📅 המשך" ב-handlePausedTasks: startTime מהכניסה, הנצבר נשמר ב-accumulatedSec.
 // ההשלמה נשארת דרך הזרימה הקיימת: סריקת המשימה הבאה סוגרת את הרצות (כולל המחודשות).
 async function resumeWorkerTasksOnPunchIn(workerId,now){
-  const paused=S.activeTasks.filter(t=>t.workerId===workerId&&t.paused);
+  const all=S.activeTasks.filter(t=>t.workerId===workerId&&t.paused&&!_isClosedTask(t.id));
+  // משימה שנשכחה פתוחה ימים לא תתחדש לבד — אחרת היא צוברת שעון-קיר לנצח
+  // (ندوه 00084 צברה 227 שע'). המנהל מקבל התראה ומחליט: לסגור, למחוק או לחדש ידנית.
+  const paused=all.filter(t=>!_isStaleTask(t));
+  const stale=all.filter(t=>_isStaleTask(t));
   for(const t of paused){
     t.paused=false;t.pausedAt=null;t.startTime=now;
-    try{if(S.fbConnected)await fbSet('activeTasks',String(t.id),{...t,startTime:now.toISOString()});}catch(e){}
+    if(S.fbConnected){
+      const ok=await fbUpdateOnly('activeTasks',String(t.id),{...t,startTime:now.toISOString()});
+      if(!ok)S.activeTasks=S.activeTasks.filter(x=>x.id!==t.id);
+    }
   }
+  if(stale.length)_alertStaleTasks(stale);
   if(paused.length){saveLS();try{renderTasks();}catch(e){}}
   return paused.length;
+}
+// משימה מושהית מעל STALE_TASK_DAYS ימים = נשכחה פתוחה, לא עבודה אמיתית שנמשכת
+const STALE_TASK_DAYS=2;
+function _isStaleTask(t){
+  const ref=t.pausedAt?new Date(t.pausedAt):(t.startTime instanceof Date?t.startTime:new Date(t.startTime));
+  return (Date.now()-ref.getTime())>STALE_TASK_DAYS*86400000;
+}
+// התראה חד-פעמית ליום למנהל, לא לעובד — כדי שלא תרוץ בכל סריקה
+function _alertStaleTasks(tasks){
+  const today=todayStr();
+  if(localStorage.getItem('txops_stale_alert')===today)return;
+  localStorage.setItem('txops_stale_alert',today);
+  const lines=tasks.map(t=>{
+    const d=t.pausedAt?new Date(t.pausedAt):new Date(t.startTime);
+    return `• ${t.workerName} — ${t.prod} ${t.taskType||''} (מושהית מ-${pad2(d.getDate())}/${pad2(d.getMonth()+1)}, ${fmtM(t.accumulatedSec||0)} נצברו)`;
+  }).join('\n');
+  sendTelegram(`⚠️ TextileOps — משימות תקועות שלא התחדשו אוטומטית\nהן פתוחות מעל ${STALE_TASK_DAYS} ימים. סגור או מחק אותן בניהול משימות:\n${lines}`).catch(()=>{});
 }
 
 // בדיקת משימות מושהות כשפותחים משימה חדשה לעובד
@@ -4287,7 +4346,10 @@ async function handlePausedTasks(workerId,newBarcodes){
         const now=srvNow();
         for(const t of bTasks){
           t.paused=false;t.pausedAt=null;t.startTime=now;
-          if(S.fbConnected)await fbSet('activeTasks',String(t.id),{...t,startTime:now.toISOString()});
+          if(S.fbConnected){
+            const ok=await fbUpdateOnly('activeTasks',String(t.id),{...t,startTime:now.toISOString()});
+            if(!ok)S.activeTasks=S.activeTasks.filter(x=>x.id!==t.id);
+          }
         }
         saveLS();renderTasks();
         showToast('▶ המשימה חודשה');
@@ -4318,7 +4380,7 @@ async function handlePausedTasks(workerId,newBarcodes){
         const now=srvNow();
         for(const t of bTasks){
           t.workerId=newW.id;t.workerName=newW.name;t.dept=newW.dept;t.paused=false;t.pausedAt=null;t.startTime=now;
-          if(S.fbConnected)await fbSet('activeTasks',String(t.id),{...t,startTime:now.toISOString()});
+          if(S.fbConnected)await fbUpdateOnly('activeTasks',String(t.id),{...t,startTime:now.toISOString()});
         }
         showToast(`✅ הועבר ל-${newW.name}`);
       }
@@ -7150,7 +7212,7 @@ async function transferTask(taskId){
     S.activeTasks.unshift(newTask);
     if(S.fbConnected){
       await fbSet('activeTasks',newTask.id,{...newTask,startTime:newTask.startTime.toISOString()});
-      await fbSet('activeTasks',String(t.id),{...t,startTime:t.startTime instanceof Date?t.startTime.toISOString():t.startTime});
+      await fbUpdateOnly('activeTasks',String(t.id),{...t,startTime:t.startTime instanceof Date?t.startTime.toISOString():t.startTime});
     }
     tgTask(newTask,true);
     saveLS();renderTasks();renderMgrTasks();
@@ -7167,7 +7229,7 @@ async function transferTask(taskId){
   // חשב מחדש צפי לעובד החדש (שכר שונה); בכשל שרת — משאירים את הצפי הקיים כדי לא למחוק צפי תקין
   const expF=await fetchExpected(t.cust,t.prod,newWorker.id,t.qty);
   if(expF?.ok&&expF.perStep?.[tt]!=null)t.expectedMin=expF.perStep[tt];
-  if(S.fbConnected)await fbSet('activeTasks',String(t.id),{...t,startTime:t.startTime instanceof Date?t.startTime.toISOString():t.startTime});
+  if(S.fbConnected)await fbUpdateOnly('activeTasks',String(t.id),{...t,startTime:t.startTime instanceof Date?t.startTime.toISOString():t.startTime});
   saveLS();renderTasks();renderMgrTasks();
   showToast(`${T.tr_done_all}${newWorker.name}`);
 }
@@ -7725,7 +7787,7 @@ async function confirmModal(){
       S.activeTasks=S.activeTasks.filter(x=>x.id!==t.id);
       if(S.fbConnected){await fbDel('activeTasks',t.id);await fbSet('histTasks',t.id,{...done,startTime:done.startTime instanceof Date?done.startTime.toISOString():done.startTime,endTime:endTime.toISOString()});}
     } else {
-      if(S.fbConnected)await fbSet('activeTasks',t.id,{...t,startTime:t.startTime instanceof Date?t.startTime.toISOString():t.startTime});
+      if(S.fbConnected)await fbUpdateOnly('activeTasks',t.id,{...t,startTime:t.startTime instanceof Date?t.startTime.toISOString():t.startTime});
     }
     saveLS();closeModal();renderTasks();renderMgrTasks();return;
   }
