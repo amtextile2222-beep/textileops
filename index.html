@@ -855,7 +855,7 @@ code{background:var(--bg2);border:0.5px solid var(--b);border-radius:4px;padding
       <div class="card">
         <div class="sec" data-i18n="task_start_sec">▶ התחלת משימה לעובד</div>
         <div class="field"><label data-i18n="th_worker">עובד</label>
-          <select id="mgr-emp-sel" style="font-size:13px" onchange="renderStepRecs('mgr')"><option value="">בחר עובד...</option></select>
+          <select id="mgr-emp-sel" style="font-size:13px" onchange="onScanEmpChange('mgr')"><option value="">בחר עובד...</option></select>
         </div>
         <div class="field"><label data-i18n="lbl_task_barcode12">ברקוד משימה (12 ספרות)</label>
           <div id="mgr-cam-container" style="display:none;margin-bottom:.75rem;position:relative">
@@ -905,7 +905,7 @@ code{background:var(--bg2);border:0.5px solid var(--b);border-radius:4px;padding
       <div class="sec" data-i18n="task_start_sec">▶ התחלת משימה לעובד</div>
       <div class="field"><label data-i18n="th_worker">עובד</label>
         <div style="display:flex;gap:6px;align-items:center">
-          <select id="ts-emp-sel" style="font-size:13px;flex:1" onchange="renderStepRecs('ts')"><option value="">בחר עובד...</option></select>
+          <select id="ts-emp-sel" style="font-size:13px;flex:1" onchange="onScanEmpChange('ts')"><option value="">בחר עובד...</option></select>
           <button class="btn primary" onclick="tsStartWorkerCam()" id="ts-emp-cam-btn" style="font-size:13px;padding:8px 12px;flex-shrink:0;display:none" title="סרוק ברקוד עובד" data-i18n="btn_scan_worker">📷 עובד</button>
         </div>
         <div id="ts-emp-cam-container" style="display:none;margin-top:8px;position:relative">
@@ -1361,6 +1361,9 @@ const LANGS={
     st_unknown:'⚠ תחנה לא מוכרת',
     st_reminder:'📍 תזכורת: סרוק ברקוד תחנה כדי לשייך אותך לעמדה',
     st_sel_worker:'⚠ בחר עובד לפני סריקת תחנה',
+    st_only:'📍 רק שלבי התחנה',
+    st_all_steps:'📋 כל השלבים',
+    st_of:'מתוך',
     sc_emp_ok:'✅ עובד זוהה: ',
     sc_emp_next:'סרוק תחנה או משימה',
     sc_emp_notfound:'⚠ עובד לא נמצא',
@@ -1595,6 +1598,9 @@ const LANGS={
     st_unknown:'⚠ محطة غير معروفة',
     st_reminder:'📍 تذكير: امسح باركود المحطة لربطك بموقع العمل',
     st_sel_worker:'⚠ اختر عاملاً قبل مسح المحطة',
+    st_only:'📍 مراحل المحطة فقط',
+    st_all_steps:'📋 كل المراحل',
+    st_of:'من أصل',
     sc_emp_ok:'✅ تم التعرف على العامل: ',
     sc_emp_next:'امسح محطة أو مهمة',
     sc_emp_notfound:'⚠ العامل غير موجود',
@@ -1829,6 +1835,9 @@ const LANGS={
     st_unknown:'⚠ Unknown station',
     st_reminder:'📍 Reminder: scan a station barcode to link you to a workstation',
     st_sel_worker:'⚠ Select a worker before scanning a station',
+    st_only:'📍 Station steps only',
+    st_all_steps:'📋 All steps',
+    st_of:'of',
     sc_emp_ok:'✅ Worker: ',
     sc_emp_next:'scan a station or task',
     sc_emp_notfound:'⚠ Worker not found',
@@ -2174,6 +2183,68 @@ function recommendWorkers(prodObj,checkedStepNames){
   }
   recs.sort((a,b)=>((b.present?1:0)-(a.present?1:0))||(a.slack-b.slack)||(a.load-b.load));
   return recs;
+}
+// ─── צמצום רשימת שלבי העבודה לפי התחנה שנסרקה ─────────────────────
+// שלב מוצר נושא station="מחלקה::תחנה" — בדיוק אותו מפתח כמו workStations[].key,
+// ולכן הרשימה הארוכה (עד 27 שלבים במוצר) מצטמצמת לשלבים של התחנה בלבד.
+// מדיניות רכה כמו שאר שיוך התחנה: בלי תחנה סרוקה, או כשאין לה אף שלב במוצר — מציגים הכל.
+function workerStationKey(w){
+  const cs=w?.currentStation;if(!cs)return'';
+  return stationById(cs.id)?.key||((cs.dept||'')+'::'+(cs.name||''));
+}
+// העובד שלפיו מסננים: בסורק האישי המשתמש המחובר, בסורקי האחראי/מנהל העובד הנבחר.
+// תמיד מ-S.workers — S.user הוא עותק מנותק מרגע ההתחברות ו-currentStation שלו לא מתעדכן.
+function scanStationWorker(prefix){
+  const id=prefix==='bc'?S.user?.id:(document.getElementById(prefix+'-emp-sel')?.value||'');
+  return id?(S.workers||[]).find(x=>x.id===id):null;
+}
+// רינדור ה-checkbox-ים של שלבי העבודה — משותף לשלושת הסורקים (bc / ts / mgr)
+function renderStepChecks(prefix,cust,prod,steps,bc){
+  const listEl=document.getElementById(prefix+'-steps-list');if(!listEl)return;
+  const T=LANGS[currentLang];
+  // זהות לפי הברקוד המלא ולא לפי לקוח+מוצר: מידה/צבע אחרים = סריקה חדשה
+  const sameBc=!!bc&&listEl.dataset.bc===bc;
+  // ברקוד חדש = רשימה נקייה; אותו ברקוד (מעבר בין מסונן/מלא) = שומר על מה שסומן
+  const keep=sameBc?new Set([...listEl.querySelectorAll('input[type="checkbox"]:checked')].map(cb=>cb.dataset.step)):new Set();
+  if(!sameBc)listEl.dataset.showAll='';
+  listEl.dataset.bc=bc||'';
+  const w=scanStationWorker(prefix);
+  const key=workerStationKey(w);
+  const atStn=key?steps.filter(s=>stepStation(s)===key):[];
+  const showAll=listEl.dataset.showAll==='1'||!atStn.length;
+  // שלב שכבר סומן נשאר גלוי גם בתצוגה המסוננת — אחרת הסימון היה נעלם בשקט
+  const shown=showAll?steps:steps.filter(s=>stepStation(s)===key||keep.has(stepName(s)));
+  listEl.dataset.cust=cust;listEl.dataset.prod=prod;
+  const onch=prefix==='bc'?'bcStepToggle(this)':(prefix==='ts'?'tsStepToggle(this)':"renderStepRecs('mgr')");
+  const bar=atStn.length&&atStn.length<steps.length
+    ?`<div style="display:flex;align-items:center;gap:8px;flex-wrap:wrap;margin-bottom:6px;font-size:12px">
+        <span style="color:var(--green-txt);font-weight:700">📍 ${esc(w.currentStation.name)}</span>
+        <span style="color:var(--txt3)">${shown.length} ${esc(T.st_of||'מתוך')} ${steps.length}</span>
+        <button type="button" class="btn" style="font-size:11px;padding:3px 10px" onclick="toggleStepStationFilter('${escj(prefix)}')">${esc(showAll?(T.st_only||'📍 רק שלבי התחנה'):(T.st_all_steps||'📋 כל השלבים'))}</button>
+      </div>`:'';
+  listEl.innerHTML=bar+shown.map(s=>{
+    const nm=stepName(s);
+    return`<label style="display:flex;align-items:center;gap:8px;padding:6px 8px;margin-bottom:4px;background:var(--bg2);border-radius:8px;cursor:pointer;font-size:13px"><input type="checkbox" data-step="${esc(nm)}"${keep.has(nm)?' checked':''} style="width:16px;height:16px" onchange="${onch}"> ${esc(stepDisplay(s))}${stepBadge(s)}</label>`;
+  }).join('');
+}
+function toggleStepStationFilter(prefix){
+  const listEl=document.getElementById(prefix+'-steps-list');if(!listEl)return;
+  listEl.dataset.showAll=listEl.dataset.showAll==='1'?'':'1';
+  const p=findProd(listEl.dataset.cust,listEl.dataset.prod);
+  renderStepChecks(prefix,listEl.dataset.cust,listEl.dataset.prod,p?.workSteps||[],listEl.dataset.bc);
+  renderStepRecs(prefix);
+}
+// החלפת העובד הנבחר בסורק האחראי/המנהל — הרשימה מסוננת מחדש לפי התחנה שלו
+function onScanEmpChange(prefix){
+  const listEl=document.getElementById(prefix+'-steps-list');
+  const p=listEl?.dataset.cust?findProd(listEl.dataset.cust,listEl.dataset.prod):null;
+  if(p&&(p.workSteps||[]).length)renderStepChecks(prefix,listEl.dataset.cust,listEl.dataset.prod,p.workSteps,listEl.dataset.bc);
+  renderStepRecs(prefix);
+}
+// ניקוי מלא של רשימת השלבים — שדה הברקוד רוקן, שלא ייגררו סימונים לסריקה הבאה
+function clearStepChecks(prefix){
+  const listEl=document.getElementById(prefix+'-steps-list');if(!listEl)return;
+  listEl.innerHTML='';listEl.dataset.bc='';listEl.dataset.cust='';listEl.dataset.prod='';listEl.dataset.showAll='';
 }
 function renderStepRecs(prefix){
   const T=LANGS[currentLang];
@@ -4164,14 +4235,15 @@ async function bcStartBatch(){
       // סריקה שנייה שעברה את בדיקת הסל לפני שהמשימה הראשונה נוצרה. אותו עובד+ברקוד+שלב פעיל = דילוג.
       if(S.activeTasks.some(x=>x.workerId===u.id&&taskBc(x)===b.raw&&(x.taskType||'')===(b.taskType||'')&&!x.paused)){dupSkip.push((b.taskType||b.prod)+' — '+(T.scan_dup_active||'פעיל כעת'));continue;}
       if(findDupIn(srvActive,b.raw,b.taskType)){dupSkip.push((b.taskType||b.prod)+' — '+(T.scan_dup_active||'פעיל כעת'));continue;}
-      const newTask={id:String(Date.now())+Math.random().toString(36).slice(2,6),workerId:u.id,workerName:u.name,dept:b.taskDept||effDept(u),station:u.currentStation?.name||'',cust:b.cust,prod:b.prod,size:b.size,qty:b.qty,col:b.col,taskType:b.taskType,bc:b.raw,isTotal:b.isTotal||false,startTime:bcStart,elapsed:0,prodStamp:b.prodStamp};
+      // wu ולא u: S.user הוא עותק מרגע ההתחברות — currentStation שלו לא מתעדכן בסריקת תחנה
+      const newTask={id:String(Date.now())+Math.random().toString(36).slice(2,6),workerId:u.id,workerName:u.name,dept:b.taskDept||effDept(wu),station:wu.currentStation?.name||'',cust:b.cust,prod:b.prod,size:b.size,qty:b.qty,col:b.col,taskType:b.taskType,bc:b.raw,isTotal:b.isTotal||false,startTime:bcStart,elapsed:0,prodStamp:b.prodStamp};
       if(bcBatchId)newTask.batchId=bcBatchId;
       if(b.expMin!=null)newTask.expectedMin=b.expMin;
       if(!(await claimTaskGuard(newTask)).ok){dupSkip.push((b.taskType||b.prod)+' — '+(T.scan_dup_active||'פעיל כעת'));continue;}
       S.activeTasks.unshift(newTask);created++;
       if(S.fbConnected)await fbSet('activeTasks',newTask.id,{...newTask,startTime:bcStart.toISOString()});
       tgTask(newTask,true);
-      await autoStampStage(b.cust,b.prod,b.taskDept||effDept(u)); // עדכון אוטומטי של שלב הייצור
+      await autoStampStage(b.cust,b.prod,b.taskDept||effDept(wu)); // עדכון אוטומטי של שלב הייצור
     }
     _bcBatch=[];renderBcBatchQueue();
     document.getElementById('bc-inp').value='';parseBc('');
@@ -4583,8 +4655,7 @@ function parseBc(v){
     const steps=prod?.workSteps||[];
     if(steps.length){
       bcShowTaskTypeField(false);
-      const listEl=document.getElementById('bc-steps-list');
-      if(listEl){listEl.dataset.cust=c;listEl.dataset.prod=p;listEl.innerHTML=steps.map(s=>`<label style="display:flex;align-items:center;gap:8px;padding:6px 8px;margin-bottom:4px;background:var(--bg2);border-radius:8px;cursor:pointer;font-size:13px"><input type="checkbox" data-step="${esc(stepName(s))}" style="width:16px;height:16px" onchange="bcStepToggle(this)"> ${esc(stepDisplay(s))}${stepBadge(s)}</label>`).join('');updateExpectedTime('bc');}
+      renderStepChecks('bc',c,p,steps,v);updateExpectedTime('bc');
       return;
     }
   }
@@ -4595,7 +4666,7 @@ function bcShowTaskTypeField(show){
   const stepsWrap=document.getElementById('bc-steps-wrap');
   if(wrap)wrap.style.display=show?'':'none';
   if(stepsWrap)stepsWrap.style.display=show?'none':'';
-  if(show){const ex=document.getElementById('bc-expected');if(ex)ex.innerHTML='';}
+  if(show){const ex=document.getElementById('bc-expected');if(ex)ex.innerHTML='';clearStepChecks('bc');}
 }
 // הגבלת סריקה בעמוד "סריקה" (bc): עד 2 שלבים לברקוד (מנהל — ללא הגבלה) + עדכון צפי זמן
 function bcStepToggle(cb){
@@ -6275,8 +6346,7 @@ function parseMgrBc(v){
     const steps=prod?.workSteps||[];
     if(steps.length){
       mgrShowTaskTypeField(false);
-      const listEl=document.getElementById('mgr-steps-list');
-      if(listEl){listEl.dataset.cust=c;listEl.dataset.prod=p;listEl.innerHTML=steps.map(s=>`<label style="display:flex;align-items:center;gap:8px;padding:6px 8px;margin-bottom:4px;background:var(--bg2);border-radius:8px;cursor:pointer;font-size:13px"><input type="checkbox" data-step="${esc(stepName(s))}" style="width:16px;height:16px" onchange="renderStepRecs('mgr')"> ${esc(stepDisplay(s))}${stepBadge(s)}</label>`).join('');renderStepRecs('mgr');}
+      renderStepChecks('mgr',c,p,steps,v);renderStepRecs('mgr');
       return;
     }
   }
@@ -6287,7 +6357,7 @@ function mgrShowTaskTypeField(show){
   const stepsWrap=document.getElementById('mgr-steps-wrap');
   if(wrap)wrap.style.display=show?'':'none';
   if(stepsWrap)stepsWrap.style.display=show?'none':'';
-  if(show){const r=document.getElementById('mgr-recs');if(r)r.innerHTML='';}
+  if(show){const r=document.getElementById('mgr-recs');if(r)r.innerHTML='';clearStepChecks('mgr');}
 }
 
 let mgrCamStream=null;let mgrCamInterval=null;
@@ -6551,6 +6621,8 @@ async function assignWorkerStation(workerId,stationId){
     saveLS();
     showToast((T.st_scanned||'📍 תחנה נקלטה: ')+st.name+(st.dvrChannel?' · 📹 '+st.dvrChannel:''));
     try{renderMgrTasks();}catch(e){}
+    // ברקוד שכבר נסרק לפני התחנה — רשימת השלבים מצטמצמת עכשיו, בלי לסרוק אותו שוב
+    try{['bc','ts','mgr'].forEach(p=>onScanEmpChange(p));}catch(e){}
     return true;
   }catch(e){showToast('❌ '+e.message,'var(--red-txt)');return false;}
 }
@@ -6757,8 +6829,7 @@ function tsParseBc(v){
     const steps=prod?.workSteps||[];
     if(steps.length){
       tsShowTaskTypeField(false);
-      const listEl=document.getElementById('ts-steps-list');
-      if(listEl){listEl.dataset.cust=c;listEl.dataset.prod=p;listEl.innerHTML=steps.map(s=>`<label style="display:flex;align-items:center;gap:8px;padding:6px 8px;margin-bottom:4px;background:var(--bg2);border-radius:8px;cursor:pointer;font-size:13px"><input type="checkbox" data-step="${esc(stepName(s))}" style="width:16px;height:16px" onchange="tsStepToggle(this)"> ${esc(stepDisplay(s))}${stepBadge(s)}</label>`).join('');renderStepRecs('ts');}
+      renderStepChecks('ts',c,p,steps,v);renderStepRecs('ts');
       return;
     }
   }
@@ -6769,7 +6840,7 @@ function tsShowTaskTypeField(show){
   const stepsWrap=document.getElementById('ts-steps-wrap');
   if(wrap)wrap.style.display=show?'':'none';
   if(stepsWrap)stepsWrap.style.display=show?'none':'';
-  if(show){const r=document.getElementById('ts-recs');if(r)r.innerHTML='';}
+  if(show){const r=document.getElementById('ts-recs');if(r)r.innerHTML='';clearStepChecks('ts');}
 }
 // הגבלת סריקה לאחראי/עובד/עוזר: עד 2 שלבים לכל ברקוד ועד 2 ברקודים בסל (מנהל — ללא הגבלה)
 function tsStepToggle(cb){
