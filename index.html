@@ -8104,7 +8104,10 @@ async function autoStampStage(cust,prod,dept){
 }
 // ─── ברקוד "יצא ללקוח": מסמן שלב shipped + עדכון כמות סופית בפועל ───
 function openShipModal(cust,prod){
-  const p=S.products.find(x=>String(x.cust)===String(cust)&&String(x.prod)===String(prod));
+  // findProd ולא S.products.find: כשיש כמה רשומות לאותו לקוח+מוצר (דוגמה ישנה + הזמנה חדשה)
+  // find מחזיר את הראשונה בסדר doc ID = הישנה, בעוד getTotalQty למטה כבר עובד לפי findProd.
+  // 02/09366 29/07: "יצא ללקוח 90 יח'" נכתב על רשומת דוגמה בת יחידה אחת.
+  const p=findProd(cust,prod);
   if(!p){showToast('⚠ מוצר לא נמצא: '+cust+'-'+prod,'var(--red-txt)',5000);return;}
   const planned=getTotalQty(cust,prod)||0;
   const cur=p.shippedQty!=null?p.shippedQty:planned;
@@ -8130,7 +8133,7 @@ function openShipModal(cust,prod){
 }
 function closeShipModal(){document.getElementById('ship-modal-wrap')?.remove();}
 async function confirmShip(cust,prod){
-  const p=S.products.find(x=>String(x.cust)===String(cust)&&String(x.prod)===String(prod));
+  const p=findProd(cust,prod); // חייב להיות אותו lookup כמו openShipModal — אחרת הכמות והדגל על רשומות שונות
   if(!p){closeShipModal();return;}
   const qty=Math.max(0,parseInt(document.getElementById('ship-qty-inp')?.value)||0);
   if(!Array.isArray(p.stageLog))p.stageLog=[];
