@@ -2541,6 +2541,10 @@ async function initFb(){
 // listeners של נתונים — רק אחרי כניסה מאומתת (יש טוקן עם role)
 let _listenersStarted=false;
 let _adminListenerStarted=false;
+// נדלק אחרי ה-snapshot הראשון של activeTasks שהגיע מהשרת (לא cache) *ואחרי* עיבוד ההשהיה
+// האוטומטית שלו. חידוש בחתימת כניסה חייב להמתין לו — אחרת העובדת הראשונה בבוקר
+// מסננת רשימה ריקה/ישנה מהזיכרון ומשימותיה נשארות מושהות (ندوه 27/07, 12 דק' אבודות).
+let _activeTasksReady=false;
 function startDataListeners(){
   if(!_listenersStarted){
     _listenersStarted=true;
@@ -2647,6 +2651,9 @@ function listenFb(){
           fbUpdateOnly('activeTasks',String(t.id),{...t,startTime:t.startTime instanceof Date?t.startTime.toISOString():t.startTime});
         }
       });
+      // רק כאן — אחרי שההשהיה האוטומטית עוגנה ל-accumulatedSec. חידוש שירוץ לפני כן
+      // יראה משימה של אתמול כ"לא מושהית", ידלג עליה, ואז הלולאה למעלה תשהה אותה ליום שלם.
+      _activeTasksReady=true;
     }
     renderAll();
   });
@@ -3802,6 +3809,15 @@ async function waitForWorker(id,timeoutMs=15000){
   }
   return null;
 }
+// המתנה ל-snapshot הראשון מהשרת של activeTasks. בניגוד ל-waitForWorker, כאן אי אפשר
+// להסתפק ב-S.workers: הוא נטען מיידית מ-localStorage ולכן חוזר לפני שהמשימות הגיעו.
+// בלי Firebase אין למה להמתין — מחזיר מיד ועובד על מה שיש בזיכרון (התנהגות קודמת).
+async function waitForActiveTasks(timeoutMs=10000){
+  if(!db||!S.fbConnected)return false;
+  const t0=Date.now();
+  while(!_activeTasksReady&&Date.now()-t0<timeoutMs)await new Promise(r=>setTimeout(r,200));
+  return _activeTasksReady;
+}
 // כניסה אוטומטית אחרי זיהוי פנים (ללא תלות ב-DOM של דף נוכחות)
 async function autoPunchIn(){
   if(!S.user)return;
@@ -4400,7 +4416,10 @@ async function pauseWorkerTasks(workerId,pausedAt){
 // עובד שלא הגיע: אין חתימת כניסה ⇒ המשימה נשארת מושהית (או שמנהל מעביר בכפתור 🔄).
 // אותה מכניקה כמו "📅 המשך" ב-handlePausedTasks: startTime מהכניסה, הנצבר נשמר ב-accumulatedSec.
 // ההשלמה נשארת דרך הזרימה הקיימת: סריקת המשימה הבאה סוגרת את הרצות (כולל המחודשות).
-async function resumeWorkerTasksOnPunchIn(workerId,now){
+// waitMs: החתמה קבוצתית ממתינה פעם אחת לפני הלולאה ומעבירה 0, אחרת המתנה כפול מספר העובדים.
+async function resumeWorkerTasksOnPunchIn(workerId,now,waitMs){
+  // חובה לפני הסינון: 300ms אחרי ההתחברות S.activeTasks עדיין ריק/ישן מ-localStorage.
+  await waitForActiveTasks(waitMs);
   const all=S.activeTasks.filter(t=>t.workerId===workerId&&t.paused&&!_isClosedTask(t.id));
   // משימה שנשכחה פתוחה ימים לא תתחדש לבד — אחרת היא צוברת שעון-קיר לנצח
   // (ندوه 00084 צברה 227 שע'). המנהל מקבל התראה ומחליט: לסגור, למחוק או לחדש ידנית.
@@ -7210,13 +7229,14 @@ async function mgrBulkPunchIn(){
   if(!selected.length){alert('לא נבחרו עובדים');return;}
   const today=todayStr();
   let bulkResumed=0;
+  await waitForActiveTasks(); // פעם אחת לכולם — בלולאה מעבירים 0 כדי לא להכפיל את ההמתנה
   for(const w of selected){
     if(!w.sessions)w.sessions=[];
     const dt=new Date(today+'T'+pad2(hh)+':'+pad2(mm)+':00');
     w.sessions.push({in:dt.toISOString(),out:null});
     w.status='in';w.checkin=w.sessions[0].in;
     if(S.fbConnected)await fbSet('workers',w.id,w);
-    bulkResumed+=await resumeWorkerTasksOnPunchIn(w.id,dt);
+    bulkResumed+=await resumeWorkerTasksOnPunchIn(w.id,dt,0);
   }
   if(bulkResumed)showToast('▶ '+bulkResumed+' '+(LANGS[currentLang].tasks_resumed_msg||'משימות חודשו אוטומטית'),'var(--green-txt)',5000);
   saveLS();
