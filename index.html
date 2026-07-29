@@ -8103,14 +8103,30 @@ async function autoStampStage(cust,prod,dept){
   if(S.fbConnected)try{await fbSet('products',p.id,{...p});}catch(e){}
 }
 // ─── ברקוד "יצא ללקוח": מסמן שלב shipped + עדכון כמות סופית בפועל ───
+// כל הרשומות של אותו לקוח+מוצר, החדשה ראשונה — אותו דירוג בדיוק כמו findProd
+function prodMatches(cust,prod){
+  const rank=p=>+p.createdAt||parseInt(String(p.id).replace(/\D/g,''))||0;
+  return (S.products||[]).filter(p=>p.cust===cust&&p.prod===prod).sort((a,b)=>rank(b)-rank(a));
+}
+function _prodQty(p){return (p.quantities||[]).reduce((s,q)=>s+(parseInt(q.qty)||0),0);}
+// ברקוד "יצא ללקוח" הוא לקוח+מוצר בלבד — הוא לא מבדיל בין שתי הזמנות של אותו מספר דגם.
+// לכן כשיש כמה רשומות המשתמש בוחר; ברירת המחדל היא החדשה ביותר (= בחירת findProd).
+// 02/09366 29/07: הדגל נכתב על רשומת דוגמה בת יחידה אחת במקום על ההזמנה בת 90.
 function openShipModal(cust,prod){
-  // findProd ולא S.products.find: כשיש כמה רשומות לאותו לקוח+מוצר (דוגמה ישנה + הזמנה חדשה)
-  // find מחזיר את הראשונה בסדר doc ID = הישנה, בעוד getTotalQty למטה כבר עובד לפי findProd.
-  // 02/09366 29/07: "יצא ללקוח 90 יח'" נכתב על רשומת דוגמה בת יחידה אחת.
-  const p=findProd(cust,prod);
-  if(!p){showToast('⚠ מוצר לא נמצא: '+cust+'-'+prod,'var(--red-txt)',5000);return;}
-  const planned=getTotalQty(cust,prod)||0;
+  const all=prodMatches(cust,prod);
+  if(!all.length){showToast('⚠ מוצר לא נמצא: '+cust+'-'+prod,'var(--red-txt)',5000);return;}
+  const p=all[0];
+  // getTotalQty כ-fallback: הוא נופל ל-_bcLastGen כשעדיין אין quantities שמורות (ברקודים שזה עתה נוצרו)
+  const planned=_prodQty(p)||getTotalQty(cust,prod)||0;
   const cur=p.shippedQty!=null?p.shippedQty:planned;
+  const opts=all.map(x=>{
+    const q=_prodQty(x);
+    const d=+x.createdAt?new Date(+x.createdAt):null;
+    const ds=d?' · נפתחה '+pad2(d.getDate())+'/'+pad2(d.getMonth()+1):'';
+    const sh=x.shippedQty!=null?' · כבר יצא '+x.shippedQty:'';
+    return `<option value="${esc(x.id)}">${esc(x.name||'(בלי שם)')} — ${q} יח'${ds}${sh}</option>`;
+  }).join('');
+  const multi=all.length>1;
   closeShipModal();
   const wrap=document.createElement('div');
   wrap.id='ship-modal-wrap';
@@ -8118,13 +8134,15 @@ function openShipModal(cust,prod){
   wrap.onclick=e=>{if(e.target===wrap)closeShipModal();};
   wrap.innerHTML=`<div style="background:var(--card);border-radius:14px;padding:20px;max-width:360px;width:100%;box-shadow:0 10px 40px rgba(0,0,0,.3)">
     <div style="font-size:16px;font-weight:800;margin-bottom:4px">🚚 יצא ללקוח</div>
-    <div style="font-size:13px;color:var(--txt3);margin-bottom:12px"><span class="bc-seg bc-c">לקוח ${esc(cust)}</span> <span class="bc-seg bc-p">${esc(prod)}</span> ${esc(p.name||'')}</div>
-    <div style="font-size:12px;color:var(--txt3);margin-bottom:8px">כמות מתוכננת בהזמנה: <b style="color:var(--txt)">${planned}</b> יח'</div>
+    <div style="font-size:13px;color:var(--txt3);margin-bottom:12px"><span class="bc-seg bc-c">לקוח ${esc(cust)}</span> <span class="bc-seg bc-p">${esc(prod)}</span> ${multi?'':esc(p.name||'')}</div>
+    ${multi?`<div style="background:var(--amber-bg);color:var(--amber-txt);font-size:12px;font-weight:700;padding:7px 9px;border-radius:8px;margin-bottom:8px">⚠ יש ${all.length} רשומות למספר הדגם הזה — בחר את ההזמנה שיצאה</div>`:''}
+    <select id="ship-prod-sel" onchange="shipPickChanged()" style="width:100%;font-size:13px;padding:8px;margin-bottom:10px;border-radius:8px;border:1px solid var(--brd);background:var(--bg);color:var(--txt);${multi?'':'display:none'}">${opts}</select>
+    <div style="font-size:12px;color:var(--txt3);margin-bottom:8px">כמות מתוכננת בהזמנה: <b id="ship-planned" style="color:var(--txt)">${planned}</b> יח'</div>
     <label style="font-size:13px;font-weight:600">כמות בפועל שיצאה ללקוח</label>
     <input id="ship-qty-inp" type="number" inputmode="numeric" min="0" value="${cur}" style="width:100%;font-size:16px;padding:8px;margin-top:6px;border-radius:8px;border:1px solid var(--brd);background:var(--bg);color:var(--txt)"/>
     <div style="font-size:11px;color:var(--txt3);margin-top:4px">לפעמים הכמות הסופית שונה מהמתוכננת — עדכן לפי מה שבאמת נשלח.</div>
     <div style="display:flex;gap:8px;margin-top:16px">
-      <button class="btn primary" style="flex:1;font-size:14px" onclick="confirmShip('${escj(cust)}','${escj(prod)}')">✅ אשר יציאה</button>
+      <button class="btn primary" style="flex:1;font-size:14px" onclick="confirmShip()">✅ אשר יציאה</button>
       <button class="btn" style="flex:1;font-size:14px" onclick="closeShipModal()">ביטול</button>
     </div>
   </div>`;
@@ -8132,8 +8150,18 @@ function openShipModal(cust,prod){
   setTimeout(()=>{const i=document.getElementById('ship-qty-inp');if(i){i.focus();i.select();}},50);
 }
 function closeShipModal(){document.getElementById('ship-modal-wrap')?.remove();}
-async function confirmShip(cust,prod){
-  const p=findProd(cust,prod); // חייב להיות אותו lookup כמו openShipModal — אחרת הכמות והדגל על רשומות שונות
+// החלפת הזמנה בבורר — הכמות המתוכננת ושדה הקלט עוברים לרשומה הנבחרת
+function shipPickChanged(){
+  const p=S.products.find(x=>x.id===document.getElementById('ship-prod-sel')?.value);
+  if(!p)return;
+  const planned=_prodQty(p)||getTotalQty(p.cust,p.prod)||0;
+  const el=document.getElementById('ship-planned');if(el)el.textContent=planned;
+  const inp=document.getElementById('ship-qty-inp');
+  if(inp){inp.value=p.shippedQty!=null?p.shippedQty:planned;inp.focus();inp.select();}
+}
+async function confirmShip(){
+  // לפי id ייחודי מהבורר — לא לפי לקוח+מוצר, שעמום כשיש כמה הזמנות לאותו דגם
+  const p=S.products.find(x=>x.id===document.getElementById('ship-prod-sel')?.value);
   if(!p){closeShipModal();return;}
   const qty=Math.max(0,parseInt(document.getElementById('ship-qty-inp')?.value)||0);
   if(!Array.isArray(p.stageLog))p.stageLog=[];
@@ -8149,7 +8177,7 @@ async function confirmShip(cust,prod){
   saveLS();
   if(S.fbConnected)try{await fbSet('products',p.id,{...p});}catch(e){}
   closeShipModal();
-  showToast('✅ '+(p.name||prod)+' — יצא ללקוח ('+qty+" יח')");
+  showToast('✅ '+(p.name||p.prod)+' — יצא ללקוח ('+qty+" יח')");
   try{buildStageReport();}catch(e){}
   try{renderProducts();}catch(e){}
 }
