@@ -2199,14 +2199,16 @@ function scanStationWorker(prefix){
   return id?(S.workers||[]).find(x=>x.id===id):null;
 }
 // רינדור ה-checkbox-ים של שלבי העבודה — משותף לשלושת הסורקים (bc / ts / mgr)
-function renderStepChecks(prefix,cust,prod,steps,bc){
+// keepMode=true רק מכפתור התצוגה עצמו. כל רינדור אחר (סריקה, החלפת עובד, סריקת תחנה)
+// מתחיל מחדש מסונן — אחרת לחיצה אחת על "כל השלבים" נדבקת לכל סריקת מצלמה של אותו ברקוד.
+function renderStepChecks(prefix,cust,prod,steps,bc,keepMode){
   const listEl=document.getElementById(prefix+'-steps-list');if(!listEl)return;
   const T=LANGS[currentLang];
   // זהות לפי הברקוד המלא ולא לפי לקוח+מוצר: מידה/צבע אחרים = סריקה חדשה
   const sameBc=!!bc&&listEl.dataset.bc===bc;
   // ברקוד חדש = רשימה נקייה; אותו ברקוד (מעבר בין מסונן/מלא) = שומר על מה שסומן
   const keep=sameBc?new Set([...listEl.querySelectorAll('input[type="checkbox"]:checked')].map(cb=>cb.dataset.step)):new Set();
-  if(!sameBc)listEl.dataset.showAll='';
+  if(!keepMode)listEl.dataset.showAll='';
   listEl.dataset.bc=bc||'';
   const w=scanStationWorker(prefix);
   const key=workerStationKey(w);
@@ -2219,7 +2221,7 @@ function renderStepChecks(prefix,cust,prod,steps,bc){
   const bar=atStn.length&&atStn.length<steps.length
     ?`<div style="display:flex;align-items:center;gap:8px;flex-wrap:wrap;margin-bottom:6px;font-size:12px">
         <span style="color:var(--green-txt);font-weight:700">📍 ${esc(w.currentStation.name)}</span>
-        <span style="color:var(--txt3)">${shown.length} ${esc(T.st_of||'מתוך')} ${steps.length}</span>
+        <span style="color:var(--txt3)">${atStn.length} ${esc(T.st_of||'מתוך')} ${steps.length}</span>
         <button type="button" class="btn" style="font-size:11px;padding:3px 10px" onclick="toggleStepStationFilter('${escj(prefix)}')">${esc(showAll?(T.st_only||'📍 רק שלבי התחנה'):(T.st_all_steps||'📋 כל השלבים'))}</button>
       </div>`:'';
   listEl.innerHTML=bar+shown.map(s=>{
@@ -2231,7 +2233,7 @@ function toggleStepStationFilter(prefix){
   const listEl=document.getElementById(prefix+'-steps-list');if(!listEl)return;
   listEl.dataset.showAll=listEl.dataset.showAll==='1'?'':'1';
   const p=findProd(listEl.dataset.cust,listEl.dataset.prod);
-  renderStepChecks(prefix,listEl.dataset.cust,listEl.dataset.prod,p?.workSteps||[],listEl.dataset.bc);
+  renderStepChecks(prefix,listEl.dataset.cust,listEl.dataset.prod,p?.workSteps||[],listEl.dataset.bc,true);
   renderStepRecs(prefix);
 }
 // החלפת העובד הנבחר בסורק האחראי/המנהל — הרשימה מסוננת מחדש לפי התחנה שלו
