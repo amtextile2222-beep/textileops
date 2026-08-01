@@ -8,3 +8,8 @@ package-lock.json
 functions/package-lock.json
 read-pdf.cjs
 read-pdf.mjs
+
+# קבצי עבודה מקומיים — לא לדחוף לרפו הציבורי
+HANDOFF.md
+TextileOps_סיכום_*.md
+backup_*.json
