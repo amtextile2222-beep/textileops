@@ -4009,8 +4009,12 @@ function _capByAttendance(t,sec){
   try{
     const w=S.workers.find(x=>x.id===t.workerId);if(!w)return sec;
     const st=t.startTime instanceof Date?t.startTime:new Date(t.startTime);
-    // היום המוקדם ביותר שהמשימה יכלה להתחיל בו: ההשהיה הראשונה או ההתחלה הנוכחית
-    const firstDay=(t.pausedAt?new Date(Math.min(new Date(t.pausedAt).getTime(),st.getTime())):st);
+    // היום המוקדם ביותר שהמשימה יכלה להתחיל בו: ההתחלה המקורית (origStart — לפני שחידוש
+    // דרס את startTime), ההשהיה הראשונה, או ההתחלה הנוכחית. בלי origStart משימה שחודשה
+    // בבוקר מקבלת fromDate=היום, התקרה = הנוכחות מאז הכניסה בלבד, וכל מה שנצבר אתמול נמחק.
+    const cand=[st.getTime()];
+    [t.pausedAt,t.origStart].forEach(v=>{if(v){const ms=new Date(v).getTime();if(isFinite(ms))cand.push(ms);}});
+    const firstDay=new Date(Math.min(...cand));
     const fromDate=firstDay.getFullYear()+'-'+pad2(firstDay.getMonth()+1)+'-'+pad2(firstDay.getDate());
     let capMs=(S.attHistory||[]).filter(r=>r.workerId===t.workerId&&r.date>=fromDate)
       .reduce((s,r)=>s+(r.netMs||0),0);
@@ -4412,6 +4416,14 @@ async function pauseWorkerTasks(workerId,pausedAt){
   return tasks.length;
 }
 
+// חידוש משימה מושהית: startTime נדרס לשעת החידוש (כך נמדדת הריצה החדשה), אבל ההתחלה
+// המקורית נשמרת ב-origStart. בלי זה משימה רב-יומית נראית בהיסטוריה כאילו התחילה ביום
+// הסגירה, ו-_capByAttendance מחשב את התקרה לפי יום החידוש בלבד — כלומר חותך את כל מה
+// שנצבר בימים הקודמים (ندوه 03/08/2026: 1:47 שע' מאתמול נרשמו כ-5 דק').
+function _resumeTask(t,now){
+  if(!t.origStart)t.origStart=t.startTime instanceof Date?t.startTime.toISOString():t.startTime;
+  t.paused=false;t.pausedAt=null;t.startTime=now;
+}
 // חידוש אוטומטי של המשימות המושהות בחתימת כניסה — במקום לסרוק את הברקוד מחדש בבוקר.
 // עובד שלא הגיע: אין חתימת כניסה ⇒ המשימה נשארת מושהית (או שמנהל מעביר בכפתור 🔄).
 // אותה מכניקה כמו "📅 המשך" ב-handlePausedTasks: startTime מהכניסה, הנצבר נשמר ב-accumulatedSec.
@@ -4426,7 +4438,7 @@ async function resumeWorkerTasksOnPunchIn(workerId,now,waitMs){
   const paused=all.filter(t=>!_isStaleTask(t));
   const stale=all.filter(t=>_isStaleTask(t));
   for(const t of paused){
-    t.paused=false;t.pausedAt=null;t.startTime=now;
+    _resumeTask(t,now);
     if(S.fbConnected){
       const ok=await fbUpdateOnly('activeTasks',String(t.id),{...t,startTime:now.toISOString()});
       if(!ok)S.activeTasks=S.activeTasks.filter(x=>x.id!==t.id);
@@ -4474,7 +4486,7 @@ async function handlePausedTasks(workerId,newBarcodes){
         // חידוש — עדכן startTime לעכשיו
         const now=srvNow();
         for(const t of bTasks){
-          t.paused=false;t.pausedAt=null;t.startTime=now;
+          _resumeTask(t,now);
           if(S.fbConnected){
             const ok=await fbUpdateOnly('activeTasks',String(t.id),{...t,startTime:now.toISOString()});
             if(!ok)S.activeTasks=S.activeTasks.filter(x=>x.id!==t.id);
@@ -4508,7 +4520,7 @@ async function handlePausedTasks(workerId,newBarcodes){
         const newW=eligible[idx];
         const now=srvNow();
         for(const t of bTasks){
-          t.workerId=newW.id;t.workerName=newW.name;t.dept=newW.dept;t.paused=false;t.pausedAt=null;t.startTime=now;
+          t.workerId=newW.id;t.workerName=newW.name;t.dept=newW.dept;_resumeTask(t,now);
           if(S.fbConnected)await fbUpdateOnly('activeTasks',String(t.id),{...t,startTime:now.toISOString()});
         }
         showToast(`✅ הועבר ל-${newW.name}`);
@@ -4957,10 +4969,13 @@ function renderTaskHist(){
     const dateStr=pad2(st.getDate())+'/'+pad2(st.getMonth()+1)+'/'+st.getFullYear();
     const _expSec=(+t.expectedMin>0)?(+t.expectedMin)*60:0;
     const _over=_expSec>0&&(t.duration||0)>_expSec;
+    // משימה שחודשה מיום קודם: startTime הוא שעת החידוש, לכן מציגים גם את ההתחלה האמיתית
+    const _os=t.origStart?new Date(t.origStart):null;
+    const _multiDay=_os&&!isNaN(_os.getTime())&&(_os.getDate()!==st.getDate()||_os.getMonth()!==st.getMonth()||_os.getFullYear()!==st.getFullYear());
     return`<div class="row">
       <div style="flex:1"><div style="font-size:12px;font-weight:500;color:var(--txt)">${esc(t.workerName)}</div>
       <div style="font-size:11px;color:var(--txt3)">${dateStr} | לקוח ${t.cust} | ${t.prod}${t.size?' | מידה '+t.size:''} | ${t.qty===0?'<span style="color:#d97706;font-weight:700">⏳ כמות פתוחה</span>':t.qty+' יח\''}${t.isTotal?' | <span style="color:#059669;font-weight:700">📦 כל הכמות</span>':' | '+(COLORS[t.col]||t.col)}${t.taskType?' | 📋 '+esc(t.taskType):''}${t.station?' | <span style="color:var(--green-txt)">📍 '+esc(t.station)+'</span>':''}</div>
-      <div style="font-size:11px;color:var(--txt3)">▶ ${stStr} → ◀ ${etStr}</div>
+      <div style="font-size:11px;color:var(--txt3)">▶ ${stStr} → ◀ ${etStr}${_multiDay?` <span style="color:#d97706;font-weight:600" title="המשימה נמשכה מיום קודם — הזמן שנצבר כלול במשך">📅 התחילה ${pad2(_os.getDate())}/${pad2(_os.getMonth()+1)} ${pad2(_os.getHours())}:${pad2(_os.getMinutes())}</span>`:''}</div>
       ${(()=>{const prev=S.histTasks.filter(x=>x.bc===t.bc&&x.workerId===t.workerId&&x.id!==t.id);const tot=prev.reduce((s,x)=>s+(x.duration||0),0);const ses=prev.length;return ses>0?`<div style="font-size:11px;color:var(--blue-txt)">📊 מצטבר קודם: <b>${fmtM(tot)}</b> (${ses} ${ses===1?'משימה':'משימות'})</div>`:''})()}
       </div>
       <div style="display:flex;align-items:center;gap:6px">
@@ -7963,7 +7978,9 @@ async function confirmModal(){
     t.taskType=document.getElementById('mf-t-type')?.value||'';
     t.dept=document.getElementById('mf-t-dept')?.value||t.dept||'';
     const stVal=document.getElementById('mf-t-start')?.value;
-    if(stVal)t.startTime=new Date(stVal);
+    // מנהל שהזין התחלה ידנית = מקור האמת; מאפסים את origStart (null ולא delete — merge:true
+    // בשרת לא מוחק שדה) כדי שלא יוצג "התחילה ביום X" סותר ושהתקרה תחושב מהערך הידני
+    if(stVal){t.startTime=new Date(stVal);t.origStart=null;}
     const etVal=document.getElementById('mf-t-end')?.value;
     if(etVal){
       // יש זמן סיום — העבר להיסטוריה
@@ -7993,7 +8010,9 @@ async function confirmModal(){
     t.taskType=document.getElementById('mf-t-type')?.value||'';
     t.dept=document.getElementById('mf-t-dept')?.value||t.dept||'';
     const stVal=document.getElementById('mf-t-start')?.value;
-    if(stVal)t.startTime=new Date(stVal);
+    // מנהל שהזין התחלה ידנית = מקור האמת; מאפסים את origStart (null ולא delete — merge:true
+    // בשרת לא מוחק שדה) כדי שלא יוצג "התחילה ביום X" סותר ושהתקרה תחושב מהערך הידני
+    if(stVal){t.startTime=new Date(stVal);t.origStart=null;}
     const etVal=document.getElementById('mf-t-end')?.value;
     if(etVal){
       const newEnd=new Date(etVal);
