@@ -4324,6 +4324,9 @@ function normalizeBatchDurations(tasks){
   tasks.forEach(t=>{if(t.batchId)(groups[t.workerId+'|'+t.batchId]=groups[t.workerId+'|'+t.batchId]||[]).push(t);else out[t.id]=t.duration||0;});
   for(const g of Object.values(groups)){
     if(g.length<2){out[g[0].id]=g[0].duration||0;continue;}
+    // משימה שחודשה מיום קודם (origStart): ה-duration כולל את הזמן שנצבר בימים קודמים
+    // ולכן גדול מחלון [start,end] הנראה — זה תקין, לא ניפוח. הכיווץ למטה היה מוחק אותו.
+    if(g.some(t=>t.origStart)){g.forEach(t=>{out[t.id]=t.duration||0;});continue;}
     const start=Math.min(...g.map(t=>new Date(t.startTime).getTime()));
     const end=Math.max(...g.map(t=>t.endTime?new Date(t.endTime).getTime():start));
     const clock=Math.max(0,(end-start)/1000);
@@ -4343,6 +4346,10 @@ function normalizeBatchDurations(tasks){
   tasks.forEach(t=>{
     const s=new Date(t.startTime).getTime(),e=t.endTime?new Date(t.endTime).getTime():NaN;
     if(!isFinite(s)||!isFinite(e)||e<=s)return;
+    // משימה מחודשת מוחרגת מהכיווץ: ה-duration שלה כולל ימים קודמים ולעולם יגדל
+    // מהחלון של הצביר, כך שהיא הייתה גוררת למטה גם את המשימות שחופפות לה.
+    // התקרה ב-_capByAttendance היא מה שחוסם אותה מלברוח.
+    if(t.origStart)return;
     (byW[t.workerId]=byW[t.workerId]||[]).push({id:t.id,w:t.workerId,s,e});
   });
   for(const arr of Object.values(byW)){
