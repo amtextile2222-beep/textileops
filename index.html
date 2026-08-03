@@ -1243,6 +1243,20 @@ code{background:var(--bg2);border:0.5px solid var(--b);border-radius:4px;padding
       <div style="font-size:15px;font-weight:700;margin-bottom:10px">🏭 תחנות עבודה (מצלמות)</div>
       <div style="font-size:12px;color:var(--txt3);margin-bottom:10px">עובד סורק את ברקוד התחנה כשהוא מתיישב בעמדה — השיוך למחלקה ולתחנה נעשה אוטומטית ונרשם על המשימות. סריקת תחנה חדשה סוגרת את הקודמת; חתימת יציאה סוגרת הכל. הרשימה נלקחת מהמחלקות והתחנות שבלשונית <b>ניהול</b> — ערוץ DVR נקבע כאן (אותו ערוץ יכול לשמש כמה תחנות)</div>
       <button class="btn" style="font-size:13px;margin-bottom:10px" onclick="syncStationsFromDepts()">🔄 סנכרן תחנות מלשונית הניהול</button>
+      <button class="btn" style="font-size:13px;margin-bottom:10px" onclick="auditStepsWithoutStation()">🔎 שלבים בלי תחנה</button>
+      <div style="padding:10px;border:1px solid var(--brd);border-radius:8px;margin-bottom:10px">
+        <label style="display:flex;align-items:center;gap:8px;cursor:pointer;font-size:13px;font-weight:600">
+          <input type="checkbox" id="stn-lock" style="width:17px;height:17px" onchange="setStationLock(this.checked)">
+          🔒 אכיפת תחנה: חובת סריקה + שלב נעול לתחנתו
+        </label>
+        <div style="font-size:11px;color:var(--txt3);margin-top:5px;line-height:1.5">
+          בהדלקה: עובד לא יוכל להתחיל משימה בלי לסרוק תחנה, ורק שלבים של התחנה שסרק (או תחנה באותו שם עם מספר אחר) יהיו זמינים.
+          שלב בלי תחנה משויכת ייחסם — הרץ קודם "🔎 שלבים בלי תחנה".
+          אחראי/מנהל יכולים לעקוף באישור. הכיבוי חל מיד על כל המכשירים.
+        </div>
+        <div id="stn-lock-state" style="font-size:12px;font-weight:700;margin-top:6px"></div>
+      </div>
+      <div id="stn-audit" style="margin-bottom:10px"></div>
       <div id="stn-list"></div>
       <button class="btn primary" style="width:100%;justify-content:center;font-size:14px;padding:10px;margin-top:10px" onclick="renderStationBarcodes()">🏭 צור ברקודי תחנות</button>
       <div id="station-bc-output" style="margin-top:1rem"></div>
@@ -1364,6 +1378,13 @@ const LANGS={
     st_only:'📍 רק שלבי התחנה',
     st_all_steps:'📋 כל השלבים',
     st_of:'מתוך',
+    st_need_scan:'📍 חובה לסרוק ברקוד תחנה לפני התחלת משימה',
+    st_locked:'🔒 לא בתחנה הנכונה',
+    st_no_station:'אין תחנה משויכת',
+    st_no_steps_here:'אין שלבים לתחנה הזו במוצר — סרוק את התחנה הנכונה',
+    st_override_title:'עקיפת נעילת תחנה',
+    st_override_msg:'להתחיל בכל זאת?',
+    st_override_ok:'התחל בכל זאת',
     sc_emp_ok:'✅ עובד זוהה: ',
     sc_emp_next:'סרוק תחנה או משימה',
     sc_emp_notfound:'⚠ עובד לא נמצא',
@@ -1601,6 +1622,13 @@ const LANGS={
     st_only:'📍 مراحل المحطة فقط',
     st_all_steps:'📋 كل المراحل',
     st_of:'من أصل',
+    st_need_scan:'📍 يجب مسح باركود المحطة قبل بدء المهمة',
+    st_locked:'🔒 لست في المحطة الصحيحة',
+    st_no_station:'لا توجد محطة مرتبطة',
+    st_no_steps_here:'لا توجد مراحل لهذه المحطة في هذا المنتج — امسح المحطة الصحيحة',
+    st_override_title:'تجاوز قفل المحطة',
+    st_override_msg:'هل تريد البدء رغم ذلك؟',
+    st_override_ok:'ابدأ رغم ذلك',
     sc_emp_ok:'✅ تم التعرف على العامل: ',
     sc_emp_next:'امسح محطة أو مهمة',
     sc_emp_notfound:'⚠ العامل غير موجود',
@@ -1838,6 +1866,13 @@ const LANGS={
     st_only:'📍 Station steps only',
     st_all_steps:'📋 All steps',
     st_of:'of',
+    st_need_scan:'📍 You must scan a station barcode before starting a task',
+    st_locked:'🔒 Wrong station',
+    st_no_station:'no station assigned',
+    st_no_steps_here:'No steps for this station in this product — scan the correct station',
+    st_override_title:'Override station lock',
+    st_override_msg:'Start anyway?',
+    st_override_ok:'Start anyway',
     sc_emp_ok:'✅ Worker: ',
     sc_emp_next:'scan a station or task',
     sc_emp_notfound:'⚠ Worker not found',
@@ -2127,7 +2162,7 @@ let S={
   activeTasks:[],
   histTasks:[],
   alerts:[],
-  settings:{thresh:60,absent:5,waEnabled:false,waInterval:60,waFrom:'07:00',waTo:'18:00',waLong:true,waAbsent:true,factoryIP:'188.225.231.120',shiftStart:'06:30',shiftEnd:'15:00',roundMinutes:5,endOfDayTime:'15:05',ipBypassMin:0,ipBypassStartMs:0},
+  settings:{thresh:60,absent:5,waEnabled:false,waInterval:60,waFrom:'07:00',waTo:'18:00',waLong:true,waAbsent:true,factoryIP:'188.225.231.120',shiftStart:'06:30',shiftEnd:'15:00',roundMinutes:5,endOfDayTime:'15:05',ipBypassMin:0,ipBypassStartMs:0,stationLock:false},
   waLastSent:0,
   wifiAlertSent:{},
   tgSentAlerts:{},
@@ -2166,6 +2201,61 @@ function isQuickStep(cust,prod,stepNm){
   return!!(s&&typeof s==='object'&&s.quick);
 }
 
+// ─── משפחת תחנות ─────────────────────────────────────────────────
+// תחנות שנבדלות רק במספר בסוף הן תחנה אחת לצורך נעילת שלב:
+// "حبكي 1" / "حبكي 2" / "حبكي 5" → "حبكي".  **חוצה מחלקות** (החלטת המשתמש 03/08):
+// אותו שם תחנה בכל מחלקה = אותה משפחה, ולכן حبكي 5 שב-قسم الخياطة 2 מצטרפת ל-حبكي 1-4.
+// ⚠ נחתך רק מספר בסוף — "حبكي 5خيطان 6" → "حبكي 5خيطان" ולכן היא **לא** מתמזגת עם "حبكي".
+// שם שכולו ספרות נשאר כמו שהוא, כדי ששתי תחנות כאלה לא ייפלו לאותה משפחה ריקה.
+function stationFamily(name){
+  const raw=String(name||'').trim();
+  const fam=raw.replace(/[\s٠-٩۰-۹\d]+$/,'').trim();
+  return (fam||raw).toLowerCase();
+}
+// שם התחנה מתוך מפתח השלב "מחלקה::תחנה" (שלב ישן עשוי לשאת שם חשוף בלי מחלקה)
+function stationNameOfKey(key){const i=String(key||'').indexOf('::');return i<0?String(key||''):String(key).slice(i+2);}
+function stepFamily(s){const st=stepStation(s);return st?stationFamily(stationNameOfKey(st)):'';}
+function workerFamily(w){return stationFamily(w?.currentStation?.name||'');}
+// האם השלב פתוח לעובד לפי התחנה שסרק
+function stepAtWorkerStation(s,w){const sf=stepFamily(s);return!!sf&&sf===workerFamily(w);}
+
+// ─── שער התחנה: חובת סריקה + נעילת שלב לתחנה ──────────────────────
+// מדיניות (03/08): עובד חייב תחנה סרוקה; שלב מותר רק בתחנה מאותה משפחה;
+// **שלב בלי תחנה משויכת = חסום** עד שמשייכים לו תחנה בכרטיס המוצר.
+// מנהל/אחראי יכולים לעקוף (אישור מפורש) — עובד לא.
+function stationLockOn(){return !!S.settings?.stationLock;}
+function stationGate(w,cust,prod,stepNames){
+  const T=LANGS[currentLang];
+  if(!stationLockOn())return{ok:true}; // 🔌 מתג כיבוי מהניהול — ברירת מחדל כבוי
+  if(!(S.workStations||[]).length)return{ok:true}; // אין תחנות מוגדרות כלל — אין מה לאכוף
+  if(!w?.currentStation)return{ok:false,noStation:true,msg:T.st_need_scan||'📍 חובה לסרוק ברקוד תחנה לפני התחלת משימה'};
+  const p=findProd(cust,prod);
+  const steps=p?.workSteps||[];
+  if(!steps.length)return{ok:true}; // מוצר בלי שלבים מוגדרים (שלב חופשי) — אין על מה לנעול
+  const blocked=[];
+  for(const nm of(stepNames||[])){
+    if(!nm)continue;
+    const s=steps.find(x=>stepName(x)===nm);
+    if(!s)continue; // שלב שאינו מהמוצר — לא בסמכות השער הזה
+    if(!stepFamily(s))blocked.push({step:nm,need:''});
+    else if(!stepAtWorkerStation(s,w))blocked.push({step:nm,need:stationNameOfKey(stepStation(s))});
+  }
+  if(!blocked.length)return{ok:true};
+  const noStn=T.st_no_station||'אין תחנה משויכת';
+  // טקסט גולמי בלבד — showToast כותב ב-textContent. ההברחה נעשית רק במסלול showConfirm (innerHTML).
+  return{ok:false,blocked,msg:(T.st_locked||'🔒 לא בתחנה הנכונה')+' ('+w.currentStation.name+'): '+blocked.map(b=>b.step+' → '+(b.need||noStn)).join(' · ')};
+}
+// מנהל/אחראי בלבד — אישור מפורש לעקיפת השער. עובד/עוזר: חסימה מוחלטת.
+function canOverrideStationGate(){return S.user?.role==='manager'||S.user?.role==='supervisor';}
+async function passStationGate(w,cust,prod,stepNames){
+  const g=stationGate(w,cust,prod,stepNames);
+  if(g.ok)return true;
+  const T=LANGS[currentLang];
+  if(!canOverrideStationGate()){showToast(g.msg,'var(--red-txt)',8000);return false;} // textContent — בלי esc
+  // showConfirm מזריק ב-innerHTML (וממיר \n ל-<br>) — כאן חובה esc, ושמות תחנה/שלב מגיעים מקלט משתמש
+  return await showConfirm(T.st_override_title||'עקיפת נעילת תחנה',esc(g.msg+'\n\n'+(T.st_override_msg||'להתחיל בכל זאת?')),T.st_override_ok||'התחל בכל זאת',T.cancel||'ביטול');
+}
+
 // ─── מנוע המלצת שיבוץ — תמחור שלב ב' ────────────────────────
 // לשלבים שנבחרו: עובד כשיר = מיומנות בתחנה ≥ רמת הקושי לכל שלב.
 // מיון: נוכחים תחילה → הרמה הנמוכה ביותר שמספיקה (slack) → הכי פחות משימות פעילות.
@@ -2184,14 +2274,10 @@ function recommendWorkers(prodObj,checkedStepNames){
   recs.sort((a,b)=>((b.present?1:0)-(a.present?1:0))||(a.slack-b.slack)||(a.load-b.load));
   return recs;
 }
-// ─── צמצום רשימת שלבי העבודה לפי התחנה שנסרקה ─────────────────────
-// שלב מוצר נושא station="מחלקה::תחנה" — בדיוק אותו מפתח כמו workStations[].key,
-// ולכן הרשימה הארוכה (עד 27 שלבים במוצר) מצטמצמת לשלבים של התחנה בלבד.
-// מדיניות רכה כמו שאר שיוך התחנה: בלי תחנה סרוקה, או כשאין לה אף שלב במוצר — מציגים הכל.
-function workerStationKey(w){
-  const cs=w?.currentStation;if(!cs)return'';
-  return stationById(cs.id)?.key||((cs.dept||'')+'::'+(cs.name||''));
-}
+// ─── נעילת רשימת שלבי העבודה לתחנה שנסרקה ─────────────────────────
+// שלב מוצר נושא station="מחלקה::תחנה". מ-03/08 ההתאמה היא לפי **משפחת התחנה**
+// (stationFamily — שם בלי המספר, חוצה מחלקות) ולא לפי המפתח המדויק, כדי ש-حبكي 1
+// תפתח גם את שלבי حبكي 2/3/4. זו נעילה, לא סינון: עובד רואה רק את שלבי תחנתו.
 // העובד שלפיו מסננים: בסורק האישי המשתמש המחובר, בסורקי האחראי/מנהל העובד הנבחר.
 // תמיד מ-S.workers — S.user הוא עותק מנותק מרגע ההתחברות ו-currentStation שלו לא מתעדכן.
 function scanStationWorker(prefix){
@@ -2211,22 +2297,35 @@ function renderStepChecks(prefix,cust,prod,steps,bc,keepMode){
   if(!keepMode)listEl.dataset.showAll='';
   listEl.dataset.bc=bc||'';
   const w=scanStationWorker(prefix);
-  const key=workerStationKey(w);
-  const atStn=key?steps.filter(s=>stepStation(s)===key):[];
-  const showAll=listEl.dataset.showAll==='1'||!atStn.length;
+  // התאמה לפי **משפחת** התחנה ולא לפי מפתח מדויק: حبكي 1 פותחת גם את שלבי حبكي 2/3/4.
+  const fam=workerFamily(w);
+  // כשהמתג כבוי — התנהגות הסינון הרכה הישנה (כולם רואים הכל, בלי חסימה)
+  const lock=stationLockOn();
+  const mayAll=!lock||canOverrideStationGate(); // "כל השלבים" הוא עקיפה — מנהל/אחראי בלבד
+  const atStn=fam?steps.filter(s=>stepFamily(s)===fam):[];
+  const showAll=mayAll&&(listEl.dataset.showAll==='1'||(!lock&&!atStn.length));
   // שלב שכבר סומן נשאר גלוי גם בתצוגה המסוננת — אחרת הסימון היה נעלם בשקט
-  const shown=showAll?steps:steps.filter(s=>stepStation(s)===key||keep.has(stepName(s)));
+  const shown=showAll?steps:steps.filter(s=>stepFamily(s)===fam||keep.has(stepName(s)));
   listEl.dataset.cust=cust;listEl.dataset.prod=prod;
   const onch=prefix==='bc'?'bcStepToggle(this)':(prefix==='ts'?'tsStepToggle(this)':"renderStepRecs('mgr')");
-  const bar=atStn.length&&atStn.length<steps.length
+  // בלי תחנה סרוקה / בלי שלבים לתחנה — הודעה במקום רשימה שאי אפשר להתחיל ממנה בכל מקרה.
+  // למנהל/אחראי הרשימה המלאה עדיין מוצגת (הם היחידים שיכולים לעקוף).
+  const note=!lock||!(S.workStations||[]).length?''
+    :!w?.currentStation?(T.st_need_scan||'📍 חובה לסרוק ברקוד תחנה לפני התחלת משימה')
+    :!atStn.length?(T.st_no_steps_here||'אין שלבים לתחנה הזו במוצר — סרוק את התחנה הנכונה'):'';
+  const noteHtml=note?`<div style="margin-bottom:6px;padding:7px 9px;border-radius:8px;font-size:12px;background:var(--amber-bg);color:var(--amber-txt);border:1px solid var(--brd)">${esc(note)}</div>`:'';
+  const rows=note?(mayAll?steps:[]):shown;
+  const bar=w?.currentStation&&atStn.length
     ?`<div style="display:flex;align-items:center;gap:8px;flex-wrap:wrap;margin-bottom:6px;font-size:12px">
         <span style="color:var(--green-txt);font-weight:700">📍 ${esc(w.currentStation.name)}</span>
         <span style="color:var(--txt3)">${atStn.length} ${esc(T.st_of||'מתוך')} ${steps.length}</span>
-        <button type="button" class="btn" style="font-size:11px;padding:3px 10px" onclick="toggleStepStationFilter('${escj(prefix)}')">${esc(showAll?(T.st_only||'📍 רק שלבי התחנה'):(T.st_all_steps||'📋 כל השלבים'))}</button>
+        ${mayAll&&atStn.length<steps.length?`<button type="button" class="btn" style="font-size:11px;padding:3px 10px" onclick="toggleStepStationFilter('${escj(prefix)}')">${esc(showAll?(T.st_only||'📍 רק שלבי התחנה'):(T.st_all_steps||'📋 כל השלבים'))}</button>`:''}
       </div>`:'';
-  listEl.innerHTML=bar+shown.map(s=>{
+  listEl.innerHTML=noteHtml+bar+rows.map(s=>{
     const nm=stepName(s);
-    return`<label style="display:flex;align-items:center;gap:8px;padding:6px 8px;margin-bottom:4px;background:var(--bg2);border-radius:8px;cursor:pointer;font-size:13px"><input type="checkbox" data-step="${esc(nm)}"${keep.has(nm)?' checked':''} style="width:16px;height:16px" onchange="${onch}"> ${esc(stepDisplay(s))}${stepBadge(s)}</label>`;
+    // שלב מחוץ לתחנה מסומן ויזואלית — מוצג רק למנהל/אחראי (עקיפה) או כשכבר היה מסומן
+    const off=!!fam&&stepFamily(s)!==fam;
+    return`<label style="display:flex;align-items:center;gap:8px;padding:6px 8px;margin-bottom:4px;background:var(--bg2);border-radius:8px;cursor:pointer;font-size:13px${off?';opacity:.62':''}"><input type="checkbox" data-step="${esc(nm)}"${keep.has(nm)?' checked':''} style="width:16px;height:16px" onchange="${onch}"> ${esc(stepDisplay(s))}${stepBadge(s)}${off?` <span style="font-size:11px;padding:1px 7px;border-radius:8px;background:var(--amber-bg);color:var(--amber-txt);border:1px solid var(--brd)">🔒 ${esc(stationNameOfKey(stepStation(s))||(T.st_no_station||'אין תחנה'))}</span>`:''}</label>`;
   }).join('');
 }
 function toggleStepStationFilter(prefix){
@@ -2694,6 +2793,9 @@ function listenFb(){
         if(data.shiftStart)S.settings.shiftStart=data.shiftStart;
         if(data.shiftEnd)S.settings.shiftEnd=data.shiftEnd;
         if(data.roundMinutes!==undefined)S.settings.roundMinutes=data.roundMinutes;
+        // 🔒 מתג האכיפה של נעילת התחנה — מסונכרן לכל המכשירים דרך אותו מסמך הגדרות,
+        // כדי שכיבוי חירום מהניהול ישחרר את כל רצפת הייצור מיד ולא מכשיר-מכשיר.
+        if(data.stationLock!==undefined)S.settings.stationLock=!!data.stationLock;
         // מצב גיבוי — ipBypassStart הוא Timestamp מהשרת; ממירים למספר לתצוגה בלבד
         S.settings.ipBypassMin=Number(data.ipBypassMin)||0;
         const _bs=data.ipBypassStart;
@@ -2711,6 +2813,7 @@ function listenFb(){
           });
         }
         saveLS();loadWaSettings();
+        try{renderStationLockState();}catch(e){}
       }
     });
     renderAll();
@@ -4247,6 +4350,14 @@ async function bcStartBatch(){
   const wu=S.workers.find(x=>x.id===u.id);
   if(!wu||wu.status!=='in'){alert('לא ניתן להתחיל משימה — יש להירשם כנוכח תחילה (כניסה לעבודה בלשונית נוכחות)');return;}
   const items=_bcBatch.slice();
+  // 🔒 בדיקה חוזרת ברגע ההתחלה — התחנה יכולה להתחלף בין ההוספה לסל לבין הלחיצה על "התחל".
+  // מקובצת לפי לקוח+מוצר כדי שלא יישאלו 5 אישורים על אותה חריגה.
+  const _bcGate={};
+  for(const b of items){const k=b.cust+'|'+b.prod;(_bcGate[k]=_bcGate[k]||[]).push(b.taskType||'');}
+  for(const k of Object.keys(_bcGate)){
+    const i=k.indexOf('|');
+    if(!await passStationGate(wu,k.slice(0,i),k.slice(i+1),_bcGate[k]))return;
+  }
   try{
     const bcBatchId=items.length>1?genBatchId():null; // כמה משימות יחד = קבוצה אחת (טיימר משותף + מסגרת אחת)
     const bcStart=srvNow();
@@ -4742,6 +4853,9 @@ async function submitBc(){
   const wu=S.workers.find(x=>x.id===u.id);
   if(!wu||wu.status!=='in'){alert('לא ניתן להתחיל משימה — יש להירשם כנוכח תחילה (כניסה לעבודה בלשונית נוכחות)');return;}
   if(bcUseSteps&&!bcCheckedSteps.length){showToast(T.err_sel_step||'⚠ בחר לפחות שלב עבודה אחד','var(--red-txt)');return;}
+  // 🔒 שער התחנה — חובת סריקת תחנה + שלב נעול למשפחת התחנה שלו. הסורק האישי מופעל
+  // ע"י העובד עצמו ולכן זו חסימה מוחלטת (העקיפה שמורה למנהל/אחראי בסורקי המשימות).
+  if(!await passStationGate(wu,cust,prod,bcUseSteps?bcCheckedSteps:[]))return;
   // ברקוד שכבר בעבודה אצל עובד אחר באותו שלב — אישור הצטרפות
   const otherSame=S.activeTasks.find(t=>t.workerId!==u.id&&taskBc(t)===raw&&(t.taskType||'').trim().toLowerCase()===taskType.toLowerCase());
   if(otherSame&&!await showConfirm(T.cfm_join_title||'הצטרפות למשימה',T.cfm_join_msg+otherSame.workerName+(otherSame.taskType?' ('+otherSame.taskType+')':'')+T.cfm_join_msg2,T.cfm_join_ok||'הצטרף',T.cancel||'ביטול'))return;
@@ -6681,6 +6795,7 @@ async function closeWorkerStation(w,when){
   }
 }
 function renderStationsAdmin(){
+  renderStationLockState(); // לפני ה-return המוקדם — המתג מוצג גם כשעדיין אין תחנות
   const el=document.getElementById('stn-list');if(!el)return;
   if(!(S.workStations||[]).length){el.innerHTML='<div style="color:var(--txt3);font-size:12px">אין תחנות מוגדרות — לחץ "🔄 סנכרן תחנות מלשונית הניהול"</div>';return;}
   el.innerHTML=S.workStations.map(s=>`<div class="row" style="gap:8px">
@@ -6694,6 +6809,63 @@ function renderStationsAdmin(){
       <input value="${esc(String(s.dvrChannel||''))}" inputmode="numeric" style="width:46px;font-size:12px;padding:3px 6px;border-radius:8px;border:1px solid var(--brd);background:var(--card);color:var(--txt)" onchange="setStationDvr('${escj(s.id)}',this.value)"></label>
     <button class="btn danger" style="font-size:11px;padding:4px 10px" onclick="delWorkStation('${escj(s.id)}')">🗑</button>
   </div>`).join('');
+}
+// ─── מתג האכיפה 🔒 ───────────────────────────────────────────────
+// נשמר ב-appSettings/telegramSettings ומגיע לכל המכשירים ב-onSnapshot,
+// כדי שכיבוי חירום ישחרר את כל רצפת הייצור מיד. ברירת מחדל: כבוי.
+async function setStationLock(on){
+  const el=document.getElementById('stn-lock');
+  // הדלקה בזמן שיש שלבים בלי תחנה = חסימה מיידית של עבודה קיימת — מאשרים במפורש
+  if(on){
+    let missing=0;
+    for(const p of (S.products||[]))missing+=(p.workSteps||[]).filter(s=>stepName(s)&&!stepStation(s)).length;
+    const noStn=S.workers.filter(w=>w.status==='in'&&!w.currentStation).length;
+    const warn=[];
+    if(missing)warn.push('• '+missing+' שלבי עבודה בלי תחנה משויכת — ייחסמו');
+    if(noStn)warn.push('• '+noStn+' עובדים נוכחים כרגע בלי תחנה סרוקה — ייחסמו');
+    if(warn.length&&!await showConfirm('הדלקת אכיפת תחנה',esc('להדליק את האכיפה עכשיו?\n\n'+warn.join('\n')+'\n\nהאכיפה חלה מיד על כל המכשירים.'),'הדלק','ביטול')){
+      if(el)el.checked=false;return;
+    }
+  }
+  S.settings.stationLock=!!on;
+  try{
+    if(S.fbConnected)await fbSet('appSettings','telegramSettings',{stationLock:!!on});
+    saveLS();renderStationLockState();
+    showToast(on?'🔒 אכיפת תחנה הופעלה':'🔓 אכיפת תחנה כובתה',on?'var(--amber-txt)':'var(--green-txt)',5000);
+    try{['bc','ts','mgr'].forEach(p=>onScanEmpChange(p));}catch(e){}
+  }catch(e){
+    S.settings.stationLock=!on;if(el)el.checked=!on;
+    showToast('❌ '+e.message,'var(--red-txt)');
+  }
+}
+function renderStationLockState(){
+  const cb=document.getElementById('stn-lock');if(cb)cb.checked=!!S.settings?.stationLock;
+  const el=document.getElementById('stn-lock-state');if(!el)return;
+  const on=!!S.settings?.stationLock;
+  el.textContent=on?'🔒 האכיפה פעילה':'🔓 האכיפה כבויה — הכל עובד כרגיל';
+  el.style.color=on?'var(--amber-txt)':'var(--txt3)';
+}
+// ─── ביקורת: שלבים בלי תחנה משויכת ───────────────────────────────
+// מאז 03/08 שלב בלי תחנה **חסום** בסורקים, ולכן צריך לראות את הרשימה לפני שנתקעים
+// מול עובדת בבוקר. מוצג רק על מוצרים פעילים (עם שלבים), עם קישור לפתיחת המוצר.
+function auditStepsWithoutStation(){
+  const el=document.getElementById('stn-audit');if(!el)return;
+  const rows=[];
+  for(const p of (S.products||[])){
+    const miss=(p.workSteps||[]).map((s,i)=>({s,i})).filter(x=>stepName(x.s)&&!stepStation(x.s));
+    if(miss.length)rows.push({p,miss});
+  }
+  if(!rows.length){el.innerHTML='<div style="font-size:12px;color:var(--green-txt);padding:8px;background:var(--green-bg);border-radius:8px">✅ לכל שלבי העבודה יש תחנה משויכת</div>';return;}
+  const totalSteps=rows.reduce((s,r)=>s+r.miss.length,0);
+  el.innerHTML=`<div style="font-size:12px;padding:8px;background:var(--amber-bg);color:var(--amber-txt);border-radius:8px;border:1px solid var(--brd)">
+      ⚠ ${totalSteps} שלבים ב-${rows.length} מוצרים בלי תחנה — הם <b>חסומים</b> בסורקים עד שתשייך להם תחנה
+    </div>
+    <div style="max-height:260px;overflow:auto;margin-top:6px">${rows.map(r=>`
+      <div style="padding:6px 8px;border-bottom:1px solid var(--brd);font-size:12px">
+        <a href="#" onclick="openProductModal('${escj(r.p.id)}');return false" style="font-weight:700;color:var(--blue-txt);text-decoration:none">${esc(r.p.cust)}/${esc(r.p.prod)}</a>
+        <span style="color:var(--txt3)"> · ${esc(r.p.name||'')}</span>
+        <div style="color:var(--txt3);margin-top:2px">${r.miss.map(x=>'#'+(x.i+1)+' '+esc(stepName(x.s))).join(' · ')}</div>
+      </div>`).join('')}</div>`;
 }
 function _stationKeyValid(key){
   const i=key.indexOf('::');if(i<0)return false;
@@ -7018,6 +7190,8 @@ async function tsStartTask(){
     const stepsWrap=document.getElementById('ts-steps-wrap');const useSteps=stepsWrap&&stepsWrap.style.display!=='none';
     const checkedSteps=useSteps?[...document.querySelectorAll('#ts-steps-list input[type="checkbox"]:checked')].map(cb=>cb.dataset.step):[];
     if(useSteps&&!checkedSteps.length){showToast(T.err_sel_step||'⚠ בחר לפחות שלב עבודה אחד','var(--red-txt)');return;}
+    // 🔒 שער התחנה (w = העובד שהמשימה נפתחת עבורו; העקיפה נקבעת לפי מי שמפעיל את הסורק)
+    if(!await passStationGate(w,cust,prod,useSteps?checkedSteps:[]))return;
     const taskType=useSteps?'':((document.getElementById('ts-tasktype').value||'').trim());
     const taskDept=(document.getElementById('ts-dept').value||'').trim();
     const types=useSteps?checkedSteps:[taskType||''];
@@ -7332,6 +7506,8 @@ async function mgrStartTask(){
     const mgrStepsWrap=document.getElementById('mgr-steps-wrap');const mgrUseSteps=mgrStepsWrap&&mgrStepsWrap.style.display!=='none';
     const mgrCheckedSteps=mgrUseSteps?[...document.querySelectorAll('#mgr-steps-list input[type="checkbox"]:checked')].map(cb=>cb.dataset.step):[];
     if(mgrUseSteps&&!mgrCheckedSteps.length){showToast(T.err_sel_step||'⚠ בחר לפחות שלב עבודה אחד','var(--red-txt)');return;}
+    // 🔒 שער התחנה (w = העובד שהמשימה נפתחת עבורו; העקיפה נקבעת לפי מי שמפעיל את הסורק)
+    if(!await passStationGate(w,cust,prod,mgrUseSteps?mgrCheckedSteps:[]))return;
     const taskType=mgrUseSteps?'':((document.getElementById('mgr-tasktype').value||'').trim());
     const taskDept=(document.getElementById('mgr-dept').value||'').trim();
     const types=mgrUseSteps?mgrCheckedSteps:[taskType||''];
@@ -9979,6 +10155,7 @@ function openProductModal(id){
   document.getElementById('prod-modal-wrap').classList.remove('hidden');
   _prodImgs=p?[...(p.images||[])]:[];
   _prodDocs=p?[...(p.docs||[])]:[];
+  renumberStepRows();
   renderProductPricing();
 }
 
@@ -10019,7 +10196,10 @@ function _stepRowHtml(s){
     <div style="display:flex;gap:6px;align-items:center">
       <input type="text" data-f="name" value="${esc(name)}" placeholder="שם השלב (עברית)" style="flex:1;min-width:0;font-size:12px;padding:4px 8px;border-radius:6px;border:1px solid var(--brd);background:var(--card);color:var(--txt)">
       <input type="text" data-f="nameAr" value="${esc(nameAr)}" placeholder="الاسم بالعربية" dir="rtl" style="flex:1;min-width:0;font-size:12px;padding:4px 8px;border-radius:6px;border:1px solid var(--brd);background:var(--card);color:var(--txt)">
-      <button type="button" onclick="this.closest('.ts-row').remove();renderProductPricing()" style="background:none;border:none;color:var(--red);cursor:pointer;font-size:14px">✕</button>
+      <span class="ts-ord" style="font-size:11px;color:var(--txt3);font-weight:700;min-width:18px;text-align:center" title="מיקום השלב בסדר העבודה"></span>
+      <button type="button" title="הזז למעלה" onclick="moveStepRow(this,-1)" style="background:none;border:none;color:var(--txt3);cursor:pointer;font-size:14px;padding:0 2px">▲</button>
+      <button type="button" title="הזז למטה" onclick="moveStepRow(this,1)" style="background:none;border:none;color:var(--txt3);cursor:pointer;font-size:14px;padding:0 2px">▼</button>
+      <button type="button" onclick="this.closest('.ts-row').remove();renumberStepRows();renderProductPricing()" style="background:none;border:none;color:var(--red);cursor:pointer;font-size:14px">✕</button>
     </div>
     <div style="display:flex;gap:6px;align-items:center">
       <select data-f="level" style="flex:1;min-width:0;font-size:12px">
@@ -10033,6 +10213,23 @@ function _stepRowHtml(s){
 }
 function addTaskStepRow(){
   document.getElementById('pm-tasksteps-list').insertAdjacentHTML('beforeend',_stepRowHtml(''));
+  renumberStepRows();
+}
+// ─── סדר שלבי העבודה ─────────────────────────────────────────────
+// סדר השלבים = סדר השורות ב-DOM (saveProduct קורא אותן ב-querySelectorAll, שמחזיר לפי סדר המסמך),
+// ולכן הזזת השורה היא כל מה שצריך — אין שדה order נפרד שאפשר לשכוח לעדכן.
+// נחוץ כי שלב שנוסף בדיעבד נכנס אחרון, גם כשמקומו האמיתי באמצע.
+function moveStepRow(btn,dir){
+  const row=btn.closest('.ts-row');const list=row?.parentElement;if(!list)return;
+  if(dir<0){const prev=row.previousElementSibling;if(!prev)return;list.insertBefore(row,prev);}
+  else{const next=row.nextElementSibling;if(!next)return;list.insertBefore(next,row);}
+  renumberStepRows();
+  renderProductPricing();
+}
+// מספור ויזואלי 1..N — בלעדיו אי אפשר לראות מה הסדר בפועל ברשימה של 24 שלבים
+function renumberStepRows(){
+  const list=document.getElementById('pm-tasksteps-list');if(!list)return;
+  [...list.querySelectorAll('.ts-row')].forEach((r,i)=>{const o=r.querySelector('.ts-ord');if(o)o.textContent=i+1;});
 }
 // ─── תמחור שלב ד' — תקצוב זמן לשלב לפי מחיר, רווח יעד וחומרים ───
 // תקציב עבודה+תקורה ליחידה = מחיר×(1−רווח%) − חומרים.
