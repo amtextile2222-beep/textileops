@@ -982,6 +982,10 @@ async function runAttendanceCloser() {
   const histSnap = await db.collection('histTasks').where('duration', '>', 8 * 3600).get();
   for (const doc of histSnap.docs) {
     const t = doc.data();
+    // משימה שחודשה מיום קודם (origStart) שוברת את ההנחה "מעל 8 שעות בלתי אפשרי במשמרת" —
+    // היא באמת נמשכה כמה ימים. הענף שחותך לפי סוף המשמרת של יום ההתחלה היה מוחק
+    // את הימים הקודמים, כי startTime הוא יום החידוש. ראה סעיף 5 ו-9eddc2d בלקוח.
+    if (t.origStart) continue;
     let newDur = null;
     if (typeof t.accumulatedSec === 'number' && (t.paused || !t.elapsed)) {
       // הושהתה ולא חודשה — הזמן האמיתי הוא מה שנצבר
@@ -1029,6 +1033,11 @@ async function runAttendanceCloser() {
     });
     for (const g of Object.values(groups)) {
       if (g.length < 2) continue;
+      // משימה שחודשה מיום קודם (origStart): ה-duration כולל בכוונה זמן שנצבר בימים
+      // קודמים, בעוד clock מודד רק את חלון היום — ולכן sumDur>clock*1.5 תמיד מתקיים
+      // וההשוואה חסרת משמעות. בלי הדילוג הזה החיתוך מוחק את עבודת אתמול
+      // (ندوه 03/08: 56.2 דק' → 2.5). מקביל לתיקון 9eddc2d ב-normalizeBatchDurations בלקוח.
+      if (g.some(x => x.t.origStart)) continue;
       const starts = g.map(x => new Date(x.t.startTime).getTime()).filter(n => !isNaN(n));
       const ends = g.map(x => x.t.endTime ? new Date(x.t.endTime).getTime() : NaN).filter(n => !isNaN(n));
       if (!starts.length || !ends.length) continue;
