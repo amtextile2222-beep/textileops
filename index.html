@@ -1269,6 +1269,8 @@ code{background:var(--bg2);border:0.5px solid var(--b);border-radius:4px;padding
         <div id="so-lock-state" style="font-size:12px;font-weight:700;margin-top:6px"></div>
       </div>
       <button class="btn" style="font-size:13px;margin-bottom:10px" onclick="auditStepOrder()">🔎 סדר שלבים בהיסטוריה</button>
+      <button class="btn" style="font-size:13px;margin-bottom:10px" onclick="renderGateLog()">📝 יומן שערים — חסימות ועקיפות</button>
+      <div id="gate-log" style="margin-bottom:10px"></div>
       <div id="so-audit" style="margin-bottom:10px"></div>
       <div id="stn-audit" style="margin-bottom:10px"></div>
       <div id="stn-list"></div>
@@ -2265,15 +2267,50 @@ function stationGate(w,cust,prod,stepNames){
   // טקסט גולמי בלבד — showToast כותב ב-textContent. ההברחה נעשית רק במסלול showConfirm (innerHTML).
   return{ok:false,blocked,msg:(T.st_locked||'🔒 לא בתחנה הנכונה')+' ('+w.currentStation.name+'): '+blocked.map(b=>b.step+' → '+(b.need||noStn)).join(' · ')};
 }
-// מנהל/אחראי בלבד — אישור מפורש לעקיפת השער. עובד/עוזר: חסימה מוחלטת.
+// ─── מי כפוף לשערים ומי מקבל אישור עקיפה ──────────────────────────
+// ברירת המחדל היא לפי תפקיד: מנהל/אחראי מאשרים עקיפה, עובד/עוזר נחסמים מוחלט.
+// אפשר לגבור עליה **פר-עובד** בכרטיס העובד (stationGateMode/stepOrderGateMode).
+// הצורך אמיתי: محمد הוא אחראי ש**עובד על הרצפה** — בלי דריסה פר-עובד הוא היחיד
+// מבין העובדים בפועל שפטור מהאכיפה, בלי שהוגדר כך במכוון.
 function canOverrideStationGate(){return S.user?.role==='manager'||S.user?.role==='supervisor';}
+// ⚠️ S.user הוא עותק קפוא מרגע ההתחברות; S.workers נבנה מחדש בכל onSnapshot.
+// קריאה משם היא מה שגורם לשינוי שהמנהל עשה עכשיו לתפוס בלי התחברות מחדש.
+function _gateWorker(){return S.workers?.find(x=>x.id===S.user?.id)||S.user||{};}
+// 'override' = מקבל מודאל אישור · 'enforce' = חסימה מוחלטת
+function gateMode(kind){
+  const w=_gateWorker();
+  const m=kind==='order'?w.stepOrderGateMode:w.stationGateMode;
+  if(m==='enforce'||m==='override')return m;
+  return canOverrideStationGate()?'override':'enforce';
+}
+// ─── יומן שערים ───────────────────────────────────────────────────
+// כל חסימה וכל עקיפה נרשמות ב-gateOverrides. בלי היומן אי אפשר לדעת בדיעבד אם
+// האכיפה עובדת או שפשוט עוקפים אותה — וזו השאלה שתכריע אם להשאיר אותה דלוקה.
+// כתיבה fire-and-forget בכוונה: יומן לא יעכב סריקה על רצפת הייצור, ו-Firestore
+// מתור כתיבות במצב אופליין ממילא. האוסף נופל תחת כלל ה-catch-all ב-firestore.rules.
+function logGateEvent(kind,result,info){
+  try{
+    const w=_gateWorker();
+    const id=Date.now()+'_'+Math.random().toString(36).slice(2,7);
+    fbSet('gateOverrides',id,{id,ts:new Date().toISOString(),kind,result,
+      workerId:w.id||'',workerName:w.name||'',role:w.role||'',
+      station:w.currentStation?.name||'',
+      cust:info.cust||'',prod:info.prod||'',bc:info.bc||'',
+      steps:(info.steps||[]).filter(Boolean).join(', '),
+      need:(info.blocked||[]).map(b=>b.step+' ← '+(b.need||[]).join(' / ')).join(' · ')
+    }).catch(e=>console.warn('logGateEvent:',e));
+  }catch(e){console.warn('logGateEvent:',e);}
+}
 async function passStationGate(w,cust,prod,stepNames){
   const g=stationGate(w,cust,prod,stepNames);
   if(g.ok)return true;
   const T=LANGS[currentLang];
-  if(!canOverrideStationGate()){showToast(g.msg,'var(--red-txt)',8000);return false;} // textContent — בלי esc
+  const info={cust,prod,steps:stepNames,blocked:g.blocked};
+  if(gateMode('station')!=='override'){logGateEvent('station','blocked',info);showToast(g.msg,'var(--red-txt)',8000);return false;} // textContent — בלי esc
   // showConfirm מזריק ב-innerHTML (וממיר \n ל-<br>) — כאן חובה esc, ושמות תחנה/שלב מגיעים מקלט משתמש
-  return await showConfirm(T.st_override_title||'עקיפת נעילת תחנה',esc(g.msg+'\n\n'+(T.st_override_msg||'להתחיל בכל זאת?')),T.st_override_ok||'התחל בכל זאת',T.cancel||'ביטול');
+  const ok=await showConfirm(T.st_override_title||'עקיפת נעילת תחנה',esc(g.msg+'\n\n'+(T.st_override_msg||'להתחיל בכל זאת?')),T.st_override_ok||'התחל בכל זאת',T.cancel||'ביטול');
+  logGateEvent('station',ok?'override':'cancel',info);
+  return ok;
 }
 
 // ─── שער סדר השלבים: 🔗 "שלב מאחד" ────────────────────────────────
@@ -2340,15 +2377,18 @@ function mergeGate(cust,prod,bc,stepNames){
   return{ok:false,blocked,msg:(T.so_locked||'🔗 שלב מאחד — יש לסיים קודם')+': '+
     blocked.map(b=>b.step+' → '+b.need.join(', ')).join(' · ')};
 }
-// אותה מדיניות כמו שער התחנה: מנהל/אחראי מאשרים עקיפה, עובד נחסם מוחלט.
+// אותה מדיניות כמו שער התחנה — כולל הדריסה הפר-עובדת והרישום ביומן.
 async function passMergeGate(cust,prod,bc,stepNames){
   const g=mergeGate(cust,prod,bc,stepNames);
   if(g.ok)return true;
   const T=LANGS[currentLang];
-  if(!canOverrideStationGate()){showToast(g.msg,'var(--red-txt)',8000);return false;}
-  return await showConfirm(T.so_override_title||'עקיפת סדר שלבים',
+  const info={cust,prod,bc,steps:stepNames,blocked:g.blocked};
+  if(gateMode('order')!=='override'){logGateEvent('order','blocked',info);showToast(g.msg,'var(--red-txt)',8000);return false;}
+  const ok=await showConfirm(T.so_override_title||'עקיפת סדר שלבים',
     esc(g.msg+'\n\n'+(T.st_override_msg||'להתחיל בכל זאת?')),
     T.st_override_ok||'התחל בכל זאת',T.cancel||'ביטול');
+  logGateEvent('order',ok?'override':'cancel',info);
+  return ok;
 }
 
 // ─── מנוע המלצת שיבוץ — תמחור שלב ב' ────────────────────────
@@ -2396,7 +2436,7 @@ function renderStepChecks(prefix,cust,prod,steps,bc,keepMode){
   const fam=workerFamily(w);
   // כשהמתג כבוי — התנהגות הסינון הרכה הישנה (כולם רואים הכל, בלי חסימה)
   const lock=stationLockOn();
-  const mayAll=!lock||canOverrideStationGate(); // "כל השלבים" הוא עקיפה — מנהל/אחראי בלבד
+  const mayAll=!lock||gateMode('station')==='override'; // "כל השלבים" הוא עקיפה — לפי מדיניות העובד
   const atStn=fam?steps.filter(s=>stepFamily(s)===fam):[];
   const showAll=mayAll&&(listEl.dataset.showAll==='1'||(!lock&&!atStn.length));
   // שלב שכבר סומן נשאר גלוי גם בתצוגה המסוננת — אחרת הסימון היה נעלם בשקט
@@ -7162,6 +7202,43 @@ function auditStepOrder(){
         <div style="margin-top:2px">🔗 ${esc(r.step)} <span style="color:var(--red-txt)">← חסר: ${esc(r.need.join(', '))}</span></div>
       </div>`).join('')}</div>`:''}`;
 }
+// ─── יומן שערים: מי נחסם, מי עקף ─────────────────────────────────
+// נקרא מהשרת ולא מ-S: זו רשומת ביקורת, וקריאה מ-cache מקומי הייתה מראה רק את
+// מה שהמכשיר הזה עשה. 200 האחרונים — מספיק לכמה שבועות בקצב הנוכחי.
+async function renderGateLog(){
+  const el=document.getElementById('gate-log');if(!el)return;
+  const box=(bg,txt,html)=>`<div style="font-size:12px;padding:8px;border-radius:8px;border:1px solid var(--brd);background:var(--${bg});color:var(--${txt})">${html}</div>`;
+  el.innerHTML=box('bg2','txt3','טוען…');
+  if(!db||!S.fbConnected){el.innerHTML=box('bg2','txt3','אין חיבור לשרת — היומן נקרא מהשרת בלבד');return;}
+  try{
+    const{collection,query,orderBy,limit,getDocs}=window._fb;
+    const snap=await getDocs(query(collection(db,'gateOverrides'),orderBy('ts','desc'),limit(200)));
+    const rows=snap.docs.map(d=>d.data());
+    if(!rows.length){el.innerHTML=box('green-bg','green-txt','✅ אין רשומות ביומן — אף אחד לא נחסם ואף אחד לא עקף מאז שהרישום הופעל');return;}
+    const ov=rows.filter(r=>r.result==='override').length;
+    const bl=rows.filter(r=>r.result==='blocked').length;
+    const ca=rows.filter(r=>r.result==='cancel').length;
+    // ריכוז לפי עובד — "מי עוקף" היא השאלה שבגללה היומן נבנה
+    const per={};
+    for(const r of rows){const k=r.workerName||r.workerId||'?';(per[k]=per[k]||{ov:0,bl:0})[r.result==='override'?'ov':'bl']++;}
+    const top=Object.entries(per).filter(([,v])=>v.ov).sort((a,b)=>b[1].ov-a[1].ov).slice(0,6);
+    el.innerHTML=box('amber-bg','amber-txt',
+        `📝 ${rows.length} רשומות אחרונות · <b>${ov}</b> עקיפות · <b>${bl}</b> חסימות · ${ca} ביטולים`+
+        (top.length?`<div style="margin-top:4px">עוקפים: ${top.map(([n,v])=>esc(n)+' ×'+v.ov).join(' · ')}</div>`:''))+
+      `<div style="max-height:280px;overflow:auto;margin-top:6px">${rows.map(r=>{
+        const d=new Date(r.ts);
+        const tag=r.result==='override'?'<span style="color:var(--amber-txt);font-weight:700">⚠ עקף</span>'
+                 :r.result==='blocked'?'<span style="color:var(--red-txt);font-weight:700">⛔ נחסם</span>'
+                 :'<span style="color:var(--txt3)">↩ ביטל</span>';
+        return `<div style="padding:6px 8px;border-bottom:1px solid var(--brd);font-size:12px">
+          <span style="font-weight:700">${r.kind==='order'?'🔗':'🔒'} ${esc(r.workerName||'')}</span>
+          <span style="color:var(--txt3)"> · ${esc(r.role||'')}${r.station?' · '+esc(r.station):''} · ${pad2(d.getDate())}/${pad2(d.getMonth()+1)} ${pad2(d.getHours())}:${pad2(d.getMinutes())}</span>
+          ${tag}
+          <div style="margin-top:2px;color:var(--txt2)">${esc(r.cust||'')}/${esc(r.prod||'')}${r.bc?' · '+esc(r.bc):''} · ${esc(r.steps||'')}</div>
+          ${r.need?`<div style="margin-top:2px;color:var(--red-txt)">חסר: ${esc(r.need)}</div>`:''}
+        </div>`;}).join('')}</div>`;
+  }catch(e){el.innerHTML=box('bg2','red-txt','❌ '+esc(e.message));}
+}
 // ─── ביקורת: שלבים בלי תחנה משויכת ───────────────────────────────
 // מאז 03/08 שלב בלי תחנה **חסום** בסורקים, ולכן צריך לראות את הרשימה לפני שנתקעים
 // מול עובדת בבוקר. מוצג רק על מוצרים פעילים (עם שלבים), עם קישור לפתיחת המוצר.
@@ -7975,6 +8052,7 @@ function renderAdmin(){
       ${w.requireFactoryIP?`<span title="חייב WiFi מפעל" style="font-size:16px">🏭</span>`:''}
       ${w.accessWindow?.enabled?`<span title="הגבלת ימים/שעות פעילה" style="font-size:16px">⏰</span>`:''}
       ${w.disabled?`<span title="גישה מושעית" style="font-size:16px">🚫</span>`:''}
+      ${(w.stationGateMode||w.stepOrderGateMode)?`<span title="אכיפה מוגדרת ידנית — ${w.stationGateMode==='enforce'?'🔒 חל':w.stationGateMode==='override'?'🔒 פטור':'🔒 לפי תפקיד'} · ${w.stepOrderGateMode==='enforce'?'🔗 חל':w.stepOrderGateMode==='override'?'🔗 פטור':'🔗 לפי תפקיד'}" style="font-size:16px">${(w.stationGateMode==='enforce'||w.stepOrderGateMode==='enforce')?'🔒':'🔓'}</span>`:''}
       ${w.deviceBinding?`<span title="${(w.deviceRegistered||w.deviceId)?'מכשיר רשום ונעול':'נעילת מכשיר — טרם נרשם'}" style="font-size:16px">${(w.deviceRegistered||w.deviceId)?'📱🔒':'📱⚪'}</span>`:''}
       ${w.deviceBinding&&(w.deviceRegistered||w.deviceId)?`<button class="btn warn" style="font-size:11px;padding:4px 8px" title="אפס מכשיר — יאפשר כניסה ממכשיר חדש" onclick="resetDeviceBinding('${w.id}')">🔄</button>`:''}
       ${w.faceAuth?`<span title="${(w.faceRegistered||w.faceDescriptor||w.faceDescriptors&&Object.keys(w.faceDescriptors).length)?'זיהוי פנים פעיל':'זיהוי פנים — פנים לא רשומים'}" style="font-size:16px">${(w.faceRegistered||w.faceDescriptor||w.faceDescriptors&&Object.keys(w.faceDescriptors).length)?'🟢':'🟡'}</span>`:''}
@@ -8227,6 +8305,22 @@ function openModal(action,id){
         ${w&&w.deviceBinding&&(w.deviceRegistered||w.deviceId)&&!w.faceAuth?`<div style="font-size:11px;color:var(--green-txt);margin-top:4px">🏷️ כניסה בסריקת ברקוד פעילה — העובד סורק את המדבקה שבתחנה שלו במקום סיסמה</div>`:''}
         ${w&&!w.deviceBinding&&!w.faceAuth?`<div style="font-size:11px;color:var(--txt3);margin-top:4px">💡 הפעל נעילת מכשיר כדי לאפשר לעובד להיכנס בסריקת הברקוד שלו במקום סיסמה</div>`:''}
       </div>
+      ${(()=>{const gm=[['','ברירת מחדל (לפי תפקיד)'],['enforce','חל — חסימה מוחלטת'],['override','פטור — אישור עקיפה']];
+        const sel=(id,cur)=>`<select id="${id}" style="font-size:12px;width:auto;flex:1">${gm.map(([v,l])=>`<option value="${v}" ${(cur||'')===v?'selected':''}>${l}</option>`).join('')}</select>`;
+        const dflt=(wRole==='manager'||wRole==='supervisor')?'פטור — אישור עקיפה':'חל — חסימה מוחלטת';return `
+      <div class="field" style="background:var(--bg2);border-radius:var(--r);padding:10px 12px;margin-bottom:8px">
+        <div style="font-size:13px;color:var(--txt);font-weight:600;margin-bottom:8px">🔒🔗 על מי חלה האכיפה</div>
+        <div style="display:flex;gap:8px;align-items:center;margin-bottom:6px">
+          <span style="font-size:12px;color:var(--txt2);min-width:104px">🔒 נעילת תחנה</span>${sel('mf-gate-station',w?.stationGateMode)}
+        </div>
+        <div style="display:flex;gap:8px;align-items:center">
+          <span style="font-size:12px;color:var(--txt2);min-width:104px">🔗 סדר שלבים</span>${sel('mf-gate-order',w?.stepOrderGateMode)}
+        </div>
+        <div style="font-size:11px;color:var(--txt3);margin-top:6px;line-height:1.5">
+          ברירת המחדל לתפקיד הנוכחי: <b>${dflt}</b>. שנה כאן כדי לגבור עליה — למשל אחראי שעובד על הרצפה ואמור להיחסם כמו כל עובד.
+          פעיל רק כשמתג האכיפה עצמו דלוק. <b>כל עקיפה וכל חסימה נרשמות ביומן</b> (לשונית 🏷️ ברקודים ← "📝 יומן שערים").
+        </div>
+      </div>`;})()}
       <div class="field" style="background:var(--bg2);border-radius:var(--r);padding:10px 12px">
         <label style="display:flex;align-items:center;gap:10px;cursor:pointer;font-size:13px;color:var(--txt)">
           <input type="checkbox" id="mf-face-auth" ${w?.faceAuth?'checked':''} style="width:auto;cursor:pointer"/>
@@ -8544,7 +8638,9 @@ async function confirmModal(){
   if(S.modalAction==='add-worker'){
     if(!pass){alert('סיסמה חובה לעובד חדש');return;}
     if(!S.fbConnected){alert('אין חיבור לשרת — לא ניתן להוסיף עובד');return;}
-    const nw={id:'w'+Date.now(),name,dept,role,user,status:'out',checkin:null,permissions:perms,faceAuth:false,breakStart:'13:00',breakEnd:'13:45',breakActive:true,skills:skills||{}};
+    const nw={id:'w'+Date.now(),name,dept,role,user,status:'out',checkin:null,permissions:perms,faceAuth:false,breakStart:'13:00',breakEnd:'13:45',breakActive:true,skills:skills||{},
+      stationGateMode:document.getElementById('mf-gate-station')?.value||'',
+      stepOrderGateMode:document.getElementById('mf-gate-order')?.value||''};
     S.workers.push(nw);
     await fbSet('workers',nw.id,nw);
     try{await _setWorkerPassword(nw.id,pass);}catch(e){alert('העובד נוצר אך שמירת הסיסמה נכשלה: '+e.message);}
@@ -8559,6 +8655,8 @@ async function confirmModal(){
       w.accessWindow={enabled:true,days:[...document.querySelectorAll('.mf-aw-day:checked')].map(x=>+x.dataset.day),from:document.getElementById('mf-aw-from')?.value||'06:00',to:document.getElementById('mf-aw-to')?.value||'16:00'};
     }else{w.accessWindow={enabled:false};}
     w.deviceBinding=!!document.getElementById('mf-device-binding')?.checked;
+    w.stationGateMode=document.getElementById('mf-gate-station')?.value||'';
+    w.stepOrderGateMode=document.getElementById('mf-gate-order')?.value||'';
     w.faceAuth=!!document.getElementById('mf-face-auth')?.checked;
     if(w.role==='supervisor'){
       w.oversightPrefs={punch_in:!!document.getElementById('mf-ov-punch_in')?.checked,punch_out:!!document.getElementById('mf-ov-punch_out')?.checked,task_start:!!document.getElementById('mf-ov-task_start')?.checked,task_end:!!document.getElementById('mf-ov-task_end')?.checked,worker_msg:!!document.getElementById('mf-ov-worker_msg')?.checked};

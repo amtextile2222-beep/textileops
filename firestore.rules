@@ -39,6 +39,10 @@ service cloud.firestore {
         && request.resource.data.get('disabled', false) == resource.data.get('disabled', false)
         && request.resource.data.get('faceUpdateAllowed', false) == resource.data.get('faceUpdateAllowed', false)
         && request.resource.data.get('accessWindow', {}) == resource.data.get('accessWindow', {})
+        // מדיניות השערים 🔒/🔗 היא ערך אכיפה — עובד שיכול לכתוב אותה על עצמו
+        // פוטר את עצמו מהחסימה, ולכן היא נעולה למנהל כמו יתר שדות האבטחה
+        && request.resource.data.get('stationGateMode', '') == resource.data.get('stationGateMode', '')
+        && request.resource.data.get('stepOrderGateMode', '') == resource.data.get('stepOrderGateMode', '')
         && request.resource.data.get('permissions', []) == resource.data.get('permissions', []));
     }
 
