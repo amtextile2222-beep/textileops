@@ -4538,6 +4538,36 @@ function _clusterClock(ws,we,wid){
 }
 
 // השהיית כל המשימות הפעילות של עובד
+// תיקון שעת היציאה במסך הנוכחות = תיקון של מתי העובד באמת עזב, ולכן המשימות חייבות לזוז
+// איתה **בשני הכיוונים**: קיצור מוריד מהזמן שנצבר, הארכה מוסיפה. הן נשארות **מושהות**
+// ולא נסגרות, כדי שיתחדשו אוטומטית בחתימת הכניסה למחרת.
+// עד 07/08/2026 המסלול הזה קרא ל-closeTasksBatchAware: המשימות נסגרו, וה-duration נשאר
+// מדוד עד שעת החתימה המקורית מול endTime מתוקן ומוקדם יותר. הסתירה הזו היא בדיוק מה
+// שהסוגר הלילי מחפש — והוא קיצץ אותה (هديل 06/08: נחתם 15:14, תוקן ל-15:00).
+async function reanchorWorkerTasks(workerId,newOutAt){
+  const tasks=S.activeTasks.filter(t=>t.workerId===workerId&&!_isClosedTask(t.id));
+  for(const t of tasks){
+    const anchor=t.paused&&t.pausedAt?new Date(t.pausedAt):null;
+    let acc=t.accumulatedSec||0;
+    if(anchor&&!isNaN(anchor.getTime())){
+      // כבר מושהית — מזיזים את העוגן מהשעה הישנה לחדשה. calcTaskDurSec מנכה הפסקה
+      // ומחזיר 0 על טווח שלילי, ולכן שני הכיוונים בטוחים.
+      if(newOutAt>anchor)acc+=calcTaskDurSec(anchor,newOutAt,workerId);
+      else acc-=calcTaskDurSec(newOutAt,anchor,workerId);
+    }else{
+      acc+=calcTaskDurSec(t.startTime,newOutAt,workerId); // עדיין רצה — כמו pauseWorkerTasks
+    }
+    t.paused=true;
+    t.pausedAt=newOutAt.toISOString();
+    t.accumulatedSec=Math.max(0,acc);
+    t.elapsed=t.accumulatedSec;
+    if(S.fbConnected){
+      const ok=await fbUpdateOnly('activeTasks',String(t.id),{...t,startTime:t.startTime instanceof Date?t.startTime.toISOString():t.startTime});
+      if(!ok)S.activeTasks=S.activeTasks.filter(x=>x.id!==t.id);
+    }
+  }
+  return tasks.length;
+}
 async function pauseWorkerTasks(workerId,pausedAt){
   const tasks=S.activeTasks.filter(t=>t.workerId===workerId&&!t.paused&&!_isClosedTask(t.id));
   for(const t of tasks){
@@ -8124,11 +8154,10 @@ async function confirmModal(){
       w.status=openSess?'in':'out';
       w.checkin=newSessions[0]?.in||null;
       w.checkout=!openSess&&newSessions.length?newSessions[newSessions.length-1].out:null;
-      // סגור משימות פעילות אם העובד יצא
+      // העובד יצא — להשהות את המשימות לשעה שהוקלדה (לא לסגור). ראה reanchorWorkerTasks
       if(!openSess){
         const checkoutTime=w.checkout?new Date(w.checkout):new Date();
-        const myTasks=S.activeTasks.filter(t=>t.workerId===w.id);
-        await closeTasksBatchAware(myTasks,checkoutTime);
+        await reanchorWorkerTasks(w.id,checkoutTime);
       }
       if(S.fbConnected)await fbSet('workers',w.id,w);
     } else {
