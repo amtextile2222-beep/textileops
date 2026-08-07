@@ -4392,12 +4392,33 @@ async function bcStartBatch(){
 
 // סגירת batch עם חלוקת זמן יחסית לפי כמות.
 // baseSec = הזמן המשותף של כל ה-batch (טיימר אחד) — מתחלק בין המשימות לפי כמות.
+// כל האחיות של הצביר — פעילות **וגם** היסטוריות. מנהל שעורך שורה-שורה מעביר כל שורה
+// ל-histTasks מיד, ומכנה שסופר רק את הפעילות מתכווץ בכל עריכה (10/40, 10/30, 10/20, 10/10
+// = 208% מהחלון). המכנה חייב להיות קבוע לאורך כל העריכות.
+function _batchSiblings(t){
+  if(!t||!t.batchId)return t?[t]:[];
+  const same=x=>x&&x.batchId===t.batchId&&x.workerId===t.workerId;
+  const seen=new Set(),out=[];
+  [...(S.activeTasks||[]).filter(same),...(S.histTasks||[]).filter(same)].forEach(x=>{
+    const k=String(x.id);if(!seen.has(k)){seen.add(k);out.push(x);}
+  });
+  // t עצמה עשויה כבר לא להיות באף רשימה (הוסרה מ-activeTasks לפני שנכתבה להיסטוריה)
+  if(!seen.has(String(t.id)))out.push(t);
+  return out;
+}
+// חלקה היחסי של משימה בטיימר המשותף של הצביר. משימה בודדת = 1 (בלי שינוי התנהגות).
+function _batchShare(t){
+  const sibs=_batchSiblings(t);
+  if(sibs.length<2)return 1;
+  const tot=sibs.reduce((s,x)=>s+(x.qty||0),0);
+  return tot>0?((t.qty||0)/tot):(1/sibs.length);
+}
 async function closeBatchProportional(tasks,endTime){
-  const totalQty=tasks.reduce((s,t)=>s+(t.qty||0),0);
   const lead=tasks[0];
   const baseSec=_capByAttendance(lead,lead.paused?(lead.accumulatedSec||0):(lead.accumulatedSec||0)+calcTaskDurSec(lead.startTime,endTime,lead.workerId));
   for(const t of tasks){
-    const proportion=totalQty>0?(t.qty||0)/totalQty:1/tasks.length;
+    // המכנה נלקח מכל האחיות (כולל כאלה שכבר נסגרו בעריכה ידנית), לא רק מ-tasks שנשלחו לכאן
+    const proportion=_batchShare(t);
     const duration=Math.round(baseSec*proportion);
     const done={...t,endTime,duration};
     delete done.paused;delete done.pausedAt;delete done.accumulatedSec;
@@ -8171,7 +8192,9 @@ async function confirmModal(){
       if(endTime.getTime()-Date.now()>3600000){
         if(!await showConfirm('⚠ זמן סיום עתידי','זמן הסיום שהזנת (' +pad2(endTime.getHours())+':'+pad2(endTime.getMinutes())+ ') רחוק מהשעה הנוכחית ביותר משעה. להמשיך בכל זאת?','כן, שמור','בטל'))return;
       }
-      const done={...t,endTime,duration:taskFinalDur(t,endTime)};
+      // צביר = טיימר אחד משותף. בלי החלוקה כל שורה נושאת את הזמן המלא (רائده 03/08: 4 שורות
+      // × 14,825 שנ' = 16.5 שע' בחלון של 4.1), והסוגר הלילי מנרמל אותן ב-23:30 במקומנו.
+      const done={...t,endTime,duration:Math.round(taskFinalDur(t,endTime)*_batchShare(t))};
       delete done.paused;delete done.pausedAt;delete done.accumulatedSec;
       S.histTasks.unshift(done);
       S.activeTasks=S.activeTasks.filter(x=>x.id!==t.id);
@@ -8202,7 +8225,8 @@ async function confirmModal(){
       if(newEnd.getTime()-Date.now()>3600000){
         if(!await showConfirm('⚠ זמן סיום עתידי','זמן הסיום שהזנת (' +pad2(newEnd.getHours())+':'+pad2(newEnd.getMinutes())+ ') רחוק מהשעה הנוכחית ביותר משעה. להמשיך בכל זאת?','כן, שמור','בטל'))return;
       }
-      t.endTime=newEnd;t.duration=Math.round((t.endTime-new Date(t.startTime))/1000);
+      // גם כאן החלון הידני הוא של הצביר כולו, לא של שורה בודדת — ראה _batchShare
+      t.endTime=newEnd;t.duration=Math.round(((t.endTime-new Date(t.startTime))/1000)*_batchShare(t));
     }
     if(S.fbConnected)await fbSet('histTasks',t.id,{...t,startTime:t.startTime instanceof Date?t.startTime.toISOString():t.startTime,endTime:t.endTime instanceof Date?t.endTime.toISOString():t.endTime});
     saveLS();closeModal();renderTasks();renderMgrTasks();buildRep();return;
