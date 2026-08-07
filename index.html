@@ -1256,6 +1256,20 @@ code{background:var(--bg2);border:0.5px solid var(--b);border-radius:4px;padding
         </div>
         <div id="stn-lock-state" style="font-size:12px;font-weight:700;margin-top:6px"></div>
       </div>
+      <div style="padding:10px;border:1px solid var(--brd);border-radius:8px;margin-bottom:10px">
+        <label style="display:flex;align-items:center;gap:8px;cursor:pointer;font-size:13px;font-weight:600">
+          <input type="checkbox" id="so-lock" style="width:17px;height:17px" onchange="setStepOrderLock(this.checked)">
+          🔗 אכיפת סדר: שלב מאחד רק אחרי שקודמיו הסתיימו
+        </label>
+        <div style="font-size:11px;color:var(--txt3);margin-top:5px;line-height:1.5">
+          חל <b>רק</b> על שלבים שסומנו "🔗 מאחד" בכרטיס המוצר, ורק מולם — שלב רגיל אף פעם לא חוסם, וכל ההכנות המקבילות נשארות חופשיות.
+          הבדיקה היא פר ברקוד (מידה+צבע). שלבים שנבחרו באותה סריקה לא חוסמים זה את זה.
+          <b>הרץ קודם "🔎 סדר שלבים בהיסטוריה"</b> כדי לראות כמה היה נחסם.
+        </div>
+        <div id="so-lock-state" style="font-size:12px;font-weight:700;margin-top:6px"></div>
+      </div>
+      <button class="btn" style="font-size:13px;margin-bottom:10px" onclick="auditStepOrder()">🔎 סדר שלבים בהיסטוריה</button>
+      <div id="so-audit" style="margin-bottom:10px"></div>
       <div id="stn-audit" style="margin-bottom:10px"></div>
       <div id="stn-list"></div>
       <button class="btn primary" style="width:100%;justify-content:center;font-size:14px;padding:10px;margin-top:10px" onclick="renderStationBarcodes()">🏭 צור ברקודי תחנות</button>
@@ -1385,6 +1399,8 @@ const LANGS={
     st_override_title:'עקיפת נעילת תחנה',
     st_override_msg:'להתחיל בכל זאת?',
     st_override_ok:'התחל בכל זאת',
+    so_locked:'🔗 שלב מאחד — יש לסיים קודם',
+    so_override_title:'עקיפת סדר שלבים',
     sc_emp_ok:'✅ עובד זוהה: ',
     sc_emp_next:'סרוק תחנה או משימה',
     sc_emp_notfound:'⚠ עובד לא נמצא',
@@ -1629,6 +1645,8 @@ const LANGS={
     st_override_title:'تجاوز قفل المحطة',
     st_override_msg:'هل تريد البدء رغم ذلك؟',
     st_override_ok:'ابدأ رغم ذلك',
+    so_locked:'🔗 مرحلة تجميع — يجب إنهاء ما قبلها أولاً',
+    so_override_title:'تجاوز ترتيب المراحل',
     sc_emp_ok:'✅ تم التعرف على العامل: ',
     sc_emp_next:'امسح محطة أو مهمة',
     sc_emp_notfound:'⚠ العامل غير موجود',
@@ -1873,6 +1891,8 @@ const LANGS={
     st_override_title:'Override station lock',
     st_override_msg:'Start anyway?',
     st_override_ok:'Start anyway',
+    so_locked:'🔗 Merge step — finish the earlier ones first',
+    so_override_title:'Override step order',
     sc_emp_ok:'✅ Worker: ',
     sc_emp_next:'scan a station or task',
     sc_emp_notfound:'⚠ Worker not found',
@@ -2162,7 +2182,7 @@ let S={
   activeTasks:[],
   histTasks:[],
   alerts:[],
-  settings:{thresh:60,absent:5,waEnabled:false,waInterval:60,waFrom:'07:00',waTo:'18:00',waLong:true,waAbsent:true,factoryIP:'188.225.231.120',shiftStart:'06:30',shiftEnd:'15:00',roundMinutes:5,endOfDayTime:'15:05',ipBypassMin:0,ipBypassStartMs:0,stationLock:false},
+  settings:{thresh:60,absent:5,waEnabled:false,waInterval:60,waFrom:'07:00',waTo:'18:00',waLong:true,waAbsent:true,factoryIP:'188.225.231.120',shiftStart:'06:30',shiftEnd:'15:00',roundMinutes:5,endOfDayTime:'15:05',ipBypassMin:0,ipBypassStartMs:0,stationLock:false,stepOrderLock:false},
   waLastSent:0,
   wifiAlertSent:{},
   tgSentAlerts:{},
@@ -2193,7 +2213,7 @@ function stepDisplay(s){if(typeof s==='string')return s;return(currentLang==='ar
 function stepLevel(s){return(s&&typeof s==='object'&&s.level)?+s.level:0;}
 function stepStation(s){return(s&&typeof s==='object'&&s.station)?s.station:'';}
 function stepManualMin(s){return(s&&typeof s==='object'&&+s.manualMin>0)?+s.manualMin:0;} // דקות ידניות ליחידה — דורס חישוב אוטומטי
-function stepBadge(s){const l=stepLevel(s);return(s&&typeof s==='object'&&s.quick?` <span style="font-size:11px;padding:1px 7px;border-radius:8px;background:var(--amber-bg);color:var(--amber-txt);border:1px solid var(--brd)">⚡ מהיר</span>`:'')+(l?` <span style="font-size:11px;padding:1px 7px;border-radius:8px;background:var(--bg2);color:var(--txt3);border:1px solid var(--brd)">${levelName(l)}</span>`:'');}
+function stepBadge(s){const l=stepLevel(s);return(s&&typeof s==='object'&&s.quick?` <span style="font-size:11px;padding:1px 7px;border-radius:8px;background:var(--amber-bg);color:var(--amber-txt);border:1px solid var(--brd)">⚡ מהיר</span>`:'')+(s&&typeof s==='object'&&s.merge?` <span style="font-size:11px;padding:1px 7px;border-radius:8px;background:var(--blue-bg);color:var(--blue-txt);border:1px solid var(--brd)">🔗 מאחד</span>`:'')+(l?` <span style="font-size:11px;padding:1px 7px;border-radius:8px;background:var(--bg2);color:var(--txt3);border:1px solid var(--brd)">${levelName(l)}</span>`:'');}
 // שלב "מהיר" ⚡ — פטור מהגבלת 2 שלבים/2 ברקודים בשני הסורקים
 function isQuickStep(cust,prod,stepNm){
   const p=findProd(cust,prod);if(!p)return false;
@@ -2254,6 +2274,81 @@ async function passStationGate(w,cust,prod,stepNames){
   if(!canOverrideStationGate()){showToast(g.msg,'var(--red-txt)',8000);return false;} // textContent — בלי esc
   // showConfirm מזריק ב-innerHTML (וממיר \n ל-<br>) — כאן חובה esc, ושמות תחנה/שלב מגיעים מקלט משתמש
   return await showConfirm(T.st_override_title||'עקיפת נעילת תחנה',esc(g.msg+'\n\n'+(T.st_override_msg||'להתחיל בכל זאת?')),T.st_override_ok||'התחל בכל זאת',T.cancel||'ביטול');
+}
+
+// ─── שער סדר השלבים: 🔗 "שלב מאחד" ────────────────────────────────
+// המפעל עובד ב**ענפי הכנה מקבילים שמתכנסים** ("מתחילים כמה שלבים ביחד כי צריך הכנות
+// לחלקים לפני שמחברים אותם"), ולכן שרשרת ליניארית נפסלה במדידה: היא הייתה חוסמת
+// 85% מ-323 התחלות אמיתיות של שלבי הגימור (25/07–06/08, 1240 משימות).
+// כאן נאכף סדר **רק בין נקודות הביקורת**: שלב מסומן 🔗 דורש שכל שלבי ה-🔗 שלפניו
+// יסתיימו על אותו ברקוד. שלב רגיל לעולם אינו חוסם — כל ההכנות נשארות חופשיות.
+// שלוש ההקלות נמדדו כהכרחיות; בלי אף אחת מהן שיעור החסימות קופץ 22%→36%→51%:
+//   1. שלב 🔗 שטרם הסתיים ולו פעם אחת במוצר = לא חוסם. שלבי קבלה/חיתוך אינם נסרקים
+//      פר-ברקוד כלל — ב-08307 `عد فتح شغل` (שלב #1) לא נסרק ב-13 יום, 16 ברקודים,
+//      263 משימות, והיה חוסם כל שלב 🔗 במוצר לנצח.
+//   2. שלב שנפתח **באותה סריקה** אינו חוסם. עובדת בוחרת تنظيف+فحص قبل יחד ושניהם
+//      מתחילים באותה מילישנייה; במוצר 02910 זה בכלל שלב אחד בשם `تنظيف+فحص قبل`.
+//   3. ברקוד "כל הכמות" מכסה את כל המידות והצבעים (אישור המשתמש 07/08).
+// ⚠️ הכלל בודק **סיום**, לא התחלה: שלב 🔗 שקודמו עדיין רץ על אותו ברקוד — נחסם.
+// ⚠️ חור ידוע ומכוון (נובע מהקלה 1): **המעבר הראשון בכל נקודת ביקורת חופשי.** כל עוד
+// שלב 🔗 מסוים לא הסתיים ולו פעם אחת בהזמנה, הוא נחשב "שלב שלא סורקים" ואינו חוסם —
+// ולכן הברקוד הראשון שמגיע ל-تغليف יעבור גם בלי فحص بعد. מהברקוד השני האכיפה תופסת.
+// אי אפשר לסגור את זה בלי להבחין בין "לא נסרק" ל"עדיין לא נסרק", והבחנה כזו אינה
+// זמינה בזמן אמת. זו הסיבה שהדוח "🔎 סדר שלבים בהיסטוריה" קיים — הוא כן רואה אחורה.
+function stepOrderLockOn(){return !!S.settings?.stepOrderLock;}
+function isMergeStep(s){return !!(s&&typeof s==='object'&&s.merge);}
+// מה כבר הסתיים במופע-המוצר הנוכחי: פר ברקוד+שלב, פר שלב, ודרך ברקוד "כל הכמות".
+// אותו סינון prodStamp כמו stepDoneMap — הזמנה חוזרת לא נשענת על היסטוריה ישנה.
+function _mergeCover(cust,prod){
+  const stamp=prodStampFor(cust,prod);
+  const bcStep=new Set(),anyStep=new Set(),totStep=new Set();
+  for(const t of (S.histTasks||[])){
+    if(t.cust!==cust||t.prod!==prod||!(t.duration>0))continue;
+    if(t.prodStamp!=null&&stamp&&t.prodStamp!==stamp)continue;
+    const st=String(t.taskType||'').trim().toLowerCase();if(!st)continue;
+    anyStep.add(st);bcStep.add(taskBc(t)+'|'+st);
+    if(t.isTotal)totStep.add(st);
+  }
+  return{bcStep,anyStep,totStep};
+}
+function mergeGate(cust,prod,bc,stepNames){
+  const T=LANGS[currentLang];
+  if(!stepOrderLockOn())return{ok:true}; // 🔌 מתג כיבוי מהניהול — ברירת מחדל כבוי
+  const steps=findProd(cust,prod)?.workSteps||[];
+  const want=(stepNames||[]).filter(Boolean);
+  if(!steps.length||!want.length)return{ok:true};
+  const sameScan=new Set(want.map(n=>String(n).trim().toLowerCase())); // הקלה 2
+  const cov=_mergeCover(cust,prod);
+  const blocked=[];
+  for(const nm of want){
+    const idx=steps.findIndex(x=>stepName(x)===nm);
+    if(idx<0||!isMergeStep(steps[idx]))continue; // שלב שאינו מהמוצר / אינו 🔗 — חופשי
+    const miss=[];
+    for(let i=0;i<idx;i++){
+      if(!isMergeStep(steps[i]))continue;        // רק 🔗 חוסם 🔗
+      const q=stepName(steps[i]);if(!q)continue;
+      const k=q.trim().toLowerCase();
+      if(sameScan.has(k))continue;
+      if(!cov.anyStep.has(k))continue;                            // הקלה 1
+      if(cov.bcStep.has(bc+'|'+k)||cov.totStep.has(k))continue;   // הושלם (הקלה 3)
+      miss.push(q);
+    }
+    if(miss.length)blocked.push({step:nm,need:miss});
+  }
+  if(!blocked.length)return{ok:true};
+  // טקסט גולמי — showToast כותב ב-textContent. ההברחה רק במסלול showConfirm (innerHTML).
+  return{ok:false,blocked,msg:(T.so_locked||'🔗 שלב מאחד — יש לסיים קודם')+': '+
+    blocked.map(b=>b.step+' → '+b.need.join(', ')).join(' · ')};
+}
+// אותה מדיניות כמו שער התחנה: מנהל/אחראי מאשרים עקיפה, עובד נחסם מוחלט.
+async function passMergeGate(cust,prod,bc,stepNames){
+  const g=mergeGate(cust,prod,bc,stepNames);
+  if(g.ok)return true;
+  const T=LANGS[currentLang];
+  if(!canOverrideStationGate()){showToast(g.msg,'var(--red-txt)',8000);return false;}
+  return await showConfirm(T.so_override_title||'עקיפת סדר שלבים',
+    esc(g.msg+'\n\n'+(T.st_override_msg||'להתחיל בכל זאת?')),
+    T.st_override_ok||'התחל בכל זאת',T.cancel||'ביטול');
 }
 
 // ─── מנוע המלצת שיבוץ — תמחור שלב ב' ────────────────────────
@@ -2796,6 +2891,7 @@ function listenFb(){
         // 🔒 מתג האכיפה של נעילת התחנה — מסונכרן לכל המכשירים דרך אותו מסמך הגדרות,
         // כדי שכיבוי חירום מהניהול ישחרר את כל רצפת הייצור מיד ולא מכשיר-מכשיר.
         if(data.stationLock!==undefined)S.settings.stationLock=!!data.stationLock;
+        if(data.stepOrderLock!==undefined)S.settings.stepOrderLock=!!data.stepOrderLock;
         // מצב גיבוי — ipBypassStart הוא Timestamp מהשרת; ממירים למספר לתצוגה בלבד
         S.settings.ipBypassMin=Number(data.ipBypassMin)||0;
         const _bs=data.ipBypassStart;
@@ -2814,6 +2910,7 @@ function listenFb(){
         }
         saveLS();loadWaSettings();
         try{renderStationLockState();}catch(e){}
+        try{renderStepOrderLockState();}catch(e){}
       }
     });
     renderAll();
@@ -4358,6 +4455,14 @@ async function bcStartBatch(){
     const i=k.indexOf('|');
     if(!await passStationGate(wu,k.slice(0,i),k.slice(i+1),_bcGate[k]))return;
   }
+  // 🔗 שער סדר השלבים — פר **ברקוד** ולא פר מוצר: הכיסוי נמדד למידה/צבע הספציפיים.
+  // כל השלבים של אותו ברקוד בסל נשלחים יחד, ולכן הם נחשבים "אותה סריקה" ולא חוסמים זה את זה.
+  const _bcOrd={};
+  for(const b of items){(_bcOrd[b.raw]=_bcOrd[b.raw]||{cust:b.cust,prod:b.prod,steps:[]}).steps.push(b.taskType||'');}
+  for(const raw of Object.keys(_bcOrd)){
+    const o=_bcOrd[raw];
+    if(!await passMergeGate(o.cust,o.prod,raw,o.steps))return;
+  }
   try{
     const bcBatchId=items.length>1?genBatchId():null; // כמה משימות יחד = קבוצה אחת (טיימר משותף + מסגרת אחת)
     const bcStart=srvNow();
@@ -4907,6 +5012,8 @@ async function submitBc(){
   // 🔒 שער התחנה — חובת סריקת תחנה + שלב נעול למשפחת התחנה שלו. הסורק האישי מופעל
   // ע"י העובד עצמו ולכן זו חסימה מוחלטת (העקיפה שמורה למנהל/אחראי בסורקי המשימות).
   if(!await passStationGate(wu,cust,prod,bcUseSteps?bcCheckedSteps:[]))return;
+  // 🔗 שער סדר השלבים — כל השלבים שסומנו בסריקה הזו נחשבים "אותה סריקה"
+  if(!await passMergeGate(cust,prod,raw,bcUseSteps?bcCheckedSteps:[taskType]))return;
   // ברקוד שכבר בעבודה אצל עובד אחר באותו שלב — אישור הצטרפות
   const otherSame=S.activeTasks.find(t=>t.workerId!==u.id&&taskBc(t)===raw&&(t.taskType||'').trim().toLowerCase()===taskType.toLowerCase());
   if(otherSame&&!await showConfirm(T.cfm_join_title||'הצטרפות למשימה',T.cfm_join_msg+otherSame.workerName+(otherSame.taskType?' ('+otherSame.taskType+')':'')+T.cfm_join_msg2,T.cfm_join_ok||'הצטרף',T.cancel||'ביטול'))return;
@@ -6847,6 +6954,7 @@ async function closeWorkerStation(w,when){
 }
 function renderStationsAdmin(){
   renderStationLockState(); // לפני ה-return המוקדם — המתג מוצג גם כשעדיין אין תחנות
+  renderStepOrderLockState();
   const el=document.getElementById('stn-list');if(!el)return;
   if(!(S.workStations||[]).length){el.innerHTML='<div style="color:var(--txt3);font-size:12px">אין תחנות מוגדרות — לחץ "🔄 סנכרן תחנות מלשונית הניהול"</div>';return;}
   el.innerHTML=S.workStations.map(s=>`<div class="row" style="gap:8px">
@@ -6895,6 +7003,93 @@ function renderStationLockState(){
   const on=!!S.settings?.stationLock;
   el.textContent=on?'🔒 האכיפה פעילה':'🔓 האכיפה כבויה — הכל עובד כרגיל';
   el.style.color=on?'var(--amber-txt)':'var(--txt3)';
+}
+// ─── מתג האכיפה 🔗 (סדר שלבים) ───────────────────────────────────
+async function setStepOrderLock(on){
+  const el=document.getElementById('so-lock');
+  // הדלקה בלי ששום שלב סומן 🔗 = מתג שלא עושה כלום; הדלקה עם סימון = חסימה מיידית.
+  if(on){
+    let marked=0;
+    for(const p of (S.products||[]))marked+=(p.workSteps||[]).filter(s=>isMergeStep(s)).length;
+    const msg=marked
+      ?'להדליק את אכיפת הסדר?\n\n• '+marked+' שלבים מסומנים 🔗 — הם ייחסמו עד שקודמיהם יסתיימו על אותו ברקוד.\n\nהאכיפה חלה מיד על כל המכשירים.'
+      :'אף שלב לא מסומן 🔗 — המתג לא ישפיע על כלום.\n\nסמן שלבים בכרטיס המוצר קודם. להדליק בכל זאת?';
+    if(!await showConfirm('הדלקת אכיפת סדר שלבים',esc(msg),'הדלק','ביטול')){if(el)el.checked=false;return;}
+  }
+  S.settings.stepOrderLock=!!on;
+  try{
+    if(S.fbConnected)await fbSet('appSettings','telegramSettings',{stepOrderLock:!!on});
+    saveLS();renderStepOrderLockState();
+    showToast(on?'🔗 אכיפת סדר שלבים הופעלה':'🔓 אכיפת סדר שלבים כובתה',on?'var(--amber-txt)':'var(--green-txt)',5000);
+  }catch(e){
+    S.settings.stepOrderLock=!on;if(el)el.checked=!on;
+    showToast('❌ '+e.message,'var(--red-txt)');
+  }
+}
+function renderStepOrderLockState(){
+  const cb=document.getElementById('so-lock');if(cb)cb.checked=!!S.settings?.stepOrderLock;
+  const el=document.getElementById('so-lock-state');if(!el)return;
+  const on=!!S.settings?.stepOrderLock;
+  let marked=0;for(const p of (S.products||[]))marked+=(p.workSteps||[]).filter(s=>isMergeStep(s)).length;
+  el.textContent=on?('🔗 האכיפה פעילה · '+marked+' שלבים מסומנים'):('🔓 האכיפה כבויה · '+marked+' שלבים מסומנים 🔗');
+  el.style.color=on?'var(--amber-txt)':'var(--txt3)';
+}
+// ─── ביקורת יבשה: מה **היה** נחסם ─────────────────────────────────
+// מריצה את mergeGate על ההיסטוריה כאילו האכיפה דלוקה, בלי לחסום כלום.
+// זו הדרך היחידה לדעת אם הסימון שנבחר הגיוני לפני שמדליקים על רצפת הייצור —
+// במדידה של 07/08 המודל הליניארי היה חוסם 85% מהעבודה האמיתית.
+function auditStepOrder(){
+  const el=document.getElementById('so-audit');if(!el)return;
+  const byProd={};
+  for(const t of (S.histTasks||[])){
+    if(!t.cust||!t.prod||!t.bc)continue;
+    (byProd[t.cust+'|'+t.prod]=byProd[t.cust+'|'+t.prod]||[]).push(t);
+  }
+  const rows=[];let tot=0,hit=0;
+  for(const key of Object.keys(byProd)){
+    const i=key.indexOf('|'),cust=key.slice(0,i),prod=key.slice(i+1);
+    const steps=findProd(cust,prod)?.workSteps||[];
+    if(!steps.some(isMergeStep))continue; // מוצר בלי סימוני 🔗 — אין מה לבדוק
+    const stamp=prodStampFor(cust,prod);
+    const list=byProd[key].filter(t=>t.duration>0&&(t.prodStamp==null||!stamp||t.prodStamp===stamp))
+      .slice().sort((a,b)=>new Date(a.startTime)-new Date(b.startTime));
+    // כיסוי מצטבר לפי סדר הזמן — "מה היה ידוע ברגע ההתחלה"
+    const bcStep=new Set(),anyStep=new Set(),totStep=new Set();
+    for(const t of list){
+      const nm=String(t.taskType||'').trim(),k=nm.toLowerCase();
+      const idx=steps.findIndex(x=>stepName(x)===nm);
+      if(idx>0&&isMergeStep(steps[idx])){
+        tot++;
+        const miss=[];
+        for(let j=0;j<idx;j++){
+          if(!isMergeStep(steps[j]))continue;
+          const q=stepName(steps[j]);if(!q)continue;
+          const qk=q.trim().toLowerCase();
+          if(qk===k)continue; // אותה סריקה בפועל לא ניתנת לשחזור מההיסטוריה — לפחות לא מול עצמו
+          if(!anyStep.has(qk))continue;
+          if(bcStep.has(taskBc(t)+'|'+qk)||totStep.has(qk))continue;
+          miss.push(q);
+        }
+        if(miss.length){hit++;rows.push({cust,prod,bc:taskBc(t),step:nm,worker:t.workerName||'',
+          when:new Date(t.startTime),need:miss});}
+      }
+      anyStep.add(k);bcStep.add(taskBc(t)+'|'+k);if(t.isTotal)totStep.add(k);
+    }
+  }
+  if(!tot){el.innerHTML='<div style="font-size:12px;color:var(--txt3);padding:8px;background:var(--bg2);border-radius:8px">אין שלבים מסומנים 🔗 בהיסטוריה — סמן שלבים בכרטיס המוצר ואז הרץ שוב</div>';return;}
+  const pct=(hit/tot*100).toFixed(0);
+  const good=hit===0;
+  rows.sort((a,b)=>b.when-a.when);
+  el.innerHTML=`<div style="font-size:12px;padding:8px;border-radius:8px;border:1px solid var(--brd);background:${good?'var(--green-bg)':'var(--amber-bg)'};color:${good?'var(--green-txt)':'var(--amber-txt)'}">
+      ${good?'✅':'⚠'} ${hit} מתוך ${tot} התחלות של שלבי 🔗 בהיסטוריה היו נחסמות (${pct}%).
+      ${good?'הסימון בטוח להדלקה.':'ככל שהאחוז גבוה — כך יותר עבודה אמיתית תיתקע. שקול להוריד סימוני 🔗.'}
+    </div>
+    ${rows.length?`<div style="max-height:260px;overflow:auto;margin-top:6px">${rows.slice(0,120).map(r=>`
+      <div style="padding:6px 8px;border-bottom:1px solid var(--brd);font-size:12px">
+        <span style="font-weight:700">${esc(r.cust)}/${esc(r.prod)}</span>
+        <span style="color:var(--txt3)"> · ${esc(r.bc)} · ${esc(r.worker)} · ${pad2(r.when.getDate())}/${pad2(r.when.getMonth()+1)} ${pad2(r.when.getHours())}:${pad2(r.when.getMinutes())}</span>
+        <div style="margin-top:2px">🔗 ${esc(r.step)} <span style="color:var(--red-txt)">← חסר: ${esc(r.need.join(', '))}</span></div>
+      </div>`).join('')}</div>`:''}`;
 }
 // ─── ביקורת: שלבים בלי תחנה משויכת ───────────────────────────────
 // מאז 03/08 שלב בלי תחנה **חסום** בסורקים, ולכן צריך לראות את הרשימה לפני שנתקעים
@@ -7243,6 +7438,8 @@ async function tsStartTask(){
     if(useSteps&&!checkedSteps.length){showToast(T.err_sel_step||'⚠ בחר לפחות שלב עבודה אחד','var(--red-txt)');return;}
     // 🔒 שער התחנה (w = העובד שהמשימה נפתחת עבורו; העקיפה נקבעת לפי מי שמפעיל את הסורק)
     if(!await passStationGate(w,cust,prod,useSteps?checkedSteps:[]))return;
+    // 🔗 שער סדר השלבים — נבדק על הברקוד שנסרק, לפני ההוספה לסל
+    if(!await passMergeGate(cust,prod,raw,useSteps?checkedSteps:[(document.getElementById('ts-tasktype').value||'').trim()]))return;
     const taskType=useSteps?'':((document.getElementById('ts-tasktype').value||'').trim());
     const taskDept=(document.getElementById('ts-dept').value||'').trim();
     const types=useSteps?checkedSteps:[taskType||''];
@@ -7559,6 +7756,8 @@ async function mgrStartTask(){
     if(mgrUseSteps&&!mgrCheckedSteps.length){showToast(T.err_sel_step||'⚠ בחר לפחות שלב עבודה אחד','var(--red-txt)');return;}
     // 🔒 שער התחנה (w = העובד שהמשימה נפתחת עבורו; העקיפה נקבעת לפי מי שמפעיל את הסורק)
     if(!await passStationGate(w,cust,prod,mgrUseSteps?mgrCheckedSteps:[]))return;
+    // 🔗 שער סדר השלבים — נבדק על הברקוד שנסרק, לפני ההוספה לסל
+    if(!await passMergeGate(cust,prod,raw,mgrUseSteps?mgrCheckedSteps:[(document.getElementById('mgr-tasktype').value||'').trim()]))return;
     const taskType=mgrUseSteps?'':((document.getElementById('mgr-tasktype').value||'').trim());
     const taskDept=(document.getElementById('mgr-dept').value||'').trim();
     const types=mgrUseSteps?mgrCheckedSteps:[taskType||''];
@@ -10261,6 +10460,7 @@ function _stepRowHtml(s){
       <select data-f="station" style="flex:1;min-width:0;font-size:12px">${_stationOpts(stn)}</select>
       <input type="number" data-f="manualMin" min="0" step="0.1" value="${mMin||''}" placeholder="דק' ידני" title="דקות ידניות ליחידה — משאירים ריק לחישוב אוטומטי לפי קושי" style="width:78px;flex:none;font-size:12px;padding:4px 6px;border-radius:6px;border:1px solid var(--brd);background:var(--card);color:var(--txt)">
       <label style="display:flex;align-items:center;gap:3px;flex:none;font-size:12px;color:var(--txt3);cursor:pointer;white-space:nowrap" title="שלב מהיר — פטור מהגבלת 2 שלבים / 2 ברקודים לעובד"><input type="checkbox" data-f="quick" ${s&&typeof s==='object'&&s.quick?'checked':''} style="width:15px;height:15px">⚡ מהיר</label>
+      <label style="display:flex;align-items:center;gap:3px;flex:none;font-size:12px;color:var(--txt3);cursor:pointer;white-space:nowrap" title="שלב מאחד — ייחסם עד שכל שלבי ה-🔗 שמעליו יסתיימו על אותו ברקוד. שלב רגיל אינו חוסם."><input type="checkbox" data-f="merge" ${s&&typeof s==='object'&&s.merge?'checked':''} style="width:15px;height:15px">🔗 מאחד</label>
     </div>
   </div>`;
 }
@@ -10585,7 +10785,8 @@ async function saveProduct(){
     const stn=r.querySelector('[data-f="station"]')?.value||'';
     const mm=parseFloat(r.querySelector('[data-f="manualMin"]')?.value)||0;
     const qk=!!r.querySelector('[data-f="quick"]')?.checked;
-    return !nm&&(lvl||stn||mm||qk);
+    const mg=!!r.querySelector('[data-f="merge"]')?.checked;
+    return !nm&&(lvl||stn||mm||qk||mg);
   });
   if(_namelessFilled){alert('⚠️ יש שלב עבודה ללא שם — מלא שם בשדה הראשון (עברית) או מחק את השורה, ואז שמור שוב.');return;}
   const workSteps=_stepRows.map(r=>({
@@ -10594,7 +10795,8 @@ async function saveProduct(){
     level:parseInt(r.querySelector('[data-f="level"]')?.value)||0,
     station:r.querySelector('[data-f="station"]')?.value||'',
     manualMin:parseFloat(r.querySelector('[data-f="manualMin"]')?.value)||0,
-    quick:!!r.querySelector('[data-f="quick"]')?.checked
+    quick:!!r.querySelector('[data-f="quick"]')?.checked,
+    merge:!!r.querySelector('[data-f="merge"]')?.checked
   })).filter(s=>s.name);
   const unitPrice=parseFloat(document.getElementById('pm-price')?.value)||0;
   const targetProfitPct=parseFloat(document.getElementById('pm-profit')?.value)||0;
