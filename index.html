@@ -4290,6 +4290,9 @@ function calcActualTaskTime(tasks){
 let _tsBatch=[];  // {raw,cust,prod,size,qty,col,isTotal,taskType,taskDept,prodStamp}
 let _mgrBatch=[];
 let _bcBatch=[];  // סל הסורק האישי (bc) — כמו _tsBatch + expMin לתצוגת צפי כולל
+// מזהי המשימות שהעובד ביקש לסגור כשיתחיל את הסל. *כוונה* בלבד — הסגירה עצמה מתבצעת
+// ב-bcStartBatch רק אחרי שנוצרה משימה חדשה במקומן. ראה ההסבר ב-submitBc.
+let _bcCloseOnStart=[];
 // ─── חסימת סריקה כפולה של אותו שלב (ברקוד+שלב) ─────────────────
 // חותמת מופע-מוצר = תאריך הקמת המוצר (הרשומה העדכנית ביותר ללקוח+מוצר).
 // הזמנה חדשה נכנסת כרשומת מוצר חדשה עם תאריך חדש ⇒ אינה נחסמת מול היסטוריה ישנה.
@@ -4538,6 +4541,15 @@ async function bcStartBatch(){
       tgTask(newTask,true);
       await autoStampStage(b.cust,b.prod,b.taskDept||effDept(wu)); // עדכון אוטומטי של שלב הייצור
     }
+    // סגירת המשימות הקודמות — רק עכשיו, כשידוע שנוצרה משימה חדשה שתחליף אותן.
+    // endTime=bcStart (רגע פתיחת החדשות) ⇒ אין חפיפה ואין חור בציר הזמן.
+    if(created>0&&_bcCloseOnStart.length){
+      const toClose=S.activeTasks.filter(t=>_bcCloseOnStart.includes(String(t.id)));
+      if(toClose.length)await closeTasksBatchAware(toClose,bcStart);
+    }else if(!created&&_bcCloseOnStart.length){
+      showToast('⚠ לא נפתחה משימה חדשה — המשימה הקודמת נשארה פעילה','var(--amber-txt)',7000);
+    }
+    _bcCloseOnStart=[];
     _bcBatch=[];renderBcBatchQueue();
     document.getElementById('bc-inp').value='';parseBc('');
     document.getElementById('bc-tasktype').value='';
@@ -5074,15 +5086,18 @@ async function submitBc(){
   if(otherSame&&!await showConfirm(T.cfm_join_title||'הצטרפות למשימה',T.cfm_join_msg+otherSame.workerName+(otherSame.taskType?' ('+otherSame.taskType+')':'')+T.cfm_join_msg2,T.cfm_join_ok||'הצטרף',T.cancel||'ביטול'))return;
   // משימה פעילה קיימת — לסגור את כולן או לעבוד במקביל. נשאל רק בסריקה הראשונה של הסל (ההחלטה תקפה לכולו)
   if(!_bcBatch.length){
+    _bcCloseOnStart=[]; // סל חדש — כוונת סגירה מסבב קודם שננטש לא נגררת לכאן
     const existTasks=S.activeTasks.filter(t=>t.workerId===u.id);
     if(existTasks.length>0){
       const prev=existTasks[0];
       const msg=existTasks.length>1?existTasks.length+' משימות פעילות — '+existTasks.map(t=>t.prod).join(', ')+T.cfm_existing_msg:'מוצר '+prev.prod+T.cfm_existing_msg;
       const parallel=await showConfirm(T.cfm_existing_title||'משימה קיימת',msg,T.cfm_parallel||'עבודה במקביל',T.cfm_close_old||'סגור ישנה + התחל חדשה');
-      if(!parallel){
-        await closeTasksBatchAware(existTasks,new Date());
-        S.activeTasks=S.activeTasks.filter(t=>t.workerId!==u.id);
-      }
+      // ⚠️ לא סוגרים כאן. עד ליצירה בפועל (bcStartBatch) יש שלוש יציאות — "כלום לא נוסף",
+      // "➕ סרוק עוד", והשערים שבתוך bcStartBatch — ומעליהן רענון מבאנר העדכון. סגירה מוקדמת
+      // בכל אחת מהן משאירה את העובד בלי שום משימה פתוחה והזמן נמחק בלי עקבה (ايمان 08/08:
+      // 92 דק'). ⚠️ _bcBatch אינו נשמר ל-localStorage — רענון מוחק את הסל, וסגירה מוקדמת
+      // הייתה מוחקת איתו גם את המשימה שרצה. לכן נשמרת כוונה בלבד.
+      if(!parallel)_bcCloseOnStart=existTasks.map(t=>String(t.id));
     }
   }
   // הגבלת סריקה לאחראי/עובד/עוזר (מנהל — ללא הגבלה): עד 2 שלבים לברקוד ועד 2 ברקודים פעילים (כולל הסל)
@@ -7615,19 +7630,17 @@ async function tsStartTask(){
   const newBcs=_tsBatch.map(b=>b.raw);
   const canProceed=await handlePausedTasks(w.id,newBcs);
   if(!canProceed){_tsBatch=[];renderTsBatchQueue();saveLS();return;}
-  // סגירת משימות פעילות (לא מושהות) אם יש
+  // ⚠️ קודם יוצרים, ורק אז סוגרים. הסגירה נכתבת ל-Firestore באופן סופי, וכל יציאה מהלולאה
+  // שאחריה — רענון מבאנר העדכון באמצע הלולאה, או אחד משלושת ה-continue (כפילות מקומית /
+  // כפילות בשרת / claimTaskGuard) — הותירה את העובדת בלי שום משימה פתוחה, והזמן נמחק בלי
+  // עקבה (ايمان 08/08: 92 דקות ריקות). לכן: לא נסגר כלום עד שנוצרה לפחות משימה אחת.
+  // תוצאת לוואי מכוונת: סריקה חוזרת של אותו ברקוד+שלב נחסמת כפילות ⇒ created===0 ⇒
+  // המשימה הקיימת ממשיכה לרוץ במקום להיסגר לריק.
   const activeCurrent=S.activeTasks.filter(t=>t.workerId===w.id&&!t.paused);
-  if(activeCurrent.length>0){
-    const endTime=srvNow();
-    const batches={};activeCurrent.forEach(t=>{const bid=t.batchId||t.id;if(!batches[bid])batches[bid]=[];batches[bid].push(t);});
-    for(const bTasks of Object.values(batches)){
-      if(bTasks.length>1)await closeBatchProportional(bTasks,endTime);
-      else{const t=bTasks[0];const done={...t,endTime,duration:(t.accumulatedSec||0)+calcTaskDurSec(t.startTime,endTime,t.workerId)};S.histTasks.unshift(done);S.activeTasks=S.activeTasks.filter(x=>x.id!==t.id);if(S.fbConnected){await fbDel('activeTasks',String(t.id));await fbSet('histTasks',String(t.id),{...done,startTime:done.startTime instanceof Date?done.startTime.toISOString():done.startTime,endTime:endTime.toISOString()});}}
-    }
-  }
+  const swapTime=srvNow(); // רגע אחד לסגירה ולפתיחה — בלי חפיפה ביניהן
   try{
     const batchId=_tsBatch.length>1?genBatchId():null;
-    const startTime=srvNow();
+    const startTime=swapTime;
     let created=0;
     const tsDupSkip=[];
     const tsSrvActive=await serverActiveTasks(w.id); // קריאה אחת לכל הסל, לא לכל פריט
@@ -7646,8 +7659,18 @@ async function tsStartTask(){
       if(w.pushPrefs?.task_assigned!==false)sendPushToWorker(w.id,'📋 משימה חדשה',`${task.prod}${task.taskType?' · '+task.taskType:''} · ${task.qty} יח'`).catch(()=>{});
       await autoStampStage(b.cust,b.prod,b.taskDept||effDept(w)); // עדכון אוטומטי של שלב הייצור
     }
+    // סגירת המשימות הקודמות — רק עכשיו, כשידוע שיש משימה חדשה שתחליף אותן
+    if(created>0&&activeCurrent.length>0){
+      const endTime=swapTime;
+      const batches={};activeCurrent.forEach(t=>{const bid=t.batchId||t.id;if(!batches[bid])batches[bid]=[];batches[bid].push(t);});
+      for(const bTasks of Object.values(batches)){
+        if(bTasks.length>1)await closeBatchProportional(bTasks,endTime);
+        else{const t=bTasks[0];const done={...t,endTime,duration:(t.accumulatedSec||0)+calcTaskDurSec(t.startTime,endTime,t.workerId)};S.histTasks.unshift(done);S.activeTasks=S.activeTasks.filter(x=>x.id!==t.id);if(S.fbConnected){await fbDel('activeTasks',String(t.id));await fbSet('histTasks',String(t.id),{...done,startTime:done.startTime instanceof Date?done.startTime.toISOString():done.startTime,endTime:endTime.toISOString()});}}
+      }
+    }
     if(tsDupSkip.length)showToast((T.scan_not_added||'לא נוסף')+' '+tsDupSkip.join(' · '),'var(--red-txt)',7000);
     if(created>0)showToast('✅ '+created+' משימות התחילו עבור '+w.name);
+    else if(activeCurrent.length)showToast('⚠ לא נפתחה משימה חדשה — המשימה הקודמת נשארה פעילה','var(--amber-txt)',7000);
     // מדיניות רכה: התחלת משימה בלי שיוך תחנה — תזכורת בלבד, לא חסימה
     if(!w.currentStation&&(S.workStations||[]).length)setTimeout(()=>showToast(T.st_reminder||'📍 תזכורת: סרוק ברקוד תחנה כדי לשייך אותך לעמדה','var(--amber-txt)',5000),1800);
     _tsBatch=[];renderTsBatchQueue();
@@ -7931,17 +7954,12 @@ async function mgrStartTask(){
   const newBcs=_mgrBatch.map(b=>b.raw);
   const canProceed=await handlePausedTasks(w.id,newBcs);
   if(!canProceed){_mgrBatch=[];renderMgrBatchQueue();saveLS();return;}
+  // ⚠️ קודם יוצרים, ורק אז סוגרים — ראה ההסבר המלא ב-tsStartTask. סגירה מוקדמת + יציאה
+  // מהלולאה (רענון/כפילות בשרת/claimTaskGuard) = העובדת בלי משימה פתוחה והזמן נמחק.
   const activeCurrent=S.activeTasks.filter(t=>t.workerId===empId&&!t.paused);
-  if(activeCurrent.length>0){
-    const endTime=srvNow();
-    const batches={};activeCurrent.forEach(t=>{const bid=t.batchId||t.id;if(!batches[bid])batches[bid]=[];batches[bid].push(t);});
-    for(const bTasks of Object.values(batches)){
-      if(bTasks.length>1)await closeBatchProportional(bTasks,endTime);
-      else{const t=bTasks[0];const done={...t,endTime,duration:(t.accumulatedSec||0)+calcTaskDurSec(t.startTime,endTime,t.workerId)};S.histTasks.unshift(done);S.activeTasks=S.activeTasks.filter(x=>x.id!==t.id);if(S.fbConnected){await fbDel('activeTasks',String(t.id));await fbSet('histTasks',String(t.id),{...done,startTime:done.startTime instanceof Date?done.startTime.toISOString():done.startTime,endTime:endTime.toISOString()});}}
-    }
-  }
+  const swapTime=srvNow(); // רגע אחד לסגירה ולפתיחה — בלי חפיפה ביניהן
   const batchId=_mgrBatch.length>1?genBatchId():null;
-  const startTime=srvNow();
+  const startTime=swapTime;
   const mgrDupSkip=[];let mgrCreated=0;
   const mgrSrvActive=await serverActiveTasks(empId); // קריאה אחת לכל הסל, לא לכל פריט
   for(const b of _mgrBatch){
@@ -7958,8 +7976,18 @@ async function mgrStartTask(){
     tgTask(newTask,true);
     await autoStampStage(b.cust,b.prod,b.taskDept||effDept(w)); // עדכון אוטומטי של שלב הייצור
   }
+  // סגירת המשימות הקודמות — רק עכשיו, כשידוע שיש משימה חדשה שתחליף אותן
+  if(mgrCreated>0&&activeCurrent.length>0){
+    const endTime=swapTime;
+    const batches={};activeCurrent.forEach(t=>{const bid=t.batchId||t.id;if(!batches[bid])batches[bid]=[];batches[bid].push(t);});
+    for(const bTasks of Object.values(batches)){
+      if(bTasks.length>1)await closeBatchProportional(bTasks,endTime);
+      else{const t=bTasks[0];const done={...t,endTime,duration:(t.accumulatedSec||0)+calcTaskDurSec(t.startTime,endTime,t.workerId)};S.histTasks.unshift(done);S.activeTasks=S.activeTasks.filter(x=>x.id!==t.id);if(S.fbConnected){await fbDel('activeTasks',String(t.id));await fbSet('histTasks',String(t.id),{...done,startTime:done.startTime instanceof Date?done.startTime.toISOString():done.startTime,endTime:endTime.toISOString()});}}
+    }
+  }
   if(mgrDupSkip.length)showToast((T.scan_not_added||'לא נוסף')+' '+mgrDupSkip.join(' · '),'var(--red-txt)',7000);
   if(mgrCreated>0)showToast('✅ '+mgrCreated+' משימות התחילו עבור '+w.name);
+  else if(activeCurrent.length)showToast('⚠ לא נפתחה משימה חדשה — המשימה הקודמת נשארה פעילה','var(--amber-txt)',7000);
   _mgrBatch=[];renderMgrBatchQueue();
   document.getElementById('mgr-bc-inp').value='';parseMgrBc('');
   document.getElementById('mgr-tasktype').value='';document.getElementById('mgr-dept').value='';
@@ -8602,7 +8630,12 @@ async function confirmModal(){
       }
       // צביר = טיימר אחד משותף. בלי החלוקה כל שורה נושאת את הזמן המלא (רائده 03/08: 4 שורות
       // × 14,825 שנ' = 16.5 שע' בחלון של 4.1), והסוגר הלילי מנרמל אותן ב-23:30 במקומנו.
-      const done={...t,endTime,duration:Math.round(taskFinalDur(t,endTime)*_batchShare(t))};
+      const _dur=Math.round(taskFinalDur(t,endTime)*_batchShare(t));
+      // ⚠️ elapsed חייב ללכת עם החלון הידני. הסוגר הלילי (functions/index.js:990/993) מעדיף
+      // את elapsed/accumulatedSec כשהם קטנים מ-duration, ולכן תיקון ידני שלא עדכן אותם נמחק
+      // ב-23:30 בשקט (ايمان: duration 5580 מול elapsed 36 ⇒ חיתוך ל-36 שניות). וגם:
+      // origStart מאופס שתי שורות מעל, ולכן `if (t.origStart) continue` (שורה 988) *לא* מדלג.
+      const done={...t,endTime,duration:_dur,elapsed:_dur};
       delete done.paused;delete done.pausedAt;delete done.accumulatedSec;
       S.histTasks.unshift(done);
       S.activeTasks=S.activeTasks.filter(x=>x.id!==t.id);
@@ -8635,6 +8668,8 @@ async function confirmModal(){
       }
       // גם כאן החלון הידני הוא של הצביר כולו, לא של שורה בודדת — ראה _batchShare
       t.endTime=newEnd;t.duration=Math.round(((t.endTime-new Date(t.startTime))/1000)*_batchShare(t));
+      // elapsed נגרר לחלון הידני — אחרת הסוגר הלילי מחזיר את הערך הישן ב-23:30 (ראה edit-task)
+      t.elapsed=t.duration;
     }
     if(S.fbConnected)await fbSet('histTasks',t.id,{...t,startTime:t.startTime instanceof Date?t.startTime.toISOString():t.startTime,endTime:t.endTime instanceof Date?t.endTime.toISOString():t.endTime});
     saveLS();closeModal();renderTasks();renderMgrTasks();buildRep();return;
@@ -11708,7 +11743,8 @@ function doAppUpdate(){
   const k=/[?&#]kiosk=1\b/.test(location.href)?'&kiosk=1':'';
   window.location.href=window.location.pathname+'?t='+Date.now()+k;
 }
-let _appVerTag=null;
+let _appVerTag=null;      // הטביעה האחרונה שנצפתה — לדיווח בדופק הטאב
+const _appVerBase={};     // בסיס השוואה *נפרד לכל סוג טביעה* — ראה _verFingerprint
 let _appVerStale=false;
 // שעון שרת: offset מכותרת Date של checkVersion. חותמות זמן קריטיות (נוכחות/משימות) עוברות
 // דרך srvNow() כדי ששעון מכשיר שגוי (מוגדר ידני) לא יעוות היסטוריה ודוחות.
@@ -11727,13 +11763,19 @@ function showUpdateBanner(){
 // תמימה תיצור באנר-שווא כשלקוח קופץ בין שרתים. לכן: גרסה חדשה רק אם ה-size השתנה או ה-mtime זז
 // ביותר מ-60 שנ' (deploys מרוחקים דקות; כך נתפס גם deploy נדיר ששומר בדיוק על אותו גודל קובץ).
 // W/ (weak ETag) נחתך — Fastly מוסיף אותו רק כשהתשובה דחוסה, אותו קובץ.
+// k = *סוג* הטביעה. אסור להשוות בין סוגים שונים: רפליקה אחת של ה-CDN מחזירה ETag והשנייה
+// לא, ואז ההשוואה מתהפכת ומדליקה "גרסה חדשה" על לא כלום (08/08 11:13 — באנר בלי שהיה deploy;
+// הלחיצה עליו רועננה את הדף באמצע פתיחת משימה ומחקה 92 דק' עבודה). בסיס נפרד לכל סוג.
 function _verFingerprint(res){
   const et=(res.headers.get('etag')||'').replace(/^W\//,'').replace(/"/g,'');
   const m=et.match(/^([0-9a-f]+)-([0-9a-f]+)$/);
-  if(m)return{mt:parseInt(m[1],16),sz:m[2]};
-  if(et)return{mt:0,sz:et};
+  if(m)return{k:'et',mt:parseInt(m[1],16),sz:m[2]};
+  if(et)return{k:'etx',mt:0,sz:et};
   const cl=res.headers.get('content-length');
-  return cl?{mt:0,sz:'cl:'+cl}:null;
+  return cl?{k:'cl',mt:0,sz:'cl:'+cl}:null;
+}
+function hideUpdateBanner(){
+  const b=document.getElementById('update-banner');if(b)b.classList.add('hidden');
 }
 async function checkVersion(){
   try{
@@ -11743,8 +11785,11 @@ async function checkVersion(){
     try{const sd=res.headers.get('date');if(sd){const stMs=new Date(sd).getTime();if(stMs)_clockOffsetMs=stMs-Date.now();}}catch(e){}
     const tag=_verFingerprint(res);
     if(!tag)return _appVerStale;
-    if(_appVerTag===null){_appVerTag=tag;return false;}
-    if(tag.sz!==_appVerTag.sz||(tag.mt&&_appVerTag.mt&&Math.abs(tag.mt-_appVerTag.mt)>60)){
+    _appVerTag=tag;
+    // סוג טביעה שלא ראינו עדיין = אין מול מה להשוות. "לא יודע" — לא "התיישן".
+    const base=_appVerBase[tag.k];
+    if(!base){_appVerBase[tag.k]=tag;return _appVerStale;}
+    if(tag.sz!==base.sz||(tag.mt&&base.mt&&Math.abs(tag.mt-base.mt)>60)){
       _appVerStale=true;
       // מסך התצוגה = לוח קיר בלי מפעיל: באנר העדכון (z-index 200) מרונדר *מאחורי* ה-overlay
       // של הלוח (z-index 9999) ⇒ בלתי נראה, ואין בלוח כניסה/חתימה/סריקה שהחסימות היו תופסות.
@@ -11752,6 +11797,12 @@ async function checkVersion(){
       // התחברות) — כמו כל בוקר; ?kiosk=1 נשמר כדי שהלוח ייפתח שוב מיד אחרי הכניסה.
       if(typeof _kioskOpen!=='undefined'&&_kioskOpen){doAppUpdate();return true;}
       showUpdateBanner();
+    }else if(_appVerStale){
+      // הדגל מאמת מחדש ולא ננעל: כל עוד הוא דלוק, שורות 7590/7909 חוסמות את האחראי מלפתוח
+      // *שום* משימה לאף עובד עד רענון ידני (08/08: 92 דק' שבהן ايمان לא הייתה רשומה על כלום).
+      // אם ה-HEAD הנוכחי זהה שוב לבסיס — ההתראה הייתה שווא, משחררים.
+      _appVerStale=false;
+      hideUpdateBanner();
     }
     return _appVerStale;
   }catch(e){return _appVerStale;}
