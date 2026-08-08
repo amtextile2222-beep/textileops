@@ -801,6 +801,21 @@ code{background:var(--bg2);border:0.5px solid var(--b);border-radius:4px;padding
         </label>
       </div>
     </div>
+    <!-- מכשירים מחוברים: דופק פר-טאב -->
+    <div class="card" style="margin-top:1rem">
+      <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:.75rem;gap:8px;flex-wrap:wrap">
+        <div class="sec" style="margin:0">📡 מכשירים מחוברים כרגע</div>
+        <div style="display:flex;gap:6px">
+          <button class="btn" style="font-size:12px;padding:5px 10px" onclick="renderTabSessions()">🔄 רענן</button>
+          <button class="btn warn" style="font-size:12px;padding:5px 10px" onclick="cleanTabSessions()">🧹 נקה ישנים</button>
+        </div>
+      </div>
+      <div style="font-size:11px;color:var(--txt3);margin-bottom:.75rem;line-height:1.6">
+        כל טאב פתוח מדווח על עצמו — <b>גם כשהוא ברקע</b>. בניגוד ל-📡 WiFi שמדווח פר עובד ורק כשהמסך גלוי.
+        טאב ישן שנשכח פתוח ומחזיק משימות בזיכרון הוא הסיבה למשימות רפאים — כאן רואים אותו.
+      </div>
+      <div id="tab-sessions"></div>
+    </div>
   </div>
 
   <!-- ATTENDANCE REPORT PAGE -->
@@ -3833,7 +3848,7 @@ function goPage(p){
     buildRep();
   }
   if(p==='alerts'){checkAlerts();renderAlerts();}
-  if(p==='admin'){renderAdmin();const inp=document.getElementById('ai-url-input');if(inp)inp.value=AI_URL;}
+  if(p==='admin'){renderAdmin();const inp=document.getElementById('ai-url-input');if(inp)inp.value=AI_URL;try{renderTabSessions();}catch(e){}}
   if(p==='mgrtasks')renderMgrTasks();
   if(p==='taskscan')renderTsScan();
   if(p==='barcodes'){
@@ -11748,6 +11763,125 @@ async function checkVersion(){
     setInterval(()=>{if(!document.hidden)checkVersion();},CHECK_INTERVAL);
   },2000);
 })();
+
+// ─── דופק פר-טאב: מי באמת פתוח עכשיו ─────────────────────────────
+// workerWifi מדווח פר *עובד* ורק כשהטאב גלוי (document.hidden ב-11112), ולכן הוא עיוור
+// בדיוק לטאב המסוכן — זה שנשכח פתוח ברקע ומחזיק משימות בזיכרון (ندوه 00084: 227 שע').
+// כאן: מזהה פר טאב ב-sessionStorage (שורד רענון, לא משותף בין טאבים של אותו דפדפן),
+// דיווח גם כשהטאב מוסתר, וספירת המשימות שהטאב מחזיק — הנתון שמזהה מקור לרפאים.
+const TAB_BEAT_MS=2*60*1000;         // טאב גלוי
+const TAB_BEAT_HIDDEN_MS=10*60*1000; // ברקע — דלילות בכוונה, לחסוך כתיבות
+const TAB_LIVE_MS=6*60*1000;         // עד כאן "חי" בתצוגה
+const TAB_STALE_MS=60*60*1000;       // מעבר לזה — לא מוצג ומועמד לניקוי
+let _tabBeatLast=0;
+const _tabOpenedAt=Date.now();
+function tabId(){
+  let id=sessionStorage.getItem('txops_tab');
+  if(!id){id='t'+Date.now().toString(36)+Math.random().toString(36).slice(2,7);sessionStorage.setItem('txops_tab',id);}
+  return id;
+}
+// דגם המכשיר לא זמין לדפדפן — מספיק תיאור קצר שיאפשר לזהות *איזה* מכשיר במפעל
+function _tabDevice(){
+  const u=navigator.userAgent||'';
+  const os=/Android/i.test(u)?'Android':/iPhone|iPad|iPod/i.test(u)?'iOS':/Windows/i.test(u)?'Windows':/Mac OS/i.test(u)?'Mac':'?';
+  const br=/EdgA?\//.test(u)?'Edge':/Firefox\//.test(u)?'Firefox':/Chrome\//.test(u)?'Chrome':/Safari\//.test(u)?'Safari':'?';
+  const pwa=window.matchMedia&&window.matchMedia('(display-mode: standalone)').matches?' · PWA':'';
+  return os+' · '+br+pwa;
+}
+async function tabBeat(force){
+  if(!db||!S.fbConnected||!S.user)return; // לפני התחברות אין role claim — הכתיבה תיחסם בכללים
+  const hidden=document.hidden;
+  const gap=hidden?TAB_BEAT_HIDDEN_MS:TAB_BEAT_MS;
+  if(!force&&Date.now()-_tabBeatLast<gap-500)return;
+  _tabBeatLast=Date.now();
+  // מה שהטאב הזה מחזיק *בזיכרון שלו*, לא מה שיש בשרת — זה בדיוק מה שטאב רפאים כותב בחזרה
+  const act=S.activeTasks||[];
+  let oldHeld=0;
+  try{oldHeld=act.filter(t=>_isStaleTask(t)).length;}catch(e){}
+  try{
+    await fbSet('tabSessions',tabId(),{
+      tabId:tabId(),
+      workerId:S.user.id||'',workerName:S.user.name||'',role:S.user.role||'',
+      ver:_appVerTag?String(_appVerTag.sz):'',verMt:_appVerTag?(_appVerTag.mt||0):0,
+      verStale:!!_appVerStale,
+      hidden,kiosk:/[?&#]kiosk=1\b/.test(location.href),
+      device:_tabDevice(),
+      held:act.length,oldHeld,
+      openedAt:_tabOpenedAt,lastSeen:srvNow().getTime()
+    });
+  }catch(e){}
+}
+setInterval(()=>{tabBeat(false);},30*1000);
+setTimeout(()=>tabBeat(true),4000);
+document.addEventListener('visibilitychange',()=>{if(!document.hidden)tabBeat(true);});
+// סגירת טאב — ניסיון מחיקה מיידי כדי שהרשימה לא תתמלא ברוחות. best-effort בלבד:
+// הדפדפן לא מחכה לבקשת רשת בסגירה. הסינון לפי lastSeen הוא הרשת הבטוחה.
+window.addEventListener('pagehide',()=>{try{if(db&&S.fbConnected&&S.user)fbDel('tabSessions',tabId());}catch(e){}});
+
+// ─── מסך ניהול: מי פתוח עכשיו, מאיזו גרסה ────────────────────────
+// נקרא מהשרת ולא מ-S — זו בדיוק השאלה "מה קורה במכשירים *אחרים*".
+async function renderTabSessions(){
+  const el=document.getElementById('tab-sessions');if(!el)return;
+  const box=(bg,txt,html)=>`<div style="font-size:12px;padding:8px;border-radius:8px;border:1px solid var(--brd);background:var(--${bg});color:var(--${txt})">${html}</div>`;
+  el.innerHTML=box('bg2','txt3','טוען…');
+  if(!db||!S.fbConnected){el.innerHTML=box('bg2','txt3','אין חיבור לשרת — הרשימה נקראת מהשרת בלבד');return;}
+  try{
+    const{collection,getDocs}=window._fb;
+    const snap=await getDocs(collection(db,'tabSessions'));
+    const now=srvNow().getTime();
+    const all=snap.docs.map(d=>d.data());
+    const rows=all.filter(r=>now-(r.lastSeen||0)<TAB_STALE_MS).sort((a,b)=>(b.lastSeen||0)-(a.lastSeen||0));
+    if(!rows.length){el.innerHTML=box('bg2','txt3','אין טאבים פעילים'+(all.length?` (${all.length} ישנים — לחץ 🧹)`:''));return;}
+    const live=rows.filter(r=>now-(r.lastSeen||0)<TAB_LIVE_MS);
+    const perWorker=new Set(rows.map(r=>r.workerId||r.tabId));
+    // ריבוי טאבים לאותו עובד הוא הדפוס שיוצר רפאים — טאב אחד סוגר, השני עוד מחזיק
+    const dup={};rows.forEach(r=>{if(r.workerId)dup[r.workerId]=(dup[r.workerId]||0)+1;});
+    const dupNames=rows.filter(r=>dup[r.workerId]>1).reduce((m,r)=>{m[r.workerName]=dup[r.workerId];return m;},{});
+    const vers={};rows.forEach(r=>{const v=r.ver||'?';vers[v]=(vers[v]||0)+1;});
+    const verList=Object.entries(vers).sort((a,b)=>b[1]-a[1]);
+    const risk=rows.filter(r=>r.oldHeld>0);
+    const head=box(risk.length?'amber-bg':'green-bg',risk.length?'amber-txt':'green-txt',
+      `📡 <b>${rows.length}</b> טאבים · <b>${live.length}</b> חיים כרגע · <b>${perWorker.size}</b> עובדים`+
+      `<div style="margin-top:4px">גרסאות: ${verList.map(([v,n])=>`<code>${esc(v)}</code> ×${n}`).join(' · ')}`+
+      (verList.length>1?' <span style="color:var(--red-txt);font-weight:700">← לא כולם על אותה גרסה</span>':' ✅ כולם על אותה גרסה')+`</div>`+
+      (Object.keys(dupNames).length?`<div style="margin-top:4px">⚠ יותר מטאב אחד: ${Object.entries(dupNames).map(([n,c])=>esc(n)+' ×'+c).join(' · ')}</div>`:''));
+    const warn=risk.length?box('red-bg','red-txt',
+      `⛔ <b>${risk.length} טאבים מחזיקים משימות שנשכחו פתוחות</b> (מעל ${STALE_TASK_DAYS} ימים). זה המקור למשימות רפאים — סגור אותם:`+
+      `<div style="margin-top:4px">${risk.map(r=>esc(r.workerName||'?')+' — '+r.oldHeld+' משימות · '+esc(r.device||'')).join('<br>')}</div>`):'';
+    el.innerHTML=head+warn+`<div style="max-height:320px;overflow:auto;margin-top:6px">${rows.map(r=>{
+      const ago=Math.round((now-(r.lastSeen||0))/60000);
+      const up=Math.round((now-(r.openedAt||now))/3600000);
+      const isLive=now-(r.lastSeen||0)<TAB_LIVE_MS;
+      const me=r.tabId===tabId();
+      return `<div style="padding:6px 8px;border-bottom:1px solid var(--brd);font-size:12px${r.oldHeld>0?';background:var(--red-bg)':''}">
+        <span style="font-weight:700">${isLive?'🟢':'🟡'} ${esc(r.workerName||'?')}</span>
+        <span style="color:var(--txt3)"> · ${esc(r.role||'')} · ${esc(r.device||'')}${r.kiosk?' · 📺 מסך תצוגה':''}${me?' · <b>הטאב הזה</b>':''}</span>
+        ${r.hidden?'<span class="badge gray" style="font-size:10px">ברקע</span>':''}
+        ${r.verStale?'<span class="badge red" style="font-size:10px">גרסה ישנה</span>':''}
+        <div style="margin-top:2px;color:var(--txt2)">
+          דיווח לפני ${ago===0?'פחות מדקה':ago+" דק'"} · פתוח ${up<1?'פחות משעה':up+" שע'"} ·
+          מחזיק ${r.held||0} משימות${r.oldHeld>0?` <span style="color:var(--red-txt);font-weight:700">(${r.oldHeld} נשכחו!)</span>`:''} ·
+          <code>${esc(r.ver||'?')}</code>
+        </div>
+      </div>`;}).join('')}</div>`;
+  }catch(e){el.innerHTML=box('bg2','red-txt','❌ '+esc(e.message));}
+}
+// ניקוי ידני — טאבים שלא דיווחו מעל שעה. אין ניקוי אוטומטי בכוונה: האוסף זעיר,
+// ומחיקה אוטומטית הייתה מוחקת ראיה בדיוק כשמחפשים טאב רפאים.
+async function cleanTabSessions(){
+  if(!db||!S.fbConnected)return;
+  try{
+    const{collection,getDocs}=window._fb;
+    const snap=await getDocs(collection(db,'tabSessions'));
+    const now=srvNow().getTime();
+    const old=snap.docs.filter(d=>now-((d.data().lastSeen)||0)>TAB_STALE_MS);
+    if(!old.length){showToast('אין רשומות ישנות למחיקה');return;}
+    if(!await showConfirm('ניקוי מכשירים',`למחוק ${old.length} רשומות של טאבים שלא דיווחו מעל שעה?`))return;
+    for(const d of old)await fbDel('tabSessions',d.id);
+    showToast(`נמחקו ${old.length} רשומות`);
+    renderTabSessions();
+  }catch(e){showToast('❌ '+e.message,'var(--red-txt)');}
+}
 </script>
 </body>
 </html>
