@@ -1283,6 +1283,19 @@ code{background:var(--bg2);border:0.5px solid var(--b);border-radius:4px;padding
         </div>
         <div id="so-lock-state" style="font-size:12px;font-weight:700;margin-top:6px"></div>
       </div>
+      <div style="padding:10px;border:1px solid var(--brd);border-radius:8px;margin-bottom:10px">
+        <label style="display:flex;align-items:center;gap:8px;cursor:pointer;font-size:13px;font-weight:600">
+          <input type="checkbox" id="so-strict" style="width:17px;height:17px" onchange="setStepOrderStrict(this.checked)">
+          🔗 חסימה מחמירה: גם שלב שמעולם לא נסרק חוסם
+        </label>
+        <div style="font-size:11px;color:var(--txt3);margin-top:5px;line-height:1.5">
+          בלי זה, שלב 🔗 שלא הסתיים ולו פעם אחת בהזמנה נחשב "שלב שלא סורקים" ואינו חוסם —
+          כך אפשר להתחיל <b>فحص قبل</b> בלי ש-<b>تنظيف</b> בוצע. עם זה, כל שלב 🔗 חייב להסתיים על אותו ברקוד.
+          <b>חל רק על הזמנות שנפתחות מרגע ההדלקה</b> — הזמנה שכבר רצה מסיימת בכללים שלפיהם התחילה,
+          אחרת היא נעצרת מיידית. דורש שאכיפת הסדר למעלה תהיה דלוקה.
+        </div>
+        <div id="so-strict-state" style="font-size:12px;font-weight:700;margin-top:6px"></div>
+      </div>
       <button class="btn" style="font-size:13px;margin-bottom:10px" onclick="auditStepOrder()">🔎 סדר שלבים בהיסטוריה</button>
       <button class="btn" style="font-size:13px;margin-bottom:10px" onclick="renderGateLog()">📝 יומן שערים — חסימות ועקיפות</button>
       <div id="gate-log" style="margin-bottom:10px"></div>
@@ -2199,7 +2212,7 @@ let S={
   activeTasks:[],
   histTasks:[],
   alerts:[],
-  settings:{thresh:60,absent:5,waEnabled:false,waInterval:60,waFrom:'07:00',waTo:'18:00',waLong:true,waAbsent:true,factoryIP:'188.225.231.120',shiftStart:'06:30',shiftEnd:'15:00',roundMinutes:5,endOfDayTime:'15:05',ipBypassMin:0,ipBypassStartMs:0,stationLock:false,stepOrderLock:false},
+  settings:{thresh:60,absent:5,waEnabled:false,waInterval:60,waFrom:'07:00',waTo:'18:00',waLong:true,waAbsent:true,factoryIP:'188.225.231.120',shiftStart:'06:30',shiftEnd:'15:00',roundMinutes:5,endOfDayTime:'15:05',ipBypassMin:0,ipBypassStartMs:0,stationLock:false,stepOrderLock:false,stepOrderStrict:false,stepOrderStrictFrom:0},
   waLastSent:0,
   wifiAlertSent:{},
   tgSentAlerts:{},
@@ -2348,6 +2361,18 @@ async function passStationGate(w,cust,prod,stepNames){
 // אי אפשר לסגור את זה בלי להבחין בין "לא נסרק" ל"עדיין לא נסרק", והבחנה כזו אינה
 // זמינה בזמן אמת. זו הסיבה שהדוח "🔎 סדר שלבים בהיסטוריה" קיים — הוא כן רואה אחורה.
 function stepOrderLockOn(){return !!S.settings?.stepOrderLock;}
+// 🔗 חסימה מחמירה: מבטלת את הקלת "שלב-רפאים". בלעדיה שלב 🔗 שמעולם לא הסתיים בהזמנה
+// אינו חוסם כלום — כך ندوه פתחה فحص قبل ב-07135 בלי ש-تنظيف בוצע (0/216), ואיש לא נחסם.
+// ⚠️ חלה **רק על מופעי-מוצר שנפתחו אחרי ההדלקה** (prodStamp ≥ stepOrderStrictFrom).
+// בלי הגבלת הזמן הזו, הדלקה באמצע הזמנה מקפיאה אותה מיידית: כל שלב 🔗 שלא נסרק עד היום
+// הופך לחוסם רטרואקטיבי על כל הברקודים (ב-07135 נמדד 92%). הזמנה רצה מסיימת בכללים
+// שלפיהם התחילה; הזמנה חדשה נאכפת מהברקוד הראשון — שם ממילא אין היסטוריה לשבור.
+function stepOrderStrictOn(cust,prod){
+  if(!S.settings?.stepOrderStrict)return false;
+  const from=+S.settings.stepOrderStrictFrom||0;
+  if(!from)return true;                       // הודלק בלי חותמת (נתון ישן) — חל על הכל
+  return (prodStampFor(cust,prod)||0)>=from;
+}
 function isMergeStep(s){return !!(s&&typeof s==='object'&&s.merge);}
 // מה כבר הסתיים במופע-המוצר הנוכחי: פר ברקוד+שלב, פר שלב, ודרך ברקוד "כל הכמות".
 // אותו סינון prodStamp כמו stepDoneMap — הזמנה חוזרת לא נשענת על היסטוריה ישנה.
@@ -2388,6 +2413,7 @@ function mergeGate(cust,prod,bc,stepNames,workerId){
   if(!steps.length||!want.length)return{ok:true};
   const sameScan=new Set(want.map(n=>String(n).trim().toLowerCase())); // הקלה 2
   const cov=_mergeCover(cust,prod,workerId); // כולל השלבים שהעובד הזה פתוח עליהם כרגע
+  const strict=stepOrderStrictOn(cust,prod); // מבטלת את הקלה 1 — ראה stepOrderStrictOn
   const blocked=[];
   for(const nm of want){
     const idx=steps.findIndex(x=>stepName(x)===nm);
@@ -2398,7 +2424,7 @@ function mergeGate(cust,prod,bc,stepNames,workerId){
       const q=stepName(steps[i]);if(!q)continue;
       const k=q.trim().toLowerCase();
       if(sameScan.has(k))continue;
-      if(!cov.anyStep.has(k))continue;                            // הקלה 1
+      if(!strict&&!cov.anyStep.has(k))continue;                   // הקלה 1 (מבוטלת במצב מחמיר)
       if(cov.bcStep.has(bc+'|'+k)||cov.totStep.has(k))continue;   // הושלם (הקלה 3)
       miss.push(q);
     }
@@ -2966,6 +2992,8 @@ function listenFb(){
         // כדי שכיבוי חירום מהניהול ישחרר את כל רצפת הייצור מיד ולא מכשיר-מכשיר.
         if(data.stationLock!==undefined)S.settings.stationLock=!!data.stationLock;
         if(data.stepOrderLock!==undefined)S.settings.stepOrderLock=!!data.stepOrderLock;
+        if(data.stepOrderStrict!==undefined)S.settings.stepOrderStrict=!!data.stepOrderStrict;
+        if(data.stepOrderStrictFrom!==undefined)S.settings.stepOrderStrictFrom=+data.stepOrderStrictFrom||0;
         // מצב גיבוי — ipBypassStart הוא Timestamp מהשרת; ממירים למספר לתצוגה בלבד
         S.settings.ipBypassMin=Number(data.ipBypassMin)||0;
         const _bs=data.ipBypassStart;
@@ -7188,11 +7216,58 @@ async function setStepOrderLock(on){
 }
 function renderStepOrderLockState(){
   const cb=document.getElementById('so-lock');if(cb)cb.checked=!!S.settings?.stepOrderLock;
-  const el=document.getElementById('so-lock-state');if(!el)return;
+  const el=document.getElementById('so-lock-state');
   const on=!!S.settings?.stepOrderLock;
   let marked=0;for(const p of (S.products||[]))marked+=(p.workSteps||[]).filter(s=>isMergeStep(s)).length;
-  el.textContent=on?('🔗 האכיפה פעילה · '+marked+' שלבים מסומנים'):('🔓 האכיפה כבויה · '+marked+' שלבים מסומנים 🔗');
-  el.style.color=on?'var(--amber-txt)':'var(--txt3)';
+  if(el){
+    el.textContent=on?('🔗 האכיפה פעילה · '+marked+' שלבים מסומנים'):('🔓 האכיפה כבויה · '+marked+' שלבים מסומנים 🔗');
+    el.style.color=on?'var(--amber-txt)':'var(--txt3)';
+  }
+  renderStepOrderStrictState();
+}
+// מציג בדיוק **על אילו מוצרים** המצב המחמיר כבר חל — בלי זה המנהל לא יכול לדעת
+// למה הזמנה אחת נחסמת והשנייה לא (ההבדל הוא תאריך פתיחת רשומת המוצר).
+function renderStepOrderStrictState(){
+  const cb=document.getElementById('so-strict');if(cb)cb.checked=!!S.settings?.stepOrderStrict;
+  const el=document.getElementById('so-strict-state');if(!el)return;
+  const on=!!S.settings?.stepOrderStrict;
+  if(!on){el.textContent='🔓 מצב מחמיר כבוי — שלב שלא נסרק מעולם אינו חוסם';el.style.color='var(--txt3)';return;}
+  const from=+S.settings?.stepOrderStrictFrom||0;
+  const withMerge=(S.products||[]).filter(p=>(p.workSteps||[]).some(isMergeStep));
+  const covered=withMerge.filter(p=>(+p.createdAt||0)>=from);
+  const dt=from?new Date(from).toLocaleDateString('he-IL'):'תמיד';
+  el.textContent='🔗 מחמיר פעיל מ-'+dt+' · חל על '+covered.length+' מתוך '+withMerge.length+
+    ' מוצרים עם שלבי 🔗'+(withMerge.length-covered.length?' ('+(withMerge.length-covered.length)+' הזמנות ותיקות ממשיכות בכללים הישנים)':'');
+  el.style.color='var(--amber-txt)';
+}
+async function setStepOrderStrict(on){
+  const el=document.getElementById('so-strict');
+  if(on&&!S.settings?.stepOrderLock){
+    showToast('⚠ קודם הדלק את אכיפת סדר השלבים למעלה','var(--red-txt)',5000);
+    if(el)el.checked=false;return;
+  }
+  if(on){
+    const msg='מכאן והלאה, שלב 🔗 ייחסם גם אם השלב שלפניו **מעולם לא נסרק** באף ברקוד.\n\n'+
+      '• חל רק על הזמנות שנפתחות מעכשיו — הזמנות שכבר רצות לא ייעצרו.\n'+
+      '• ודא ששלבי ה-🔗 שמוגדרים במוצר באמת נסרקים בפועל. שלב שמוגדר ולא נסרק יחסום את כל מה שאחריו.';
+    if(!await showConfirm('הדלקת חסימה מחמירה',esc(msg),'הדלק','ביטול')){if(el)el.checked=false;return;}
+  }
+  const prevOn=!!S.settings.stepOrderStrict,prevFrom=+S.settings.stepOrderStrictFrom||0;
+  S.settings.stepOrderStrict=!!on;
+  // החותמת נקבעת **בהדלקה בלבד** ולא מתאפסת בכיבוי — כיבוי והדלקה חוזרת לא אמורים
+  // לגרור לתוך האכיפה הזמנות שכבר רצו כשהמצב היה כבוי.
+  if(on&&!prevFrom)S.settings.stepOrderStrictFrom=srvNow().getTime();
+  try{
+    if(S.fbConnected)await fbSet('appSettings','telegramSettings',
+      {stepOrderStrict:!!on,stepOrderStrictFrom:+S.settings.stepOrderStrictFrom||0});
+    saveLS();renderStepOrderStrictState();
+    showToast(on?'🔗 חסימה מחמירה הופעלה — להזמנות חדשות':'🔓 חסימה מחמירה כובתה',
+      on?'var(--amber-txt)':'var(--green-txt)',5000);
+  }catch(e){
+    S.settings.stepOrderStrict=prevOn;S.settings.stepOrderStrictFrom=prevFrom;
+    if(el)el.checked=prevOn;
+    showToast('❌ '+e.message,'var(--red-txt)');
+  }
 }
 // ─── ביקורת יבשה: מה **היה** נחסם ─────────────────────────────────
 // מריצה את mergeGate על ההיסטוריה כאילו האכיפה דלוקה, בלי לחסום כלום.
@@ -7205,7 +7280,7 @@ function auditStepOrder(){
     if(!t.cust||!t.prod||!t.bc)continue;
     (byProd[t.cust+'|'+t.prod]=byProd[t.cust+'|'+t.prod]||[]).push(t);
   }
-  const rows=[];let tot=0,hit=0;
+  const rows=[];let tot=0,hit=0,hitStrict=0;
   for(const key of Object.keys(byProd)){
     const i=key.indexOf('|'),cust=key.slice(0,i),prod=key.slice(i+1);
     const steps=findProd(cust,prod)?.workSteps||[];
@@ -7220,16 +7295,18 @@ function auditStepOrder(){
       const idx=steps.findIndex(x=>stepName(x)===nm);
       if(idx>0&&isMergeStep(steps[idx])){
         tot++;
-        const miss=[];
+        const miss=[],missStrict=[];
         for(let j=0;j<idx;j++){
           if(!isMergeStep(steps[j]))continue;
           const q=stepName(steps[j]);if(!q)continue;
           const qk=q.trim().toLowerCase();
           if(qk===k)continue; // אותה סריקה בפועל לא ניתנת לשחזור מההיסטוריה — לפחות לא מול עצמו
-          if(!anyStep.has(qk))continue;
           if(bcStep.has(taskBc(t)+'|'+qk)||totStep.has(qk))continue;
+          missStrict.push(q);              // מחמיר: גם שלב שמעולם לא נסרק נחשב חסר
+          if(!anyStep.has(qk))continue;    // הקלה 1 — במצב הרגיל שלב-רפאים אינו חוסם
           miss.push(q);
         }
+        if(missStrict.length)hitStrict++;
         if(miss.length){hit++;rows.push({cust,prod,bc:taskBc(t),step:nm,worker:t.workerName||'',
           when:new Date(t.startTime),need:miss});}
       }
@@ -7243,6 +7320,10 @@ function auditStepOrder(){
   el.innerHTML=`<div style="font-size:12px;padding:8px;border-radius:8px;border:1px solid var(--brd);background:${good?'var(--green-bg)':'var(--amber-bg)'};color:${good?'var(--green-txt)':'var(--amber-txt)'}">
       ${good?'✅':'⚠'} ${hit} מתוך ${tot} התחלות של שלבי 🔗 בהיסטוריה היו נחסמות (${pct}%).
       ${good?'הסימון בטוח להדלקה.':'ככל שהאחוז גבוה — כך יותר עבודה אמיתית תיתקע. שקול להוריד סימוני 🔗.'}
+      <div style="margin-top:5px;padding-top:5px;border-top:1px solid var(--brd)">
+        🔗 <b>במצב מחמיר</b> (גם שלב שלא נסרק מעולם חוסם): <b>${hitStrict}</b> מתוך ${tot} (${(hitStrict/tot*100).toFixed(0)}%).
+        ${hitStrict>hit?'ההפרש (' +(hitStrict-hit)+ ') הוא שלבים שמוגדרים 🔗 אך לא נסרקים בפועל — במצב מחמיר הם יחסמו את כל מה שאחריהם.':'אין שלבי 🔗 שלא נסרקים — המצב המחמיר לא יוסיף חסימות.'}
+      </div>
     </div>
     ${rows.length?`<div style="max-height:260px;overflow:auto;margin-top:6px">${rows.slice(0,120).map(r=>`
       <div style="padding:6px 8px;border-bottom:1px solid var(--brd);font-size:12px">
