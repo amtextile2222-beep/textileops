@@ -2351,7 +2351,17 @@ function stepOrderLockOn(){return !!S.settings?.stepOrderLock;}
 function isMergeStep(s){return !!(s&&typeof s==='object'&&s.merge);}
 // מה כבר הסתיים במופע-המוצר הנוכחי: פר ברקוד+שלב, פר שלב, ודרך ברקוד "כל הכמות".
 // אותו סינון prodStamp כמו stepDoneMap — הזמנה חוזרת לא נשענת על היסטוריה ישנה.
-function _mergeCover(cust,prod){
+//
+// ⚠️ ההיסטוריה לבדה לא מבחינה בין **"דילגת על השלב"** לבין **"אתה באמצע השלב הזה ממש
+// עכשיו"** — בשני המצבים אין רשומה ב-histTasks. זה תקע את ميرفت 09/08: היא עברה מ-محطة
+// الكي ל-محطة تغليف בעוד كوي פתוחה על אותו ברקוד, ומהסורק שלה לא הייתה שום יציאה.
+// לכן משימה **פעילה של אותו עובד** על אותו ברקוד+שלב נחשבת כיסוי (workerId).
+// האכיפה לא נחלשת: ברקוד שהשלב הקודם בו לא נגע כלל עדיין נחסם, ועובד *אחר* שקופץ קדימה
+// עדיין נחסם — הסריקה שלו לא סוגרת את המשימה הפתוחה של חברתו.
+// מושהית נספרת גם היא: היא "באמצע", ובלעדיה עובדת שיצאה להפסקה נתקעת באותה מלכודת.
+// ⚠️ נכנס ל-bcStep/totStep בלבד ו**לא** ל-anyStep — anyStep מזין את ההקלה "המעבר הראשון
+// בכל נקודת ביקורת חופשי", ומשימה שרק *נפתחה* לא אמורה להפעיל חסימה שטרם הייתה קיימת.
+function _mergeCover(cust,prod,workerId){
   const stamp=prodStampFor(cust,prod);
   const bcStep=new Set(),anyStep=new Set(),totStep=new Set();
   for(const t of (S.histTasks||[])){
@@ -2361,16 +2371,23 @@ function _mergeCover(cust,prod){
     anyStep.add(st);bcStep.add(taskBc(t)+'|'+st);
     if(t.isTotal)totStep.add(st);
   }
+  if(workerId!=null)for(const t of (S.activeTasks||[])){
+    if(String(t.workerId)!==String(workerId)||t.cust!==cust||t.prod!==prod)continue;
+    if(t.prodStamp!=null&&stamp&&t.prodStamp!==stamp)continue;
+    const st=String(t.taskType||'').trim().toLowerCase();if(!st)continue;
+    bcStep.add(taskBc(t)+'|'+st);
+    if(t.isTotal)totStep.add(st);
+  }
   return{bcStep,anyStep,totStep};
 }
-function mergeGate(cust,prod,bc,stepNames){
+function mergeGate(cust,prod,bc,stepNames,workerId){
   const T=LANGS[currentLang];
   if(!stepOrderLockOn())return{ok:true}; // 🔌 מתג כיבוי מהניהול — ברירת מחדל כבוי
   const steps=findProd(cust,prod)?.workSteps||[];
   const want=(stepNames||[]).filter(Boolean);
   if(!steps.length||!want.length)return{ok:true};
   const sameScan=new Set(want.map(n=>String(n).trim().toLowerCase())); // הקלה 2
-  const cov=_mergeCover(cust,prod);
+  const cov=_mergeCover(cust,prod,workerId); // כולל השלבים שהעובד הזה פתוח עליהם כרגע
   const blocked=[];
   for(const nm of want){
     const idx=steps.findIndex(x=>stepName(x)===nm);
@@ -2393,8 +2410,10 @@ function mergeGate(cust,prod,bc,stepNames){
     blocked.map(b=>b.step+' → '+b.need.join(', ')).join(' · ')};
 }
 // אותה מדיניות כמו שער התחנה — כולל הדריסה הפר-עובדת והרישום ביומן.
-async function passMergeGate(cust,prod,bc,stepNames){
-  const g=mergeGate(cust,prod,bc,stepNames);
+// workerId = העובד שהמשימה נפתחת **עבורו** (לא בהכרח מי שמפעיל את הסורק) — הוא זה שמשימותיו
+// הפתוחות נחשבות כיסוי, כי הסריקה הזו היא שתסגור אותן.
+async function passMergeGate(cust,prod,bc,stepNames,workerId){
+  const g=mergeGate(cust,prod,bc,stepNames,workerId);
   if(g.ok)return true;
   const T=LANGS[currentLang];
   const info={cust,prod,bc,steps:stepNames,blocked:g.blocked};
@@ -4519,7 +4538,7 @@ async function bcStartBatch(){
   for(const b of items){(_bcOrd[b.raw]=_bcOrd[b.raw]||{cust:b.cust,prod:b.prod,steps:[]}).steps.push(b.taskType||'');}
   for(const raw of Object.keys(_bcOrd)){
     const o=_bcOrd[raw];
-    if(!await passMergeGate(o.cust,o.prod,raw,o.steps))return;
+    if(!await passMergeGate(o.cust,o.prod,raw,o.steps,u.id))return;
   }
   try{
     const bcBatchId=items.length>1?genBatchId():null; // כמה משימות יחד = קבוצה אחת (טיימר משותף + מסגרת אחת)
@@ -5080,7 +5099,7 @@ async function submitBc(){
   // ע"י העובד עצמו ולכן זו חסימה מוחלטת (העקיפה שמורה למנהל/אחראי בסורקי המשימות).
   if(!await passStationGate(wu,cust,prod,bcUseSteps?bcCheckedSteps:[]))return;
   // 🔗 שער סדר השלבים — כל השלבים שסומנו בסריקה הזו נחשבים "אותה סריקה"
-  if(!await passMergeGate(cust,prod,raw,bcUseSteps?bcCheckedSteps:[taskType]))return;
+  if(!await passMergeGate(cust,prod,raw,bcUseSteps?bcCheckedSteps:[taskType],u.id))return;
   // ברקוד שכבר בעבודה אצל עובד אחר באותו שלב — אישור הצטרפות
   const otherSame=S.activeTasks.find(t=>t.workerId!==u.id&&taskBc(t)===raw&&(t.taskType||'').trim().toLowerCase()===taskType.toLowerCase());
   if(otherSame&&!await showConfirm(T.cfm_join_title||'הצטרפות למשימה',T.cfm_join_msg+otherSame.workerName+(otherSame.taskType?' ('+otherSame.taskType+')':'')+T.cfm_join_msg2,T.cfm_join_ok||'הצטרף',T.cancel||'ביטול'))return;
@@ -7617,7 +7636,7 @@ async function tsStartTask(){
     // 🔒 שער התחנה (w = העובד שהמשימה נפתחת עבורו; העקיפה נקבעת לפי מי שמפעיל את הסורק)
     if(!await passStationGate(w,cust,prod,useSteps?checkedSteps:[]))return;
     // 🔗 שער סדר השלבים — נבדק על הברקוד שנסרק, לפני ההוספה לסל
-    if(!await passMergeGate(cust,prod,raw,useSteps?checkedSteps:[(document.getElementById('ts-tasktype').value||'').trim()]))return;
+    if(!await passMergeGate(cust,prod,raw,useSteps?checkedSteps:[(document.getElementById('ts-tasktype').value||'').trim()],w.id))return;
     const taskType=useSteps?'':((document.getElementById('ts-tasktype').value||'').trim());
     const taskDept=(document.getElementById('ts-dept').value||'').trim();
     const types=useSteps?checkedSteps:[taskType||''];
@@ -7943,7 +7962,7 @@ async function mgrStartTask(){
     // 🔒 שער התחנה (w = העובד שהמשימה נפתחת עבורו; העקיפה נקבעת לפי מי שמפעיל את הסורק)
     if(!await passStationGate(w,cust,prod,mgrUseSteps?mgrCheckedSteps:[]))return;
     // 🔗 שער סדר השלבים — נבדק על הברקוד שנסרק, לפני ההוספה לסל
-    if(!await passMergeGate(cust,prod,raw,mgrUseSteps?mgrCheckedSteps:[(document.getElementById('mgr-tasktype').value||'').trim()]))return;
+    if(!await passMergeGate(cust,prod,raw,mgrUseSteps?mgrCheckedSteps:[(document.getElementById('mgr-tasktype').value||'').trim()],w.id))return;
     const taskType=mgrUseSteps?'':((document.getElementById('mgr-tasktype').value||'').trim());
     const taskDept=(document.getElementById('mgr-dept').value||'').trim();
     const types=mgrUseSteps?mgrCheckedSteps:[taskType||''];
