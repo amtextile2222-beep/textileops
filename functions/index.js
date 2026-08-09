@@ -391,13 +391,25 @@ exports.calcTaskExpected = functions.https.onCall(async (data, context) => {
   // רק שלבים אוטומטיים (קושי בלי override ידני) מתחלקים את התקציב לפי משקל
   const totW = usable.filter(s => +s.level > 0 && !(+s.manualMin > 0)).reduce((s, x) => s + (+weights[+x.level] || 1), 0);
   if (!usable.length) return { ok: false, reason: 'no-levels' };
+  // ⚠️ כשכל השלבים המתומחרים ידניים, הדקות שהוזנו הן **משקל יחסי ולא תקן מוחלט**:
+  // כל שלב מקבל `תקציב × (דקותיו ÷ סה"כ הדקות)`, והכסף מומר חזרה לדקות לפי עלות השעה
+  // של **העובד הספציפי** — ולכן עובד יקר מקבל פחות זמן וזול מקבל יותר, בדיוק כמו במסלול
+  // האוטומטי. חייב להישאר תואם ל-splitStepBudget בלקוח; שינוי כאן בלי שינוי שם = דוח
+  // היעילות ישווה "בפועל" מול מוקצב שהעובדת מעולם לא ראתה.
+  // ערבוב ידני+אוטומטי נשאר בהתנהגות הישנה (דקות×כמות) — אין כלל מובן מאליו לשילוב.
+  const allManual = totW === 0;
+  const totManualMin = usable.reduce((s, x) => s + (+x.manualMin > 0 ? +x.manualMin : 0), 0);
   const perStep = {};
   let total = 0;
   for (const name of stepNames) {
     const st = usable.find(s => s.name === name);
     if (!st) continue;
     let min;
-    if (+st.manualMin > 0) { min = +st.manualMin * qty; } // דקות ידניות דורסות — צפי = דקות×כמות
+    if (+st.manualMin > 0) {
+      min = (allManual && totManualMin > 0 && budget > 0)
+        ? budget * (+st.manualMin / totManualMin) * qty / hourCost * 60
+        : +st.manualMin * qty;
+    }
     else if (totW > 0) { min = budget * (+weights[+st.level] || 1) / totW * qty / hourCost * 60; }
     else continue;
     perStep[name] = Math.round(min * 10) / 10;

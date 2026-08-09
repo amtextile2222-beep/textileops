@@ -6098,26 +6098,51 @@ function _pricingCtx(){
   const avgAll=rated.length?rated.reduce((s,w)=>s+loadedHourlyRate(w.id),0)/rated.length:0;
   return{oh,avgAll,weights:S.costs.difficultyWeights||{1:1,2:1.5,3:2,4:2.5,5:3.5}};
 }
+// ⚠️ שתי שיטות לחלק את תקציב היחידה בין השלבים. איזו פועלת נקבע לפי סוג התמחור:
+//
+// • **כל השלבים ידניים** → כל שלב מקבל את **חלקו היחסי בזמן**: `תקציב × (דקות השלב ÷ סה"כ דקות)`.
+//   הדקות שהוזנו הן משקל יחסי, לא תקן מוחלט; הכסף שנגזר מהן מומר חזרה לדקות **לפי תעריף
+//   העובד**, ולכן הצפי תלוי בשכר בדיוק כמו במסלול האוטומטי. הסכום מתכנס בדיוק לתקציב.
+//   (14717: `قص` 0.2 מתוך 17.4 = 1.15% ⇒ ₪5.44×1.15% = ₪0.0625)
+//   ⚠️ המשמעות: `Σ ils` שווה תמיד ל-`budgetUnit`, ולכן "רווח בפועל" המחושב ממנו יוצא תמיד
+//   שווה ליעד. מי שרוצה את בדיקת השפיות "האם הזמנים מחזיקים את המחיר" חייב לחשב אותה
+//   בנפרד מ-`Σ דקות×תעריף` — ראה `manualCheckCost` בפאנל התמחור.
+//
+// • **יש לפחות שלב אוטומטי אחד** → ההתנהגות הישנה: ידני = דקות×תעריף, ועלותו יורדת מהתקציב
+//   לפני שהשאר מתחלק לאוטומטיים לפי משקל קושי. במפעל 339 שלבים ידניים מול 2 אוטומטיים,
+//   ולכן זה נתיב נדיר שנשאר כמו שהיה **בכוונה** — אין כלל מובן מאליו לערבוב השניים.
+//
+// mins/levels/rates מקבילים באינדקס. משותף ל-_prodBudget, לפאנל התמחור ולדוח היעילות.
+function splitStepBudget(mins,levels,rates,budgetUnit,weights){
+  const allManual=mins.length>0&&mins.every(m=>m>0);
+  const totMin=mins.reduce((s,m)=>s+(m>0?m:0),0);
+  if(allManual&&totMin>0&&budgetUnit>0){
+    return mins.map((m,i)=>{const ils=budgetUnit*(m/totMin);return{ils,min:rates[i]>0?ils/rates[i]*60:0,typed:m,prop:m/totMin};});
+  }
+  const totW=levels.reduce((s,l,i)=>s+((l&&!(mins[i]>0))?(+weights[l]||1):0),0);
+  const manualCost=mins.reduce((t,m,i)=>m>0?t+m/60*rates[i]:t,0);
+  const autoBudget=Math.max(budgetUnit-manualCost,0);
+  return mins.map((m,i)=>{
+    if(m>0)return{ils:m/60*rates[i],min:m,typed:m,prop:0};
+    const ils=totW>0?autoBudget*(+weights[levels[i]]||1)/totW:0;
+    return{ils,min:rates[i]>0?ils/rates[i]*60:0,typed:0,prop:0};
+  });
+}
 function _prodBudget(p,ctx){
   const price=+p.unitPrice||0;if(!price)return null;
   const lvl=(p.workSteps||[]).filter(s=>stepLevel(s)||stepManualMin(s)>0);if(!lvl.length)return null;
   const budgetUnit=price*(1-(+p.targetProfitPct||0)/100)-(+p.directMaterialsCost||0);
   // רק שלבים אוטומטיים (קושי בלי override ידני) מתחלקים את התקציב לפי משקל
   const totW=lvl.filter(s=>stepLevel(s)&&!(stepManualMin(s)>0)).reduce((s,x)=>s+(+ctx.weights[stepLevel(x)]||1),0);
-  // תקצוב פר-שלב ליחידה (₪ ודקות) — אותו מנוע כמו פאנל התמחור במוצר:
-  // שלב ידני = דקות×תעריף השלב; עלות הידניים יורדת מהתקציב לפני החלוקה לאוטומטיים
   const rates=lvl.map(s=>_pricingStepRate(stepStation(s),stepLevel(s),ctx.avgAll)+ctx.oh);
+  const mins=lvl.map(s=>stepManualMin(s));
+  const allManual=mins.length>0&&mins.every(m=>m>0);
   const manualCost=lvl.reduce((t,s,i)=>stepManualMin(s)>0?t+stepManualMin(s)/60*rates[i]:t,0);
   const autoBudget=Math.max(budgetUnit-manualCost,0);
-  const stepBud=lvl.map((s,i)=>{
-    const mm=stepManualMin(s);
-    if(mm>0)return{ils:mm/60*rates[i],min:mm};
-    const ils=totW>0?autoBudget*(+ctx.weights[stepLevel(s)]||1)/totW:0;
-    return{ils,min:rates[i]>0?ils/rates[i]*60:0};
-  });
+  const stepBud=splitStepBudget(mins,lvl.map(s=>stepLevel(s)),rates,budgetUnit,ctx.weights);
   const budMinUnit=stepBud.reduce((t,b)=>t+b.min,0);
   const budCostUnit=(+p.directMaterialsCost||0)+stepBud.reduce((t,b)=>t+b.ils,0);
-  return{price,budgetUnit,autoBudget,totW,lvl,stepBud,budMinUnit,budCostUnit,materials:+p.directMaterialsCost||0,targetPct:+p.targetProfitPct||0};
+  return{price,budgetUnit,autoBudget,totW,allManual,lvl,rates,stepBud,budMinUnit,budCostUnit,materials:+p.directMaterialsCost||0,targetPct:+p.targetProfitPct||0};
 }
 function buildBudgetReport(fl){
   const card=document.getElementById('rp-budget-card'),el=document.getElementById('rp-budget-body');
@@ -6133,16 +6158,21 @@ function buildBudgetReport(fl){
     if(!t.done||!(t.duration>0))continue;
     const p=findProd(t.cust,t.prod);if(!p)continue;
     const pb=_prodBudget(p,ctx);if(!pb||pb.budgetUnit<=0)continue;
-    const st=pb.lvl.find(s=>stepName(s)===t.taskType);if(!st)continue;
+    const si=pb.lvl.findIndex(s=>stepName(s)===t.taskType);if(si<0)continue;
+    const st=pb.lvl[si];
     // מוקצב: עדיף חישוב מהתמחור הנוכחי (מתעדכן רטרואקטיבית אם נוספו/הוסרו שלבים למוצר
     // אחרי שהמשימה נפתחה — אחרת שלב שהיה לבד בזמן הפתיחה "בולע" את כל התקציב).
     // ליפול לצפי השמור במשימה רק אם אין תעריף שעה זמין לחישוב.
     let alloc=0;
     const mm=stepManualMin(st);
     const units=taskUnits(t); // "כמות פתוחה" = כל ההזמנה, אחרת alloc=0 והמשימה נזרקת בשקט
-    if(mm>0){alloc=mm*units;} // דקות ידניות — צפי = דקות×כמות
+    // ⚠️ התעריף הוא של **העובד שביצע**, לא הממוצע שב-stepBud — הצפי במשימה נקבע כך
+    // ב-calcTaskExpected, וחישוב אחר כאן היה מייצר "חריגה" מול מספר שהעובדת מעולם לא ראתה.
+    const rate=(loadedHourlyRate(t.workerId)||ctx.avgAll)+ctx.oh;
+    if(pb.allManual){ // חלוקה יחסית לפי זמן — ראה splitStepBudget
+      alloc=rate>0?pb.stepBud[si].ils*units/rate*60:0;
+    }else if(mm>0){alloc=mm*units;} // ערבוב ידני+אוטומטי — התנהגות ישנה: דקות×כמות
     else{
-      const rate=(loadedHourlyRate(t.workerId)||ctx.avgAll)+ctx.oh;
       alloc=rate>0&&pb.totW>0?(pb.autoBudget*(+ctx.weights[stepLevel(st)]||1)/pb.totW*units)/rate*60:0;
     }
     if(!(alloc>0))alloc=+t.expectedMin;
@@ -10882,20 +10912,21 @@ function renderProductPricing(){
       <div style="font-size:11px;color:var(--amber-txt);margin-top:4px">⚠ אין נתוני עלות שעה — הזן שכר לעובדים בלשונית עלויות</div></div>`;
     return;
   }
-  // עלות השלבים הידניים יורדת מהתקציב לפני שהוא מתחלק לשלבים האוטומטיים
-  const manualCost=shownSteps.reduce((t,s)=>s.manualMin>0?t+s.manualMin/60*(_pricingStepRate(s.station,s.level,avgAll)+oh):t,0);
-  const autoBudget=Math.max(budget-manualCost,0);
-  let totalMin=0,totalCost=0,tooShortCnt=0;
-  const rows=shownSteps.map(s=>{
-    const rate=_pricingStepRate(s.station,s.level,avgAll)+oh;
-    let min,share,manual=s.manualMin>0;
-    if(manual){ // דקות ידניות דורסות את החישוב
-      min=s.manualMin;
-      share=min/60*rate;
-    }else{
-      share=totW?autoBudget*(+weights[s.level]||1)/totW:0;
-      min=rate>0?share/rate*60:0;
-    }
+  const rates=shownSteps.map(s=>_pricingStepRate(s.station,s.level,avgAll)+oh);
+  const mins=shownSteps.map(s=>+s.manualMin>0?+s.manualMin:0);
+  const bud=splitStepBudget(mins,shownSteps.map(s=>s.level),rates,budget,weights);
+  const allManual=mins.length>0&&mins.every(m=>m>0);
+  // ⚠️ בדיקת השפיות "האם הזמנים שהוזנו מחזיקים את המחיר" מחושבת **בנפרד** מ-Σ דקות×תעריף.
+  // בחלוקה היחסית סכום ה-₪ שווה תמיד לתקציב, ולכן "רווח בפועל" שנגזר ממנו היה יוצא תמיד
+  // שווה ליעד — והאינדיקטור שמראה שהתמחור מחזיק מרווח היה מת בשקט.
+  const manualCheckCost=mins.reduce((t,m,i)=>m>0?t+m/60*rates[i]:t,0);
+  let totalMin=0,totalCost=0,tooShortCnt=0,derivedMin=0;
+  const rows=shownSteps.map((s,i)=>{
+    const rate=rates[i];
+    const manual=s.manualMin>0;
+    const share=bud[i].ils;
+    const min=manual?s.manualMin:bud[i].min; // בשורה מוצגות הדקות שהוזנו, לא הנגזרות
+    derivedMin+=bud[i].min;
     totalMin+=min;totalCost+=share;
     const tooShort=!manual&&min*60<s.level*30; // היוריסטיקה: פחות מ-30 שנ' לרמת קושי = לא ריאלי
     if(tooShort)tooShortCnt++;
@@ -10907,15 +10938,25 @@ function renderProductPricing(){
     </div>`;
   }).join('');
   const shortWarn=tooShortCnt?`<div style="font-size:12px;color:var(--red-txt);font-weight:600;margin-top:6px;background:var(--red-bg,#fee2e2);padding:6px 10px;border-radius:8px">⚠ ${tooShortCnt} שלבים עם זמן לא ריאלי — המחיר כנראה לא מחזיק את יעד הרווח</div>`:'';
-  // רווח בפועל — רלוונטי רק כשיש דקות ידניות (אחרת העלות שווה לתקציב והרווח = היעד)
-  const actProfit=price-materials-totalCost;
+  // רווח בפועל — נגזר מ-manualCheckCost (דקות×תעריף) ולא מ-totalCost, שבחלוקה היחסית
+  // שווה תמיד לתקציב. זה האינדיקטור היחיד שאומר אם המחיר מחזיק את הזמנים שהוזנו.
+  const checkCost=allManual?manualCheckCost:totalCost;
+  const actProfit=price-materials-checkCost;
   const actPct=price>0?actProfit/price*100:0;
   const below=actPct<profitPct-0.05;
-  const actualLine=shownSteps.some(s=>s.manualMin>0)?`<div style="font-size:12px;font-weight:700;margin-top:2px;color:${below?'var(--red-txt)':'var(--green-txt)'}">💰 רווח בפועל לפי הזמנים שהוזנו: ${actPct.toFixed(1)}% (₪${actProfit.toFixed(2)})${below?' — מתחת ליעד':''}</div>`:'';
+  const actualLine=mins.some(m=>m>0)?`<div style="font-size:12px;font-weight:700;margin-top:2px;color:${below?'var(--red-txt)':'var(--green-txt)'}">💰 רווח בפועל לפי הזמנים שהוזנו: ${actPct.toFixed(1)}% (₪${actProfit.toFixed(2)})${below?' — מתחת ליעד':''}</div>`:'';
+  // התעריף שמוצג חייב להיות זה שבו הקוד באמת מחלק (ממוצע העובדים הכשירים + תקורה) —
+  // הצגת התקורה לבדה יצרה מספר קטן פי שש ממה שהחישוב עושה בפועל.
+  const avgRate=rates.length?rates.reduce((a,b)=>a+b,0)/rates.length:0;
+  const headLine=allManual
+    ? `חלוקת התקציב לפי חלקו היחסי של כל שלב בזמן · ממוצע עלות שעה עמוסה+תקורה ₪${avgRate.toFixed(2)} (מתוכה תקורה ₪${oh.toFixed(2)}):`
+    : `תקצוב זמן לשלב (לפי משקל קושי ÷ עלות שעה עמוסה+תקורה ₪${avgRate.toFixed(2)}, מתוכה תקורה ₪${oh.toFixed(2)}):`;
+  const derivedLine=allManual?`<div style="font-size:12px;color:var(--txt3);margin-top:2px">🧮 צפי מחושב לעובד בעלות שעה ממוצעת: ${derivedMin.toFixed(1)} דק' — עובד יקר יותר יקבל פחות, זול יותר יקבל יותר</div>`:'';
   box.innerHTML=`<div style="background:var(--bg2);border-radius:8px;padding:8px 10px">${head}
-    <div style="font-size:11px;color:var(--txt3);margin:4px 0 2px">תקצוב זמן לשלב (לפי משקל קושי ÷ עלות שעה עמוסה+תקורה ₪${oh.toFixed(2)}):</div>
+    <div style="font-size:11px;color:var(--txt3);margin:4px 0 2px">${headLine}</div>
     ${rows}
-    <div style="font-size:13px;font-weight:700;color:var(--green-txt);margin-top:6px">⏱ סה"כ זמן עבודה מתוקצב ליחידה: ${totalMin.toFixed(1)} דק'</div>
+    <div style="font-size:13px;font-weight:700;color:var(--green-txt);margin-top:6px">⏱ סה"כ ${allManual?'זמן שהוזן':'זמן עבודה מתוקצב'} ליחידה: ${totalMin.toFixed(1)} דק'</div>
+    ${derivedLine}
     ${actualLine}
     ${shortWarn}</div>`;
 }
