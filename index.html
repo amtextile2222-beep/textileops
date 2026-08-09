@@ -2184,14 +2184,24 @@ function sumUnitsDedup(tasks){
 // היו נספרות 675 מתוך הזמנה של 225.
 const stepDoneKey=(cust,prod,stepNm)=>cust+'|'+prod+'|'+String(stepNm||'').trim();
 const coverKey=t=>taskBc(t)+'|'+String(t.taskType||'').trim().toLowerCase()+(t.splitId?'|'+t.splitId:'');
-// ⚠️ ברקוד "כל הכמות" שנסרק **לפני** שהוזנו הכמויות לפי מידה נשמר עם qty=0 — זו ה"כמות
-// הפתוחה" — ולכן תרם 0 לדוח למרות שהשלב בוצע על ההזמנה כולה. זה לא מקרה קצה: **כל 10
-// רשומות `عد فتح شغل` במפעל, ב-10 מוצרים שונים, הן isTotal + qty=0**, וכך גם `فرد قماش`
-// ו-`قص` ב-14717. השלבים האלה הוצגו 0/N לנצח ונראו כאילו לא בוצעו.
-// הכמות נלקחת מהמוצר **בזמן הצגת הדוח** ולא בזמן הסריקה, כי בזמן הסריקה היא לא הייתה ידועה.
-// כפילות מול סריקת מידה לאותו שלב חסומה בקלט (3e162b6), ולכן אין כאן ספירה כפולה.
+// ⚠️ הכמות האפקטיבית של משימה. ברקוד "כל הכמות" שנסרק **לפני** שהוזנו הכמויות לפי מידה
+// נשמר עם qty=0 — זו ה"כמות הפתוחה" — אבל העבודה בוצעה על ההזמנה כולה. נמדד: 24 משימות,
+// 44 שעות עבודה, ובהן **כל 10 רשומות `عد فتح شغل` במפעל** וכל משפחת הפרישה/חיתוך.
+//
+// זו נקודה משותפת אחת לכל חישוב שנשען על כמות **בדיעבד**, כי כל דוח נשבר אחרת בלעדיה:
+//   • "כמות שהושלמה לפי שלב" — הציג 0/N לנצח, כאילו השלב לא בוצע
+//   • "מוקצב מול בפועל"      — alloc=0 ⇒ המשימה נזרקה מהדוח בשקט
+//   • דוח רווח               — units=0 ⇒ עלות היחידה נלקחה מהתקציב במקום מהמציאות
+// הכמות נקראת מהמוצר בזמן ההצגה ולא בזמן הסריקה, כי בזמן הסריקה היא לא הייתה ידועה —
+// וזו בדיוק הסיבה שנשמר 0. חיפוש המוצר קורה רק בנתיב הנדיר (isTotal + qty=0), 24 מתוך 4,007.
+// כפילות מול סריקת מידה לאותו שלב חסומה כבר בקלט (3e162b6), ולכן אין סיכון לספירה כפולה.
+function taskUnits(t){
+  const q=+t?.qty||0;
+  if(q>0)return q;
+  return t&&t.isTotal?(getTotalQty(t.cust,t.prod)||0):0;
+}
 function stepDoneMap(tasks){
-  const seen=new Set(),map={},stampCache={},totCache={};
+  const seen=new Set(),map={},stampCache={};
   for(const t of tasks){
     if(!(t.duration>0))continue;
     // הזמנה חוזרת = רשומת מוצר חדשה עם אותו לקוח+מוצר (אותו ברקוד). סופרים רק את ההזמנה
@@ -2202,9 +2212,7 @@ function stepDoneMap(tasks){
     if(t.prodStamp!=null&&stamp&&t.prodStamp!==stamp)continue;
     const k=coverKey(t);if(seen.has(k))continue;seen.add(k);
     const mk=stepDoneKey(t.cust,t.prod,t.taskType);
-    let q=t.qty||0;
-    if(!q&&t.isTotal)q=(ck in totCache)?totCache[ck]:(totCache[ck]=getTotalQty(t.cust,t.prod));
-    map[mk]=(map[mk]||0)+q;
+    map[mk]=(map[mk]||0)+taskUnits(t);
   }
   return map;
 }
@@ -6131,17 +6139,18 @@ function buildBudgetReport(fl){
     // ליפול לצפי השמור במשימה רק אם אין תעריף שעה זמין לחישוב.
     let alloc=0;
     const mm=stepManualMin(st);
-    if(mm>0){alloc=mm*(t.qty||0);} // דקות ידניות — צפי = דקות×כמות
+    const units=taskUnits(t); // "כמות פתוחה" = כל ההזמנה, אחרת alloc=0 והמשימה נזרקת בשקט
+    if(mm>0){alloc=mm*units;} // דקות ידניות — צפי = דקות×כמות
     else{
       const rate=(loadedHourlyRate(t.workerId)||ctx.avgAll)+ctx.oh;
-      alloc=rate>0&&pb.totW>0?(pb.autoBudget*(+ctx.weights[stepLevel(st)]||1)/pb.totW*(t.qty||0))/rate*60:0;
+      alloc=rate>0&&pb.totW>0?(pb.autoBudget*(+ctx.weights[stepLevel(st)]||1)/pb.totW*units)/rate*60:0;
     }
     if(!(alloc>0))alloc=+t.expectedMin;
     if(!(alloc>0))continue;
     const actual=(nd[t.id]||0)/60;
     const key=t.workerId+'|'+t.cust+'|'+t.prod+'|'+t.taskType;
     const g=grp[key]||(grp[key]={workerName:t.workerName,taskType:t.taskType,cust:t.cust,prod:t.prod,qty:0,alloc:0,actual:0});
-    g.qty+=(t.qty||0);g.alloc+=alloc;g.actual+=actual;
+    g.qty+=units;g.alloc+=alloc;g.actual+=actual;
   }
   const rows=Object.values(grp).map(g=>({...g,eff:g.actual>0?g.alloc/g.actual*100:0}));
   if(!rows.length){el.innerHTML='<div style="color:var(--txt3);font-size:12px;padding:.5rem 0">אין משימות שהושלמו עם תמחור בטווח הנבחר</div>';return;}
@@ -6182,7 +6191,7 @@ function buildProfitReport(fl){
     const stepRows=pb.lvl.map((s,i)=>{
       const budPU=pb.stepBud[i].ils; // מהמנוע המשותף — מכבד דקות ידניות ותעריף לפי תחנה
       const ts=pTasks.filter(t=>t.taskType===stepName(s));
-      const units=ts.reduce((sum,t)=>sum+(t.qty||0),0);
+      const units=ts.reduce((sum,t)=>sum+taskUnits(t),0); // כולל "כמות פתוחה" — אחרת actPU נופל לתקציב
       let actPU=null;
       if(units>0){
         const cost=ts.reduce((sum,t)=>sum+((nd[t.id]||0)/3600)*((loadedHourlyRate(t.workerId)||ctx.avgAll)+ctx.oh),0);
