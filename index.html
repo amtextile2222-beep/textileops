@@ -2184,8 +2184,14 @@ function sumUnitsDedup(tasks){
 // היו נספרות 675 מתוך הזמנה של 225.
 const stepDoneKey=(cust,prod,stepNm)=>cust+'|'+prod+'|'+String(stepNm||'').trim();
 const coverKey=t=>taskBc(t)+'|'+String(t.taskType||'').trim().toLowerCase()+(t.splitId?'|'+t.splitId:'');
+// ⚠️ ברקוד "כל הכמות" שנסרק **לפני** שהוזנו הכמויות לפי מידה נשמר עם qty=0 — זו ה"כמות
+// הפתוחה" — ולכן תרם 0 לדוח למרות שהשלב בוצע על ההזמנה כולה. זה לא מקרה קצה: **כל 10
+// רשומות `عد فتح شغل` במפעל, ב-10 מוצרים שונים, הן isTotal + qty=0**, וכך גם `فرد قماش`
+// ו-`قص` ב-14717. השלבים האלה הוצגו 0/N לנצח ונראו כאילו לא בוצעו.
+// הכמות נלקחת מהמוצר **בזמן הצגת הדוח** ולא בזמן הסריקה, כי בזמן הסריקה היא לא הייתה ידועה.
+// כפילות מול סריקת מידה לאותו שלב חסומה בקלט (3e162b6), ולכן אין כאן ספירה כפולה.
 function stepDoneMap(tasks){
-  const seen=new Set(),map={},stampCache={};
+  const seen=new Set(),map={},stampCache={},totCache={};
   for(const t of tasks){
     if(!(t.duration>0))continue;
     // הזמנה חוזרת = רשומת מוצר חדשה עם אותו לקוח+מוצר (אותו ברקוד). סופרים רק את ההזמנה
@@ -2196,7 +2202,9 @@ function stepDoneMap(tasks){
     if(t.prodStamp!=null&&stamp&&t.prodStamp!==stamp)continue;
     const k=coverKey(t);if(seen.has(k))continue;seen.add(k);
     const mk=stepDoneKey(t.cust,t.prod,t.taskType);
-    map[mk]=(map[mk]||0)+(t.qty||0);
+    let q=t.qty||0;
+    if(!q&&t.isTotal)q=(ck in totCache)?totCache[ck]:(totCache[ck]=getTotalQty(t.cust,t.prod));
+    map[mk]=(map[mk]||0)+q;
   }
   return map;
 }
