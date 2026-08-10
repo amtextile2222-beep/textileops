@@ -8405,6 +8405,27 @@ async function restoreHistTask(taskId){
   saveLS();renderTasks();renderTaskHist();
   showToast('✅ המשימה הוחזרה לפעילות','var(--green-txt,#16a34a)');
 }
+// ממלא מחדש את שדה הצפי בדיאלוג העריכה לפי התמחור **הנוכחי**.
+// זו הדרך היחידה לתקן expectedMin שנצרב על רשומה שכבר בהיסטוריה: recalcActiveExpected
+// עוברת רק על S.activeTasks, ולכן תיקון בכרטיס המוצר לא נוגע ברשומות סגורות.
+// קורא את לקוח/מוצר/כמות/שלב **מהשדות בדיאלוג** כדי לכבד עריכה שעוד לא נשמרה.
+async function recalcEditExpected(taskId,isHist){
+  const t=(isHist?S.histTasks:S.activeTasks).find(x=>String(x.id)===String(taskId));
+  const el=document.getElementById('mf-t-exp');
+  if(!t||!el)return;
+  const cust=(document.getElementById('mf-t-cust')?.value||t.cust||'').padStart(2,'0').slice(0,2);
+  const prod=(document.getElementById('mf-t-prod')?.value||t.prod||'').padStart(5,'0').slice(0,5);
+  const qty=Math.max(0,parseInt(document.getElementById('mf-t-qty')?.value)||0);
+  const tt=document.getElementById('mf-t-type')?.value||t.taskType||'';
+  const ph=el.placeholder;el.disabled=true;el.placeholder='מחשב…';
+  let r={ok:false};
+  try{r=await fetchExpected(cust,prod,t.workerId,qty);}catch(e){console.error('recalcEditExpected:',e);}
+  el.disabled=false;el.placeholder=ph;
+  const v=(r&&r.ok&&r.perStep&&r.perStep[tt]!=null)?r.perStep[tt]:null;
+  if(v==null){el.value='';showToast('אין תמחור לשלב הזה — הצפי נוקה','var(--amber-txt)',4000);return;}
+  el.value=v;
+  showToast('🎯 צפי מחושב: '+v+" דק'",'var(--green-txt)',3000);
+}
 function openEditTask(taskId, isHist){
   const t=isHist?S.histTasks.find(x=>x.id===taskId):S.activeTasks.find(x=>x.id===taskId);
   if(!t)return;
@@ -8423,6 +8444,13 @@ function openEditTask(taskId, isHist){
     <div class="field"><label>כמות ${t.qty===0?'<span style="color:var(--amber-txt);font-size:11px">⏳ כמות פתוחה — עדכן לאחר ספירה/גזירה</span>':''}</label><input type="number" inputmode="numeric" id="mf-t-qty" value="${t.qty}" min="0" style="font-size:13px"/></div>
     <div class="field"><label>צבע</label><select id="mf-t-col" style="font-size:13px">${colorOpts}</select></div>
     <div class="field"><label>סוג משימה</label><input id="mf-t-type" value="${esc(t.taskType||'')}" style="font-size:13px"/></div>
+    <div class="field"><label>🎯 צפי (דק') <span style="color:var(--txt3);font-size:11px">— ריק = בלי צפי</span></label>
+      <div style="display:flex;gap:6px;align-items:center">
+        <input type="number" step="0.1" min="0" inputmode="decimal" id="mf-t-exp" value="${t.expectedMin!=null&&t.expectedMin!==''?esc(String(t.expectedMin)):''}" placeholder="ללא" style="font-size:13px;flex:1"/>
+        <button type="button" class="btn" style="font-size:12px;white-space:nowrap;padding:6px 10px" onclick="recalcEditExpected('${escj(String(t.id))}',${isHist?'true':'false'})">🎯 חשב מהתמחור</button>
+      </div>
+      <div style="font-size:11px;color:var(--txt3);margin-top:3px">הצפי נצרב על המשימה בזמן הסריקה. שינוי תמחור מאוחר יותר <b>לא</b> מעדכן רשומה שכבר נסגרה.</div>
+    </div>
     <div class="field"><label>מחלקה</label><select id="mf-t-dept" style="font-size:13px">${S.depts.map(d=>`<option value="${esc(d)}" ${(t.dept||'')=== d?'selected':''}>${esc(d)}</option>`).join('')}</select></div>
     <div class="field"><label>זמן התחלה</label><input type="datetime-local" lang="he" id="mf-t-start" value="${stLocal}" style="font-size:13px"/></div>
     <div class="field"><label>זמן סיום ${isHist?'':'(ריק = עדיין פעיל)'}</label><input type="datetime-local" lang="he" id="mf-t-end" value="${etLocal}" style="font-size:13px"/></div>`;
@@ -8780,6 +8808,10 @@ async function confirmModal(){
     t.col=document.getElementById('mf-t-col')?.value||t.col;
     t.taskType=document.getElementById('mf-t-type')?.value||'';
     t.dept=document.getElementById('mf-t-dept')?.value||t.dept||'';
+    // צפי ידני. ריק/0 = הסרת הצפי — **null ולא delete**, כי fbSet הוא merge:true ואינו
+    // מוחק שדה בשרת (אותו שיקול כמו origStart למטה). `+null>0` שקר ⇒ אין תג ואין התראת חריגה.
+    const _expVal=document.getElementById('mf-t-exp')?.value;
+    if(_expVal!==undefined)t.expectedMin=(parseFloat(_expVal)>0)?parseFloat(_expVal):null;
     const stVal=document.getElementById('mf-t-start')?.value;
     // מנהל שהזין התחלה ידנית = מקור האמת; מאפסים את origStart (null ולא delete — merge:true
     // בשרת לא מוחק שדה) כדי שלא יוצג "התחילה ביום X" סותר ושהתקרה תחושב מהערך הידני
@@ -8819,6 +8851,10 @@ async function confirmModal(){
     t.col=document.getElementById('mf-t-col')?.value||t.col;
     t.taskType=document.getElementById('mf-t-type')?.value||'';
     t.dept=document.getElementById('mf-t-dept')?.value||t.dept||'';
+    // צפי ידני. ריק/0 = הסרת הצפי — **null ולא delete**, כי fbSet הוא merge:true ואינו
+    // מוחק שדה בשרת (אותו שיקול כמו origStart למטה). `+null>0` שקר ⇒ אין תג ואין התראת חריגה.
+    const _expVal=document.getElementById('mf-t-exp')?.value;
+    if(_expVal!==undefined)t.expectedMin=(parseFloat(_expVal)>0)?parseFloat(_expVal):null;
     const stVal=document.getElementById('mf-t-start')?.value;
     // מנהל שהזין התחלה ידנית = מקור האמת; מאפסים את origStart (null ולא delete — merge:true
     // בשרת לא מוחק שדה) כדי שלא יוצג "התחילה ביום X" סותר ושהתקרה תחושב מהערך הידני
