@@ -5424,6 +5424,22 @@ function _histPrevHtml(tasks){
   const ses=prev.length;
   return ses>0?`<div style="font-size:11px;color:var(--blue-txt)">📊 מצטבר קודם: <b>${fmtM(tot)}</b> (${ses} ${ses===1?'משימה':'משימות'})</div>`:'';
 }
+// תג ההפרש מול הצפי — נקודה משותפת יחידה להיסטוריה ולדוח הפירוט.
+// עד 10/08 הוצג רק המשך בפועל, וצבע אדום/כחול אמר *אם* הייתה חריגה אבל לא *בכמה*;
+// ההפרש היה קבור ב-title, שלא נגיש בנייד. ▲/▼ בעקבות אותה מוסכמה בדוח הרווח.
+// expSec=0 (בלי תמחור / "כמות פתוחה") ⇒ מחזיר מחרוזת ריקה, בדיוק כמו קודם.
+function _expDeltaBadge(durSec,expSec,small){
+  if(!(+expSec>0))return'';
+  const diff=(+durSec||0)-(+expSec);
+  const dm=Math.round(Math.abs(diff)/60);
+  const stl=`font-size:${small?9:10}px;font-weight:700`;
+  const base=`צפי ${fmtM(expSec)} · בפועל ${fmtM(durSec)}`;
+  // פחות מחצי דקה לכל כיוון — "▲ 0" היה רעש; מציגים שהיא בול על הצפי.
+  if(dm===0)return`<span class="badge gray" style="${stl}" title="${base}">≈ צפי</span>`;
+  const over=diff>0;
+  const pct=Math.round(Math.abs(diff)/(+expSec)*100);
+  return`<span class="badge ${over?'red':'green'}" style="${stl}" title="${base} · ${over?'חריגה':'חיסכון'} ${dm} ${"דק'"} (${pct}%)">${over?'▲':'▼'} ${dm}</span>`;
+}
 function _histCardHtml(tasks){
   const lead=tasks[0],multi=tasks.length>1;
   const isMgr=S.user?.role==='manager'||S.user?.role==='supervisor';
@@ -5447,7 +5463,7 @@ function _histCardHtml(tasks){
   const qtyHtml=q=>q===0?'<span style="color:#d97706;font-weight:700">⏳ כמות פתוחה</span>':q+" יח'";
   const meta=`${dateStr} | לקוח ${esc(lead.cust)} | ${esc(lead.prod)}${lead.size?' | מידה '+esc(lead.size):''} | ${qtyHtml(lead.qty)}${lead.isTotal?' | <span style="color:#059669;font-weight:700">📦 כל הכמות</span>':' | '+esc(COLORS[lead.col]||lead.col)}`;
   const times=`<div style="font-size:11px;color:var(--txt3)">▶ ${stStr} → ◀ ${etStr}${_multiDay?` <span style="color:#d97706;font-weight:600" title="המשימה נמשכה מיום קודם — הזמן שנצבר כלול במשך">📅 התחילה ${pad2(_os.getDate())}/${pad2(_os.getMonth()+1)} ${pad2(_os.getHours())}:${pad2(_os.getMinutes())}</span>`:''}</div>`;
-  const durBadge=`<span class="badge ${over?'red':'blue'}"${over?` title="חריגה מהצפי (${fmtM(totExp)})"`:''}>${over?'⚠ ':''}${fmtM(totDur)}</span>`;
+  const durBadge=`<span class="badge ${over?'red':'blue'}">${over?'⚠ ':''}${fmtM(totDur)}</span>${_expDeltaBadge(totDur,totExp)}`;
   if(!multi){
     // משימה בודדת — בדיוק הפריסה הישנה, בלי רגרסיה
     return`<div class="row">
@@ -5477,7 +5493,7 @@ function _histCardHtml(tasks){
         <span class="badge gray">📋 ${esc(t.taskType||'—')}</span>
         <span style="font-size:11px;color:var(--txt3)">${qtyHtml(t.qty)}${t.prod!==lead.prod?' · '+esc(t.prod):''}</span>
         ${t.size&&t.size!==lead.size?`<span class="bc-seg bc-s">מידה ${esc(t.size)}</span>`:''}${t.col!==lead.col?`<span class="bc-seg bc-col">${esc(COLORS[t.col]||t.col)}</span>`:''}${t.station&&t.station!==lead.station?`<span style="font-size:11px;color:var(--green-txt)">📍 ${esc(t.station)}</span>`:''}
-        <span class="badge ${tOver?'red':'blue'}" style="font-size:10px"${tOver?` title="חריגה מהצפי (${fmtM(tExp)})"`:''}>${tOver?'⚠ ':''}${fmtM(t.duration||0)}</span>
+        <span class="badge ${tOver?'red':'blue'}" style="font-size:10px">${tOver?'⚠ ':''}${fmtM(t.duration||0)}</span>${_expDeltaBadge(t.duration||0,tExp,true)}
         <div style="margin-inline-start:auto;display:flex;gap:6px">${acts(t)}</div>
       </div>`;}).join('')}
     </div>
@@ -5946,7 +5962,7 @@ async function buildRep(){
     <td>${t.size?`<span class="bc-seg bc-s">${t.size}</span>`:'—'}</td>
     <td>${t.qty}</td><td>${COLORS[t.col]||t.col}</td>
     <td>${stStr}</td><td>${etStr}</td>
-    <td>${t.done?`<span class="badge ${over?'red':'blue'}"${over?` title="חריגה מהצפי (${fmtM(expSec)})"`:''}>${over?'⚠ ':''}${fmtM(t.duration||0)}</span>`:`<span class="badge ${over?'red':'amber'}"${over?` title="חריגה מהצפי (${fmtM(expSec)})"`:''}>${over?'⚠ ':''}${fmtS(t.elapsed||0)}</span>`}</td>
+    <td>${t.done?`<span class="badge ${over?'red':'blue'}">${over?'⚠ ':''}${fmtM(t.duration||0)}</span>${_expDeltaBadge(t.duration||0,expSec,true)}`:`<span class="badge ${over?'red':'amber'}"${over?` title="חריגה מהצפי (${fmtM(expSec)})"`:''}>${over?'⚠ ':''}${fmtS(t.elapsed||0)}</span>`}</td>
     <td><span class="badge ${t.done?'green':'blue'}">${t.done?T.completed:T.active}</span></td></tr>`;
   }).join('');
   // update filters
