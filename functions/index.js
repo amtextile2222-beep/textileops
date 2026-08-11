@@ -338,7 +338,12 @@ function loadedRateServer(costs, nWorkers, wid) {
 }
 function overheadPerHourServer(costs, nWorkers) {
   const fixedMonthly = (costs.fixedDaily || 0) * (costs.workDaysMonth || 22) + (costs.fixedMonthly || 0) + (costs.fixedAnnual || 0) / 12;
-  const months = (costs.costMonths || []).slice().sort((a, b) => String(b.month).localeCompare(String(a.month))).slice(0, 3);
+  // ⚠️ חלון החודשים הוא הגדרה של המשתמש (בורר "חודשים לממוצע" במסך העלויות). עד 11/08/2026
+  // היה כאן 3 קשיח בעוד הלקוח כיבד את ההגדרה, ולכן פאנל התמחור הראה תקורה אחת והצפי של
+  // העובדות חושב מאחרת: 4.10 מול 3.52 ₪/שעה = פער 3.6% בכל צפי במערכת.
+  // חייב להישאר זהה ל-overheadPerHour בלקוח (index.html) — אותה נוסחה, אותו clamp.
+  const win = Math.max(1, Math.min(3, parseInt(costs.overheadMonthsWindow) || 3));
+  const months = (costs.costMonths || []).slice().sort((a, b) => String(b.month).localeCompare(String(a.month))).slice(0, win);
   const varAvg = months.length ? months.reduce((s, m) => s + (m.variableTotal || 0), 0) / months.length : 0;
   const varEst = varAvg * (1 + ((costs.overheadBufferPct != null ? costs.overheadBufferPct : 10) / 100));
   const hours = (nWorkers || 0) * (costs.workDaysMonth || 22) * 8;
