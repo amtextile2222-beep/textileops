@@ -4467,10 +4467,41 @@ _guardReentrant('bcStartBatch','bcStartBatch');
 // 216 ("כל הכמות", رائده) + 18 + 18 (מידות, ايمان) — אותן יחידות נספרו פעמיים.
 // מחזיר 'total' (נחסם ע"י "כל הכמות" קיים) / 'sizes' (נחסם ע"י מידות קיימות) / '' (תקין).
 const _taskIsTotal=t=>t.isTotal!=null?!!t.isTotal:isTotalBc(t.bc||taskBc(t));
+// לאיזו **הזמנה** שייך ברקוד. אותו לקוח+מוצר יכול להיות כמה הזמנות במקביל (הזמנה
+// חוזרת = רשומת מוצר חדשה), והברקוד אינו נושא מזהה הזמנה — רק מידה+כמות+צבע. לכן
+// מזהים לפי שורת הכמויות שתואמת **בדיוק**, ומחזירים את חותמת הרשומה.
+// ⚠️ ברקוד "כל הכמות" (מידה 9, צבע 00) **זהה לחלוטין בין ההזמנות** — שם מזהים לפי סך
+// היחידות של המשימה, ואם אינו מכריע נופלים לרשומה החדשה ביותר, כמו getTotalQty.
+// '' = לא ניתן להכריע ⇒ המתקשר חייב לנהוג שמרנית (להתייחס כאותה הזמנה).
+// מוצר עם רשומה אחת בלבד מחזיר '' מיידית — אפס שינוי התנהגות ל-45 מתוך 46 הצירופים.
+function _orderStampOf(cust,prod,size,col,qty,isTot){
+  const recs=(S.products||[]).filter(p=>p&&p.cust===cust&&p.prod===prod);
+  if(recs.length<2)return '';
+  const stampOf=p=>+p.createdAt||parseInt(String(p.id).replace(/\D/g,''))||0;
+  const totOf=p=>(p.quantities||[]).reduce((s,x)=>s+(parseInt(x.qty)||0),0);
+  const q=parseInt(qty)||0;
+  if(isTot){
+    const m=q>0?recs.filter(p=>totOf(p)===q):[];
+    return m.length===1?String(stampOf(m[0])):String(Math.max(...recs.map(stampOf)));
+  }
+  const m=recs.filter(p=>(p.quantities||[]).some(x=>
+    String(x.size)===String(size)&&String(x.color)===String(col)&&(parseInt(x.qty)||0)===q));
+  return m.length===1?String(stampOf(m[0])):'';
+}
 function totalScanConflict(base,taskType,stamp,cart){
   const tt=taskType||'';
   const live=t=>t.prodStamp==null||t.prodStamp===stamp;
-  const rel=t=>t.cust===base.cust&&t.prod===base.prod&&(t.taskType||'')===tt;
+  // 🔴 prodStamp לבדו **אינו מפריד בין שתי הזמנות פעילות של אותו מוצר** — prodStampFor
+  // מחזיר תמיד את חותמת הרשומה החדשה ביותר. בלי ההפרדה כאן, סריקת "כל הכמות" בהזמנה
+  // אחת נעלה את השלב בכל ההזמנות: 05215 ב-11/08/2026 — رهام סרקה כל-הכמות להזמנת
+  // ה-30 יח', והזמנת ה-81 נחסמה לגמרי ל`طبق بطانه` בלי שום מסלול עוקף.
+  const myOrder=_orderStampOf(base.cust,base.prod,base.size,base.col,base.qty,base.isTotal);
+  const sameOrder=t=>{
+    if(!myOrder)return true;
+    const k=_orderStampOf(t.cust,t.prod,t.size,t.col,taskUnits(t),_taskIsTotal(t));
+    return !k||k===myOrder;
+  };
+  const rel=t=>t.cust===base.cust&&t.prod===base.prod&&(t.taskType||'')===tt&&sameOrder(t);
   const peers=[
     ...S.activeTasks.filter(t=>rel(t)&&!t.paused&&live(t)),
     ...S.histTasks.filter(t=>rel(t)&&live(t)),
