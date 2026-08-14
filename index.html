@@ -2239,7 +2239,7 @@ let S={
   modalAction:null,
   attHistory:[],  // {workerId, workerName, dept, date, checkin, checkout, breakStart, breakEnd, breakActive}
   products:[],    // {id, prod, cust, name, images:[], docs:[], quantities:[{size,color,qty}]}
-  costs:{workerRates:{}, workerUnitRates:{}, fixedDaily:0, fixedMonthly:0, workDaysMonth:22, fixedAnnual:0, workDaysYear:250, variableExpenses:[],
+  costs:{workerRates:{}, workerUnitRates:{}, oversightPct:{}, oversightDepts:{}, fixedDaily:0, fixedMonthly:0, workDaysMonth:22, fixedAnnual:0, workDaysYear:250, variableExpenses:[],
     // תמחור שלב ג' — שעה עמוסה + תקורה
     workerTransport:{}, workerInsurance:{}, severancePct:8.33, holidayDays:4, giftsAnnual:0, tripAnnual:0, overheadBufferPct:10, costMonths:[],
     difficultyWeights:{1:1,2:1.5,3:2,4:2.5,5:3.5}},
@@ -3511,7 +3511,7 @@ function finishLogin(w,autoPunch){
   try{if(w.user)localStorage.setItem('txops_last_user',w.user);}catch(e){}
   if(w.role!=='manager'){
     // עותקי עלויות ישנים לא נשארים במכשירי עובדים
-    S.costs={workerRates:{},workerUnitRates:{},fixedDaily:0,fixedMonthly:0,workDaysMonth:22,fixedAnnual:0,workDaysYear:250,variableExpenses:[],workerTransport:{},workerInsurance:{},severancePct:8.33,holidayDays:4,giftsAnnual:0,tripAnnual:0,overheadBufferPct:10,costMonths:[],difficultyWeights:{1:1,2:1.5,3:2,4:2.5,5:3.5}};
+    S.costs={workerRates:{},workerUnitRates:{},oversightPct:{},oversightDepts:{},fixedDaily:0,fixedMonthly:0,workDaysMonth:22,fixedAnnual:0,workDaysYear:250,variableExpenses:[],workerTransport:{},workerInsurance:{},severancePct:8.33,holidayDays:4,giftsAnnual:0,tripAnnual:0,overheadBufferPct:10,costMonths:[],difficultyWeights:{1:1,2:1.5,3:2,4:2.5,5:3.5}};
     saveLS();
   }
   startDataListeners();
@@ -9418,6 +9418,18 @@ function renderWorkerRates(){
             onchange="if(!S.costs.workerInsurance)S.costs.workerInsurance={};S.costs.workerInsurance['${w.id}']=parseFloat(this.value)||0"
             oninput="if(!S.costs.workerInsurance)S.costs.workerInsurance={};S.costs.workerInsurance['${w.id}']=parseFloat(this.value)||0"/>
           <div style="font-size:10px;color:var(--amber-txt)">🛡 ביטוח ₪/שנה</div>
+          <input type="number" min="0" max="100" placeholder="0" value="${S.costs.oversightPct?.[w.id]||''}"
+            style="width:80px;font-size:13px;text-align:left;padding:5px 8px;border-color:var(--purple-txt,var(--blue-txt))"
+            title="תקרת אחוז: כמה מיום העבודה מותר לזקוף כפיקוח. 0 = המנגנון כבוי לעובד הזה."
+            onchange="if(!S.costs.oversightPct)S.costs.oversightPct={};S.costs.oversightPct['${w.id}']=parseFloat(this.value)||0"
+            oninput="if(!S.costs.oversightPct)S.costs.oversightPct={};S.costs.oversightPct['${w.id}']=parseFloat(this.value)||0"/>
+          <div style="font-size:10px;color:var(--purple-txt,var(--blue-txt))">🎯 תקרת פיקוח %</div>
+          <select multiple size="3" style="width:80px;font-size:11px;padding:2px"
+            title="על אילו מחלקות הוא אחראי — לשם יתחלק זמן הפיקוח. בלי בחירה המנגנון לא פועל."
+            onchange="if(!S.costs.oversightDepts)S.costs.oversightDepts={};S.costs.oversightDepts['${w.id}']=Array.from(this.selectedOptions).map(o=>o.value)">
+            ${S.depts.map(d=>`<option value="${esc(d)}" ${((S.costs.oversightDepts?.[w.id])||[]).includes(d)?'selected':''}>${esc(d)}</option>`).join('')}
+          </select>
+          <div style="font-size:10px;color:var(--purple-txt,var(--blue-txt))">אחראי על מחלקות</div>
         </div>
       </div>`).join('')}
   </div>`;
@@ -9840,17 +9852,63 @@ async function calcCosts(){
     taskSecByWorkerDay[k]=(taskSecByWorkerDay[k]||0)+(t.duration||0);
   });
 
+  // ─── מחלקת העובד לצורך הקצאת פיקוח ──────────────────────────────
+  // ⚠️ במכוון **לא** t.dept: השדה שנשמר על המשימה נושא 20 ערכים חופשיים מלפני
+  // הסטנדרטיזציה (`قسم الخياطة`, `חיתוך`, `תפירה`...) ורובם אינם ב-S.depts.
+  // מחלקת העובד היא השדה הנקי — 19 מ-20 העובדים בערך שברשימה הרשמית.
+  const _wDept={};(S.workers||[]).forEach(w=>{_wDept[w.id]=w.dept||'';});
+  const _ovDepts=w=>((S.costs.oversightDepts||{})[w]||[]).filter(Boolean);
+  const _ovCap=w=>Math.max(0,Math.min(100,+((S.costs.oversightPct||{})[w])||0))/100;
+  // עובד בתשלום-ליחידה אינו מקור פיקוח: שכרו אינו נגזר משעות, ואין ממה להפחית.
+  const _isOv=w=>_ovCap(w)>0&&_ovDepts(w).length>0&&!((S.costs.workerUnitRates||{})[w]>0);
+
   // שכר עוזרים/מנהלים/אחראים ללא משימות — יתחלק על המוצרים
   const nonTaskWageByDay={};
   S.attHistory.forEach(rec=>{
     const d=rec.date;
     if(d<from||d>to)return;
+    if(_isOv(rec.workerId))return;   // מסומן — עובר במסלול הפיקוח למטה, לא כאן
     if(taskWorkersByDay[d]?.has(rec.workerId))return;
     const dailyRate=S.costs.workerRates[rec.workerId]||0;
     if(!dailyRate)return;
     const hoursWorked=(rec.netMs||0)/3600000;
     const wage=(dailyRate/8)*hoursWorked;
     nonTaskWageByDay[d]=(nonTaskWageByDay[d]||0)+wage;
+  });
+
+  // ─── 🎯 הקצאת זמן פיקוח ──────────────────────────────────────────
+  // אחראי מסומן חולק חלק משכר יומו על משימות המחלקות שהוא אחראי עליהן.
+  // המקור = הזמן שאינו מכוסה במשימות שלו באותו יום, חסום בתקרת האחוז הידנית.
+  // ⚠️ **העברה בלבד** — סך העלות אינו משתנה: מה שיורד ממשימותיו עולה אצל המקבלים.
+  // ⚠️ המקבלים מקבלים **עלות בלבד** — הצפי/הזמן שלהם לא נוגעים, אחרת היינו
+  //    הופכים אותם לחריגים ורק מזיזים את הבעיה.
+  // ⚠️ אם אין לאן לחלק (אף משימה מתאימה באותו יום) — לא מפחיתים ממנו כלום,
+  //    אחרת השכר היה נעלם.
+  const ovFrac={};                              // workerId_date → החלק שהועבר
+  const ovByIdx=new Array(tasks.length).fill(0);
+  Object.keys(attByWorkerDay).forEach(k=>{
+    const _i=k.lastIndexOf('_');
+    const wid=k.slice(0,_i), d=k.slice(_i+1);
+    if(!_isOv(wid))return;
+    const dailyRate=S.costs.workerRates[wid]||0;if(!dailyRate)return;
+    const attSec=(attByWorkerDay[k]||0)/1000;if(attSec<=0)return;
+    const mySec=taskSecByWorkerDay[k]||0;
+    // בלי משימות כלל ⇒ כל היום פיקוח (אחרת שאר שכרו לא ייספר בשום מקום)
+    const frac=mySec>0?Math.min(Math.max(0,1-mySec/attSec),_ovCap(wid)):1;
+    if(frac<=0)return;
+    const depts=_ovDepts(wid);
+    const elig=[];let tot=0;
+    tasks.forEach((t,ix)=>{
+      if(t.workerId===wid)return;               // לא מחזירים לו את ההקצאה של עצמו
+      const td=(t.startTime instanceof Date?t.startTime:new Date(t.startTime)).toISOString().slice(0,10);
+      if(td!==d)return;
+      if(!depts.includes(_wDept[t.workerId]||''))return;
+      elig.push(ix);tot+=(t.duration||0);
+    });
+    if(!elig.length||tot<=0)return;
+    ovFrac[k]=frac;
+    const wage=(dailyRate/8)*(attSec/3600)*frac;
+    elig.forEach(ix=>{ovByIdx[ix]+=wage*((tasks[ix].duration||0)/tot);});
   });
 
   // חישוב עלות לכל משימה
@@ -9860,7 +9918,7 @@ async function calcCosts(){
   tasks.forEach(t=>{if(isTotalBc(t.bc))_totalBcProds.add(t.cust+'_'+t.prod);});
   const _unitSeen=new Set();
   const _prodCounted=new Set();
-  const enriched=tasks.map(t=>{
+  const enriched=tasks.map((t,_tix)=>{
     const d=(t.startTime instanceof Date?t.startTime:new Date(t.startTime)).toISOString().slice(0,10);
     const dayTotalSec=byDay[d]?.totalSec||1;
     const taskRatio=(t.duration||0)/dayTotalSec;
@@ -9873,7 +9931,9 @@ async function calcCosts(){
     const workerTotalTaskSec=taskSecByWorkerDay[t.workerId+'_'+d]||1;
     const taskShare=(t.duration||0)/workerTotalTaskSec;
     const byUnit=unitRate>0&&(t.qty||0)>0;
-    const wage=byUnit?(unitRate*(t.qty||0)):(dailyRate/8)*attHours*taskShare;
+    // חלק הפיקוח שהועבר מהעובד הזה ביום הזה יורד משכרו על משימותיו שלו
+    const ovCut=1-(ovFrac[t.workerId+'_'+d]||0);
+    const wage=byUnit?(unitRate*(t.qty||0)):(dailyRate/8)*attHours*taskShare*ovCut;
 
     // חלק מהוצאות קבועות + משתנות
     const dayVar=varByDay[d]||0;
@@ -9881,8 +9941,10 @@ async function calcCosts(){
 
     // חלק משכר עוזרים/מנהלים ללא משימות
     const nonTaskShare=(nonTaskWageByDay[d]||0)*taskRatio;
+    // חלק מזמן הפיקוח של אחראי המחלקה שלה שייכת המשימה
+    const oversightShare=ovByIdx[_tix]||0;
 
-    totalWages+=wage+nonTaskShare;
+    totalWages+=wage+nonTaskShare+oversightShare;
     totalOverhead+=overhead;
     if(nonTaskShare)totalNonTaskWage+=nonTaskShare;
 
@@ -9895,7 +9957,7 @@ async function calcCosts(){
       const ukey=t.cust+'_'+t.prod+'_'+(t.size||'0');
       if(!_unitSeen.has(ukey)){unitCounted=true;_unitSeen.add(ukey);}
     }
-    return{...t,wage,nonTaskShare,overhead,total:wage+nonTaskShare+overhead,date:d,taskRatio,unitCounted,byUnit};
+    return{...t,wage,nonTaskShare,oversightShare,overhead,total:wage+nonTaskShare+oversightShare+overhead,date:d,taskRatio,unitCounted,byUnit};
   });
 
   const grandTotal=totalWages+totalOverhead;
