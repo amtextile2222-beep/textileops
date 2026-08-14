@@ -9386,6 +9386,13 @@ function setCostRange(r){
   calcCosts();
 }
 
+// אוסף את המחלקות המסומנות לעובד. תיבות סימון ולא select multiple — האחרון
+// דורש Ctrl+לחיצה ובנייד אי אפשר לבחור בו יותר ממחלקה אחת.
+function _ovDeptToggle(wid){
+  if(!S.costs.oversightDepts)S.costs.oversightDepts={};
+  S.costs.oversightDepts[wid]=Array.from(
+    document.querySelectorAll('input[data-ovw="'+wid+'"]:checked')).map(x=>x.value);
+}
 function renderWorkerRates(){
   const el=document.getElementById('cost-worker-rates');
   if(!el)return;
@@ -9424,12 +9431,15 @@ function renderWorkerRates(){
             onchange="if(!S.costs.oversightPct)S.costs.oversightPct={};S.costs.oversightPct['${w.id}']=parseFloat(this.value)||0"
             oninput="if(!S.costs.oversightPct)S.costs.oversightPct={};S.costs.oversightPct['${w.id}']=parseFloat(this.value)||0"/>
           <div style="font-size:10px;color:var(--purple-txt,var(--blue-txt))">🎯 תקרת פיקוח %</div>
-          <select multiple size="3" style="width:80px;font-size:11px;padding:2px"
-            title="על אילו מחלקות הוא אחראי — לשם יתחלק זמן הפיקוח. בלי בחירה המנגנון לא פועל."
-            onchange="if(!S.costs.oversightDepts)S.costs.oversightDepts={};S.costs.oversightDepts['${w.id}']=Array.from(this.selectedOptions).map(o=>o.value)">
-            ${S.depts.map(d=>`<option value="${esc(d)}" ${((S.costs.oversightDepts?.[w.id])||[]).includes(d)?'selected':''}>${esc(d)}</option>`).join('')}
-          </select>
-          <div style="font-size:10px;color:var(--purple-txt,var(--blue-txt))">אחראי על מחלקות</div>
+          <div style="width:140px;max-height:70px;overflow-y:auto;border:1px solid var(--brd);border-radius:4px;padding:3px;background:var(--bg)"
+            title="על אילו מחלקות הוא אחראי — לשם יתחלק זמן הפיקוח. אפשר לסמן כמה. בלי בחירה המנגנון לא פועל.">
+            ${S.depts.map(d=>`<label style="display:flex;align-items:center;gap:4px;font-size:10px;cursor:pointer;padding:1px 0">
+              <input type="checkbox" data-ovw="${esc(w.id)}" value="${esc(d)}" ${((S.costs.oversightDepts?.[w.id])||[]).includes(d)?'checked':''}
+                style="width:13px;height:13px;flex-shrink:0;margin:0" onchange="_ovDeptToggle('${escj(w.id)}')"/>
+              <span style="white-space:nowrap;overflow:hidden;text-overflow:ellipsis">${esc(d)}</span>
+            </label>`).join('')}
+          </div>
+          <div style="font-size:10px;color:var(--purple-txt,var(--blue-txt))">אחראי על מחלקות (אפשר כמה)</div>
         </div>
       </div>`).join('')}
   </div>`;
