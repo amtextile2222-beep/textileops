@@ -9862,11 +9862,20 @@ async function calcCosts(){
     taskSecByWorkerDay[k]=(taskSecByWorkerDay[k]||0)+(t.duration||0);
   });
 
-  // ─── מחלקת העובד לצורך הקצאת פיקוח ──────────────────────────────
+  // ─── מחלקת המשימה לצורך הקצאת פיקוח ─────────────────────────────
   // ⚠️ במכוון **לא** t.dept: השדה שנשמר על המשימה נושא 20 ערכים חופשיים מלפני
   // הסטנדרטיזציה (`قسم الخياطة`, `חיתוך`, `תפירה`...) ורובם אינם ב-S.depts.
-  // מחלקת העובד היא השדה הנקי — 19 מ-20 העובדים בערך שברשימה הרשמית.
+  //
+  // הקובע הוא **התחנה שבה בוצעה העבודה**, ולא המחלקה שאליה העובד משויך:
+  // עובדת הרשומה ב-`قسم الخياطة 1` שעבדה ב-`حبكي 5` ביצעה עבודה של `قسم الخياطة 2`.
+  // נמדד 14/08: 33% מהמשימות עם תחנה שייכות למחלקה אחרת משיוך העובד, ול-
+  // `قسم الخياطة 2` יש 150 משימות לפי תחנה מול **0** עובדים משויכים.
+  // נפילה למחלקת העובד רק כשאין תחנה — היסטוריה בלבד: אכיפת התחנות נדלקה 07/08
+  // והכיסוי מאז 09/08 הוא 100% בכל יום (יוני 0% · יולי 18% · אוגוסט 91%).
   const _wDept={};(S.workers||[]).forEach(w=>{_wDept[w.id]=w.dept||'';});
+  const _stDept={};Object.keys(S.deptStations||{}).forEach(d=>
+    (S.deptStations[d]||[]).forEach(s=>{_stDept[s]=d;}));
+  const _taskDept=t=>_stDept[t.station]||_wDept[t.workerId]||'';
   const _ovDepts=w=>((S.costs.oversightDepts||{})[w]||[]).filter(Boolean);
   const _ovCap=w=>Math.max(0,Math.min(100,+((S.costs.oversightPct||{})[w])||0))/100;
   // עובד בתשלום-ליחידה אינו מקור פיקוח: שכרו אינו נגזר משעות, ואין ממה להפחית.
@@ -9912,7 +9921,7 @@ async function calcCosts(){
       if(t.workerId===wid)return;               // לא מחזירים לו את ההקצאה של עצמו
       const td=(t.startTime instanceof Date?t.startTime:new Date(t.startTime)).toISOString().slice(0,10);
       if(td!==d)return;
-      if(!depts.includes(_wDept[t.workerId]||''))return;
+      if(!depts.includes(_taskDept(t)))return;
       elig.push(ix);tot+=(t.duration||0);
     });
     if(!elig.length||tot<=0)return;
