@@ -8421,11 +8421,27 @@ async function deleteHistTask(taskId){
   if(S.fbConnected){try{await fbDel('histTasks',String(taskId));}catch(e){}}
   saveLS();renderTaskHist();
 }
+// החזרה מהיסטוריה = משימה **מושהית** שנושאת ב-accumulatedSec את הזמן שכבר נעשה.
+// קודם: elapsed בלבד נקבע (שדה תצוגה), accumulatedSec נשאר 0 — הסגירה מוחקת אותו
+// (delete done.accumulatedSec) — ו-startTime נשאר המקורי. לכן ההשהיה/סגירה הבאה חישבה
+// 0 + שעון(מההתחלה המקורית → עכשיו) וספרה גם את כל הזמן שהמשימה ישבה בהיסטוריה.
+// קרה חי ב-20/08/2026: שלוש משימות של 04380 תפחו מ-79/40/40 ד' ל-301/300/300 ד'.
+// paused:true מוביל את ההחזרה דרך הנתיבים הבטוחים הקיימים: taskFinalDur למושהית מחזיר
+// accumulatedSec בלבד, ו-_resumeTask דורס את startTime לרגע החידוש — חתימת כניסה
+// (resumeWorkerTasksOnPunchIn) או "📅 המשך" ב-handlePausedTasks כשהעובדת סורקת.
+// origStart מסמן שההתחלה האמיתית מוקדמת יותר: _capByAttendance מחשב תקרה מהיום הנכון,
+// והמשימה מוחרגת מאשכול החפיפה ב-normalizeBatchDurations ולכן לא גוררת למטה עבודה
+// אמיתית שחופפת לה (ב-20/08 הכיווץ הזה אכל 223 ד' של 00239 אצל ابوزكي ו-رشديه).
 async function restoreHistTask(taskId){
-  if(!confirm('להחזיר משימה זו למשימות פעילות?'))return;
   const t=S.histTasks.find(x=>x.id===taskId);
   if(!t){showToast('משימה לא נמצאה','var(--red-txt)');return;}
-  const restored={...t,startTime:t.startTime instanceof Date?t.startTime:new Date(t.startTime),elapsed:t.duration||0};
+  const accSec=Math.max(0,Math.round(t.duration||0));
+  if(!confirm(`להחזיר משימה זו למשימות פעילות?\n\n${t.prod} ${t.taskType||''}\nתחזור ⏸ מושהית עם ${fmtM(accSec)} שכבר נצברו.\nהספירה תתחדש בחתימת הכניסה הבאה או בסריקה — לא מעכשיו.`))return;
+  const st=t.startTime instanceof Date?t.startTime:new Date(t.startTime);
+  const restored={...t,startTime:st,
+    origStart:t.origStart||st.toISOString(),
+    accumulatedSec:accSec,elapsed:accSec,
+    paused:true,pausedAt:srvNow().toISOString()};
   delete restored.endTime;delete restored.duration;
   S.activeTasks.push(restored);
   S.histTasks=S.histTasks.filter(x=>x.id!==taskId);
@@ -8434,7 +8450,7 @@ async function restoreHistTask(taskId){
     try{await fbDel('histTasks',String(taskId));}catch(e){}
   }
   saveLS();renderTasks();renderTaskHist();
-  showToast('✅ המשימה הוחזרה לפעילות','var(--green-txt,#16a34a)');
+  showToast(`✅ הוחזרה ⏸ מושהית עם ${fmtM(accSec)}`,'var(--green-txt,#16a34a)');
 }
 // ממלא מחדש את שדה הצפי בדיאלוג העריכה לפי התמחור **הנוכחי**.
 // זו הדרך היחידה לתקן expectedMin שנצרב על רשומה שכבר בהיסטוריה: recalcActiveExpected
