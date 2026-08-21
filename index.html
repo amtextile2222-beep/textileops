@@ -1393,10 +1393,10 @@ code{background:var(--bg2);border:0.5px solid var(--b);border-radius:4px;padding
 <script type="module">
 import{initializeApp}from'https://www.gstatic.com/firebasejs/10.12.0/firebase-app.js';
 import{getFirestore,collection,doc,getDoc,getDocs,getDocsFromServer,setDoc,onSnapshot,query,where,orderBy,limit,serverTimestamp,deleteDoc,updateDoc,addDoc,runTransaction}from'https://www.gstatic.com/firebasejs/10.12.0/firebase-firestore.js';
-import{getAuth,signInAnonymously,signInWithCustomToken,onAuthStateChanged}from'https://www.gstatic.com/firebasejs/10.12.0/firebase-auth.js';
+import{getAuth,signInAnonymously,signInWithCustomToken,signOut,onAuthStateChanged}from'https://www.gstatic.com/firebasejs/10.12.0/firebase-auth.js';
 import{getMessaging,getToken,onMessage}from'https://www.gstatic.com/firebasejs/10.12.0/firebase-messaging.js';
 import{getFunctions,httpsCallable}from'https://www.gstatic.com/firebasejs/10.12.0/firebase-functions.js';
-window._fb={initializeApp,getFirestore,collection,doc,getDoc,getDocs,getDocsFromServer,setDoc,onSnapshot,query,where,orderBy,limit,serverTimestamp,deleteDoc,updateDoc,addDoc,runTransaction,getAuth,signInAnonymously,signInWithCustomToken,onAuthStateChanged,getMessaging,getToken,onMessage,getFunctions,httpsCallable};
+window._fb={initializeApp,getFirestore,collection,doc,getDoc,getDocs,getDocsFromServer,setDoc,onSnapshot,query,where,orderBy,limit,serverTimestamp,deleteDoc,updateDoc,addDoc,runTransaction,getAuth,signInAnonymously,signInWithCustomToken,signOut,onAuthStateChanged,getMessaging,getToken,onMessage,getFunctions,httpsCallable};
 window._fbReady=true;
 document.dispatchEvent(new Event('fbSDKReady'));
 </script>
@@ -2846,6 +2846,9 @@ async function initFb(){
   // רק אחרי אימות בשרת ב-doLogin; ה-listeners מתחילים אחרי הכניסה
   S.fbConnected=true;
   setFbStatus('ok','✅ Firebase מחובר');
+  // השחזור רץ ברגע ש-Firebase מוכן — לפני הכניסה האוטומטית ולפני שהעובדת
+  // הספיקה להקליד. אם אין session הוא יוצא מיד ולא עושה כלום.
+  _restoreSession();
 }
 
 // listeners של נתונים — רק אחרי כניסה מאומתת (יש טוקן עם role)
@@ -3484,7 +3487,7 @@ async function fbSignInWithToken(token){
 }
 function _loginErrCode(e){
   const m=String((e&&e.message)||'').trim();
-  return['wrong','missing-pass','disabled','locked','ip','time-window','device','device-unknown','face-mismatch','no-face-update','emergency-wrong'].includes(m)?m:'network';
+  return['wrong','missing-pass','disabled','locked','ip','time-window','device','device-unknown','face-mismatch','no-face-update','emergency-wrong','no-session','session-expired'].includes(m)?m:'network';
 }
 function _loginErrMsg(code){
   return{
@@ -3499,10 +3502,77 @@ function _loginErrMsg(code){
     'face-mismatch':'זיהוי פנים נכשל',
     'no-face-update':'אין אישור לעדכון פנים — פנה למנהל',
     'emergency-wrong':'קוד חירום שגוי',
+    'no-session':'נא להיכנס למערכת',
+    'session-expired':'⏰ החיבור פג — נא להיכנס מחדש',
     'barcode-wrong':'⛔ הברקוד שסרקת שייך לעובד אחר — סרוק את הברקוד שבתחנה שלך',
     'barcode-not-allowed':'⛔ כניסה בברקוד לא מופעלת עבורך — פנה למנהל',
     'barcode-needs-setup':'הכניסה הראשונה במכשיר הזה חייבת להיות עם סיסמה — הזן סיסמה פעם אחת, ומהפעם הבאה תיכנס בסריקה'
   }[code]||'שגיאת חיבור לשרת — נסה שוב';
+}
+// ─── שחזור session אחרי טעינה מחדש ──────────────────────────────────────
+// S.user חי בזיכרון בלבד (saveLS לא שומר אותו), ולכן כל הריגה של הטאב ע"י
+// הדפדפן/iOS החזירה את העובדת למסך כניסה — נמדד: עד 5 פתיחות ביום לאותו עובד.
+// ה-session של Firebase דווקא שורד (IndexedDB); onAuthStateChanged היה מיובא
+// מאז ומעולם ולא נקרא אף פעם. כאן שואלים אותו, והשרת מאמת בשערים שהעובדת
+// עדיין רשאית להיכנס עכשיו לפני שהיא נכנסת.
+let _restoreBusy=false,_restoreDone=false;
+function _restoreOverlay(on){
+  let el=document.getElementById('_restore-ov');
+  if(!on){if(el)el.remove();return;}
+  if(el)return;
+  el=document.createElement('div');
+  el.id='_restore-ov';
+  el.style.cssText='position:fixed;inset:0;z-index:9999;display:flex;flex-direction:column;align-items:center;justify-content:center;gap:14px;background:var(--bg);color:var(--txt);font-size:15px';
+  el.innerHTML='<div style="font-size:38px">✂️</div><div>משחזר חיבור…</div>';
+  document.body.appendChild(el);
+}
+async function _restoreSession(){
+  if(_restoreBusy||_restoreDone||S.user)return;
+  if(!window._fb||!window._fbApp||!window._fbFunctions)return;
+  _restoreBusy=true;
+  let code='no-session';
+  try{
+    const{getAuth,onAuthStateChanged,signOut,httpsCallable}=window._fb;
+    const auth=getAuth(window._fbApp);
+    // הקריאה מ-IndexedDB אינה מיידית — ממתינים פעם אחת למצב ההתחלתי
+    const user=await new Promise(res=>{
+      let settled=false;
+      const fin=u=>{if(settled)return;settled=true;try{un&&un();}catch(e){}res(u);};
+      const un=onAuthStateChanged(auth,fin,()=>fin(null));
+      setTimeout(()=>fin(null),4000);
+    });
+    if(!user){_restoreBusy=false;_restoreDone=true;_startAutoLogin();return;}
+    _restoreOverlay(true);
+    const devId=await getDeviceId();
+    const fn=httpsCallable(window._fbFunctions,'resumeSession');
+    // 6 שניות ואז נופלים למסך כניסה רגיל — אסור להשאיר עובדת מול ספינר
+    const res=await Promise.race([
+      fn({deviceId:devId||undefined}).then(r=>(r&&r.data)||{}),
+      new Promise((_,rej)=>setTimeout(()=>rej(new Error('network')),6000))
+    ]);
+    if(!res||!res.worker)throw new Error('network');
+    if(res.token)await fbSignInWithToken(res.token);
+    _restoreOverlay(false);_restoreBusy=false;_restoreDone=true;
+    // ⚠ autoPunch=false קריטי: שחזור אינו חתימת כניסה. autoPunchIn הוא שמפעיל
+    // את resumeWorkerTasksOnPunchIn, ולכן שחזור שיחתים כניסה היה מייצר רישום
+    // נוכחות שקרי *ומחדש משימות מושהות* בכל הריגה של האפליקציה.
+    finishLogin(res.worker,false);
+    return;
+  }catch(e){
+    code=_loginErrCode(e);
+  }
+  _restoreOverlay(false);_restoreBusy=false;_restoreDone=true;
+  // כשל שער = ה-session כבר לא תקף. מוחקים אותו, אחרת ננסה שוב בכל טעינה
+  // ונציף את הטלגרם בהתראות על אותה עובדת.
+  if(code!=='network'){
+    try{const{getAuth,signOut}=window._fb;await signOut(getAuth(window._fbApp));}catch(e){}
+  }
+  const msg=_loginErrMsg(code);
+  const el=document.getElementById('l-err');
+  if(el&&code!=='no-session'&&code!=='network'&&msg)el.textContent=msg;
+  // אחרי חסימת שער לא מפעילים כניסה אוטומטית — היא תיפול על אותו שער ותדרוס
+  // את ההודעה שמסבירה לעובדת למה היא בחוץ.
+  if(code==='no-session'||code==='network')_startAutoLogin();
 }
 // סיום כניסה מוצלחת — משותף לסיסמה/פנים/חירום
 function finishLogin(w,autoPunch){
@@ -3588,16 +3658,22 @@ function onUserInput(u){
 // + "זכור אותי": השם האחרון ממולא מראש; לעובד עם פנים רשומות הכניסה מתחילה לבד (אפס הקלדה)
 window.addEventListener('load',()=>{setTimeout(()=>{
   if((S.workers||[]).some(x=>x.faceAuth))loadFaceModels();
+  _startAutoLogin();
+},1500);});
+// מושהית כל עוד שחזור ה-session רץ: אחרת המצלמה נדלקת לרגע מתחת לאוברליי
+// ושתי כניסות מתחרות על אותו מסך. _restoreSession קורא לה בעצמו כשאין מה לשחזר.
+function _startAutoLogin(){
+  if(S.user||_restoreBusy)return;
   const lu=localStorage.getItem('txops_last_user')||'';
   const inp=document.getElementById('l-user');
-  if(lu&&!S.user&&inp&&!inp.value.trim()){
+  if(lu&&inp&&!inp.value.trim()){
     inp.value=lu;
     onUserInput(lu);
     document.getElementById('l-switch-user').style.display='';
     _autoFaceLogin(lu);
     _autoBcLogin(lu);
   }
-},1500);});
+}
 function switchUser(){
   try{localStorage.removeItem('txops_last_user');}catch(e){}
   stopBcLogin();
@@ -3878,6 +3954,10 @@ async function sendAIMsg(){
   }
 }
 function doLogout(){
+  // בלי signOut ה-session של Firebase שורד את היציאה, והשחזור בטעינה הבאה
+  // היה מחזיר את העובדת פנימה — כלומר אי אפשר היה לצאת בכלל.
+  try{const{getAuth,signOut}=window._fb;signOut(getAuth(window._fbApp)).catch(()=>{});}catch(e){}
+  _restoreDone=true;
   S.user=null;
   if(typeof _kioskOpen!=='undefined'&&_kioskOpen)closeKiosk();
   document.getElementById('nb-kiosk')?.classList.add('hidden');
@@ -4240,6 +4320,16 @@ async function punchOut(){
   saveLS();renderAtt();
   const roundedOut=now.getTime()!==nowRaw.getTime();
   document.getElementById('att-msg').textContent='🚪 '+T.att_out+': '+pad2(now.getHours())+':'+pad2(now.getMinutes())+(roundedOut?' (עוגל)':'')+(pausedCount?' | '+pausedCount+' '+T.tasks_paused_msg:'');
+  // חתימת יציאה מסיימת את ה-session. window.close() חסום בטאב וב-PWA, וזו
+  // הדרך להשיג את אותה מטרה: ה-session נמחק ⇒ השחזור לא יחזיר אותה פנימה.
+  // punchOut היא נקודת מעבר יחידה (הכפתור וגם סריקת הברקוד), ולכן זה סוגר גם
+  // טאב נשכח שממשיך להחזיק משימות בזיכרון, ואת הצטברות tabSessions.
+  // pauseWorkerTasks כבר רץ למעלה, אז המשימות מושהות בבטחה לפני היציאה.
+  setTimeout(async()=>{
+    try{await fbDel('tabSessions',tabId());}catch(e){}
+    try{const{getAuth,signOut}=window._fb;await signOut(getAuth(window._fbApp));}catch(e){}
+    doLogout();
+  },3000);
 }
 // ─── חתימת יציאה בסריקת ברקוד העובד ───
 // כאן העובד כבר מאומת (יש טוקן) — הסריקה רק מאשרת שהוא פיזית בתחנה שלו,

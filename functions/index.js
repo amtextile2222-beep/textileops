@@ -128,7 +128,7 @@ exports.login = functions.https.onCall(async (data, context) => {
     await emRef.set({ failCount: 0 }, { merge: true });
     const mq = await db.collection('workers').where('role', '==', 'manager').limit(1).get();
     const mgr = mq.empty ? { id: 'emergency', name: 'מנהל חירום', role: 'manager' } : { id: mq.docs[0].id, ...mq.docs[0].data() };
-    const token = await admin.auth().createCustomToken(mgr.id, { role: 'manager' });
+    const token = await admin.auth().createCustomToken(mgr.id, { role: 'manager', sat: Date.now() });
     await tg('✅ TextileOps — כניסת חירום בוצעה\n🕐 שעה: ' + ilTime() + '\nנכנס דרך קוד חירום כמנהל.');
     return { token, worker: sanitizeWorker({ ...mgr, role: 'manager' }) };
   }
@@ -286,8 +286,105 @@ exports.login = functions.https.onCall(async (data, context) => {
 
   await credRef.set({ failCount: 0 }, { merge: true });
   const role = w.role || 'worker';
-  const token = await admin.auth().createCustomToken(w.id, { role });
+  const token = await admin.auth().createCustomToken(w.id, { role, sat: Date.now() });
   return { token, worker: sanitizeWorker(w), needFaceRegister };
+});
+
+// ─── שחזור session אחרי טעינה מחדש ───────────────────────────────────────────
+// הדפדפן ו-iOS הורגים את הטאב ברקע, ו-S.user חי בזיכרון בלבד ⇒ כל טעינה מחדש
+// החזירה את העובדת למסך כניסה (נמדד: עד 5 פתיחות ביום לאותו עובד). ה-session של
+// Firebase דווקא שורד את הטעינה (IndexedDB); מה שחסר היה שמישהו יאמת שהעובדת
+// עדיין *רשאית* להיכנס עכשיו, מהמקום הזה — ורק אז יכניס אותה.
+//
+// הקלט אינו מכיל שום פרט הזדהות ⇒ אין מה לנחש כאן. מה ש*לא* נבדק מחדש: סיסמה,
+// פנים, ברקוד — העובדת כבר עברה אחד מהם כדי לייצר את ה-session. מה ש*כן* נבדק
+// מחדש: כל מה שיכול היה להשתנות מאז, ובדיוק בסדר של exports.login.
+//
+// מנפיק טוקן חדש במקום להישען על הישן: התפקיד נלקח מכרטיס העובד בכל שחזור
+// (מנהל שהוריד אחראית לעובדת מתעדכן כבר בשחזור הבא), ואין תלות בשאלה אם ה-claim
+// שרד את רענון הטוקן בדפדפן.
+exports.resumeSession = functions.https.onCall(async (data, context) => {
+  const d = data || {};
+  const { token: tgToken, chatId: tgChatId } = tgCfg();
+  const tg = text => (tgToken && tgChatId) ? sendTelegram(tgToken, tgChatId, text).catch(() => {}) : Promise.resolve();
+
+  // ── שער 0: יש בכלל session? ──
+  if (!context.auth || !context.auth.uid) throw new functions.https.HttpsError('unauthenticated', 'no-session');
+  const uid = String(context.auth.uid);
+  const claims = context.auth.token || {};
+
+  const wSnap = await db.collection('workers').doc(uid).get();
+  // העובד נמחק מאז — ה-session מצביע לכלום
+  if (!wSnap.exists) throw new functions.https.HttpsError('permission-denied', 'no-session');
+  const w = { id: wSnap.id, ...wSnap.data() };
+
+  // ── שער 1: גיל ה-session ──
+  // אין כאן הגדרה חדשה. accessWindow שבכרטיס העובד (שער 4) הוא הכלל הראשי, ולכן
+  // מי שיש לו חלון שעות ממילא מוגבל לפיו — ושינוי שעות בכרטיס משפיע מיד, בלי קוד.
+  // תקרת 12 השעות היא רשת ביטחון *רק* למי שאין לו חלון (וגם למנהל, שפטור משער 4).
+  //
+  // sat = רגע ההזדהות המקורי, נחתם בשרת בהנפקת הטוקן ב-login ומועבר הלאה בכל
+  // שחזור. אי אפשר לסמוך כאן על auth_time: השחזור מנפיק טוקן חדש, ולכן auth_time
+  // מתאפס בכל שחזור והתקרה לא הייתה נאכפת אף פעם. הנפילה חזרה ל-auth_time היא
+  // בשביל session שנוצר לפני הפריסה הזאת ואין לו עדיין sat.
+  const aw = w.accessWindow;
+  const hasWindow = w.role !== 'manager' && aw && aw.enabled
+    && Array.isArray(aw.days) && aw.days.length && aw.from && aw.to;
+  const sat = Number(claims.sat) || (Number(claims.auth_time) || 0) * 1000;
+  if (!hasWindow) {
+    if (!sat || Date.now() - sat > 12 * 60 * 60 * 1000) {
+      throw new functions.https.HttpsError('permission-denied', 'session-expired');
+    }
+  }
+
+  // ── שער 2: השעיה ──
+  if (w.disabled) throw new functions.https.HttpsError('permission-denied', 'disabled');
+
+  // ── שער 3: רשת המפעל ──
+  if (w.requireFactoryIP) {
+    const tgSet = await db.collection('appSettings').doc('telegramSettings').get();
+    const tgData = (tgSet.exists && tgSet.data()) || {};
+    const factoryIP = tgData.factoryIP || '';
+    const ip = callerIp(context);
+    if (factoryIP && ip && ip !== factoryIP && !ipBypassMsLeft(tgData)) {
+      await tg('⛔ TextileOps — שחזור session מחוץ למפעל\n👤 עובד: ' + w.name + '\n🌐 IP: ' + ip + '\n🕐 שעה: ' + ilTime() + '\nהאפליקציה נטענה מחדש מרשת שאינה רשת המפעל. הגישה נדחתה.');
+      throw new functions.https.HttpsError('permission-denied', 'ip');
+    }
+  }
+
+  // ── שער 4: חלון ימים/שעות — מנהל פטור, fail-open כשהתצורה חסרה ──
+  if (hasWindow) {
+    const ilNow = new Date(new Date().toLocaleString('en-US', { timeZone: 'Asia/Jerusalem' }));
+    const day = ilNow.getDay();
+    const mins = ilNow.getHours() * 60 + ilNow.getMinutes();
+    const toMin = s => { const [h, m] = String(s).split(':').map(Number); return (h || 0) * 60 + (m || 0); };
+    const dayOk = aw.days.map(Number).includes(day);
+    const timeOk = mins >= toMin(aw.from) && mins <= toMin(aw.to);
+    if (!dayOk || !timeOk) {
+      await tg('⛔ TextileOps — שחזור session מחוץ לחלון הזמן\n👤 עובד: ' + w.name + '\n🕐 שעה: ' + ilTime() + '\nהאפליקציה נטענה מחדש מחוץ לימים/שעות שהוגדרו לו.');
+      throw new functions.https.HttpsError('permission-denied', 'time-window');
+    }
+  }
+
+  // ── שער 5: נעילת מכשיר ──
+  // בניגוד ל-login, כאן *אין* רישום מכשיר אוטומטי. מכשיר שהמנהל אִפס חייב לעבור
+  // כניסה מלאה, שבה הרישום נעשה תחת אימות אמיתי — אחרת שחזור היה מקבע מכשיר
+  // בלי שאף אחד הזדהה.
+  if (w.deviceBinding && w.role !== 'manager') {
+    const credSnap = await db.collection('credentials').doc(w.id).get();
+    const creds = credSnap.exists ? credSnap.data() : {};
+    const dev = String(d.deviceId || '');
+    if (!dev) throw new functions.https.HttpsError('failed-precondition', 'device-unknown');
+    if (!creds.deviceId) throw new functions.https.HttpsError('permission-denied', 'device');
+    if (creds.deviceId !== dev) {
+      await tg('⛔ TextileOps — שחזור session ממכשיר לא מורשה\n👤 עובד: ' + w.name + '\n🕐 שעה: ' + ilTime());
+      throw new functions.https.HttpsError('permission-denied', 'device');
+    }
+  }
+
+  const role = w.role || 'worker';
+  const token = await admin.auth().createCustomToken(w.id, { role, sat });
+  return { token, worker: sanitizeWorker(w) };
 });
 
 // ─── ניהול סודות כניסה — סיסמה/מכשיר/פנים (credentials חסומה לגמרי ללקוח) ───
