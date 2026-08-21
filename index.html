@@ -4356,6 +4356,9 @@ let _bcBatch=[];  // סל הסורק האישי (bc) — כמו _tsBatch + expMi
 // מזהי המשימות שהעובד ביקש לסגור כשיתחיל את הסל. *כוונה* בלבד — הסגירה עצמה מתבצעת
 // ב-bcStartBatch רק אחרי שנוצרה משימה חדשה במקומן. ראה ההסבר ב-submitBc.
 let _bcCloseOnStart=[];
+// כוונת **השהיה** (⏸ משימה זמנית) — אותה מכניקה בדיוק כמו _bcCloseOnStart: נשמרת
+// כוונה בלבד, ומופעלת ב-bcStartBatch רק אחרי שנוצרה משימה חדשה במקומן.
+let _bcPauseOnStart=[];
 // ─── חסימת סריקה כפולה של אותו שלב (ברקוד+שלב) ─────────────────
 // חותמת מופע-מוצר = תאריך הקמת המוצר (הרשומה העדכנית ביותר ללקוח+מוצר).
 // הזמנה חדשה נכנסת כרשומת מוצר חדשה עם תאריך חדש ⇒ אינה נחסמת מול היסטוריה ישנה.
@@ -4643,7 +4646,13 @@ async function bcStartBatch(){
     }else if(!created&&_bcCloseOnStart.length){
       showToast('⚠ לא נפתחה משימה חדשה — המשימה הקודמת נשארה פעילה','var(--amber-txt)',7000);
     }
-    _bcCloseOnStart=[];
+    // ⏸ משימה זמנית — השהיה במקום סגירה. onlyIds חובה: בלי זה גם המשימה שזה עתה
+    // נוצרה נכנסת לסינון "כל מה שלא מושהה של העובד" ומושהית מיד.
+    if(created>0&&_bcPauseOnStart.length){
+      const n=await pauseWorkerTasks(u.id,bcStart,_bcPauseOnStart);
+      if(n)showToast(`⏸ ${n} משימות הושהו — לחזרה אליהן סרוק אותן בסורק המשימות`,'var(--amber-txt)',7000);
+    }
+    _bcCloseOnStart=[];_bcPauseOnStart=[];
     _bcBatch=[];renderBcBatchQueue();
     document.getElementById('bc-inp').value='';parseBc('');
     document.getElementById('bc-tasktype').value='';
@@ -4834,8 +4843,12 @@ async function reanchorWorkerTasks(workerId,newOutAt){
   }
   return tasks.length;
 }
-async function pauseWorkerTasks(workerId,pausedAt){
-  const tasks=S.activeTasks.filter(t=>t.workerId===workerId&&!t.paused&&!_isClosedTask(t.id));
+// onlyIds (אופציונלי): להשהות רק את המשימות האלה. חובה כשמשהים בנקודת ההחלפה בסורק —
+// בלעדיו הסינון "כל מה שלא מושהה של העובד" תופס גם את המשימה החדשה שזה עתה נוצרה
+// ומשהה אותה מיד. שני הקוראים הישנים (חתימת יציאה) לא מעבירים כלום ולא מושפעים.
+async function pauseWorkerTasks(workerId,pausedAt,onlyIds){
+  const only=onlyIds?new Set(onlyIds.map(String)):null;
+  const tasks=S.activeTasks.filter(t=>t.workerId===workerId&&!t.paused&&!_isClosedTask(t.id)&&(!only||only.has(String(t.id))));
   for(const t of tasks){
     const addSec=calcTaskDurSec(t.startTime,pausedAt,t.workerId);
     t.paused=true;
@@ -4851,6 +4864,60 @@ async function pauseWorkerTasks(workerId,pausedAt){
   return tasks.length;
 }
 
+// ─── נקודת ההחלפה: משימה זמנית מול משימה חדשה ─────────────────────────────
+// עובדת שנקראת לעבודה אחרת באמצע משימה. עד היום המשימה הפעילה נסגרה **בשקט**
+// להיסטוריה, ומשם סריקה חוזרת נחסמה כ-'כבר בוצע' (stepAlreadyTaken → 'done').
+//   ⏸ זמנית  — המשימה מושהית ונשארת ב-activeTasks. השחרור: סורק המשימות —
+//              בחירת העובד + סריקת התחנה (passStationGate) + הברקוד והשלב.
+//              אז handlePausedTasks מחדש אותה **וסוגר את הזמנית להיסטוריה**.
+//   ✅ חדשה   — ההתנהגות הקיימת: הישנה נסגרת להיסטוריה.
+//   ⇄ במקביל — לא נוגעים. ⚠️ העבודה טורית ולא מקבילה, ולכן נרמול החפיפה מכווץ
+//              את שתיהן יחסית והקטנה מקבלת ~25% פחות. לכן זו האפשרות האחרונה.
+// מוחזרת **כוונה בלבד** — הפעולה מתבצעת ב-applySwapMode רק אחרי שנוצרה משימה חדשה.
+// כל סגירה מוקדמת בין ההחלטה ליצירה מוחקת זמן עבודה בלי עקבה (ايمان 08/08: 92 דק').
+async function askSwapMode(w,activeCurrent){
+  if(!activeCurrent||!activeCurrent.length)return 'close';
+  const names=[...new Set(activeCurrent.map(t=>t.prod+(t.taskType?' · '+t.taskType:'')))].join('\n');
+  const ch=await showConfirm3(
+    LANGS[currentLang].swap_title||'יש משימה פעילה',
+    `${w.name}\n${names}\n\nמה לעשות איתה?`,
+    '⏸ משימה זמנית — השהה וחזור אליה','✅ משימה חדשה — סגור את הישנה','⇄ עבודה במקביל');
+  return ch===0?'pause':ch===2?'parallel':'close';
+}
+// הפעלת הכוונה. נקראת רק אחרי שנוצרה לפחות משימה חדשה אחת.
+async function applySwapMode(mode,workerId,activeCurrent,swapTime){
+  if(!activeCurrent||!activeCurrent.length)return;
+  if(mode==='parallel')return;
+  if(mode==='pause'){
+    // onlyIds חובה — בלעדיו גם המשימה החדשה שזה עתה נוצרה הייתה מושהית מיד
+    const n=await pauseWorkerTasks(workerId,swapTime,activeCurrent.map(t=>t.id));
+    if(n)showToast(`⏸ ${n} משימות הושהו — סרוק אותן שוב בסורק המשימות כדי לחזור אליהן`,'var(--amber-txt)',7000);
+    return;
+  }
+  // ⚠️ **רשימה מפורשת**, לא "כל מה שרץ" — בנקודה הזו המשימה החדשה כבר נוצרה
+  // והיא רצה. סינון לפי עובד היה סוגר גם אותה מיד אחרי שנפתחה.
+  await closeTaskList(activeCurrent,swapTime);
+}
+// סגירת רשימת משימות מפורשת להיסטוריה, מקובצות לפי batchId — אותה מכניקה בדיוק
+// כמו נקודת ההחלפה בסורקים, כולל closeBatchProportional לצביר.
+// ⚠️ הנוסחה כאן זהה לזו שבסורקים (accumulatedSec + calcTaskDurSec) ובמכוון **בלי**
+// _capByAttendance — הוספת תקרה כאן תחתוך משימות רב-יומיות אמיתיות. ראה gotcha התקרה.
+async function closeTaskList(tasks,endTime){
+  const list=(tasks||[]).filter(t=>!_isClosedTask(t.id));
+  if(!list.length)return 0;
+  const batches={};list.forEach(t=>{const bid=t.batchId||t.id;if(!batches[bid])batches[bid]=[];batches[bid].push(t);});
+  for(const bTasks of Object.values(batches)){
+    if(bTasks.length>1)await closeBatchProportional(bTasks,endTime);
+    else{const t=bTasks[0];const done={...t,endTime,duration:(t.accumulatedSec||0)+calcTaskDurSec(t.startTime,endTime,t.workerId)};S.histTasks.unshift(done);S.activeTasks=S.activeTasks.filter(x=>x.id!==t.id);if(S.fbConnected){await fbDel('activeTasks',String(t.id));await fbSet('histTasks',String(t.id),{...done,startTime:done.startTime instanceof Date?done.startTime.toISOString():done.startTime,endTime:endTime.toISOString()});}}
+  }
+  return list.length;
+}
+// סגירת המשימות ה**רצות** של העובד. exceptIds מחריג משימות שאסור לסגור — בשחרור
+// מושהית זו המשימה שזה עתה חודשה, שכבר `paused=false` ולכן הייתה נסגרת מיד אחרי החידוש.
+async function closeRunningTasks(workerId,endTime,exceptIds){
+  const skip=exceptIds?new Set(exceptIds.map(String)):null;
+  return closeTaskList(S.activeTasks.filter(t=>t.workerId===workerId&&!t.paused&&!_isClosedTask(t.id)&&(!skip||!skip.has(String(t.id)))),endTime);
+}
 // חידוש משימה מושהית: startTime נדרס לשעת החידוש (כך נמדדת הריצה החדשה), אבל ההתחלה
 // המקורית נשמרת ב-origStart. בלי זה משימה רב-יומית נראית בהיסטוריה כאילו התחילה ביום
 // הסגירה, ו-_capByAttendance מחשב את התקרה לפי יום החידוש בלבד — כלומר חותך את כל מה
@@ -4902,6 +4969,9 @@ function _alertStaleTasks(tasks){
 }
 
 // בדיקת משימות מושהות כשפותחים משימה חדשה לעובד
+// newBarcodes: מחרוזות ברקוד, או {raw,taskType} כדי להפריד בין כמה מושהות על **אותו
+// ברקוד בשלבים שונים**. שחרור מושהית = בחירת העובד + התחנה (passStationGate) + הברקוד
+// והשלב — ולכן ההתאמה חייבת לרדת לרזולוציית השלב, אחרת הקבוצה הלא-נכונה מתחדשת.
 async function handlePausedTasks(workerId,newBarcodes){
   const T=LANGS[currentLang];
   const paused=S.activeTasks.filter(t=>t.workerId===workerId&&t.paused);
@@ -4909,8 +4979,21 @@ async function handlePausedTasks(workerId,newBarcodes){
   // קבץ לפי batchId
   const batches={};
   paused.forEach(t=>{const bid=t.batchId||t.id;if(!batches[bid])batches[bid]=[];batches[bid].push(t);});
+  // התאמה דו-שלבית: קודם ברקוד+שלב; אם אף קבוצה לא נתפסה כך — ברקוד בלבד, כדי לא לשנות
+  // את ההתנהגות הקיימת כשסורקים שלב **חדש** על מוצר שכבר מושהה (אז זו באמת משימה חדשה).
+  const _raw=x=>typeof x==='string'?x:((x&&x.raw)||'');
+  const _tt=x=>typeof x==='string'?null:((x&&x.taskType)||'');
+  const hitStep=new Set(),hitBc=new Set();
+  for(const [bid,bTasks] of Object.entries(batches))
+    for(const nb of (newBarcodes||[])){
+      const raw=_raw(nb),tt=_tt(nb);
+      if(!bTasks.some(t=>taskBc(t)===raw))continue;
+      hitBc.add(bid);
+      if(tt!==null&&bTasks.some(t=>taskBc(t)===raw&&(t.taskType||'')===tt))hitStep.add(bid);
+    }
+  const matched=hitStep.size?hitStep:hitBc;
   for(const [bid,bTasks] of Object.entries(batches)){
-    const sameBC=newBarcodes.some(nb=>bTasks.find(t=>taskBc(t)===nb));
+    const sameBC=matched.has(bid);
     if(sameBC){
       // אותו ברקוד — המשך
       const resumed=await showConfirm(T.resume_title,
@@ -4920,15 +5003,21 @@ async function handlePausedTasks(workerId,newBarcodes){
       if(resumed){
         // חידוש — עדכן startTime לעכשיו
         const now=srvNow();
+        let okCount=0;
         for(const t of bTasks){
           _resumeTask(t,now);
           if(S.fbConnected){
             const ok=await fbUpdateOnly('activeTasks',String(t.id),{...t,startTime:now.toISOString()});
-            if(!ok)S.activeTasks=S.activeTasks.filter(x=>x.id!==t.id);
-          }
+            if(!ok)S.activeTasks=S.activeTasks.filter(x=>x.id!==t.id);else okCount++;
+          }else okCount++;
         }
+        // המשימה הזמנית נסגרת להיסטוריה — חזרה למושהית פירושה שהזמנית הסתיימה.
+        // ⚠️ קודם מחדשים ורק אז סוגרים: אם החידוש נכשל (המשימה נסגרה במכשיר אחר),
+        // סגירת הזמנית הייתה משאירה את העובדת בלי שום משימה פתוחה — הלקח של ايمان 08/08.
+        // ⚠️ המשימות שחודשו מוחרגות מהסגירה, אחרת הן נסגרות מיד אחרי שחודשו.
+        const closed=okCount?await closeRunningTasks(workerId,now,bTasks.map(t=>t.id)):0;
         saveLS();renderTasks();
-        showToast('▶ המשימה חודשה');
+        showToast(closed?`▶ המשימה חודשה · ${closed} זמניות נסגרו`:'▶ המשימה חודשה');
         return false; // לא לפתוח חדשה
       }else{
         // חדשה — סגור את המושהות
@@ -5180,18 +5269,23 @@ async function submitBc(){
   if(otherSame&&!await showConfirm(T.cfm_join_title||'הצטרפות למשימה',T.cfm_join_msg+otherSame.workerName+(otherSame.taskType?' ('+otherSame.taskType+')':'')+T.cfm_join_msg2,T.cfm_join_ok||'הצטרף',T.cancel||'ביטול'))return;
   // משימה פעילה קיימת — לסגור את כולן או לעבוד במקביל. נשאל רק בסריקה הראשונה של הסל (ההחלטה תקפה לכולו)
   if(!_bcBatch.length){
-    _bcCloseOnStart=[]; // סל חדש — כוונת סגירה מסבב קודם שננטש לא נגררת לכאן
-    const existTasks=S.activeTasks.filter(t=>t.workerId===u.id);
+    _bcCloseOnStart=[];_bcPauseOnStart=[]; // סל חדש — כוונה מסבב קודם שננטש לא נגררת לכאן
+    // ⚠️ מושהיות מוחרגות. שחרור מושהית עובר **בסורק המשימות** (עובד + תחנה + ברקוד
+    // ושלב → handlePausedTasks), ולא בסורק האישי. בלי הסינון הזה משימה שהושהתה כ-⏸
+    // זמנית הייתה מוצגת כאן כ"פעילה" ונסגרת להיסטוריה בסריקה הבאה של העובדת עצמה.
+    const existTasks=S.activeTasks.filter(t=>t.workerId===u.id&&!t.paused);
     if(existTasks.length>0){
       const prev=existTasks[0];
       const msg=existTasks.length>1?existTasks.length+' משימות פעילות — '+existTasks.map(t=>t.prod).join(', ')+T.cfm_existing_msg:'מוצר '+prev.prod+T.cfm_existing_msg;
-      const parallel=await showConfirm(T.cfm_existing_title||'משימה קיימת',msg,T.cfm_parallel||'עבודה במקביל',T.cfm_close_old||'סגור ישנה + התחל חדשה');
+      const _sm=await askSwapMode({name:u.name},existTasks);
+      const parallel=_sm==='parallel';
+      if(_sm==='pause')_bcPauseOnStart=existTasks.map(t=>String(t.id));
       // ⚠️ לא סוגרים כאן. עד ליצירה בפועל (bcStartBatch) יש שלוש יציאות — "כלום לא נוסף",
       // "➕ סרוק עוד", והשערים שבתוך bcStartBatch — ומעליהן רענון מבאנר העדכון. סגירה מוקדמת
       // בכל אחת מהן משאירה את העובד בלי שום משימה פתוחה והזמן נמחק בלי עקבה (ايمان 08/08:
       // 92 דק'). ⚠️ _bcBatch אינו נשמר ל-localStorage — רענון מוחק את הסל, וסגירה מוקדמת
       // הייתה מוחקת איתו גם את המשימה שרצה. לכן נשמרת כוונה בלבד.
-      if(!parallel)_bcCloseOnStart=existTasks.map(t=>String(t.id));
+      if(_sm==='close')_bcCloseOnStart=existTasks.map(t=>String(t.id));
     }
   }
   // הגבלת סריקה לאחראי/עובד/עוזר (מנהל — ללא הגבלה): עד 2 שלבים לברקוד ועד 2 ברקודים פעילים (כולל הסל)
@@ -5200,8 +5294,11 @@ async function submitBc(){
     if(bcUseSteps&&nonQuickSteps.length>2){showToast(T.lim_steps||'⚠ ניתן לבחור עד 2 שלבים לכל ברקוד','var(--red-txt)');return;}
     // ברקודים שכל משימותיהם הפעילות הן שלבי ⚡ מהיר אינם נספרים; סריקה כולה-מהירה לא נחסמת
     const addingNonQuick=bcUseSteps?nonQuickSteps.length>0:true;
+    // ⚠️ מושהית אינה "ברקוד פעיל". בלי הסינון הזה עובדת שהשהתה שתי משימות (⏸ זמנית)
+    // נחסמת מלסרוק בכלל — כלומר גם מלהתחיל את הזמנית שבשבילה השהתה. זה היה הופך
+    // את ⏸ למלכודת: הודעת "עד 2 ברקודים" בלי שום רמז לסיבה.
     const nonQuickBc=new Set([
-      ...S.activeTasks.filter(t=>t.workerId===u.id&&!isQuickStep(t.cust,t.prod,t.taskType)).map(t=>taskBc(t)),
+      ...S.activeTasks.filter(t=>t.workerId===u.id&&!t.paused&&!isQuickStep(t.cust,t.prod,t.taskType)).map(t=>taskBc(t)),
       ..._bcBatch.filter(b=>!isQuickStep(b.cust,b.prod,b.taskType)).map(b=>b.raw)
     ]);
     if(addingNonQuick&&!nonQuickBc.has(raw)&&nonQuickBc.size>=2){showToast(T.lim_bc||'⚠ ניתן לסרוק עד 2 ברקודים','var(--red-txt)');return;}
@@ -7820,8 +7917,8 @@ async function tsStartTask(){
     if(_sk.length){showToast(T.scan_not_added+' '+_sk.join(' · '),'var(--red-txt)',7000);if(!_tsBatch.length)return;}
   }
   if(!_tsBatch.length){showToast(T.err_scan_one||'⚠ סרוק לפחות ברקוד אחד','var(--red-txt)');return;}
-  // בדיקת משימות מושהות
-  const newBcs=_tsBatch.map(b=>b.raw);
+  // בדיקת משימות מושהות — עם השלב, כדי להפריד בין כמה מושהות על אותו ברקוד
+  const newBcs=_tsBatch.map(b=>({raw:b.raw,taskType:b.taskType||''}));
   const canProceed=await handlePausedTasks(w.id,newBcs);
   if(!canProceed){_tsBatch=[];renderTsBatchQueue();saveLS();return;}
   // ⚠️ קודם יוצרים, ורק אז סוגרים. הסגירה נכתבת ל-Firestore באופן סופי, וכל יציאה מהלולאה
@@ -7831,6 +7928,7 @@ async function tsStartTask(){
   // תוצאת לוואי מכוונת: סריקה חוזרת של אותו ברקוד+שלב נחסמת כפילות ⇒ created===0 ⇒
   // המשימה הקיימת ממשיכה לרוץ במקום להיסגר לריק.
   const activeCurrent=S.activeTasks.filter(t=>t.workerId===w.id&&!t.paused);
+  const swapMode=await askSwapMode(w,activeCurrent); // ⏸ זמנית / ✅ חדשה / ⇄ במקביל — כוונה בלבד
   const swapTime=srvNow(); // רגע אחד לסגירה ולפתיחה — בלי חפיפה ביניהן
   try{
     const batchId=_tsBatch.length>1?genBatchId():null;
@@ -7853,15 +7951,8 @@ async function tsStartTask(){
       if(w.pushPrefs?.task_assigned!==false)sendPushToWorker(w.id,'📋 משימה חדשה',`${task.prod}${task.taskType?' · '+task.taskType:''} · ${task.qty} יח'`).catch(()=>{});
       await autoStampStage(b.cust,b.prod,b.taskDept||effDept(w)); // עדכון אוטומטי של שלב הייצור
     }
-    // סגירת המשימות הקודמות — רק עכשיו, כשידוע שיש משימה חדשה שתחליף אותן
-    if(created>0&&activeCurrent.length>0){
-      const endTime=swapTime;
-      const batches={};activeCurrent.forEach(t=>{const bid=t.batchId||t.id;if(!batches[bid])batches[bid]=[];batches[bid].push(t);});
-      for(const bTasks of Object.values(batches)){
-        if(bTasks.length>1)await closeBatchProportional(bTasks,endTime);
-        else{const t=bTasks[0];const done={...t,endTime,duration:(t.accumulatedSec||0)+calcTaskDurSec(t.startTime,endTime,t.workerId)};S.histTasks.unshift(done);S.activeTasks=S.activeTasks.filter(x=>x.id!==t.id);if(S.fbConnected){await fbDel('activeTasks',String(t.id));await fbSet('histTasks',String(t.id),{...done,startTime:done.startTime instanceof Date?done.startTime.toISOString():done.startTime,endTime:endTime.toISOString()});}}
-      }
-    }
+    // טיפול במשימות הקודמות — רק עכשיו, כשידוע שיש משימה חדשה שתחליף אותן
+    if(created>0&&activeCurrent.length>0)await applySwapMode(swapMode,w.id,activeCurrent,swapTime);
     if(tsDupSkip.length)showToast((T.scan_not_added||'לא נוסף')+' '+tsDupSkip.join(' · '),'var(--red-txt)',7000);
     if(created>0)showToast('✅ '+created+' משימות התחילו עבור '+w.name);
     else if(activeCurrent.length)showToast('⚠ לא נפתחה משימה חדשה — המשימה הקודמת נשארה פעילה','var(--amber-txt)',7000);
@@ -8145,12 +8236,14 @@ async function mgrStartTask(){
     if(_sk.length){showToast(T.scan_not_added+' '+_sk.join(' · '),'var(--red-txt)',7000);if(!_mgrBatch.length)return;}
   }
   if(!_mgrBatch.length){showToast(T.err_scan_one||'⚠ סרוק לפחות ברקוד אחד','var(--red-txt)');return;}
-  const newBcs=_mgrBatch.map(b=>b.raw);
+  // עם השלב, כדי להפריד בין כמה מושהות על אותו ברקוד
+  const newBcs=_mgrBatch.map(b=>({raw:b.raw,taskType:b.taskType||''}));
   const canProceed=await handlePausedTasks(w.id,newBcs);
   if(!canProceed){_mgrBatch=[];renderMgrBatchQueue();saveLS();return;}
   // ⚠️ קודם יוצרים, ורק אז סוגרים — ראה ההסבר המלא ב-tsStartTask. סגירה מוקדמת + יציאה
   // מהלולאה (רענון/כפילות בשרת/claimTaskGuard) = העובדת בלי משימה פתוחה והזמן נמחק.
   const activeCurrent=S.activeTasks.filter(t=>t.workerId===empId&&!t.paused);
+  const swapMode=await askSwapMode(w,activeCurrent); // ⏸ זמנית / ✅ חדשה / ⇄ במקביל — כוונה בלבד
   const swapTime=srvNow(); // רגע אחד לסגירה ולפתיחה — בלי חפיפה ביניהן
   const batchId=_mgrBatch.length>1?genBatchId():null;
   const startTime=swapTime;
@@ -8170,15 +8263,8 @@ async function mgrStartTask(){
     tgTask(newTask,true);
     await autoStampStage(b.cust,b.prod,b.taskDept||effDept(w)); // עדכון אוטומטי של שלב הייצור
   }
-  // סגירת המשימות הקודמות — רק עכשיו, כשידוע שיש משימה חדשה שתחליף אותן
-  if(mgrCreated>0&&activeCurrent.length>0){
-    const endTime=swapTime;
-    const batches={};activeCurrent.forEach(t=>{const bid=t.batchId||t.id;if(!batches[bid])batches[bid]=[];batches[bid].push(t);});
-    for(const bTasks of Object.values(batches)){
-      if(bTasks.length>1)await closeBatchProportional(bTasks,endTime);
-      else{const t=bTasks[0];const done={...t,endTime,duration:(t.accumulatedSec||0)+calcTaskDurSec(t.startTime,endTime,t.workerId)};S.histTasks.unshift(done);S.activeTasks=S.activeTasks.filter(x=>x.id!==t.id);if(S.fbConnected){await fbDel('activeTasks',String(t.id));await fbSet('histTasks',String(t.id),{...done,startTime:done.startTime instanceof Date?done.startTime.toISOString():done.startTime,endTime:endTime.toISOString()});}}
-    }
-  }
+  // טיפול במשימות הקודמות — רק עכשיו, כשידוע שיש משימה חדשה שתחליף אותן
+  if(mgrCreated>0&&activeCurrent.length>0)await applySwapMode(swapMode,empId,activeCurrent,swapTime);
   if(mgrDupSkip.length)showToast((T.scan_not_added||'לא נוסף')+' '+mgrDupSkip.join(' · '),'var(--red-txt)',7000);
   if(mgrCreated>0)showToast('✅ '+mgrCreated+' משימות התחילו עבור '+w.name);
   else if(activeCurrent.length)showToast('⚠ לא נפתחה משימה חדשה — המשימה הקודמת נשארה פעילה','var(--amber-txt)',7000);
