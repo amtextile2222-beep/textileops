@@ -3941,6 +3941,12 @@ function renderAll(){
   if(id==='attrep')initAttRep();
   if(id==='alerts'){checkAlerts();renderAlerts();loadWaSettings();loadPushSettings();}
   if(id==='expenses')renderExpenses();
+  // מסך הניהול מצויר רק ברגע הכניסה אליו (goPage) ולכן נשאר תקוע על העותק שהיה
+  // בזיכרון באותו רגע. זה נראה כמו "הכול התאפס" — תחנות, שלב ייצור ורישום פנים
+  // נעלמים מהמסך בזמן שב-Firestore הכול שלם. רינדור ישן, לא נזק לנתונים.
+  // הדילוג בזמן הקלדה חיוני: renderAdmin דורס את adm-depts, ובתוכו שדה "תחנה חדשה",
+  // ו-renderAll נורה בכל חתימת כניסה/יציאה — בלי זה השדה היה מתאפס תוך כדי כתיבה.
+  if(id==='admin'&&!document.getElementById('page-admin')?.contains(document.activeElement))renderAdmin();
   if(typeof _kioskOpen!=='undefined'&&_kioskOpen)renderKiosk(); // מסך התצוגה מתעדכן בזמן אמת עם כל שינוי נתונים
 }
 
