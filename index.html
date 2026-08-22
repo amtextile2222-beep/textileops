@@ -2849,6 +2849,7 @@ async function initFb(){
   // השחזור רץ ברגע ש-Firebase מוכן — לפני הכניסה האוטומטית ולפני שהעובדת
   // הספיקה להקליד. אם אין session הוא יוצא מיד ולא עושה כלום.
   _restoreSession();
+  _watchAuthLoss();
 }
 
 // listeners של נתונים — רק אחרי כניסה מאומתת (יש טוקן עם role)
@@ -3573,6 +3574,30 @@ async function _restoreSession(){
   // אחרי חסימת שער לא מפעילים כניסה אוטומטית — היא תיפול על אותו שער ותדרוס
   // את ההודעה שמסבירה לעובדת למה היא בחוץ.
   if(code==='no-session'||code==='network')_startAutoLogin();
+}
+// ─── טאב שאיבד את ה-session מגלה זאת מיד ─────────────────────────────
+// Firebase שומר session אחד לכל אתר, משותף לכל הטאבים באותו מכשיר. לחיצה על
+// ↩ יציאה בטאב אחד — או חתימת יציאה — מוחקת אותו לכולם. בלי המאזין הזה הטאב
+// השני נשאר עם ממשק מלא ובלי טוקן: נראה תקין לגמרי, וכל כתיבה שלו נדחית
+// ב-Missing or insufficient permissions. זה בדיוק מה שקרה ל-محمد 22/08 —
+// הוא לחץ خروج בטאב ישן, וה-PWA שלו הפסיק לשמור בלי שום סימן על המסך.
+let _authWatchOn=false;
+function _watchAuthLoss(){
+  if(_authWatchOn||!window._fb||!window._fbApp)return;
+  _authWatchOn=true;
+  const{getAuth,onAuthStateChanged}=window._fb;
+  const auth=getAuth(window._fbApp);
+  onAuthStateChanged(auth,u=>{
+    if(u||!S.user||_restoreBusy)return;
+    // המתנה קצרה: החלפת טוקן בשחזור עוברת רגע דרך null, וזו אינה יציאה
+    setTimeout(()=>{
+      if(auth.currentUser||!S.user||_restoreBusy)return;
+      _restoreDone=true;              // יציאה מכוונת — לא לנסות לשחזר אחריה
+      doLogout();
+      const el=document.getElementById('l-err');
+      if(el)el.textContent='⚠ החיבור נסגר בחלון אחר — נא להיכנס מחדש';
+    },1500);
+  });
 }
 // סיום כניסה מוצלחת — משותף לסיסמה/פנים/חירום
 function finishLogin(w,autoPunch){
@@ -6766,8 +6791,13 @@ async function initFCM(){
     const messaging=getMessaging(window._fbApp);
     const token=await getToken(messaging,{vapidKey,serviceWorkerRegistration:swReg});
     if(token){
-      // שמור טוקן עם מפתח ייחודי לדפדפן זה
-      const deviceKey='dev_'+btoa(token.slice(-16)).replace(/[^a-zA-Z0-9]/g,'').slice(0,12);
+      // מפתח לפי **עובד + מזהה מכשיר קבוע**, לא לפי הטוקן.
+      // FCM מחליף טוקנים מעצמו מדי כמה ימים, ומפתח שנגזר מהטוקן יצר רשומה
+      // חדשה בכל החלפה במקום לדרוס — 35 רשומות הצטברו על שם אדם אחד, וכל
+      // התראה נשלחה שוב ושוב לאותו אדם. txops_device_uuid לא משתנה.
+      const _devUuid=await getDeviceId();
+      const deviceKey='dev_'+String(S.user?.id||'anon').replace(/[^a-zA-Z0-9]/g,'')+'_'+
+        String(_devUuid||token.slice(-12)).replace(/[^a-zA-Z0-9]/g,'').slice(-10);
       const tokens=(pushSnap.tokens||{});
       const deviceName=S.user?.name||deviceKey;
       const isMobile=/iPhone|iPad|Android/i.test(navigator.userAgent);
@@ -6837,12 +6867,15 @@ async function enableMyNotifications(){
 function tgPunch(name,dept,isIn,time,workerId){
   const ts=pad2(time.getHours())+':'+pad2(time.getMinutes());
   const title=isIn?'✅ כניסה לעבודה':'🚪 יציאה מהעבודה';
+  // הטלגרם נשאר בעברית (המנהל קורא אותו); ההתראה לנייד דו-לשונית —
+  // רוב האחראים והעובדים קוראים ערבית, והכותרות היו קשיחות בעברית בלבד.
+  const pTitle=isIn?'✅ כניסה לעבודה · تسجيل حضور':'🚪 יציאה מהעבודה · تسجيل انصراف';
   sendTelegram(title+'\n👤 עובד: '+name+'\n🏭 מחלקה: '+dept+'\n🕐 שעה: '+ts).catch(()=>{});
-  sendPush(title,name+' · '+dept+' · '+ts, isIn?'punch_in':'punch_out').catch(()=>{});
+  sendPush(pTitle,name+' · '+dept+' · '+ts, isIn?'punch_in':'punch_out').catch(()=>{});
   // התראה אישית לעובד על הפעילות שלו עצמו (רק אם המנהל הפעיל לו במפורש)
   const wk=workerId?S.workers.find(x=>x.id===workerId):null;
   const pk=isIn?'own_checkin':'own_checkout';
-  if(wk&&wk.pushPrefs&&wk.pushPrefs[pk]===true)sendPushToWorker(workerId,title,dept+' · '+ts).catch(()=>{});
+  if(wk&&wk.pushPrefs&&wk.pushPrefs[pk]===true)sendPushToWorker(workerId,pTitle,dept+' · '+ts).catch(()=>{});
 }
 function tgTask(task,isStart,endTime){
   const custName=(S.customerNames&&S.customerNames[task.cust])||task.cust;
@@ -6854,7 +6887,8 @@ function tgTask(task,isStart,endTime){
   msg+='\n🕐 שעה: '+ts;
   if(!isStart&&endTime){const dur=Math.round((endTime-st)/60000);msg+='\n⏱ משך: '+dur+' דק\'';}
   sendTelegram(msg).catch(()=>{});
-  const title=isStart?'🔧 התחלת משימה':'✅ סיום משימה';
+  // דו-לשוני: אותה התראה נשלחת למנהל (עברית) ולאחראים (ערבית) כאחד
+  const title=isStart?'🔧 התחלת משימה · بدء مهمة':'✅ סיום משימה · إنهاء مهمة';
   const pushBody=task.workerName+' · '+task.prod+(task.taskType?' · '+task.taskType:'')+' · '+ts;
   sendPush(title,pushBody,isStart?'task_start':'task_end').catch(()=>{});
   // התראה אישית לעובד על המשימה שלו עצמו (רק אם המנהל הפעיל לו במפורש)
