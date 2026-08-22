@@ -3608,6 +3608,9 @@ function finishLogin(w,autoPunch){
     saveLS();
   }
   startDataListeners();
+  // מדידת ריבוי טאבים — 9 שנ' כדי שהדופק הראשון של הטאב הזה (4 שנ') כבר ייכתב.
+  // כאן ולא ב-tabBeat: זו הנקודה שבה בוודאות יש S.user, והיא משותפת לכניסה ולשחזור.
+  setTimeout(()=>{_checkMultiTab();},9000);
   listenWorkerMessages();
   listenMgrInbox();
   loadAIUrl();
@@ -12422,6 +12425,69 @@ async function tabBeat(force){
 }
 setInterval(()=>{tabBeat(false);},30*1000);
 setTimeout(()=>tabBeat(true),4000);
+
+// ─── מדידה זמנית (22/08/2026): התראת טלגרם כשנפתח טאב שני לאותו עובד ──────
+// 🛑 **מדידה בלבד — לא חוסמת, לא משתלטת, לא נוגעת בשום נתון.** הוחלט לאסוף
+// כמה ימי נתונים לפני שמחליטים אם בכלל צריך אכיפה. להסרה: למחוק את הפונקציה
+// ואת הקריאה היחידה אליה ב-finishLogin.
+//
+// ⚠️ למה זה לא בדיקה חד-פעמית פשוטה: **טאב שנהרג משאיר רשומה שנראית חיה.**
+// pagehide הוא best-effort, ו-iOS/אנדרואיד הורגים טאבים ברקע — עד 5 פעמים
+// ביום לאותו עובד (זו הסיבה שנבנה _restoreSession). בדיקה תמימה הייתה מדווחת
+// על כל הריגה כאילו נפתח טאב שני, והמדידה הייתה חסרת ערך.
+// לכן: קוראים פעמיים ומסווגים לפי האם הדופק **התקדם** בין הקריאות.
+//   🟢 חי ומדווח   — lastSeen זז ⇒ טאב פתוח באמת
+//   🟡 לא ודאי     — לא זז, אבל צעיר מ-11 דק' ⇒ או גופה שלא נסגרה, או טאב
+//                    ברקע (TAB_BEAT_HIDDEN_MS=10 דק') שפשוט טרם דיווח
+// מתריע **הטאב החדש ביותר בלבד** — אחרת שני הטאבים היו מתריעים על אותו אירוע.
+// פעם אחת לכל טאב: הדגל ב-sessionStorage, ששורד רענון ⇒ רענון אינו אירוע חדש.
+// מוחרגים: מסך התצוגה (kiosk=1 רץ כטאב נפרד כל היום) ומנהל (פותח טאבים כשגרה).
+const MT_RECHECK_MS=3.5*60*1000;  // חלון אימות — טאב גלוי מדווח כל 2 דק'
+const MT_MAYBE_MS=11*60*1000;     // מעבר לזה גם טאב ברקע כבר היה מדווח
+async function _checkMultiTab(){
+  try{
+    if(!db||!S.fbConnected||!S.user)return;
+    if(S.user.role==='manager')return;
+    if(/[?&#]kiosk=1\b/.test(location.href))return;
+    if(sessionStorage.getItem('txops_multitab_sent'))return;
+    const{collection,getDocs}=window._fb;
+    const mine=tabId(),wid=S.user.id;
+    const read=async()=>{
+      const snap=await getDocs(collection(db,'tabSessions'));
+      const now=srvNow().getTime();
+      return snap.docs.map(d=>d.data())
+        .filter(r=>r.workerId===wid&&r.tabId!==mine&&!r.kiosk&&now-(r.lastSeen||0)<MT_MAYBE_MS);
+    };
+    const first=await read();
+    if(!first.length)return;
+    const seen={};first.forEach(r=>{seen[r.tabId]=r.lastSeen||0;});
+    // רק החדש ביותר מתריע. שוויון ב-openedAt (נדיר) נשבר לפי tabId.
+    if(first.some(r=>(r.openedAt||0)>_tabOpenedAt||((r.openedAt||0)===_tabOpenedAt&&String(r.tabId)>mine)))return;
+    await new Promise(res=>setTimeout(res,MT_RECHECK_MS));
+    if(!S.user||S.user.id!==wid)return; // יצא/התחלף בינתיים
+    const second=await read();
+    if(!second.length)return;
+    const now=srvNow().getTime();
+    const live=second.filter(r=>(r.lastSeen||0)>(seen[r.tabId]||0));
+    const maybe=second.filter(r=>!((r.lastSeen||0)>(seen[r.tabId]||0)));
+    if(!live.length&&!maybe.length)return;
+    sessionStorage.setItem('txops_multitab_sent','1');
+    const line=r=>{
+      const ago=Math.round((now-(r.lastSeen||0))/60000);
+      const up=Math.round((now-(r.openedAt||now))/60000);
+      return '   • '+(r.device||'?')+' — דופק לפני '+(ago<1?"פחות מדקה":ago+" דק'")
+        +' · פתוח '+(up<1?"פחות מדקה":up+" דק'")+' · מחזיק '+(r.held||0)+' משימות'
+        +(r.oldHeld?' ⚠ '+r.oldHeld+' נשכחו':'');
+    };
+    await sendTelegram(
+      '📑 TextileOps — יותר מטאב אחד לאותו עובד\n'+
+      '👤 '+(S.user.name||'?')+' · '+(S.user.role||'')+'\n'+
+      '🆕 נפתח עכשיו: '+_tabDevice()+'\n'+
+      (live.length?'\n🟢 פתוחים באמת (הדופק התקדם) — '+live.length+':\n'+live.map(line).join('\n'):'')+
+      (maybe.length?'\n🟡 לא ודאי (ייתכן טאב שנהרג ולא נסגר) — '+maybe.length+':\n'+maybe.map(line).join('\n'):'')+
+      '\n\nמדידה בלבד — שום דבר לא נחסם.');
+  }catch(e){}
+}
 document.addEventListener('visibilitychange',()=>{if(!document.hidden)tabBeat(true);});
 // סגירת טאב — ניסיון מחיקה מיידי כדי שהרשימה לא תתמלא ברוחות. best-effort בלבד:
 // הדפדפן לא מחכה לבקשת רשת בסגירה. הסינון לפי lastSeen הוא הרשת הבטוחה.
