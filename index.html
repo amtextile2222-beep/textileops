@@ -1616,7 +1616,6 @@ const LANGS={
     cfm_join_ok:'הצטרף',
     cfm_existing_title:'משימה קיימת',
     cfm_existing_msg:' פעיל\nבחר פעולה:',
-    cfm_parallel:'עבודה במקביל',
     cfm_close_old:'סגור ישנה + התחל חדשה',
     cfm_worker_not_in:'⚠ העובד לא נמצא בעבודה — וודא שחתם כניסה',
     no_task_worker:'אין משימה פעילה כרגע — המתן עד שהאחראי יפתח לך משימה',
@@ -1862,7 +1861,6 @@ const LANGS={
     cfm_join_ok:'انضم',
     cfm_existing_title:'مهمة قائمة',
     cfm_existing_msg:' نشط\nاختر إجراءً:',
-    cfm_parallel:'عمل متوازٍ',
     cfm_close_old:'إغلاق القديمة + بدء جديدة',
     cfm_worker_not_in:'⚠ العامل غير مسجل حضوراً — تأكد من تسجيل الدخول',
     no_task_worker:'لا توجد مهمة نشطة الآن — انتظر حتى يفتح لك المسؤول مهمة',
@@ -4992,8 +4990,13 @@ async function pauseWorkerTasks(workerId,pausedAt,onlyIds){
 //              בחירת העובד + סריקת התחנה (passStationGate) + הברקוד והשלב.
 //              אז handlePausedTasks מחדש אותה **וסוגר את הזמנית להיסטוריה**.
 //   ✅ חדשה   — ההתנהגות הקיימת: הישנה נסגרת להיסטוריה.
-//   ⇄ במקביל — לא נוגעים. ⚠️ העבודה טורית ולא מקבילה, ולכן נרמול החפיפה מכווץ
-//              את שתיהן יחסית והקטנה מקבלת ~25% פחות. לכן זו האפשרות האחרונה.
+// 🛑 האפשרות השלישית "⇄ עבודה במקביל" **הוסרה 23/08/2026** בהחלטת המשתמש — כסידור, לא
+// כתיקון. שתי משימות פתוחות בו-זמנית רושמות **כל אחת את הזמן המלא**: ندوه 03/08 עבדה
+// 480 דק' ונרשמו 729. זו ספירה כפולה שהמערכת נאלצת לנחש בדיעבד ב-normalizeBatchDurations.
+// מדידה על 4,777 רשומות: מ-09/08 ואילך **אפס שימוש** ב-⇄ (1,526 רשומות, החפיפה היחידה
+// היא 04380 שחודשה מהיסטוריה). להחזרה: כפתור שלישי כאן + ענף 'parallel' ב-applySwapMode.
+// ⚠️ הסל בסורק האישי (batchId משותף) **אינו** ⇄ — closeBatchProportional מחלק שם את
+// הזמן ולא מכפיל אותו, והוא נשאר כמו שהוא.
 // מוחזרת **כוונה בלבד** — הפעולה מתבצעת ב-applySwapMode רק אחרי שנוצרה משימה חדשה.
 // כל סגירה מוקדמת בין ההחלטה ליצירה מוחקת זמן עבודה בלי עקבה (ايمان 08/08: 92 דק').
 async function askSwapMode(w,activeCurrent){
@@ -5002,13 +5005,12 @@ async function askSwapMode(w,activeCurrent){
   const ch=await showConfirm3(
     LANGS[currentLang].swap_title||'יש משימה פעילה',
     `${w.name}\n${names}\n\nמה לעשות איתה?`,
-    '⏸ משימה זמנית — השהה וחזור אליה','✅ משימה חדשה — סגור את הישנה','⇄ עבודה במקביל');
-  return ch===0?'pause':ch===2?'parallel':'close';
+    '⏸ משימה זמנית — השהה וחזור אליה','✅ משימה חדשה — סגור את הישנה');
+  return ch===0?'pause':'close';
 }
 // הפעלת הכוונה. נקראת רק אחרי שנוצרה לפחות משימה חדשה אחת.
 async function applySwapMode(mode,workerId,activeCurrent,swapTime){
   if(!activeCurrent||!activeCurrent.length)return;
-  if(mode==='parallel')return;
   if(mode==='pause'){
     // onlyIds חובה — בלעדיו גם המשימה החדשה שזה עתה נוצרה הייתה מושהית מיד
     const n=await pauseWorkerTasks(workerId,swapTime,activeCurrent.map(t=>t.id));
@@ -5177,7 +5179,10 @@ async function handlePausedTasks(workerId,newBarcodes){
   return true;
 }
 
-// showConfirm עם 3 אפשרויות
+// showConfirm עם 2-3 אפשרויות
+// btn3 אופציונלי — בלעדיו מוצג דיאלוג דו-כפתורי. ⚠️ **לא** להחליף ב-showConfirm הרגיל
+// כשהבחירה הרסנית: ל-showConfirm יש סגירה בלחיצה על הרקע (_cfmClose(false)) ולכאן אין,
+// ולכן אי אפשר "לבטל" בטעות לתוך ענף שסוגר משימה רצה להיסטוריה.
 function showConfirm3(title,msg,btn1,btn2,btn3){
   return new Promise(res=>{
     const ov=document.createElement('div');
@@ -5188,7 +5193,7 @@ function showConfirm3(title,msg,btn1,btn2,btn3){
       <div style="display:flex;flex-direction:column;gap:8px">
         <button class="btn success" onclick="this.closest('div[style*=fixed]').remove();window._c3res(0)">${btn1}</button>
         <button class="btn" onclick="this.closest('div[style*=fixed]').remove();window._c3res(1)">${btn2}</button>
-        <button class="btn" style="opacity:.7" onclick="this.closest('div[style*=fixed]').remove();window._c3res(2)">${btn3}</button>
+        ${btn3?`<button class="btn" style="opacity:.7" onclick="this.closest('div[style*=fixed]').remove();window._c3res(2)">${btn3}</button>`:''}
       </div></div>`;
     window._c3res=res;
     document.body.appendChild(ov);
@@ -5399,7 +5404,6 @@ async function submitBc(){
       const prev=existTasks[0];
       const msg=existTasks.length>1?existTasks.length+' משימות פעילות — '+existTasks.map(t=>t.prod).join(', ')+T.cfm_existing_msg:'מוצר '+prev.prod+T.cfm_existing_msg;
       const _sm=await askSwapMode({name:u.name},existTasks);
-      const parallel=_sm==='parallel';
       if(_sm==='pause')_bcPauseOnStart=existTasks.map(t=>String(t.id));
       // ⚠️ לא סוגרים כאן. עד ליצירה בפועל (bcStartBatch) יש שלוש יציאות — "כלום לא נוסף",
       // "➕ סרוק עוד", והשערים שבתוך bcStartBatch — ומעליהן רענון מבאנר העדכון. סגירה מוקדמת
@@ -8058,7 +8062,7 @@ async function tsStartTask(){
   // תוצאת לוואי מכוונת: סריקה חוזרת של אותו ברקוד+שלב נחסמת כפילות ⇒ created===0 ⇒
   // המשימה הקיימת ממשיכה לרוץ במקום להיסגר לריק.
   const activeCurrent=S.activeTasks.filter(t=>t.workerId===w.id&&!t.paused);
-  const swapMode=await askSwapMode(w,activeCurrent); // ⏸ זמנית / ✅ חדשה / ⇄ במקביל — כוונה בלבד
+  const swapMode=await askSwapMode(w,activeCurrent); // ⏸ זמנית / ✅ חדשה — כוונה בלבד
   const swapTime=srvNow(); // רגע אחד לסגירה ולפתיחה — בלי חפיפה ביניהן
   try{
     const batchId=_tsBatch.length>1?genBatchId():null;
@@ -8373,7 +8377,7 @@ async function mgrStartTask(){
   // ⚠️ קודם יוצרים, ורק אז סוגרים — ראה ההסבר המלא ב-tsStartTask. סגירה מוקדמת + יציאה
   // מהלולאה (רענון/כפילות בשרת/claimTaskGuard) = העובדת בלי משימה פתוחה והזמן נמחק.
   const activeCurrent=S.activeTasks.filter(t=>t.workerId===empId&&!t.paused);
-  const swapMode=await askSwapMode(w,activeCurrent); // ⏸ זמנית / ✅ חדשה / ⇄ במקביל — כוונה בלבד
+  const swapMode=await askSwapMode(w,activeCurrent); // ⏸ זמנית / ✅ חדשה — כוונה בלבד
   const swapTime=srvNow(); // רגע אחד לסגירה ולפתיחה — בלי חפיפה ביניהן
   const batchId=_mgrBatch.length>1?genBatchId():null;
   const startTime=swapTime;
