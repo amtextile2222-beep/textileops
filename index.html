@@ -1223,10 +1223,17 @@ code{background:var(--bg2);border:0.5px solid var(--b);border-radius:4px;padding
       </div>
       <div style="display:grid;grid-template-columns:1fr 1fr;gap:10px;margin-bottom:10px">
         <div class="field" style="margin:0"><label>לקוח (2 ספרות)</label>
-          <input id="bc-gen-cust" maxlength="2" inputmode="numeric" placeholder="01" style="font-size:14px"/></div>
+          <input id="bc-gen-cust" maxlength="2" inputmode="numeric" placeholder="01" style="font-size:14px" oninput="bcSyncOrderSel()"/></div>
         <div class="field" style="margin:0"><label>מוצר/דגם (5 ספרות)</label>
-          <input id="bc-gen-prod" maxlength="5" inputmode="numeric" placeholder="14415" style="font-size:14px"/></div>
+          <input id="bc-gen-prod" maxlength="5" inputmode="numeric" placeholder="14415" style="font-size:14px" oninput="bcSyncOrderSel()"/></div>
       </div>
+      <!-- בורר הזמנה: מוצג רק כשיש כמה רשומות לאותו דגם. בלעדיו המחולל היה מפיק תמיד
+           את מספר ההזמנה של הרשומה החדשה, וערבב 13 ו-16 על אותה הזמנה. -->
+      <div id="bc-gen-order-wrap" style="display:none;margin-bottom:10px">
+        <div style="background:var(--amber-bg);color:var(--amber-txt);font-size:12px;font-weight:700;padding:7px 9px;border-radius:8px;margin-bottom:6px">⚠ יש כמה הזמנות לדגם הזה — בחר לאיזו להפיק ברקודים</div>
+        <select id="bc-gen-order" onchange="bcOrderPicked()" style="width:100%;font-size:13px;padding:8px;border-radius:8px;border:1px solid var(--brd);background:var(--bg);color:var(--txt)"></select>
+      </div>
+      <div id="bc-gen-order-note" style="font-size:12px;color:var(--txt3);margin-bottom:10px"></div>
       <div style="background:var(--amber-bg);border:1px solid var(--amber-txt);border-radius:8px;padding:10px 12px;margin-bottom:12px;display:flex;align-items:center;justify-content:space-between;gap:10px;flex-wrap:wrap">
         <div>
           <div style="font-size:13px;font-weight:700;color:var(--amber-txt)">✂️ ברקוד ספירה / גזירה</div>
@@ -2155,6 +2162,11 @@ function orderNoOf(raw){
   const s=String(raw||'');
   return s.length>=BC_LEN_NEW?(parseInt(s.slice(13,16),10)||0):0;
 }
+// צ'יפ "הזמנה #NNN" לתצוגת מקדימה בשלושת הסורקים. ריק לברקוד ישן — אין מה להציג.
+const bcOrderChip=v=>{
+  const n=orderNoOf(v);
+  return n?`<span class="bc-seg" style="background:var(--green-bg,#dcfce7);color:var(--green-txt,#16a34a);font-weight:700">הזמנה #${String(n).padStart(3,'0')}</span>`:'';
+};
 // חילוץ ברקוד מקריאת מצלמה. ⚠️ הקוד הישן עשה תמיד slice(0,13) — ברקוד 16 ספרות היה
 // נקטם **בשקט** ל-13 ומתפרש כברקוד אחר לגמרי (ספירה כפולה). מעדיפים 16 כשיש 16.
 // '' = לא ברקוד משימה.
@@ -4044,6 +4056,7 @@ function goPage(p){
   if(p==='barcodes'){
     const rows=document.getElementById('bc-gen-rows');
     if(rows&&!rows.children.length)bcAddRow();
+    bcSyncOrderSel(); // הדף לא נכלל ב-renderAll — הבורר מסונכרן בכל פתיחה
     bcFillProductSelect();
     fillDeptSelects();
     renderStationsAdmin();
@@ -5347,12 +5360,12 @@ function parseBc(v){
   el.innerHTML=isTotal
     ?`<div style="display:flex;gap:5px;flex-wrap:wrap;align-items:center;padding:8px;background:var(--bg2);border-radius:var(--r)">
         <span class="bc-seg bc-c">לקוח: ${c||'__'}</span>
-        <span class="bc-seg bc-p">מוצר: ${p.padEnd(5,'_')}</span>
+        <span class="bc-seg bc-p">מוצר: ${p.padEnd(5,'_')}</span>${bcOrderChip(v)}
         <span class="bc-seg" style="background:var(--green-bg,#d1fae5);color:var(--green-txt,#065f46);font-weight:700">📦 כל הכמות${totalQty?' — '+totalQty+' יח׳':''}</span>
       </div>`
     :`<div style="display:flex;gap:5px;flex-wrap:wrap;align-items:center;padding:8px;background:var(--bg2);border-radius:var(--r)">
         <span class="bc-seg bc-c">לקוח: ${c||'__'}</span>
-        <span class="bc-seg bc-p">מוצר: ${p.padEnd(5,'_')}</span>
+        <span class="bc-seg bc-p">מוצר: ${p.padEnd(5,'_')}</span>${bcOrderChip(v)}
         <span class="bc-seg" style="background:var(--amber-bg);color:var(--amber-txt)">מידה: ${sz||'_'}</span>
         <span class="bc-seg bc-q">כמות: ${q.padEnd(3,'_')}</span>
         <span class="bc-seg bc-col">צבע: ${COLORS[col]||col||'__'}</span>
@@ -5395,7 +5408,7 @@ async function submitBc(){
   if(!raw&&_bcBatch.length){await bcStartBatch();return;} // שדה ריק + סל ממתין = התחל את כל הסל
   if(!isBcLen(raw.length)){alert('ברקוד חייב להיות 13 או 16 ספרות');return;}
   if(!S.user){alert('יש להתחבר תחילה');return;}
-  if(isShipBc(raw)){openShipModal(raw.slice(0,2),raw.slice(2,7));document.getElementById('bc-inp').value='';parseBc('');return;} // ברקוד "יצא ללקוח" — לא משימה
+  if(isShipBc(raw)){openShipModal(raw.slice(0,2),raw.slice(2,7),orderNoOf(raw));document.getElementById('bc-inp').value='';parseBc('');return;} // ברקוד "יצא ללקוח" — לא משימה
   const cust=raw.slice(0,2),prod=raw.slice(2,7),size=raw.slice(7,8),col=raw.slice(11,13);
   const isTotal=isTotalBc(raw);
   if(!isTotal&&parseInt(raw.slice(8,11))===0&&productHasDefinedQty(cust,prod)){showToast('⚠ קיים ברקוד עם כמות למוצר זה — השתמש בברקוד הספציפי','var(--red-txt)',6000);return;}
@@ -6353,7 +6366,10 @@ async function buildStepQtyReport(cf,pf){
   const dm=stepDoneMap(hist);
   const cards=prods.map(p=>{
     const steps=(p.workSteps||[]).map(s=>stepName(s)).filter(Boolean);
-    const total=getTotalQty(p.cust,p.prod);
+    // ⚠️ פר-רשומה. getTotalQty מחזיר תמיד את ההזמנה **החדשה** ⇒ כרטיס של הזמנה א' הציג
+    // את הסכום של הזמנה ב', וכשלחדשה אין quantities הוא נפל ל-_bcLastGen — שארית בזיכרון
+    // מהברקוד האחרון שהופק בדפדפן. ככה הוצג "סה״כ 1 יח'" ל-180 יחידות ב-02691 (24/08).
+    const total=_prodQty(p);
     const rows=steps.map(stepNm=>{
       const done=dm[stepDoneKey(p.cust,p.prod,stepNm)]||0;
       const pct=total?Math.min(100,Math.round(done/total*100)):0;
@@ -6365,7 +6381,7 @@ async function buildStepQtyReport(cf,pf){
   if(!document.getElementById('page-reports')?.classList.contains('active'))return; // המשתמש עזב את הדף בזמן הטעינה
   el.innerHTML=cards.map(c=>`
     <div style="margin-bottom:14px">
-      <div style="font-size:13px;font-weight:600;margin-bottom:4px"><span class="bc-seg bc-c">${c.p.cust}</span> <span class="bc-seg bc-p">${c.p.prod}</span> ${esc(c.p.name||'')} <span style="color:var(--txt3);font-weight:400">(סה"כ ${c.total||'?'} יח')</span></div>
+      <div style="font-size:13px;font-weight:600;margin-bottom:4px"><span class="bc-seg bc-c">${c.p.cust}</span> <span class="bc-seg bc-p">${c.p.prod}</span>${(parseInt(c.p.orderNo,10)||0)?` <span class="bc-seg" style="background:var(--green-bg,#dcfce7);color:var(--green-txt,#16a34a);font-weight:700">הזמנה #${String(c.p.orderNo).padStart(3,'0')}</span>`:''} ${esc(c.p.name||'')} <span style="color:var(--txt3);font-weight:400">(סה"כ ${c.total||'?'} יח')</span></div>
       <div class="tbl-wrap"><table>
         <thead><tr><th>שלב</th><th>בוצע</th><th>התקדמות</th></tr></thead>
         <tbody>${c.rows.map(r=>`<tr>
@@ -6527,7 +6543,7 @@ function buildProfitReport(fl){
     const profitPct=pb.price>0?profit/pb.price*100:0;
     // כמות שיצאה בפועל (מברקוד "יצא ללקוח") — לרווח האמיתי של ההזמנה: הכנסה רק על מה שיצא
     const shipped=p.shippedQty!=null?Math.max(0,+p.shippedQty||0):null;
-    const planned=getTotalQty(p.cust,p.prod)||0;
+    const planned=_prodQty(p); // פר-רשומה — אותו באג בדיוק כמו בדוח "כמות שהושלמה לפי שלב"
     blocks.push({p,pb,stepRows,withData,profit,profitPct,shipped,planned,actMinTot});
   }
   if(!blocks.length){el.innerHTML='<div style="color:var(--txt3);font-size:12px;padding:.5rem 0">אין מוצרים מתומחרים עם משימות שהושלמו בטווח הנבחר</div>';return;}
@@ -7187,10 +7203,10 @@ function parseMgrBc(v){
   const isTotal=isTotalBc(v);const totalQty=isTotal?getTotalQty(c,p):0;
   el.innerHTML=isTotal
     ?`<div style="display:flex;gap:5px;flex-wrap:wrap;padding:6px;background:var(--bg2);border-radius:var(--r)">
-        <span class="bc-seg bc-c">לקוח: ${c||'__'}</span><span class="bc-seg bc-p">מוצר: ${p.padEnd(5,'_')}</span>
+        <span class="bc-seg bc-c">לקוח: ${c||'__'}</span><span class="bc-seg bc-p">מוצר: ${p.padEnd(5,'_')}</span>${bcOrderChip(v)}
         <span class="bc-seg" style="background:var(--green-bg,#d1fae5);color:var(--green-txt,#065f46);font-weight:700">📦 כל הכמות${totalQty?' — '+totalQty+' יח׳':''}</span></div>`
     :`<div style="display:flex;gap:5px;flex-wrap:wrap;padding:6px;background:var(--bg2);border-radius:var(--r)">
-        <span class="bc-seg bc-c">לקוח: ${c||'__'}</span><span class="bc-seg bc-p">מוצר: ${p.padEnd(5,'_')}</span>
+        <span class="bc-seg bc-c">לקוח: ${c||'__'}</span><span class="bc-seg bc-p">מוצר: ${p.padEnd(5,'_')}</span>${bcOrderChip(v)}
         <span class="bc-seg" style="background:var(--amber-bg);color:var(--amber-txt)">מידה: ${sz||'_'}</span>
         <span class="bc-seg bc-q">כמות: ${q.padEnd(3,'_')}</span><span class="bc-seg bc-col">צבע: ${COLORS[col]||col||'__'}</span></div>`;
   if(isBcLen(v.length)){
@@ -7905,10 +7921,10 @@ function tsParseBc(v){
   const isTotal=isTotalBc(v);const totalQty=isTotal?getTotalQty(c,p):0;
   el.innerHTML=isTotal
     ?`<div style="display:flex;gap:5px;flex-wrap:wrap;padding:6px;background:var(--bg2);border-radius:var(--r)">
-        <span class="bc-seg bc-c">לקוח: ${c||'__'}</span><span class="bc-seg bc-p">מוצר: ${p.padEnd(5,'_')}</span>
+        <span class="bc-seg bc-c">לקוח: ${c||'__'}</span><span class="bc-seg bc-p">מוצר: ${p.padEnd(5,'_')}</span>${bcOrderChip(v)}
         <span class="bc-seg" style="background:var(--green-bg,#d1fae5);color:var(--green-txt,#065f46);font-weight:700">📦 כל הכמות${totalQty?' — '+totalQty+' יח׳':''}</span></div>`
     :`<div style="display:flex;gap:5px;flex-wrap:wrap;padding:6px;background:var(--bg2);border-radius:var(--r)">
-        <span class="bc-seg bc-c">לקוח: ${c||'__'}</span><span class="bc-seg bc-p">מוצר: ${p.padEnd(5,'_')}</span>
+        <span class="bc-seg bc-c">לקוח: ${c||'__'}</span><span class="bc-seg bc-p">מוצר: ${p.padEnd(5,'_')}</span>${bcOrderChip(v)}
         <span class="bc-seg" style="background:var(--amber-bg);color:var(--amber-txt)">מידה: ${sz||'_'}</span>
         <span class="bc-seg bc-q">כמות: ${q.padEnd(3,'_')}</span><span class="bc-seg bc-col">צבע: ${COLORS[col]||col||'__'}</span></div>`;
   // אם המוצר מוגדר עם שלבי עבודה — הצג checkboxes
@@ -8027,7 +8043,7 @@ function tsAddToBatch(){
   const T=LANGS[currentLang];
   if(!empId){showToast(T.err_sel_worker||'⚠ בחר עובד','var(--red-txt)');return;}
   if(!isBcLen(raw.length)){showToast(T.err_barcode_13||'⚠ ברקוד חייב להיות 13 או 16 ספרות','var(--red-txt)');return;}
-  if(isShipBc(raw)){openShipModal(raw.slice(0,2),raw.slice(2,7));document.getElementById('ts-bc-inp').value='';return;} // ברקוד "יצא ללקוח"
+  if(isShipBc(raw)){openShipModal(raw.slice(0,2),raw.slice(2,7),orderNoOf(raw));document.getElementById('ts-bc-inp').value='';return;} // ברקוד "יצא ללקוח"
   const cust=raw.slice(0,2),prod=raw.slice(2,7),size=raw.slice(7,8),col=raw.slice(11,13);
   const isTotal=isTotalBc(raw);
   const qty=isTotal?getTotalQty(cust,prod):parseInt(raw.slice(8,11))||0;
@@ -8352,7 +8368,7 @@ function mgrAddToBatch(){
   const T=LANGS[currentLang];
   if(!empId){showToast(T.err_sel_worker||'⚠ בחר עובד','var(--red-txt)');return;}
   if(!isBcLen(raw.length)){showToast(T.err_barcode_13||'⚠ ברקוד חייב להיות 13 או 16 ספרות','var(--red-txt)');return;}
-  if(isShipBc(raw)){openShipModal(raw.slice(0,2),raw.slice(2,7));document.getElementById('mgr-bc-inp').value='';parseMgrBc('');return;} // ברקוד "יצא ללקוח"
+  if(isShipBc(raw)){openShipModal(raw.slice(0,2),raw.slice(2,7),orderNoOf(raw));document.getElementById('mgr-bc-inp').value='';parseMgrBc('');return;} // ברקוד "יצא ללקוח"
   const cust=raw.slice(0,2),prod=raw.slice(2,7),size=raw.slice(7,8),col=raw.slice(11,13);
   const isTotal=isTotalBc(raw);const qty=isTotal?getTotalQty(cust,prod):parseInt(raw.slice(8,11))||0;
   const mgrStepsWrap=document.getElementById('mgr-steps-wrap');const mgrUseSteps=mgrStepsWrap&&mgrStepsWrap.style.display!=='none';
@@ -9272,13 +9288,49 @@ function prodMatches(cust,prod){
   return (S.products||[]).filter(p=>p.cust===cust&&p.prod===prod).sort((a,b)=>rank(b)-rank(a));
 }
 function _prodQty(p){return (p.quantities||[]).reduce((s,q)=>s+(parseInt(q.qty)||0),0);}
-// ברקוד "יצא ללקוח" הוא לקוח+מוצר בלבד — הוא לא מבדיל בין שתי הזמנות של אותו מספר דגם.
-// לכן כשיש כמה רשומות המשתמש בוחר; ברירת המחדל היא החדשה ביותר (= בחירת findProd).
+// ─── מספר הזמנה פר-דגם ────────────────────────────────────────
+// המספור הוא **פר לקוח+מוצר** ולא גלובלי: הזמנה חוזרת של אותו דגם היא #002, בלי
+// קשר לכמה הזמנות נפתחו בינתיים לדגמים אחרים. 61 הרשומות הקיימות מוספרו ב-24/08.
+function nextOrderNo(cust,prod){
+  const mx=prodMatches(cust,prod).reduce((m,p)=>Math.max(m,parseInt(p.orderNo,10)||0),0);
+  return Math.min(999,mx+1);
+}
+// החותמת שכל מוצר **חדש** מקבל ברגע ההקמה. bcLen=16 הוא בדיוק הכלל שנקבע:
+// "מוצר שיוקם אחרי ההתקנה מקבל 16 ספרות". רשומות קיימות אין להן את השדה ⇒ 13 לנצח,
+// והמדבקות שתלויות במפעל ממשיכות לעבוד עד שההזמנות האלה ייצאו ללקוח.
+function newProdOrderFields(cust,prod){
+  return{orderNo:nextOrderNo(cust,prod),bcLen:BC_LEN_NEW};
+}
+// ברקוד "יצא ללקוח" בן 13 ספרות הוא לקוח+מוצר בלבד — הוא לא מבדיל בין שתי הזמנות של
+// אותו מספר דגם. ברקוד בן 16 נושא את מספר ההזמנה ומכריע לבד.
+//
+// 🔑 שני העולמות מופרדים, וזה מה שסוגר את תקלת 02691:
+//   • 16 ספרות ⇒ נבחרת הרשומה שה-orderNo שלה תואם. חד-משמעי.
+//   • 13 ספרות ⇒ מדבקה מלפני השינוי, ולכן היא **לא יכולה** להצביע על הזמנה חדשה.
+//     המועמדות מצטמצמות לרשומות בלי bcLen. נשארה אחת — נבחרת אוטומטית.
+//     נשארו כמה — הוותיקה ביותר שטרם יצאה (ההזמנה שיוצאת היא כמעט תמיד הישנה,
+//     וברירת המחדל הישנה "החדשה ביותר" היא בדיוק מה שהפיל את 02691 ב-24/08).
+//   • אם הסינון לא הותיר כלום (המדבקה שרדה את מחיקת הרשומה) — נופלים לכל הרשומות
+//     ולא חוסמים. עדיף בורר עם כל האפשרויות מאשר מסך מת.
 // 02/09366 29/07: הדגל נכתב על רשומת דוגמה בת יחידה אחת במקום על ההזמנה בת 90.
-function openShipModal(cust,prod){
+function openShipModal(cust,prod,orderNo){
   const all=prodMatches(cust,prod);
   if(!all.length){showToast('⚠ מוצר לא נמצא: '+cust+'-'+prod,'var(--red-txt)',5000);return;}
-  const p=all[0];
+  const no=parseInt(orderNo,10)||0;
+  let pick=null;
+  if(no>0){
+    pick=all.find(x=>(parseInt(x.orderNo,10)||0)===no)||null;
+    if(!pick)showToast('⚠ הזמנה #'+String(no).padStart(3,'0')+' לא נמצאה — בחר ידנית','var(--amber-txt)',6000);
+  }else{
+    const legacy=all.filter(x=>x.bcLen!==BC_LEN_NEW);
+    const pool=legacy.length?legacy:all;
+    if(pool.length===1)pick=pool[0];
+    else{
+      const open=pool.filter(x=>x.shippedQty==null);
+      pick=(open.length?open:pool).slice(-1)[0]; // prodMatches ממוין חדש→ישן, לכן האחרון הוא הוותיק
+    }
+  }
+  const p=pick||all[0];
   // getTotalQty כ-fallback: הוא נופל ל-_bcLastGen כשעדיין אין quantities שמורות (ברקודים שזה עתה נוצרו)
   const planned=_prodQty(p)||getTotalQty(cust,prod)||0;
   const cur=p.shippedQty!=null?p.shippedQty:planned;
@@ -9287,7 +9339,8 @@ function openShipModal(cust,prod){
     const d=+x.createdAt?new Date(+x.createdAt):null;
     const ds=d?' · נפתחה '+pad2(d.getDate())+'/'+pad2(d.getMonth()+1):'';
     const sh=x.shippedQty!=null?' · כבר יצא '+x.shippedQty:'';
-    return `<option value="${esc(x.id)}">${esc(x.name||'(בלי שם)')} — ${q} יח'${ds}${sh}</option>`;
+    const on=(parseInt(x.orderNo,10)||0)?'#'+String(x.orderNo).padStart(3,'0')+' ':'';
+    return `<option value="${esc(x.id)}"${x.id===p.id?' selected':''}>${on}${esc(x.name||'(בלי שם)')} — ${q} יח'${ds}${sh}</option>`;
   }).join('');
   const multi=all.length>1;
   closeShipModal();
@@ -9298,7 +9351,9 @@ function openShipModal(cust,prod){
   wrap.innerHTML=`<div style="background:var(--card);border-radius:14px;padding:20px;max-width:360px;width:100%;box-shadow:0 10px 40px rgba(0,0,0,.3)">
     <div style="font-size:16px;font-weight:800;margin-bottom:4px">🚚 יצא ללקוח</div>
     <div style="font-size:13px;color:var(--txt3);margin-bottom:12px"><span class="bc-seg bc-c">לקוח ${esc(cust)}</span> <span class="bc-seg bc-p">${esc(prod)}</span> ${multi?'':esc(p.name||'')}</div>
-    ${multi?`<div style="background:var(--amber-bg);color:var(--amber-txt);font-size:12px;font-weight:700;padding:7px 9px;border-radius:8px;margin-bottom:8px">⚠ יש ${all.length} רשומות למספר הדגם הזה — בחר את ההזמנה שיצאה</div>`:''}
+    ${multi?(no>0&&pick
+      ?`<div style="background:var(--green-bg,#dcfce7);color:var(--green-txt,#16a34a);font-size:12px;font-weight:700;padding:7px 9px;border-radius:8px;margin-bottom:8px">🔢 הברקוד מכיל מספר הזמנה — נבחרה אוטומטית הזמנה #${String(no).padStart(3,'0')}</div>`
+      :`<div style="background:var(--amber-bg);color:var(--amber-txt);font-size:12px;font-weight:700;padding:7px 9px;border-radius:8px;margin-bottom:8px">⚠ יש ${all.length} רשומות למספר הדגם הזה — ודא שזו ההזמנה שיצאה</div>`):''}
     <select id="ship-prod-sel" onchange="shipPickChanged()" style="width:100%;font-size:13px;padding:8px;margin-bottom:10px;border-radius:8px;border:1px solid var(--brd);background:var(--bg);color:var(--txt);${multi?'':'display:none'}">${opts}</select>
     <div style="font-size:12px;color:var(--txt3);margin-bottom:8px">כמות מתוכננת בהזמנה: <b id="ship-planned" style="color:var(--txt)">${planned}</b> יח'</div>
     <label style="font-size:13px;font-weight:600">כמות בפועל שיצאה ללקוח</label>
@@ -10522,10 +10577,75 @@ function printPayroll(){
 let _editProdId=null;
 
 // ─── BARCODE GENERATOR ───────────────────────────────────────
+// 🔢 מספר ההזמנה בברקוד — 3 ספרות בסוף, רק להזמנות שהוקמו אחרי השינוי.
+//
+// הכלל שנקבע: **מוצר שיוקם אחרי ההתקנה מקבל 16 ספרות; כל הקיימים נשארים 13 לנצח.**
+// המימוש הוא השדה bcLen שנחתם ב-saveProduct ברגע ההקמה — לא השוואת שעונים ולא
+// שאילתת היסטוריה. הוא **דביק**: הדפסה חוזרת של מדבקה שנקרעה תפיק תמיד בדיוק
+// את אותה מחרוזת, ולכן אי אפשר לערבב 13 ו-16 על אותה הזמנה.
+const bcSuffixFor=p=>(p&&p.bcLen===BC_LEN_NEW)?String(Math.min(999,Math.max(0,parseInt(p.orderNo,10)||0))).padStart(3,'0'):'';
+// שורת "הזמנה #NNN" על גבי המדבקה עצמה. נגזרת מהקוד המודפס, ולכן נכונה גם במסך וגם
+// בהדפסה וגם ב-PDF. ריקה למדבקה בת 13 — שם אין מספר, וכך היא נשארת זהה למה שהודפס קודם.
+const bcOrderLbl=raw=>{
+  const n=orderNoOf(raw);
+  return n?`<div style="font-size:13px;font-weight:800;color:#059669">🔢 הזמנה #${String(n).padStart(3,'0')}</div>`:'';
+};
+// הרשומה שהמחולל מפיק עבורה. ⚠️ בלי הבורר הזה findProd היה מחזיר תמיד את הרשומה
+// החדשה, והדפסה חוזרת להזמנה ותיקה הייתה מקבלת את המספר של החדשה.
+let _bcGenPid=null;
+function bcGenCustProd(){
+  return{
+    cust:(document.getElementById('bc-gen-cust')?.value||'').replace(/\D/g,'').padStart(2,'0').slice(0,2),
+    prod:(document.getElementById('bc-gen-prod')?.value||'').replace(/\D/g,'').padStart(5,'0').slice(0,5)
+  };
+}
+function bcGenTarget(){
+  const{cust,prod}=bcGenCustProd();
+  const all=prodMatches(cust,prod);
+  if(!all.length)return null;
+  const pid=document.getElementById('bc-gen-order')?.value||_bcGenPid;
+  return all.find(x=>x.id===pid)||all[0];
+}
+// ממלא את בורר ההזמנה ומציג אותו רק כשיש באמת יותר מרשומה אחת.
+function bcSyncOrderSel(){
+  const wrap=document.getElementById('bc-gen-order-wrap');
+  const sel=document.getElementById('bc-gen-order');
+  const note=document.getElementById('bc-gen-order-note');
+  if(!wrap||!sel)return;
+  const{cust,prod}=bcGenCustProd();
+  const all=prodMatches(cust,prod);
+  if(all.length>1){
+    sel.innerHTML=all.map(x=>{
+      const d=+x.createdAt?new Date(+x.createdAt):null;
+      const ds=d?' · נפתחה '+pad2(d.getDate())+'/'+pad2(d.getMonth()+1):'';
+      const sh=x.shippedQty!=null?' · כבר יצא':'';
+      const no=x.bcLen===BC_LEN_NEW?'הזמנה #'+bcSuffixFor(x):'הזמנה ישנה (13 ספרות)';
+      return `<option value="${esc(x.id)}">${no} — ${esc(x.name||'(בלי שם)')} — ${_prodQty(x)} יח'${ds}${sh}</option>`;
+    }).join('');
+    if(_bcGenPid&&all.some(x=>x.id===_bcGenPid))sel.value=_bcGenPid;
+    wrap.style.display='';
+  }else{
+    sel.innerHTML='';wrap.style.display='none';
+  }
+  if(note){
+    const t=bcGenTarget();
+    const{cust:c0,prod:p0}=bcGenCustProd();
+    // ⚠️ בלי רשומת מוצר אין מספר הזמנה, והברקודים ייצאו 13 ספרות בשקט. זו בדיוק
+    // הטעות שתקרה אם מדפיסים מדבקות לפני שמקימים את כרטיס המוצר.
+    note.innerHTML=(!t&&c0!=='00'&&p0!=='00000')
+      ?`<span style="color:var(--red-txt);font-weight:700">⚠ אין כרטיס מוצר ל-${esc(c0)}-${esc(p0)} — הברקודים יהיו 13 ספרות בלי מספר הזמנה. הקם קודם את המוצר.</span>`
+      :!t?''
+      :(bcSuffixFor(t)
+        ?`<span style="color:var(--green-txt,#16a34a);font-weight:700">🔢 הזמנה #${bcSuffixFor(t)} — הברקודים יהיו 16 ספרות</span>`
+        :`ℹ️ הזמנה מלפני השינוי — הברקודים יהיו 13 ספרות, כמו המדבקות שכבר תלויות במפעל`);
+  }
+}
+function bcOrderPicked(){_bcGenPid=document.getElementById('bc-gen-order')?.value||null;bcSyncOrderSel();}
 function bcFromProduct(pid){
   const p=S.products.find(x=>x.id===pid);if(!p)return;
   goPage('barcodes');
   setTimeout(()=>{
+    _bcGenPid=p.id; // המחולל יפיק עבור הרשומה שנבחרה, לא עבור החדשה ביותר
     document.getElementById('bc-gen-cust').value=p.cust||'';
     document.getElementById('bc-gen-prod').value=p.prod||'';
     const container=document.getElementById('bc-gen-rows');
@@ -10547,6 +10667,7 @@ function bcFromProduct(pid){
         }
       });
     } else {bcAddRow();}
+    bcSyncOrderSel();
     bcGenerate();
   },100);
 }
@@ -10569,6 +10690,7 @@ function bcLoadFromProduct(){
   if(!sel||!sel.value){alert('בחר מוצר תחילה');return;}
   const p=S.products.find(x=>x.id===sel.value);
   if(!p){alert('מוצר לא נמצא');return;}
+  _bcGenPid=p.id; // הרשומה שנבחרה מהרשימה היא היעד, גם אם היא לא החדשה ביותר
   document.getElementById('bc-gen-cust').value=p.cust||'';
   document.getElementById('bc-gen-prod').value=p.prod||'';
   const container=document.getElementById('bc-gen-rows');
@@ -10597,6 +10719,7 @@ function bcLoadFromProduct(){
   } else {
     bcAddRow();
   }
+  bcSyncOrderSel();
   alert(`✅ נטען: מוצר ${p.prod} · לקוח ${p.cust}${qty.length?' · '+qty.length+' שורות':''}`);
 }
 function bcAddRow(){
@@ -10620,7 +10743,8 @@ function bcGenerateOpenQty(){
   const cust=(document.getElementById('bc-gen-cust')?.value||'').replace(/\D/g,'').padStart(2,'0').slice(0,2);
   const prod=(document.getElementById('bc-gen-prod')?.value||'').replace(/\D/g,'').padStart(5,'0').slice(0,5);
   if(cust==='00'||prod==='00000'){alert('הזן מספר לקוח ומספר מוצר');return;}
-  const code=cust+prod+'900000';
+  const sfx=bcSuffixFor(bcGenTarget()); // 3 ספרות מספר הזמנה, או '' להזמנה ותיקה
+  const code=cust+prod+'900000'+sfx;
   const out=document.getElementById('bc-gen-output');
   if(!out)return;
   out.innerHTML=`
@@ -10633,6 +10757,7 @@ function bcGenerateOpenQty(){
         <div style="font-size:14px;font-weight:800;color:var(--amber-txt)">✂️ ספירה / גזירה</div>
         <div style="font-size:13px;font-weight:700">לקוח: ${cust}</div>
         <div style="font-size:13px;font-weight:700">מוצר: ${prod}</div>
+        ${bcOrderLbl(code)}
         <div style="font-size:12px;color:var(--txt3)">⏳ כמות פתוחה</div>
         <div style="font-size:11px;color:var(--txt3);margin-top:4px">${code}</div>
       </div>
@@ -10653,6 +10778,7 @@ function bcPrintOpenQty(cust,prod,code){
         <div style="font-size:16px;font-weight:800;color:#d97706">✂️ ספירה / גזירה</div>
         <div style="font-size:14px;font-weight:700">לקוח: ${cust}</div>
         <div style="font-size:14px;font-weight:700">מוצר: ${prod}</div>
+        ${bcOrderLbl(code)}
         <div style="font-size:13px;color:#666">⏳ כמות פתוחה</div>
         <div style="font-size:11px;color:#999;margin-top:4px">${code}</div>
       </div>
@@ -10663,7 +10789,8 @@ function bcGenerateShip(){
   const cust=(document.getElementById('bc-gen-cust')?.value||'').replace(/\D/g,'').padStart(2,'0').slice(0,2);
   const prod=(document.getElementById('bc-gen-prod')?.value||'').replace(/\D/g,'').padStart(5,'0').slice(0,5);
   if(cust==='00'||prod==='00000'){alert('הזן מספר לקוח ומספר מוצר');return;}
-  const code=cust+prod+'900099';
+  const sfx=bcSuffixFor(bcGenTarget()); // מספר ההזמנה בברקוד היציאה = הבורר יידע לאיזו רשומה לעדכן את הכמות
+  const code=cust+prod+'900099'+sfx;
   const out=document.getElementById('bc-gen-output');
   if(!out)return;
   out.innerHTML=`
@@ -10676,6 +10803,7 @@ function bcGenerateShip(){
         <div style="font-size:14px;font-weight:800;color:var(--green-txt,#16a34a)">🚚 יצא ללקוח</div>
         <div style="font-size:13px;font-weight:700;color:#000">לקוח: ${cust}</div>
         <div style="font-size:13px;font-weight:700;color:#000">מוצר: ${prod}</div>
+        ${bcOrderLbl(code)}
         <div style="font-size:12px;color:#666">✅ סמן יציאה + עדכן כמות סופית</div>
         <div style="font-size:11px;color:#999;margin-top:4px">${code}</div>
       </div>
@@ -10696,6 +10824,7 @@ function bcPrintShip(cust,prod,code){
         <div style="font-size:16px;font-weight:800;color:#16a34a">🚚 יצא ללקוח</div>
         <div style="font-size:14px;font-weight:700">לקוח: ${cust}</div>
         <div style="font-size:14px;font-weight:700">מוצר: ${prod}</div>
+        ${bcOrderLbl(code)}
         <div style="font-size:13px;color:#666">✅ סמן יציאה + עדכן כמות סופית</div>
         <div style="font-size:11px;color:#999;margin-top:4px">${code}</div>
       </div></div></body></html>`);
@@ -10713,9 +10842,12 @@ function bcGenerate(){
   }));
   const out=document.getElementById('bc-gen-output');
   if(!out)return;
-  window._bcLastGen={cust,prod,items};
+  const _t=bcGenTarget(),sfx=bcSuffixFor(_t);
+  // sfx נשמר יחד עם הפריטים — bcPrint / bcDownloadPDF / bcExportNiimbot בונים את
+  // המחרוזות מחדש מ-_bcLastGen, ובלעדיו הם היו מפיקים 13 ספרות בזמן שהמסך מציג 16.
+  window._bcLastGen={cust,prod,items,sfx,pid:_t?.id||null};
   const totalQtyAll=items.reduce((s,it)=>s+(parseInt(it.qty)||0),0);
-  const totalCode=cust+prod+'9'+'000'+'00';
+  const totalCode=cust+prod+'9'+'000'+'00'+sfx;
   // בניית HTML עם canvas לכל ברקוד
   out.innerHTML=`
     <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:12px;flex-wrap:wrap;gap:8px">
@@ -10745,6 +10877,7 @@ function bcGenerate(){
       <div style="font-size:15px;font-weight:800;color:#059669;margin-bottom:4px">📦 כל הכמות</div>
       <div style="font-size:13px;font-weight:700;color:#000">לקוח: ${cust}</div>
       <div style="font-size:13px;font-weight:700;color:#000">מוצר: ${prod}</div>
+      ${bcOrderLbl(totalCode)}
       <div style="font-size:16px;font-weight:800;color:#059669">סה"כ: ${totalQtyAll} יח׳</div>
       <div style="font-size:11px;color:#555;margin-top:4px">${totalCode}</div>`;
     div.appendChild(qrWrap);
@@ -10754,7 +10887,7 @@ function bcGenerate(){
     setTimeout(()=>{const im=qrWrap.querySelector('img');if(im)im.style.display='none';},50);
   })();
   items.forEach(it=>{
-    const code=cust+prod+it.size+it.qty+it.col;
+    const code=cust+prod+it.size+it.qty+it.col+sfx;
     const colName=(COLORS_AR[it.col]||COLORS[it.col]||it.col);
     const div=document.createElement('div');
     div.className='bc-card';
@@ -10767,6 +10900,7 @@ function bcGenerate(){
     infoDiv.innerHTML=`
       <div style="font-size:13px;font-weight:700;color:#000">לקוח: ${cust}</div>
       <div style="font-size:13px;font-weight:700;color:#000">מוצר: ${prod}</div>
+      ${bcOrderLbl(code)}
       <div style="font-size:13px;font-weight:700;color:#000">מידה: ${it.size}</div>
       <div style="font-size:13px;font-weight:700;color:#000">כמות: ${parseInt(it.qty)}</div>
       <div style="font-size:13px;font-weight:700;color:#000">צבע: ${it.col} · ${colName}</div>
@@ -10821,7 +10955,7 @@ function bcPrint(mode){
   let shipCard='';
   const g=window._bcLastGen;
   if(g){
-    const shipCode=g.cust+g.prod+'900099';
+    const shipCode=g.cust+g.prod+'900099'+(g.sfx||'');
     const tmp=document.createElement('div');
     new QRCode(tmp,{text:shipCode,width:150,height:150,colorDark:'#000000',colorLight:'#ffffff',correctLevel:QRCode.CorrectLevel.M});
     const cv=tmp.querySelector('canvas');
@@ -10905,21 +11039,23 @@ function bcDownloadPDF(){
   const J=window.jspdf&&window.jspdf.jsPDF;
   if(!J){alert('ספריית PDF עדיין נטענת — נסה שוב עוד רגע');return;}
   if(!window.QRCode){alert('ספריית QR לא נטענה');return;}
-  const {cust,prod,items}=g;
+  const {cust,prod,items}=g,sfx=g.sfx||'';
   const totalQty=items.reduce((s,it)=>s+(parseInt(it.qty)||0),0);
-  const totalCode=cust+prod+'900000';
+  const totalCode=cust+prod+'900000'+sfx;
   const cards=[{qr:totalCode,lines:[
     {t:'📦 כל הכמות',mm:4,bold:true,color:'#059669'},
     {t:'לקוח: '+cust,mm:3.6,bold:true,color:'#000'},
     {t:'מוצר: '+prod,mm:3.6,bold:true,color:'#000'},
+    ...(sfx?[{t:'🔢 הזמנה #'+sfx,mm:3.6,bold:true,color:'#059669'}]:[]),
     {t:'סה"כ: '+totalQty+' יח׳',mm:4,bold:true,color:'#059669'},
     {t:totalCode,mm:2.8,bold:false,color:'#555'}]}];
   items.forEach(it=>{
-    const code=cust+prod+it.size+it.qty+it.col;
+    const code=cust+prod+it.size+it.qty+it.col+sfx;
     const colName=(COLORS_AR[it.col]||COLORS[it.col]||it.col);
     cards.push({qr:code,lines:[
       {t:'לקוח: '+cust,mm:3.6,bold:true,color:'#000'},
       {t:'מוצר: '+prod,mm:3.6,bold:true,color:'#000'},
+      ...(sfx?[{t:'🔢 הזמנה #'+sfx,mm:3.6,bold:true,color:'#059669'}]:[]),
       {t:'מידה: '+it.size,mm:3.6,bold:true,color:'#000'},
       {t:'כמות: '+parseInt(it.qty),mm:3.6,bold:true,color:'#000'},
       {t:'צבע: '+it.col+' · '+colName,mm:3.6,bold:true,color:'#000'},
@@ -11039,11 +11175,11 @@ function _applyPDFResult(result){
 function bcExportNiimbot(){
   const g=window._bcLastGen;
   if(!g){alert('צור ברקודים תחילה');return;}
-  const {cust,prod,items}=g;
+  const {cust,prod,items}=g,sfx=g.sfx||'';
   const BOM='﻿';
   const header='ברקוד,לקוח,מוצר,מידה,כמות,קוד_צבע,שם_צבע\r\n';
   const rows=items.map(it=>{
-    const code=cust+prod+it.size+it.qty+it.col;
+    const code=cust+prod+it.size+it.qty+it.col+sfx;
     const colName=(COLORS[it.col]||it.col).replace(/,/g,' ');
     return `${code},${cust},${prod},${it.size},${parseInt(it.qty)},${it.col},${colName}`;
   }).join('\r\n');
@@ -11092,7 +11228,7 @@ function renderProducts(){
     return`<div class="card" style="margin-bottom:10px">
       <div style="display:flex;align-items:flex-start;justify-content:space-between;gap:8px">
         <div style="flex:1">
-          <div style="font-size:14px;font-weight:700;color:var(--txt)">מוצר ${esc(p.prod)} &nbsp;·&nbsp; לקוח ${esc(p.cust)}${p.name?` &nbsp;·&nbsp; <span style="color:var(--txt3)">${esc(p.name)}</span>`:''}</div>
+          <div style="font-size:14px;font-weight:700;color:var(--txt)">מוצר ${esc(p.prod)} &nbsp;·&nbsp; לקוח ${esc(p.cust)}${(parseInt(p.orderNo,10)||0)?` &nbsp;·&nbsp; <span style="color:var(--green-txt,#16a34a)" title="${p.bcLen===BC_LEN_NEW?'ברקודים בני 16 ספרות':'הזמנה מלפני השינוי — ברקודים בני 13 ספרות'}">הזמנה #${String(p.orderNo).padStart(3,'0')}${p.bcLen===BC_LEN_NEW?'':' <span style="color:var(--txt3);font-weight:400">(13)</span>'}</span>`:''}${p.name?` &nbsp;·&nbsp; <span style="color:var(--txt3)">${esc(p.name)}</span>`:''}</div>
           ${stageHtml}${pricingHtml}${qtyRows}${imgHtml}${docHtml}
         </div>
         <div style="display:flex;gap:6px;flex-shrink:0">
@@ -11625,7 +11761,7 @@ async function saveProduct(){
       stageLog.unshift({id:'receive',date:now.getFullYear()+'-'+pad2(now.getMonth()+1)+'-'+pad2(now.getDate()),time:pad2(now.getHours())+':'+pad2(now.getMinutes()),note:'',auto:true});
       stageLog.sort((a,b)=>PROD_STAGES.findIndex(x=>x.id===a.id)-PROD_STAGES.findIndex(x=>x.id===b.id));
     }
-    S.products.push({id,createdAt:Date.now(),prod,cust,name,images:_prodImgs,docs:_prodDocs,quantities,stageLog,stageSkipped,workSteps,unitPrice,targetProfitPct,directMaterialsCost});
+    S.products.push({id,createdAt:Date.now(),...newProdOrderFields(cust,prod),prod,cust,name,images:_prodImgs,docs:_prodDocs,quantities,stageLog,stageSkipped,workSteps,unitPrice,targetProfitPct,directMaterialsCost});
   }
   saveLS();
   if(S.fbConnected){
@@ -12188,7 +12324,10 @@ function raumaAddQtyRow(){
 }
 async function raumaConfirm(){
   const prod=(document.getElementById('rauma-prod').value||'').trim().padStart(5,'0').slice(0,5);
-  const cust=(document.getElementById('rauma-cust').value||'02').trim();
+  // ⚠️ ריפוד לשתי ספרות. בלעדיו הקלדת "2" נשמרה כ-cust:'2' בזמן שכל המערכת מחזיקה '02'
+  // ⇒ הרשומה לא מתאימה לאף ברקוד (raw.slice(0,2)='02'), לא נמצאת ב-findProd,
+  // ולא מתקבצת עם ההזמנות הקודמות של אותו דגם ⇒ גם מספר ההזמנה היה מתחיל מ-#001 מחדש.
+  const cust=((document.getElementById('rauma-cust').value||'02').replace(/\D/g,'')||'02').padStart(2,'0').slice(0,2);
   const name=(document.getElementById('rauma-name').value||'').trim();
   if(!prod||prod==='00000'){alert('יש להזין מספר מוצר');return;}
   const quantities=[];
@@ -12201,7 +12340,7 @@ async function raumaConfirm(){
     if(size||color)quantities.push({size,color,qty});
   });
   const id='p'+Date.now();
-  const newProd={id,createdAt:Date.now(),prod,cust,name,images:[],docs:[],quantities,stageLog:[],stageSkipped:[]};
+  const newProd={id,createdAt:Date.now(),...newProdOrderFields(cust,prod),prod,cust,name,images:[],docs:[],quantities,stageLog:[],stageSkipped:[]};
   S.products.push(newProd);
   saveLS();
   if(S.fbConnected)await fbSet('products',id,{...newProd});
