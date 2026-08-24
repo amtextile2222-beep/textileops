@@ -2267,12 +2267,25 @@ function taskUnits(t){
 // המדידה: כל 141 המשימות חסרות-החותמת בדגמים רב-הזמנתיים קדמו בחודש ויותר להקמת הרשומה
 // החדשה — 07155 (13-21/06 מול 21/07) · 09358 (23-28/06 מול 21/07) · 03413 (17-18/06 מול
 // 30/07). שיוכן לחדשה היה משמר ניפוח שכבר מוצג: `كوي` הראה 582 יח' על הזמנה של 90.
+// ⚠️ **לאיזו הזמנה שייכת המשימה — נקודת אמת אחת.** מוגדר פעם אחת כי גם דוח הכמות
+// וגם דוח הרווח נשענים עליו, ושתי נוסחאות נפרדות מתיישנות בשקט אחת מהשנייה
+// (זה בדיוק מה שקרה לנוסחאות התמחור בין הלקוח לשרת).
+//
+// `cache` שייך לקורא ולא גלובלי — במכוון. מפה גלובלית הייתה מתיישנת מול S.products
+// בלי שאיש ישים לב, וזו משפחת באגים שכבר נשרפנו בה (_expMap).
+function taskOrderStamp(t,cache){
+  if(t.prodStamp!=null)return t.prodStamp;
+  const k=t.cust+'|'+t.prod;
+  if(cache&&(k in cache))return cache[k];
+  const v=prodStampOldest(t.cust,t.prod);
+  if(cache)cache[k]=v;
+  return v;
+}
 function stepDoneMap(tasks){
   const seen=new Set(),map={},oldCache={};
   for(const t of tasks){
     if(!(t.duration>0))continue;
-    let ps=t.prodStamp;
-    if(ps==null){const ck=t.cust+'|'+t.prod;ps=(ck in oldCache)?oldCache[ck]:(oldCache[ck]=prodStampOldest(t.cust,t.prod));}
+    const ps=taskOrderStamp(t,oldCache);
     const k=coverKey(t);if(seen.has(k))continue;seen.add(k);
     const mk=stepDoneKey(t.cust,t.prod,t.taskType,ps);
     map[mk]=(map[mk]||0)+taskUnits(t);
@@ -6587,10 +6600,18 @@ function buildProfitReport(fl){
   const done=fl.filter(t=>t.done&&(t.duration||0)>0);
   const nd=normalizeBatchDurations(done); // תיקון זמן batch מנופח בקריאה
   const prods=S.products.filter(p=>+p.unitPrice&&(p.workSteps||[]).some(s=>stepLevel(s)||stepManualMin(s)>0));
-  const blocks=[];
+  const blocks=[],stampCache={};
   for(const p of prods){
     const pb=_prodBudget(p,ctx);if(!pb||pb.budgetUnit<=0)continue;
-    const pTasks=done.filter(t=>t.cust===p.cust&&t.prod===p.prod);
+    // 🔴 הקיבוץ היה לפי לקוח+מוצר בלבד ⇒ **כל כרטיס הזמנה קיבל את משימות כל
+    // ההזמנות של הדגם.** נמדד 26/08: 6 כרטיסים מעוותים, והגרוע — 2691C, הזמנה
+    // שהתחילה בה משימה אחת בת 43 דקות, הציגה 197 שע' 50 דק' "בפועל" ו"נותר 7 שע'
+    // 12 דק'" — 100% מהעבודה של 2691A. הסטייה ב-₪/יחידה הייתה דו-כיוונית, −77%
+    // עד +56%, ולכן לא ניתן היה להתייחס אליה כשמרנית.
+    // כרטיס בלי משימות משלו נופל למוקצב (actPU!=null?actPU:budPU) — תקציב במקום
+    // מספרים של הזמנה אחרת.
+    const pst=prodStampOf(p);
+    const pTasks=done.filter(t=>t.cust===p.cust&&t.prod===p.prod&&taskOrderStamp(t,stampCache)===pst);
     if(!pTasks.length)continue;
     let costUnit=pb.materials,withData=0;
     const actMinTot=pTasks.reduce((s,t)=>s+(nd[t.id]||0)/60,0); // כל שעות העבודה על המוצר בטווח
