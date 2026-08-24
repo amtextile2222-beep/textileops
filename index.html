@@ -11398,13 +11398,22 @@ function _stationOpts(sel){
 // 🛑 **הכמות לא מועתקת בכוונה.** ההזמנה מגיעה למפעל כגזרים לספירה או כבדים לגזירה,
 // והכמות נודעת רק אחרי הספירה. זו גם הסיבה שברקוד הספירה/גזירה הוא בלי כמות.
 function pmPrevOrderRec(){
-  if(_editProdId)return null; // עריכת מוצר קיים — אין מה להעתיק
   const prod=(document.getElementById('pm-prod')?.value||'').trim().padStart(5,'0').slice(0,5);
   const cust=(document.getElementById('pm-cust')?.value||'').trim().padStart(2,'0').slice(0,2);
   if(!prod||prod==='00000'||cust==='00')return null;
-  // הרשומה העדכנית ביותר לאותו דגם, ורק אם יש לה משהו להעתיק
-  const recs=prodMatches(cust,prod).filter(x=>(x.workSteps||[]).length||+x.unitPrice);
-  return recs[0]||null;
+  // ⚠️ **לא לסנן לפי _editProdId בלבד.** הזמנה חוזרת שכבר הוקמה היא בדיוק המקרה
+  // שבו ההעתקה נחוצה — 2691C הוקמה 25/08 לפני שהפיצ'ר היה קיים, והתנאי הישן
+  // ("עריכה ⇒ אין מה להעתיק") נעל אותה מחוץ לפיצ'ר.
+  //
+  // 🔑 אבל **רק אחורה בזמן**: בעריכת הזמנה ותיקה אסור להציע להעתיק מהזמנה חדשה
+  // ממנה. זה הפוך מ"ההזמנה הקודמת", ולחיצה בטעות הייתה דורסת שלבים נכונים
+  // בשלבים חלקיים של הזמנה שרק נפתחה.
+  const stampOf=p=>+p.createdAt||parseInt(String(p.id).replace(/\D/g,''))||0;
+  const me=_editProdId?(S.products||[]).find(x=>x.id===_editProdId):null;
+  const cutoff=me?stampOf(me):Infinity; // מוצר חדש ⇒ כל הרשומות הקיימות קודמות לו
+  const recs=prodMatches(cust,prod).filter(x=>
+    x.id!==_editProdId&&stampOf(x)<cutoff&&((x.workSteps||[]).length||+x.unitPrice));
+  return recs[0]||null; // prodMatches ממוין חדש→ישן ⇒ הקודמת הכי קרובה
 }
 function pmCheckPrevOrder(){
   const box=document.getElementById('pm-prev-order');
