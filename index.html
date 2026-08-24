@@ -10996,14 +10996,31 @@ function bcPrint(mode){
     // כדי לא לגלוש לגיליון מדבקות שני; מדפיסים אותו דרך "הדפס הכל" הרגיל.
     body=`<div class="grid">${allCards.join('')}</div>`;
   }else{
-    // רצף אחד בלי עמוד נפרד לכל צבע — רק כותרת מפרידה בין צבעים
-    const pages=[...byColor.entries()].map(([col,cards])=>{
+    // ─── חלוקה מפורשת לדפים ─────────────────────────────────────
+    // ⚠️ **לא לסמוך על break-inside:avoid.** הכרטיסים היו פריטי CSS grid, וכרום
+    // לא מכבד שם את הכלל ⇒ הכרטיס האחרון בדף נחתך באמצע ("כמות/צבע/מספר הברקוד"
+    // נדחפו מתחת לשולי ההדפסה ונחתכו ע"י כותרת התחתית של הדפדפן — נצפה 25/08).
+    // כאן סופרים מ"מ ומחלקים לדפים בעצמנו, כך שהתוצאה לא תלויה בדפדפן.
+    const PAGE_MM=281,HDR_MM=13,ROW_MM=48; // A4 פחות שוליים 8 מ"מ · כותרת צבע · שורת כרטיסים
+    const items=[]; // כל פריט = שורה שלמה, כדי שלעולם לא ייחתך באמצע
+    [...byColor.entries()].forEach(([col,cards])=>{
       const colName=(COLORS_AR[col]||COLORS[col]||col);
-      const header=col==='total'?'':`<div style="text-align:right;padding:6px 10px 4px;font-size:14px;font-weight:700;color:#333">צבע: ${col} · ${colName} — ${cards.length} יחידות</div>`;
-      return`<div>${header}<div class="grid">${cards.join('')}</div></div>`;
-    }).join('');
-    // ברקוד "יצא ללקוח" מצורף בסוף — בדף האחרון
-    body=pages+(shipCard?`<div class="grid" style="page-break-before:always">${shipCard}</div>`:'');
+      const hdr=col==='total'?'':`<div class="colhdr">צבע: ${col} · ${colName} — ${cards.length} יחידות</div>`;
+      const per=col==='total'?1:2; // כרטיס "כל הכמות" תופס שורה שלמה
+      for(let i=0;i<cards.length;i+=per){
+        const row=`<div class="grid">${cards.slice(i,i+per).join('')}</div>`;
+        // הכותרת נצמדת לשורה הראשונה — כדי שלא תישאר לבדה בתחתית דף
+        items.push(i===0&&hdr?{h:HDR_MM+ROW_MM,html:hdr+row}:{h:ROW_MM,html:row});
+      }
+    });
+    if(shipCard)items.push({h:ROW_MM,html:`<div class="grid">${shipCard}</div>`});
+    const pgs=[];let cur=[],used=0;
+    items.forEach(it=>{
+      if(used+it.h>PAGE_MM&&cur.length){pgs.push(cur);cur=[];used=0;}
+      cur.push(it.html);used+=it.h;
+    });
+    if(cur.length)pgs.push(cur);
+    body=pgs.map((p,i)=>`<div class="page"${i<pgs.length-1?' style="page-break-after:always"':''}>${p.join('')}</div>`).join('');
   }
   // במצב מדבקות: !important גובר על ה-inline של הכרטיסים (padding/border/grid-column) כדי לקבע גודל תא
   const style=labels
@@ -11016,8 +11033,23 @@ function bcPrint(mode){
       .bc-card>div:last-child{position:absolute!important;right:5mm!important;top:50%!important;transform:translateY(-50%)!important;width:29mm!important;flex:none!important;text-align:right!important;line-height:1.8!important}
       @media print{@page{size:A4 portrait;margin:8.5mm 0}}`
     :`body{margin:0;font-family:Arial,sans-serif;background:#fff}
-      .grid{display:grid;grid-template-columns:repeat(2,1fr);gap:10px;padding:6px 10px}
-      .bc-card{border:2px solid #333;border-radius:6px;padding:10px;display:flex;align-items:center;gap:12px;break-inside:avoid}
+      /* ⚠️ **לא CSS grid כאן.** כרום לא מכבד break-inside:avoid על פריטי grid בפיצול
+         לעמודים — הכרטיס האחרון בדף נחתך באמצע (נצפה 25/08: "כמות/צבע/מספר הברקוד"
+         נדחפו מתחת לשולי ההדפסה ונחתכו ע"י כותרת התחתית של הדפדפן).
+         inline-block כן מכובד: הדפדפן מזיז את כל הכרטיס לדף הבא במקום לשבור אותו.
+         font-size:0 על המכל מבטל את רווח הרווח-הלבן שבין שני inline-block. */
+      .page{padding:0 8px}
+      .colhdr{text-align:right;padding:4px 4px 3px;font-size:14px;font-weight:700;color:#333;height:13mm;box-sizing:border-box}
+      .grid{display:block;font-size:0}
+      /* !important — הכרטיסים נושאים display:flex ו-padding ב-style inline, והם גוברים על גיליון הסגנון.
+         גובה קבוע 46 מ"מ ⇒ 5 שורות (240 מ"מ) נכנסות בנוחות ב-281, וגם עם כותרת צבע. */
+      .bc-card{border:2px solid #333;border-radius:6px;padding:6px 8px!important;display:inline-flex!important;align-items:center;gap:10px;
+        width:calc(50% - 10px);height:46mm;box-sizing:border-box;vertical-align:top;margin:0 4px 2mm;font-size:13px;overflow:hidden;
+        break-inside:avoid!important;page-break-inside:avoid!important}
+      .bc-card[data-col="total"]{width:calc(100% - 8px)}
+      /* line-height מכווץ בהדפסה בלבד — 7 שורות טקסט (כולל "הזמנה #NNN") נכנסות ב-46 מ"מ */
+      .bc-card>div:last-child{line-height:1.5!important}
+      .bc-card img{width:38mm;height:38mm}
       @media print{@page{size:A4 portrait;margin:8mm}}`;
   printViaIframe(`<html dir="rtl"><head><title>QR קודים למשימות</title>
     <style>${style}</style></head><body>
