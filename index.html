@@ -465,7 +465,7 @@ code{background:var(--bg2);border:0.5px solid var(--b);border-radius:4px;padding
             <button class="btn primary full" onclick="startCam()" id="cam-btn" style="font-size:14px;padding:12px">📷 <span data-i18n="scan_cam">סרוק עם מצלמה</span></button>
           </div>
           <div style="text-align:center;font-size:12px;color:var(--txt3);margin-bottom:.75rem">— <span data-i18n="scan_manual">הזן ידנית</span> / סורק USB —</div>
-          <input class="bc-inp" id="bc-inp" maxlength="13" placeholder="הזן 13 ספרות..." oninput="parseBc(this.value)" onkeydown="if(event.key==='Enter')submitBc()"/>
+          <input class="bc-inp" id="bc-inp" maxlength="16" placeholder="הזן 13 או 16 ספרות..." oninput="parseBc(this.value)" onkeydown="if(event.key==='Enter')submitBc()"/>
           <div id="bc-prev" style="margin-top:.75rem;min-height:36px"></div>
           <div class="field" id="bc-tasktype-wrap" style="margin-top:.75rem;margin-bottom:0">
             <label style="font-size:12px;color:var(--txt2);margin-bottom:5px;display:block" data-i18n="lbl_task_type">סוג משימה</label>
@@ -881,7 +881,7 @@ code{background:var(--bg2);border:0.5px solid var(--b);border-radius:4px;padding
             <div id="mgr-cam-status" style="position:absolute;bottom:8px;right:0;left:0;text-align:center;font-size:12px;color:#fff;background:rgba(0,0,0,.5);padding:4px">מכוון מצלמה...</div>
           </div>
           <button class="btn primary full" onclick="mgrStartCam()" id="mgr-cam-btn" style="font-size:13px;padding:10px;margin-bottom:8px">📷 סרוק עם מצלמה</button>
-          <input id="mgr-bc-inp" class="bc-inp" maxlength="13" placeholder="או הזן 13 ספרות ידנית..." oninput="parseMgrBc(this.value)"/>
+          <input id="mgr-bc-inp" class="bc-inp" maxlength="16" placeholder="או הזן 13 או 16 ספרות ידנית..." oninput="parseMgrBc(this.value)"/>
         </div><!-- /field barcode -->
         <div id="mgr-bc-prev" style="margin-bottom:.5rem;min-height:30px"></div>
         <div id="mgr-batch-queue" style="margin-bottom:.75rem"></div>
@@ -930,7 +930,7 @@ code{background:var(--bg2);border:0.5px solid var(--b);border-radius:4px;padding
           <div id="ts-emp-cam-status" style="position:absolute;bottom:8px;right:0;left:0;text-align:center;font-size:12px;color:#fff;background:rgba(0,0,0,.5);padding:4px" data-i18n="scan_searching_worker">מחפש ברקוד עובד...</div>
         </div>
       </div>
-      <div class="field"><label data-i18n="lbl_task_barcode13">ברקוד משימה (13 ספרות)</label>
+      <div class="field"><label data-i18n="lbl_task_barcode13">ברקוד משימה (13 או 16 ספרות)</label>
         <div id="ts-cam-container" style="display:none;margin-bottom:.75rem;position:relative">
           <video id="ts-cam-video" style="width:100%;border-radius:var(--rl);background:#000;max-height:220px;object-fit:cover" autoplay muted playsinline></video>
           <div style="position:absolute;inset:0;border:3px solid var(--blue-txt);border-radius:var(--rl);pointer-events:none;opacity:.6"></div>
@@ -939,7 +939,7 @@ code{background:var(--bg2);border:0.5px solid var(--b);border-radius:4px;padding
           <div id="ts-cam-status" style="position:absolute;bottom:8px;right:0;left:0;text-align:center;font-size:12px;color:#fff;background:rgba(0,0,0,.5);padding:4px" data-i18n="scan_aiming">מכוון מצלמה...</div>
         </div>
         <button class="btn primary full" onclick="tsStartCam()" id="ts-cam-btn" style="font-size:13px;padding:10px;margin-bottom:8px">📷 <span data-i18n="scan_cam_all">סרוק עובד / תחנה / משימה</span></button>
-        <input id="ts-bc-inp" class="bc-inp" maxlength="13" placeholder="או הזן 13 ספרות ידנית..." data-i18n-ph="ts_inp_ph" oninput="tsParseBc(this.value)"/>
+        <input id="ts-bc-inp" class="bc-inp" maxlength="16" placeholder="או הזן 13 או 16 ספרות ידנית..." data-i18n-ph="ts_inp_ph" oninput="tsParseBc(this.value)"/>
       </div>
       <div id="ts-bc-prev" style="margin-bottom:.5rem;min-height:30px"></div>
       <div id="ts-batch-queue" style="margin-bottom:.75rem"></div>
@@ -1436,7 +1436,7 @@ const LANGS={
     sc_emp_notfound:'⚠ עובד לא נמצא',
     sc_st_next:'📍 תחנה שויכה — סרוק ברקוד משימה',
     sc_scanned:'✅ נסרק: ',
-    sc_short:'⚠ קוד קצר מדי (צריך 13 ספרות): ',
+    sc_short:'⚠ קוד קצר מדי (צריך 13 או 16 ספרות): ',
     scan_cart:'🛒 סל',
     scan_barcodes:'ברקודים',
     bc_cart_q_title:'לצרף עוד משימות?',
@@ -1513,8 +1513,8 @@ const LANGS={
     btn_add_batch:'➕ הוסף לסל (ברקוד נוסף)',
     btn_send_msg_worker:'שלח הודעה לעובד הנבחר',
     btn_send_msg_mgr:'שלח הודעה למנהל',
-    ts_inp_ph:'או הזן 13 ספרות ידנית...',
-    bc_inp_ph:'הזן 13 ספרות...',
+    ts_inp_ph:'או הזן 13 או 16 ספרות ידנית...',
+    bc_inp_ph:'הזן 13 או 16 ספרות...',
     btn_select_steps:'🔧 בחר שלבי עבודה',
     task_end_sec_lbl:'⏹ סיום משימה לעובד',
     btn_end_task:'⏹ סיים',
@@ -1573,7 +1573,7 @@ const LANGS={
     delete:'מחק',
     edit:'ערוך',
     task_start_sec:'▶ התחלת משימה לעובד',
-    lbl_task_barcode13:'ברקוד משימה (13 ספרות)',
+    lbl_task_barcode13:'ברקוד משימה (13 או 16 ספרות)',
     lbl_task_barcode12:'ברקוד משימה (12 ספרות)',
     lbl_task_type:'סוג משימה',
     lbl_dept:'מחלקה',
@@ -1593,7 +1593,7 @@ const LANGS={
     bc_example_lbl:'דוגמה — לחץ לניסיון:',
     ph_task_type:'לדוגמה: תפירה, חיתוך, גימור...',
     err_sel_worker:'⚠ בחר עובד',
-    err_barcode_13:'⚠ ברקוד חייב להיות 13 ספרות',
+    err_barcode_13:'⚠ ברקוד חייב להיות 13 או 16 ספרות',
     err_scan_one:'⚠ סרוק לפחות ברקוד אחד',
     err_sel_step:'⚠ בחר לפחות שלב עבודה אחד',
     lim_steps:'⚠ ניתן לבחור עד 2 שלבים לכל ברקוד',
@@ -1681,7 +1681,7 @@ const LANGS={
     sc_emp_notfound:'⚠ العامل غير موجود',
     sc_st_next:'📍 تم ربط المحطة — امسح باركود المهمة',
     sc_scanned:'✅ تم المسح: ',
-    sc_short:'⚠ الرمز قصير جداً (يلزم 13 رقماً): ',
+    sc_short:'⚠ الرمز قصير جداً (يلزم 13 أو 16 رقماً): ',
     scan_cart:'🛒 السلة',
     scan_barcodes:'باركود',
     bc_cart_q_title:'إضافة مهام أخرى؟',
@@ -1758,8 +1758,8 @@ const LANGS={
     btn_add_batch:'➕ أضف للسلة (باركود إضافي)',
     btn_send_msg_worker:'إرسال رسالة للعامل المحدد',
     btn_send_msg_mgr:'إرسال رسالة للمدير',
-    ts_inp_ph:'أو أدخل 13 رقماً يدوياً...',
-    bc_inp_ph:'أدخل 13 رقماً...',
+    ts_inp_ph:'أو أدخل 13 أو 16 رقماً يدوياً...',
+    bc_inp_ph:'أدخل 13 أو 16 رقماً...',
     btn_select_steps:'🔧 اختر مراحل العمل',
     task_end_sec_lbl:'⏹ إنهاء مهمة للعامل',
     btn_end_task:'⏹ إنهاء',
@@ -1818,7 +1818,7 @@ const LANGS={
     delete:'حذف',
     edit:'تعديل',
     task_start_sec:'▶ بدء مهمة للعامل',
-    lbl_task_barcode13:'باركود المهمة (13 رقماً)',
+    lbl_task_barcode13:'باركود المهمة (13 أو 16 رقماً)',
     lbl_task_barcode12:'باركود المهمة (12 رقماً)',
     lbl_task_type:'نوع المهمة',
     lbl_dept:'القسم',
@@ -1838,7 +1838,7 @@ const LANGS={
     bc_example_lbl:'مثال — انقر للتجربة:',
     ph_task_type:'مثال: خياطة، قص، تشطيب...',
     err_sel_worker:'⚠ اختر عاملاً',
-    err_barcode_13:'⚠ الباركود يجب أن يكون 13 رقماً',
+    err_barcode_13:'⚠ الباركود يجب أن يكون 13 أو 16 رقماً',
     err_scan_one:'⚠ امسح باركوداً واحداً على الأقل',
     err_sel_step:'⚠ اختر مرحلة عمل واحدة على الأقل',
     lim_steps:'⚠ يمكن اختيار مرحلتين كحد أقصى لكل باركود',
@@ -1926,7 +1926,7 @@ const LANGS={
     sc_emp_notfound:'⚠ Worker not found',
     sc_st_next:'📍 Station assigned — scan task barcode',
     sc_scanned:'✅ Scanned: ',
-    sc_short:'⚠ Code too short (13 digits needed): ',
+    sc_short:'⚠ Code too short (13 or 16 digits needed): ',
     scan_cart:'🛒 Cart',
     scan_barcodes:'barcodes',
     bc_cart_q_title:'Add more tasks?',
@@ -2023,7 +2023,7 @@ const LANGS={
     delete:'Delete',
     edit:'Edit',
     task_start_sec:'▶ Start Task for Worker',
-    lbl_task_barcode13:'Task Barcode (13 digits)',
+    lbl_task_barcode13:'Task Barcode (13 or 16 digits)',
     lbl_task_barcode12:'Task Barcode (12 digits)',
     lbl_task_type:'Task Type',
     lbl_dept:'Department',
@@ -2043,7 +2043,7 @@ const LANGS={
     bc_example_lbl:'Example — click to try:',
     ph_task_type:'e.g. sewing, cutting, finishing...',
     err_sel_worker:'⚠ Select a worker',
-    err_barcode_13:'⚠ Barcode must be 13 digits',
+    err_barcode_13:'⚠ Barcode must be 13 or 16 digits',
     err_scan_one:'⚠ Scan at least one barcode',
     err_sel_step:'⚠ Select at least one work step',
     lim_steps:'⚠ Up to 2 steps per barcode',
@@ -2143,10 +2143,31 @@ const esc=s=>String(s??'').replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>
 const escj=s=>esc(String(s??'').replace(/\\/g,'\\\\').replace(/'/g,"\\'"));
 // ברקוד מלא של משימה (תאימות למשימות ישנות בלי שדה bc)
 const taskBc=t=>t.bc||String(t.cust)+String(t.prod)+String(t.size||'0')+String(t.qty).padStart(3,'0')+String(t.col);
+// ─── אורך הברקוד: 13 (ישן) או 16 (עם מספר הזמנה) ─────────────
+// מבנה: לקוח(2) מוצר(5) מידה(1) כמות(3) צבע(2) [ מספר-הזמנה(3) ]
+// 🔑 מספר ההזמנה נוסף **בסוף** בכוונה: כל ה-slice הקיימים — slice(0,2)/(2,7)/(7,8)/
+// (8,11)/(11,13) — נשארים נכונים לשני האורכים. מדבקה בת 13 שתלויה במפעל ממשיכה לעבוד
+// בדיוק כמו קודם, ומקבלת orderNo=0 = "הזמנה מלפני השינוי".
+const BC_LEN_OLD=13,BC_LEN_NEW=16;
+const isBcLen=n=>n===BC_LEN_OLD||n===BC_LEN_NEW;
+// מספר ההזמנה מתוך הברקוד. 0 = ברקוד ישן בלי מספר ⇒ אסור להסיק ממנו כלום.
+function orderNoOf(raw){
+  const s=String(raw||'');
+  return s.length>=BC_LEN_NEW?(parseInt(s.slice(13,16),10)||0):0;
+}
+// חילוץ ברקוד מקריאת מצלמה. ⚠️ הקוד הישן עשה תמיד slice(0,13) — ברקוד 16 ספרות היה
+// נקטם **בשקט** ל-13 ומתפרש כברקוד אחר לגמרי (ספירה כפולה). מעדיפים 16 כשיש 16.
+// '' = לא ברקוד משימה.
+function bcFromScan(text){
+  const d=String(text||'').replace(/\D/g,'');
+  if(d.length>=BC_LEN_NEW)return d.slice(0,BC_LEN_NEW);
+  if(d.length>=BC_LEN_OLD)return d.slice(0,BC_LEN_OLD);
+  return '';
+}
 // ברקוד "כל הכמות": size='9', col='00'
-function isTotalBc(raw){return raw&&raw.length===13&&raw.slice(7,8)==='9'&&raw.slice(11,13)==='00';}
-// ברקוד "יצא ללקוח": size='9', col='99' (הצבעים 01-20 בלבד — אין התנגשות). מבנה: לקוח+מוצר+9+000+99
-function isShipBc(raw){return raw&&raw.length===13&&raw.slice(7,8)==='9'&&raw.slice(11,13)==='99';}
+function isTotalBc(raw){return !!raw&&isBcLen(raw.length)&&raw.slice(7,8)==='9'&&raw.slice(11,13)==='00';}
+// ברקוד "יצא ללקוח": size='9', col='99' (הצבעים 01-30 בלבד — אין התנגשות). מבנה: לקוח+מוצר+9+000+99
+function isShipBc(raw){return !!raw&&isBcLen(raw.length)&&raw.slice(7,8)==='9'&&raw.slice(11,13)==='99';}
 function productHasDefinedQty(cust,prod){
   const p=findProd(cust,prod);
   return p&&p.quantities&&p.quantities.some(q=>parseInt(q.qty)>0);
@@ -2601,7 +2622,7 @@ function updateExpectedTime(prefix){
   const raw=(rawEl?.value||'').replace(/\D/g,'');
   const workerId=sel?sel.value:(prefix==='bc'?(S.user?.id||''):'');
   const checked=listEl?[...listEl.querySelectorAll('input[type="checkbox"]:checked')].map(cb=>cb.dataset.step):[];
-  if(!workerId||raw.length!==13||!checked.length||!listEl?.dataset.cust||!S.fbConnected||!window._fbFunctions){box.innerHTML='';return;}
+  if(!workerId||!isBcLen(raw.length)||!checked.length||!listEl?.dataset.cust||!S.fbConnected||!window._fbFunctions){box.innerHTML='';return;}
   const cust=raw.slice(0,2),prod=raw.slice(2,7);
   if(cust!==listEl.dataset.cust||prod!==listEl.dataset.prod){box.innerHTML='';return;}
   const prodObj=findProd(cust,prod);
@@ -4719,7 +4740,7 @@ async function bcStartBatch(){
   if(!_bcBatch.length)return;
   // ברקוד שנסרק אך לא נוסף לסל — לא לזרוק בשקט. מזהיר ומחזיר, כדי שהמשתמש יוסיף/ינקה קודם.
   const pend=(document.getElementById('bc-inp')?.value||'').replace(/\D/g,'');
-  if(pend.length===13){showToast(T.bc_pending_scan||'⚠ יש ברקוד סרוק שטרם נוסף לסל — לחץ "התחל / משימה" כדי להוסיפו, או נקה את השדה','var(--red-txt)',7000);document.getElementById('bc-inp')?.focus();return;}
+  if(isBcLen(pend.length)){showToast(T.bc_pending_scan||'⚠ יש ברקוד סרוק שטרם נוסף לסל — לחץ "התחל / משימה" כדי להוסיפו, או נקה את השדה','var(--red-txt)',7000);document.getElementById('bc-inp')?.focus();return;}
   const u=S.user;if(!u)return;
   const wu=S.workers.find(x=>x.id===u.id);
   if(!wu||wu.status!=='in'){alert('לא ניתן להתחיל משימה — יש להירשם כנוכח תחילה (כניסה לעבודה בלשונית נוכחות)');return;}
@@ -5336,7 +5357,7 @@ function parseBc(v){
         <span class="bc-seg bc-q">כמות: ${q.padEnd(3,'_')}</span>
         <span class="bc-seg bc-col">צבע: ${COLORS[col]||col||'__'}</span>
       </div>`;
-  if(v.length===13){
+  if(isBcLen(v.length)){
     const prod=findProd(c,p);
     const steps=prod?.workSteps||[];
     if(steps.length){
@@ -5372,7 +5393,7 @@ async function submitBc(){
   const raw=(document.getElementById('bc-inp').value||'').replace(/\D/g,'');
   const T=LANGS[currentLang];
   if(!raw&&_bcBatch.length){await bcStartBatch();return;} // שדה ריק + סל ממתין = התחל את כל הסל
-  if(raw.length!==13){alert('ברקוד חייב להיות 13 ספרות בדיוק');return;}
+  if(!isBcLen(raw.length)){alert('ברקוד חייב להיות 13 או 16 ספרות');return;}
   if(!S.user){alert('יש להתחבר תחילה');return;}
   if(isShipBc(raw)){openShipModal(raw.slice(0,2),raw.slice(2,7));document.getElementById('bc-inp').value='';parseBc('');return;} // ברקוד "יצא ללקוח" — לא משימה
   const cust=raw.slice(0,2),prod=raw.slice(2,7),size=raw.slice(7,8),col=raw.slice(11,13);
@@ -7172,7 +7193,7 @@ function parseMgrBc(v){
         <span class="bc-seg bc-c">לקוח: ${c||'__'}</span><span class="bc-seg bc-p">מוצר: ${p.padEnd(5,'_')}</span>
         <span class="bc-seg" style="background:var(--amber-bg);color:var(--amber-txt)">מידה: ${sz||'_'}</span>
         <span class="bc-seg bc-q">כמות: ${q.padEnd(3,'_')}</span><span class="bc-seg bc-col">צבע: ${COLORS[col]||col||'__'}</span></div>`;
-  if(v.length===13){
+  if(isBcLen(v.length)){
     const prod=findProd(c,p);
     const steps=prod?.workSteps||[];
     if(steps.length){
@@ -7233,15 +7254,15 @@ function mgrStartDecoding(video,status){
           return;
         }
         const text=code.data.replace(/\D/g,'');
-        if(text.length>=13){
-          const bc=text.slice(0,13);
+        const bc=bcFromScan(text);
+        if(bc){
           document.getElementById('mgr-bc-inp').value=bc;
           parseMgrBc(bc);
           status.textContent=(T.sc_scanned||'✅ נסרק: ')+bc;
           clearInterval(mgrCamInterval);
           setTimeout(()=>mgrStopCam(),600);
         } else if(text.length>0){
-          status.textContent=(T.sc_short||'⚠ קוד קצר מדי (צריך 13 ספרות): ')+text;
+          status.textContent=(T.sc_short||'⚠ קוד קצר מדי (צריך 13 או 16 ספרות): ')+text;
         }
       }
     }catch(e){}
@@ -7891,7 +7912,7 @@ function tsParseBc(v){
         <span class="bc-seg" style="background:var(--amber-bg);color:var(--amber-txt)">מידה: ${sz||'_'}</span>
         <span class="bc-seg bc-q">כמות: ${q.padEnd(3,'_')}</span><span class="bc-seg bc-col">צבע: ${COLORS[col]||col||'__'}</span></div>`;
   // אם המוצר מוגדר עם שלבי עבודה — הצג checkboxes
-  if(v.length===13){
+  if(isBcLen(v.length)){
     const prod=findProd(c,p);
     const steps=prod?.workSteps||[];
     if(steps.length){
@@ -7930,7 +7951,7 @@ function tsScanLimitsOk(raw,checkedSteps){
   if(addingNonQuick&&!nonQuickBc.has(raw)&&nonQuickBc.size>=2){showToast(T.lim_bc||'⚠ ניתן לסרוק עד 2 ברקודים','var(--red-txt)');return false;}
   return true;
 }
-// מצלמה מאוחדת: מזהה אוטומטית עובד (EMP:), תחנה (STN:) או משימה (13 ספרות).
+// מצלמה מאוחדת: מזהה אוטומטית עובד (EMP:), תחנה (STN:) או משימה (13 או 16 ספרות).
 // עובד/תחנה — המצלמה נשארת פתוחה כדי להמשיך לסרוק; משימה — סוגרת לבחירת שלבים.
 async function tsStartCam(){
   const T=LANGS[currentLang];
@@ -7982,9 +8003,9 @@ async function tsStartCam(){
           }
           return;
         }
-        // משימה (13 ספרות) — ממלא את השדה וסוגר לבחירת שלבים/כמות
+        // משימה (13 או 16 ספרות) — ממלא את השדה וסוגר לבחירת שלבים/כמות
         const digits=text.replace(/\D/g,'');
-        if(/^\d{13}$/.test(digits)){
+        if(isBcLen(digits.length)){
           document.getElementById('ts-bc-inp').value=digits;tsParseBc(digits);
           status.textContent=(T.sc_scanned||'✅ נסרק: ')+digits;
           clearInterval(tsCamInterval);setTimeout(()=>tsStopCam(),600);
@@ -8005,7 +8026,7 @@ function tsAddToBatch(){
   const raw=(document.getElementById('ts-bc-inp').value||'').replace(/\D/g,'');
   const T=LANGS[currentLang];
   if(!empId){showToast(T.err_sel_worker||'⚠ בחר עובד','var(--red-txt)');return;}
-  if(raw.length!==13){showToast(T.err_barcode_13||'⚠ ברקוד חייב להיות 13 ספרות','var(--red-txt)');return;}
+  if(!isBcLen(raw.length)){showToast(T.err_barcode_13||'⚠ ברקוד חייב להיות 13 או 16 ספרות','var(--red-txt)');return;}
   if(isShipBc(raw)){openShipModal(raw.slice(0,2),raw.slice(2,7));document.getElementById('ts-bc-inp').value='';return;} // ברקוד "יצא ללקוח"
   const cust=raw.slice(0,2),prod=raw.slice(2,7),size=raw.slice(7,8),col=raw.slice(11,13);
   const isTotal=isTotalBc(raw);
@@ -8035,7 +8056,7 @@ async function tsStartTask(){
   const w=S.workers.find(x=>x.id===empId);
   if(!w||w.status!=='in'){showToast(T.cfm_worker_not_in||'⚠ העובד לא נמצא בעבודה — וודא שחתם כניסה','var(--red-txt)',5000);return;}
   // אם יש ברקוד בשדה — הוסף לסל
-  if(raw.length===13){
+  if(isBcLen(raw.length)){
     if(!isTotalBc(raw)&&parseInt(raw.slice(8,11))===0&&productHasDefinedQty(raw.slice(0,2),raw.slice(2,7))){showToast('⚠ קיים ברקוד עם כמות למוצר זה','var(--red-txt)',6000);return;}
     const cust=raw.slice(0,2),prod=raw.slice(2,7),size=raw.slice(7,8),col=raw.slice(11,13);
     const isTotal=isTotalBc(raw);const qty=isTotal?getTotalQty(cust,prod):parseInt(raw.slice(8,11))||0;
@@ -8330,7 +8351,7 @@ function mgrAddToBatch(){
   const raw=(document.getElementById('mgr-bc-inp').value||'').replace(/\D/g,'');
   const T=LANGS[currentLang];
   if(!empId){showToast(T.err_sel_worker||'⚠ בחר עובד','var(--red-txt)');return;}
-  if(raw.length!==13){showToast(T.err_barcode_13||'⚠ ברקוד חייב להיות 13 ספרות','var(--red-txt)');return;}
+  if(!isBcLen(raw.length)){showToast(T.err_barcode_13||'⚠ ברקוד חייב להיות 13 או 16 ספרות','var(--red-txt)');return;}
   if(isShipBc(raw)){openShipModal(raw.slice(0,2),raw.slice(2,7));document.getElementById('mgr-bc-inp').value='';parseMgrBc('');return;} // ברקוד "יצא ללקוח"
   const cust=raw.slice(0,2),prod=raw.slice(2,7),size=raw.slice(7,8),col=raw.slice(11,13);
   const isTotal=isTotalBc(raw);const qty=isTotal?getTotalQty(cust,prod):parseInt(raw.slice(8,11))||0;
@@ -8355,7 +8376,7 @@ async function mgrStartTask(){
   if(!empId){showToast(T.err_sel_worker||'⚠ בחר עובד','var(--red-txt)');return;}
   const w=S.workers.find(x=>x.id===empId);
   if(!w||w.status!=='in'){showToast(T.cfm_worker_not_in||'⚠ העובד לא נמצא בעבודה','var(--red-txt)',5000);return;}
-  if(raw.length===13){
+  if(isBcLen(raw.length)){
     if(!isTotalBc(raw)&&parseInt(raw.slice(8,11))===0&&productHasDefinedQty(raw.slice(0,2),raw.slice(2,7))){showToast('⚠ קיים ברקוד עם כמות למוצר זה','var(--red-txt)',6000);return;}
     const cust=raw.slice(0,2),prod=raw.slice(2,7),size=raw.slice(7,8),col=raw.slice(11,13);
     const isTotal=isTotalBc(raw);const qty=isTotal?getTotalQty(cust,prod):parseInt(raw.slice(8,11))||0;
@@ -9464,15 +9485,15 @@ function startDecoding(video,status){
           return;
         }
         const text=code.data.replace(/\D/g,'');
-        if(text.length>=13){
-          const bc=text.slice(0,13);
+        const bc=bcFromScan(text);
+        if(bc){
           document.getElementById('bc-inp').value=bc;
           parseBc(bc);
           status.textContent=(T.sc_scanned||'✅ נסרק: ')+bc;
           clearInterval(camInterval);
           setTimeout(()=>{stopCam();submitBc();},600);
         } else if(text.length>0){
-          status.textContent=(T.sc_short||'⚠ קוד קצר מדי (צריך 13 ספרות): ')+text;
+          status.textContent=(T.sc_short||'⚠ קוד קצר מדי (צריך 13 או 16 ספרות): ')+text;
         }
       }
     }catch(e){}
