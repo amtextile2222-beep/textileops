@@ -2231,7 +2231,9 @@ function sumUnitsDedup(tasks){
 // המלאה של הברקוד ⇒ אותן יחידות נספרות שוב בכל יום.
 // נצפה בנתונים: 00243 / تنظيف وفحص — 5 רשומות של אותו ברקוד ב-27-29/06, כולן qty=225,
 // היו נספרות 675 מתוך הזמנה של 225.
-const stepDoneKey=(cust,prod,stepNm)=>cust+'|'+prod+'|'+String(stepNm||'').trim();
+// ⚠️ `stamp` = חותמת ההזמנה. **בלעדיו המפתח הוא ברמת הדגם** — וזה מכוון: מסך התצוגה
+// מציג התקדמות ברמת הדגם (החלטה קיימת) וקורא בלי חותמת, הדוח קורא עם חותמת.
+const stepDoneKey=(cust,prod,stepNm,stamp)=>cust+'|'+prod+'|'+String(stepNm||'').trim()+(stamp!=null?'|'+stamp:'');
 const coverKey=t=>taskBc(t)+'|'+String(t.taskType||'').trim().toLowerCase()+(t.splitId?'|'+t.splitId:'');
 // ⚠️ הכמות האפקטיבית של משימה. ברקוד "כל הכמות" שנסרק **לפני** שהוזנו הכמויות לפי מידה
 // נשמר עם qty=0 — זו ה"כמות הפתוחה" — אבל העבודה בוצעה על ההזמנה כולה. נמדד: 24 משימות,
@@ -2251,21 +2253,47 @@ function taskUnits(t){
   // משימה ישנה (13) מחזירה 0 ⇒ אותה התנהגות כמו קודם.
   return t&&t.isTotal?(getTotalQty(t.cust,t.prod,orderNoOf(t.bc||''))||0):0;
 }
+// כל משימה נספרת **בדלי של ההזמנה שלה**, לא ברמת הדגם.
+//
+// 🔴 הגרסה הקודמת עשתה שני דברים שהיו נכונים יחד ושגויים יחד: המפתח היה לקוח|מוצר|שלב
+// (בלי ממד הזמנה), ולכן היה חייב סינון ל-prodStamp של ההזמנה **החדשה** — אחרת היסטוריית
+// ההזמנה הקודמת הייתה מתנפחת אל תוך הכמות של החדשה. זה עבד כל עוד הדוח הציג כרטיס אחד
+// לדגם. מרגע ש-`getTotalQty`→`_prodQty` (25/08) גרם לו להציג **כרטיס נפרד לכל הזמנה**,
+// הסינון הפך למסתיר: נמדד 26/08 — **267 משימות שהושלמו נזרקו**, מהן 209 על 02691 שהציגה
+// 0/180 למרות 27 שלבים שבוצעו. הפתרון הוא לא להסיר את הסינון אלא **להעביר את התפקיד שלו
+// למפתח**: כשלכל הזמנה יש דלי משלה אין למה להתנפח, וכל משימה נמדדת מול היעד של ההזמנה שלה.
+//
+// משימה בלי `prodStamp` משויכת ל**הזמנה הוותיקה ביותר** של הדגם (החלטת המשתמש 26/08).
+// המדידה: כל 141 המשימות חסרות-החותמת בדגמים רב-הזמנתיים קדמו בחודש ויותר להקמת הרשומה
+// החדשה — 07155 (13-21/06 מול 21/07) · 09358 (23-28/06 מול 21/07) · 03413 (17-18/06 מול
+// 30/07). שיוכן לחדשה היה משמר ניפוח שכבר מוצג: `كوي` הראה 582 יח' על הזמנה של 90.
 function stepDoneMap(tasks){
-  const seen=new Set(),map={},stampCache={};
+  const seen=new Set(),map={},oldCache={};
   for(const t of tasks){
     if(!(t.duration>0))continue;
-    // הזמנה חוזרת = רשומת מוצר חדשה עם אותו לקוח+מוצר (אותו ברקוד). סופרים רק את ההזמנה
-    // הנוכחית לפי prodStamp, אחרת היסטוריית ההזמנה הקודמת מנפחת את הכמות מול הכמות שהוזמנה.
-    // משימה ישנה בלי prodStamp נחשבת לנוכחית — אותה תאימות לאחור כמו stepAlreadyTaken.
-    const ck=t.cust+'|'+t.prod;
-    const stamp=(ck in stampCache)?stampCache[ck]:(stampCache[ck]=prodStampFor(t.cust,t.prod));
-    if(t.prodStamp!=null&&stamp&&t.prodStamp!==stamp)continue;
+    let ps=t.prodStamp;
+    if(ps==null){const ck=t.cust+'|'+t.prod;ps=(ck in oldCache)?oldCache[ck]:(oldCache[ck]=prodStampOldest(t.cust,t.prod));}
     const k=coverKey(t);if(seen.has(k))continue;seen.add(k);
-    const mk=stepDoneKey(t.cust,t.prod,t.taskType);
+    const mk=stepDoneKey(t.cust,t.prod,t.taskType,ps);
     map[mk]=(map[mk]||0)+taskUnits(t);
   }
   return map;
+}
+// כיווץ המפה חזרה לרמת הדגם, **רק ההזמנה הנוכחית** — בדיוק המספרים שמסך התצוגה הציג קודם.
+// מופרד מ-stepDoneMap כי לשני הצרכנים יש שאלות שונות: הדוח שואל "כמה על ההזמנה הזו",
+// הלוח שואל "כמה על הדגם שרץ עכשיו".
+function stepDoneByModel(map){
+  const out={};
+  for(const k in map){
+    const i=k.lastIndexOf('|');if(i<0)continue;
+    const base=k.slice(0,i),stamp=+k.slice(i+1);
+    const c=base.slice(0,base.indexOf('|'));
+    const rest=base.slice(base.indexOf('|')+1);
+    const p=rest.slice(0,rest.indexOf('|'));
+    if(stamp!==prodStampFor(c,p))continue;
+    out[base]=(out[base]||0)+map[k];
+  }
+  return out;
 }
 
 // ─── STATE ──────────────────────────────────────────────────
@@ -4538,14 +4566,27 @@ let _bcPauseOnStart=[];
 // ─── חסימת סריקה כפולה של אותו שלב (ברקוד+שלב) ─────────────────
 // חותמת מופע-מוצר = תאריך הקמת המוצר (הרשומה העדכנית ביותר ללקוח+מוצר).
 // הזמנה חדשה נכנסת כרשומת מוצר חדשה עם תאריך חדש ⇒ אינה נחסמת מול היסטוריה ישנה.
+// חותמת של רשומת מוצר בודדת. `createdAt` הוא מקור האמת; ה-fallback ל-id קיים כי לרשומות
+// הוותיקות ביותר אין את השדה, וה-id שלהן הוא חותמת זמן.
+function prodStampOf(p){return +p.createdAt||parseInt(String(p.id).replace(/\D/g,''))||0;}
 function prodStampFor(cust,prod){
   let mx=0;
   for(const p of (S.products||[])){
     if(p.cust!==cust||p.prod!==prod)continue;
-    const c=+p.createdAt||parseInt(String(p.id).replace(/\D/g,''))||0;
+    const c=prodStampOf(p);
     if(c>mx)mx=c;
   }
   return mx;
+}
+// ההזמנה **הראשונה** של הדגם — שם נוחתות משימות בלי prodStamp. ראה stepDoneMap.
+function prodStampOldest(cust,prod){
+  let mn=Infinity;
+  for(const p of (S.products||[])){
+    if(p.cust!==cust||p.prod!==prod)continue;
+    const c=prodStampOf(p);
+    if(c<mn)mn=c;
+  }
+  return isFinite(mn)?mn:0;
 }
 // האם ברקוד+שלב כבר פעיל (לא מושהה) או כבר בוצע עבור אותו מופע-מוצר.
 // מושהות מוחרגות — הן מיועדות לחידוש בסריקה חוזרת. היסטוריה ישנה בלי חותמת נחסמת תמיד.
@@ -5890,7 +5931,9 @@ function renderKiosk(){
 // Firestore נוספות. מכוון: הלוח רץ כל היום ומתרנדר בכל שינוי נתונים — שליפת היסטוריה מלאה
 // כאן (כמו בדוח buildStepQtyReport) הייתה עולה מאות אלפי קריאות ביום. אותה החלטה שהתקבלה
 // ל"מצטבר קודם" בסורק. המשמעות: הזמנה שרצה מעל 14 יום תוצג כאן נמוך מהדוח שבלשונית דוחות.
-function _kioskStepDone(){return stepDoneMap(S.histTasks);}
+// ⚠️ **חייב לכווץ.** מאז שהמפתח כולל חותמת הזמנה, קריאה ישירה עם stepDoneKey בן 3
+// ארגומנטים הייתה מחזירה undefined לכל שלב ומאפסת את הלוח כולו — בלי שום שגיאה.
+function _kioskStepDone(){return stepDoneByModel(stepDoneMap(S.histTasks));}
 function _kProgHtml(done,total){
   if(!total)return `<span class="k-progtxt">${done}</span>`;
   const pct=Math.min(100,Math.round(done/total*100));
@@ -6391,7 +6434,11 @@ async function buildStepQtyReport(cf,pf){
     // מהברקוד האחרון שהופק בדפדפן. ככה הוצג "סה״כ 1 יח'" ל-180 יחידות ב-02691 (24/08).
     const total=_prodQty(p);
     const rows=steps.map(stepNm=>{
-      const done=dm[stepDoneKey(p.cust,p.prod,stepNm)]||0;
+      // תקרה בתצוגה (החלטת המשתמש 26/08): שלב לא יציג יותר מהכמות שהוזמנה. נדרש כי
+      // `taskUnits` של ברקוד "כל הכמות" בן 13 ספרות מחזיר orderNo=0 ⇒ הכמות נקראת
+      // מהרשומה החדשה. נמדד: 02691 #001 הציג 265 על הזמנה של 180.
+      const raw=dm[stepDoneKey(p.cust,p.prod,stepNm,prodStampOf(p))]||0;
+      const done=total?Math.min(raw,total):raw;
       const pct=total?Math.min(100,Math.round(done/total*100)):0;
       return{stepNm,done,pct};
     });
