@@ -2865,7 +2865,11 @@ const HIST_RETENTION_DAYS=60;
 // ─── LOCAL STORAGE ──────────────────────────────────────────
 function saveLS(){
   try{
-    const d={workers:S.workers,depts:S.depts,deptStations:S.deptStations,activeTasks:S.activeTasks.map(t=>({...t,startTime:t.startTime instanceof Date?t.startTime.toISOString():t.startTime})),histTasks:S.histTasks.map(t=>({...t,startTime:t.startTime instanceof Date?t.startTime.toISOString():t.startTime,endTime:t.endTime instanceof Date?t.endTime.toISOString():t.endTime})),settings:S.settings,nextTId:S.nextTId,attHistory:S.attHistory,costs:S.costs,customerNames:S.customerNames,customColors:S.customColors,products:S.products,tgSentAlerts:S.tgSentAlerts,tgAbsentSig:S.tgAbsentSig};
+    const d={workers:S.workers,depts:S.depts,deptStations:S.deptStations,activeTasks:S.activeTasks.map(t=>({...t,startTime:t.startTime instanceof Date?t.startTime.toISOString():t.startTime})),histTasks:S.histTasks.map(t=>({...t,startTime:t.startTime instanceof Date?t.startTime.toISOString():t.startTime,endTime:t.endTime instanceof Date?t.endTime.toISOString():t.endTime})),settings:S.settings,nextTId:S.nextTId,attHistory:S.attHistory,costs:S.costs,customerNames:S.customerNames,customColors:S.customColors,
+      // ⚠️ בלי התמונות. איתן המטמון שקל 17 MB מול מכסה של ~5 MB, setItem נכשל,
+      // ה-catch בלע את השגיאה — ו**שום דבר לא נשמר**. כל פתיחה הורידה הכל מהרשת.
+      products:S.products.map(p=>{const q={...p};delete q.images;q.imgCount=prodImgCount(p);return q;}),
+      tgSentAlerts:S.tgSentAlerts,tgAbsentSig:S.tgAbsentSig};
     localStorage.setItem('txops_v3',JSON.stringify(d));
   }catch(e){}
 }
@@ -11319,8 +11323,10 @@ function renderProducts(){
   if(!el)return;
   if(!list.length){el.innerHTML='<div style="text-align:center;color:var(--txt3);padding:2rem">אין מוצרים. לחץ "+ הוסף מוצר"</div>';return;}
   el.innerHTML=list.map(p=>{
-    const imgHtml=p.images&&p.images.length
-      ?`<div style="display:flex;gap:6px;flex-wrap:wrap;margin-top:8px">${p.images.slice(0,4).map(img=>`<img src="${img}" style="width:64px;height:64px;object-fit:cover;border-radius:6px;border:1px solid var(--brd)" onclick="viewImg('${p.id}',this.src)">`).join('')}${p.images.length>4?`<div style="width:64px;height:64px;border-radius:6px;background:var(--bg2);display:flex;align-items:center;justify-content:center;font-size:12px;color:var(--txt3)">+${p.images.length-4}</div>`:''}</div>`:'';
+    // תג בלבד — התמונות נמשכות בלחיצה. ראה fetchProdImgs.
+    const _ic=prodImgCount(p);
+    const imgHtml=_ic
+      ?`<div style="margin-top:8px"><button type="button" class="btn" style="font-size:11px;padding:4px 10px" onclick="loadProdImgs('${p.id}')">📷 ${_ic} ${_ic===1?'תמונה':'תמונות'}</button><div id="pimg-${p.id}"></div></div>`:'';
     const qtyRows=p.quantities&&p.quantities.length
       ?`<div style="margin-top:8px;font-size:11px;color:var(--txt3)">${p.quantities.map(q=>`מידה ${q.size} | ${COLORS[q.color]||q.color}: <b style="color:var(--txt)">${q.qty}</b>`).join(' &nbsp;·&nbsp; ')}</div>`:'';
     const docHtml=p.docs&&p.docs.length
@@ -11454,14 +11460,25 @@ function openProductModal(id){
     </div>
     <div id="pm-pricing-result" style="margin-bottom:8px"></div>`;
   document.getElementById('prod-modal-wrap').classList.remove('hidden');
+  // התמונות נטענות אסינכרונית; עד שיגיעו _prodImgs ריק והתצוגה מראה "טוען…".
+  // ⚠️ אסור לשמור מוצר לפני שהן הגיעו — נשמר דגל שחוסם את saveProduct.
   _prodImgs=p?[...(p.images||[])]:[];
   _prodDocs=p?[...(p.docs||[])]:[];
+  _prodImgsLoading=false;
+  if(p&&!_prodImgs.length&&prodImgCount(p)){
+    _prodImgsLoading=true;
+    const _pv=document.getElementById('prod-img-preview');
+    if(_pv)_pv.innerHTML='<span style="font-size:11px;color:var(--txt3)">טוען תמונות…</span>';
+    fetchProdImgs(p.id).then(a=>{_prodImgs=[...a];_prodImgsLoading=false;refreshImgPreview();});
+  }
   renumberStepRows();
   renderProductPricing();
   pmCheckPrevOrder(); // מוצר חדש שכבר יש לו הזמנה קודמת — להציע העתקה במקום הקלדה מחדש
 }
 
 let _prodImgs=[], _prodDocs=[], _prodCamStream=null;
+// נעילה בזמן שתמונות בדרך — שמירה באמצע הייתה כותבת מערך ריק ומוחקת אותן
+let _prodImgsLoading=false;
 
 function closeProdModal(){
   document.getElementById('prod-modal-wrap').classList.add('hidden');
@@ -11739,6 +11756,41 @@ async function addProdImages(input){
   refreshImgPreview();
 }
 
+// ─── תמונות מוצר — נטענות לפי דרישה ─────────────────────────────────────
+// 🔑 התמונות **אינן** יושבות במסמך המוצר. הן ב-productImages/{id}, ונמשכות רק כשמסתכלים.
+//
+// למה: מסמכי products שקלו 17 MB, מהם 15.97 MB תמונות base64, והם נטענים ב-onSnapshot
+// אצל **כל** משתמש בכל פתיחה — בזמן שלשונית המוצרים היא הרשאת מנהל בלבד. 19 מתוך 20
+// המשתמשים הורידו תמונות שאין להם הרשאה לראות. בנוסף saveLS ניסה לכתוב 17 MB
+// ל-localStorage (מכסה ~5 MB), נכשל ב-QuotaExceededError שנבלע ב-catch ריק, ולכן
+// **המטמון המקומי מעולם לא נשמר** — כל פתיחה הורידה הכל מחדש. משם 15+ השניות.
+//
+// ⚠️ Firestore מחזיר מסמך שלם ב-onSnapshot — אין דרך לבקש "products בלי images".
+// לכן ההפרדה לאוסף נפרד היא הפתרון היחיד ששומר על העדכון החי של כרטיס המוצר.
+const _prodImgCache={};
+async function fetchProdImgs(id){
+  if(_prodImgCache[id])return _prodImgCache[id];
+  if(!S.fbConnected)return [];
+  try{const d=await fbGet('productImages',String(id));
+    const arr=(d&&Array.isArray(d.images))?d.images:[];
+    _prodImgCache[id]=arr;return arr;
+  }catch(e){return [];}
+}
+// כמה תמונות יש למוצר, בלי להוריד אותן. imgCount נכתב בשמירה; לרשומות שטרם עברו
+// מיגרציה נופלים חזרה ל-p.images שעדיין קיים — ולכן הקוד עובד גם לפני שלב הניקוי.
+function prodImgCount(p){
+  if(p&&Array.isArray(p.images)&&p.images.length)return p.images.length;
+  return +(p&&p.imgCount)||0;
+}
+async function loadProdImgs(id){
+  const box=document.getElementById('pimg-'+id);if(!box)return;
+  const p=S.products.find(x=>String(x.id)===String(id));
+  box.innerHTML='<span style="font-size:11px;color:var(--txt3)">טוען תמונות…</span>';
+  let imgs=(p&&Array.isArray(p.images)&&p.images.length)?p.images:await fetchProdImgs(id);
+  if(!imgs.length){box.innerHTML='<span style="font-size:11px;color:var(--txt3)">אין תמונות</span>';return;}
+  box.innerHTML='<div style="display:flex;gap:6px;flex-wrap:wrap;margin-top:8px">'+imgs.map(img=>
+    '<img src="'+img+'" style="width:64px;height:64px;object-fit:cover;border-radius:6px;border:1px solid var(--brd);cursor:pointer" onclick="viewImg('+"'"+String(id)+"'"+',this.src)">').join('')+'</div>';
+}
 function refreshImgPreview(){
   const el=document.getElementById('prod-img-preview');
   if(!el)return;
@@ -11881,6 +11933,7 @@ function readStagesFromModal(){
   return{stageLog,stageSkipped};
 }
 async function saveProduct(){
+  if(_prodImgsLoading){showToast('⏳ התמונות עדיין נטענות — נסה שוב בעוד רגע','var(--amber-txt)');return;}
   const prod=(document.getElementById('pm-prod')?.value||'').trim().padStart(5,'0').slice(0,5);
   const cust=(document.getElementById('pm-cust')?.value||'').trim().padStart(2,'0').slice(0,2);
   const name=(document.getElementById('pm-name')?.value||'').trim();
@@ -11932,7 +11985,7 @@ async function saveProduct(){
           sendTelegram('📦 TextileOps — מוצר עבר שלב ייצור\n🏷 מוצר: '+name+' ('+cust+'-'+prod+')\n📍 שלב: '+stageName+'\n📅 תאריך: '+s.date+' '+s.time+'\n🕐 עודכן: '+now).catch(()=>{});
         }
       }
-      Object.assign(p,{prod,cust,name,images:_prodImgs,docs:_prodDocs,quantities,stageLog,stageSkipped,workSteps,unitPrice,targetProfitPct,directMaterialsCost});
+      Object.assign(p,{prod,cust,name,images:_prodImgs,imgCount:_prodImgs.length,docs:_prodDocs,quantities,stageLog,stageSkipped,workSteps,unitPrice,targetProfitPct,directMaterialsCost});
     }
   }else{
     const id='p'+Date.now();
@@ -11942,12 +11995,23 @@ async function saveProduct(){
       stageLog.unshift({id:'receive',date:now.getFullYear()+'-'+pad2(now.getMonth()+1)+'-'+pad2(now.getDate()),time:pad2(now.getHours())+':'+pad2(now.getMinutes()),note:'',auto:true});
       stageLog.sort((a,b)=>PROD_STAGES.findIndex(x=>x.id===a.id)-PROD_STAGES.findIndex(x=>x.id===b.id));
     }
-    S.products.push({id,createdAt:Date.now(),...newProdOrderFields(cust,prod),prod,cust,name,images:_prodImgs,docs:_prodDocs,quantities,stageLog,stageSkipped,workSteps,unitPrice,targetProfitPct,directMaterialsCost});
+    S.products.push({id,createdAt:Date.now(),...newProdOrderFields(cust,prod),prod,cust,name,images:_prodImgs,imgCount:_prodImgs.length,docs:_prodDocs,quantities,stageLog,stageSkipped,workSteps,unitPrice,targetProfitPct,directMaterialsCost});
   }
   saveLS();
   if(S.fbConnected){
     const p=S.products.find(x=>x.id===(_editProdId||S.products[S.products.length-1].id));
-    if(p)await fbSet('products',p.id,{...p,images:p.images,docs:p.docs.map(d=>({name:d.name,data:d.data}))});
+    if(p){
+      // 🔑 התמונות נכתבות לאוסף הנפרד, ומסמך המוצר נושא רק את המונה.
+      // ⚠️ fbSet הוא setDoc(merge:true) ולכן **אינו מוחק** שדה images קיים —
+      // הניקוי של הרשומות הישנות נעשה במיגרציה, לא כאן.
+      const imgs=Array.isArray(p.images)?p.images:[];
+      if(imgs.length)await fbSet('productImages',String(p.id),{images:imgs,count:imgs.length,migratedAt:Date.now(),srcCust:p.cust,srcProd:p.prod});
+      else{try{await fbDel('productImages',String(p.id));}catch(e){}}
+      _prodImgCache[p.id]=imgs;
+      const out={...p,imgCount:imgs.length,docs:(p.docs||[]).map(d=>({name:d.name,data:d.data}))};
+      delete out.images;
+      await fbSet('products',p.id,out);
+    }
   }
   closeProdModal();renderProducts();
   _expMap={}; // התמחור אולי השתנה — ניקוי cache של צפי הזמן
@@ -11964,7 +12028,11 @@ async function deleteProduct(id){
   }
   if(!confirm('למחוק את המוצר "'+p.name+'" ('+p.cust+'-'+p.prod+')?\nהפעולה בלתי הפיכה.'))return;
   S.products=S.products.filter(x=>x.id!==id);
-  if(S.fbConnected)await fbDel('products',id);
+  if(S.fbConnected){
+    await fbDel('products',id);
+    try{await fbDel('productImages',String(id));}catch(e){} // אחרת נשארות תמונות יתומות
+  }
+  delete _prodImgCache[id];
   saveLS();renderProducts();
 }
 
