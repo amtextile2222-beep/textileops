@@ -581,6 +581,7 @@ code{background:var(--bg2);border:0.5px solid var(--b);border-radius:4px;padding
       <span style="font-size:13px;font-weight:600">מה להדפיס?</span>
       <label style="display:flex;align-items:center;gap:6px;font-size:13px;cursor:pointer"><input type="radio" name="print-choice" value="detail" checked style="width:auto"/> פירוט משימות</label>
       <label style="display:flex;align-items:center;gap:6px;font-size:13px;cursor:pointer"><input type="radio" name="print-choice" value="summary" style="width:auto"/> דוח מרוכז</label>
+      <label style="display:flex;align-items:center;gap:6px;font-size:13px;cursor:pointer"><input type="radio" name="print-choice" value="expprod" style="width:auto"/> 🎯 בפועל מול צפי</label>
       <label style="display:flex;align-items:center;gap:6px;font-size:13px;cursor:pointer"><input type="radio" name="print-choice" value="stages" style="width:auto"/> דוח ייצור לפי שלב</label>
       <label style="display:flex;align-items:center;gap:6px;font-size:13px;cursor:pointer"><input type="radio" name="print-choice" value="stepqty" style="width:auto"/> כמות לפי שלב עבודה</label>
       <label style="display:flex;align-items:center;gap:6px;font-size:13px;cursor:pointer"><input type="radio" name="print-choice" value="profit" style="width:auto"/> 💰 רווח מול יעד</label>
@@ -597,6 +598,10 @@ code{background:var(--bg2);border:0.5px solid var(--b);border-radius:4px;padding
     <div class="card">
       <div class="sec">👥 דוח מרוכז — שעות לפי עובד</div>
       <div id="rp-summary-body"></div>
+    </div>
+    <div class="card" style="margin-top:1rem">
+      <div class="sec">🎯 בפועל מול צפי — לפי מוצר</div>
+      <div id="rp-expprod-body"></div>
     </div>
     <div class="card" style="margin-top:1rem">
       <div style="display:flex;align-items:center;justify-content:space-between;gap:8px">
@@ -6344,6 +6349,7 @@ async function buildRep(){
   rfc.innerHTML='<option value="">כל הלקוחות</option>'+cOpts.map(c=>`<option value="${c}" ${c===cf?'selected':''}>לקוח ${c}</option>`).join('');
   rfp.innerHTML='<option value="">כל המוצרים</option>'+pOpts.map(p=>`<option value="${p}" ${p===pf?'selected':''}>מוצר ${p}</option>`).join('');
   buildSummaryReport(fl);
+  buildExpectedByProduct(fl);
   buildStageReport();
   buildStepQtyReport(cf,pf);
   buildBudgetReport(fl);
@@ -6394,6 +6400,112 @@ function buildSummaryReport(fl){
       ${showCost?`<td style="padding:8px 8px"><span class="badge green">₪${grandCost.toFixed(2)}</span></td>`:''}
     </tr></tfoot>
   </table>${showCost?`<div style="font-size:11px;color:var(--txt3);margin-top:6px">עלות עבודה = שעות בפועל × (עלות שעה עמוסה + תקורה מפעלית ₪${oh.toFixed(2)}/שעה)</div>`:''}`;
+}
+// ─── 🎯 בפועל מול צפי — לפי מוצר ─────────────────────────────
+// שורה לכל לקוח+מוצר, במסננים ובטווח התאריכים של לשונית הדוחות (עובד · לקוח · מוצר · מ-/עד).
+// ⚠️ הצפי (`expectedMin`) **נצרב על המשימה בזמן הסריקה** ואינו מחושב מחדש — שלב עם רמת
+// קושי ובלי דקות ידניות בולע 100% מתקציב ההזמנה ומייצר צפי אבסורדי (00205 `سيرت` 517 דק').
+// נמדד 27/08: 30 רשומות באוגוסט, 228 שע' "חיסכון" מדומה. **החלטת המשתמש: להציג כמו שהן,
+// מסומנות ⚠** — הדוח לא מסנן ולא מתקן, רק מראה איפה המספר לא אמין.
+const EXP_SUSPECT_MIN=120;    // דק' — סף מוחלט, מתחתיו לא מסמנים כלל
+const EXP_SUSPECT_RATIO=3;    // וגם: הצפי גדול מפי-כך מהזמן שבפועל
+function _expSuspect(actSec,expSec){return expSec>EXP_SUSPECT_MIN*60&&expSec>actSec*EXP_SUSPECT_RATIO;}
+let _expProdRows=[];  // נבנה כאן ונקרא ב-exportCSV — כדי שה-CSV וההצגה לא יתפצלו לשתי נוסחאות
+function buildExpectedByProduct(fl){
+  const el=document.getElementById('rp-expprod-body');if(!el)return;
+  _expProdRows=[];
+  const done=fl.filter(t=>t.done);
+  const openCnt=fl.length-done.length;
+  if(!done.length){el.innerHTML='<div style="color:var(--txt3);font-size:12px;padding:.5rem 0">אין משימות שהושלמו בטווח</div>';return;}
+  // פעם אחת על כל הקבוצה, לא פר-מוצר: כך סכום השורות שווה בדיוק ל"זמן כולל" שלמעלה
+  const nd=normalizeBatchDurations(done);
+  const g={};
+  done.forEach(t=>{
+    const k=t.cust+'|'+t.prod;
+    const r=g[k]||(g[k]={cust:t.cust,prod:t.prod,tasks:[],act:0,exp:0,over:0,under:0,noExp:0,noExpSec:0,susp:0,suspSec:0,suspList:[]});
+    const s=nd[t.id]||0;
+    r.tasks.push(t);r.act+=s;
+    const e=(+t.expectedMin>0)?(+t.expectedMin)*60:0;
+    if(!e){r.noExp++;r.noExpSec+=s;return;}
+    r.exp+=e;
+    const d=s-e;if(d>0)r.over+=d;else r.under+=-d;
+    if(_expSuspect(s,e)){r.susp++;r.suspSec+=(e-s);
+      if(r.suspList.length<8)r.suspList.push((t.taskType||'—')+' — צפי '+fmtM(e)+' מול '+fmtM(s)+' בפועל');}
+  });
+  const H=s=>(s/3600).toFixed(1)+" שע'";
+  const rows=Object.values(g).map(r=>{
+    r.units=sumUnitsDedup(r.tasks);
+    r.actExp=r.act-r.noExpSec;              // הזמן שיש מולו צפי — רק הוא מושווה
+    r.gap=r.over-r.under;                   // = actExp − exp, ולכן תמיד סוגר עם שתי העמודות
+    r.eff=r.actExp>0?Math.round(r.exp/r.actExp*100):null;
+    // ⚠️ הקיבוץ כאן הוא **לפי מוצר** (החלטת המשתמש), אבל `findProd` מחזיר תמיד את רשומת
+    // המוצר החדשה — כלומר את שם ההזמנה האחרונה. שורה שמאגדת כמה הזמנות תציג שם של
+    // הזמנה אחת, וזו בדיוק הטעות שדוח הרווח עשה. לכן סופרים חותמות ומסמנים במפורש.
+    r.orders=new Set(r.tasks.map(t=>t.prodStamp||0)).size;
+    r.name=findProd(r.cust,r.prod)?.name||'';
+    return r;
+  }).sort((a,b)=>b.act-a.act);
+  _expProdRows=rows;
+  const T2={act:0,exp:0,over:0,under:0,units:0,n:0,noExp:0,noExpSec:0,susp:0,suspSec:0,actExp:0};
+  rows.forEach(r=>{T2.act+=r.act;T2.exp+=r.exp;T2.over+=r.over;T2.under+=r.under;T2.units+=r.units;
+    T2.n+=r.tasks.length;T2.noExp+=r.noExp;T2.noExpSec+=r.noExpSec;T2.susp+=r.susp;T2.suspSec+=r.suspSec;T2.actExp+=r.actExp;});
+  const totGap=T2.over-T2.under,totEff=T2.actExp>0?Math.round(T2.exp/T2.actExp*100):null;
+  const cell=(v,cls,ttl)=>`<td style="padding:7px 8px">${v?`<span class="badge ${cls}"${ttl?` title="${esc(ttl)}"`:''}>${v}</span>`:'<span style="color:var(--txt3)">—</span>'}</td>`;
+  el.innerHTML=`
+  <div class="g4" style="margin-bottom:.75rem">
+    <div class="card" style="padding:.6rem .8rem"><div class="mlbl">צפי מצטבר</div><div class="mval" style="font-size:20px">${H(T2.exp)}</div></div>
+    <div class="card" style="padding:.6rem .8rem"><div class="mlbl">▲ מעל הצפי</div><div class="mval" style="font-size:20px;color:var(--red)">${H(T2.over)}</div></div>
+    <div class="card" style="padding:.6rem .8rem"><div class="mlbl">▼ מתחת לצפי</div><div class="mval" style="font-size:20px;color:var(--green)">${H(T2.under)}</div></div>
+    <div class="card" style="padding:.6rem .8rem"><div class="mlbl">פער נטו</div><div class="mval" style="font-size:20px;color:${totGap>0?'var(--red)':'var(--green)'}">${totGap>0?'+':''}${H(totGap)}</div></div>
+  </div>
+  <div class="tbl-wrap"><table style="width:100%;border-collapse:collapse;font-size:13px">
+    <thead><tr style="border-bottom:1px solid var(--b)">
+      <th style="text-align:right;padding:6px 8px">מוצר</th>
+      <th style="text-align:right;padding:6px 8px">משימות</th>
+      <th style="text-align:right;padding:6px 8px">יחידות</th>
+      <th style="text-align:right;padding:6px 8px">בפועל</th>
+      <th style="text-align:right;padding:6px 8px">צפי</th>
+      <th style="text-align:right;padding:6px 8px">פער</th>
+      <th style="text-align:right;padding:6px 8px">▲ מעל</th>
+      <th style="text-align:right;padding:6px 8px">▼ מתחת</th>
+      <th style="text-align:right;padding:6px 8px">יעילות</th>
+    </tr></thead><tbody>
+    ${rows.map(r=>`<tr style="border-bottom:0.5px solid var(--b)${r.susp?';background:rgba(245,158,11,.07)':''}">
+      <td style="padding:7px 8px;white-space:nowrap">
+        <span class="bc-seg bc-c">${r.cust}</span> <span class="bc-seg bc-p">${r.prod}</span>
+        ${r.name?`<span style="color:var(--txt2);font-size:12px"> ${esc(r.name)}</span>`:''}
+        ${r.orders>1?`<span class="badge gray" style="font-size:9px" title="${esc('השורה מאגדת '+r.orders+' הזמנות של אותו מוצר. השם שמוצג הוא של רשומת המוצר החדשה ביותר.')}">${r.orders} הזמנות</span>`:''}
+        ${r.susp?`<span class="badge amber" style="font-size:9px;font-weight:700" title="${esc('צפי חשוד — '+r.susp+" רשומות שהצפי שלהן מנופח ומזרים "+H(r.suspSec)+' חיסכון מדומה:\n'+r.suspList.join('\n'))}">⚠ ${r.susp} צפי חשוד</span>`:''}
+      </td>
+      <td style="padding:7px 8px">${r.tasks.length}${r.noExp?`<span class="badge gray" style="font-size:9px;margin-inline-start:4px" title="${esc(r.noExp+' משימות בלי צפי כלל ('+H(r.noExpSec)+') — לא נכנסו להשוואה')}">${r.noExp} בלי צפי</span>`:''}</td>
+      <td style="padding:7px 8px">${r.units}</td>
+      <td style="padding:7px 8px"><span class="badge blue">${H(r.act)}</span></td>
+      ${cell(r.exp?H(r.exp):'','gray')}
+      ${cell(r.exp?((r.gap>0?'+':'')+H(r.gap)):'',r.gap>0?'red':'green','פער = מעל פחות מתחת, על המשימות שיש להן צפי')}
+      ${cell(r.over?H(r.over):'','red')}
+      ${cell(r.under?H(r.under):'','green')}
+      ${cell(r.eff!=null?r.eff+'%':'',r.eff==null?'gray':(r.eff>=100?'green':'red'),'יעילות = צפי חלקי בפועל. מעל 100% = מהר מהצפי')}
+    </tr>`).join('')}
+    </tbody>
+    <tfoot><tr style="border-top:1.5px solid var(--b);font-weight:600;background:var(--bg2)">
+      <td style="padding:8px 8px">סה"כ ${rows.length} מוצרים</td>
+      <td style="padding:8px 8px">${T2.n}</td>
+      <td style="padding:8px 8px">${T2.units}</td>
+      <td style="padding:8px 8px"><span class="badge blue">${H(T2.act)}</span></td>
+      <td style="padding:8px 8px"><span class="badge gray">${H(T2.exp)}</span></td>
+      <td style="padding:8px 8px"><span class="badge ${totGap>0?'red':'green'}">${totGap>0?'+':''}${H(totGap)}</span></td>
+      <td style="padding:8px 8px"><span class="badge red">${H(T2.over)}</span></td>
+      <td style="padding:8px 8px"><span class="badge green">${H(T2.under)}</span></td>
+      <td style="padding:8px 8px"><span class="badge ${totEff!=null&&totEff>=100?'green':'red'}">${totEff!=null?totEff+'%':'—'}</span></td>
+    </tr></tfoot>
+  </table></div>
+  <div style="font-size:11px;color:var(--txt3);margin-top:6px;line-height:1.6">
+    בפועל = <b>duration</b> נקי (הפסקות, לילות והשהיות כבר מנוכים; סריקת אצווה נספרת פעם אחת).
+    ההשוואה רצה רק על משימות שיש להן צפי.
+    ${openCnt?`<br>${openCnt} משימות פעילות שטרם נסגרו אינן נספרות כאן.`:''}
+    ${T2.noExp?`<br>${T2.noExp} משימות (${H(T2.noExpSec)}) בלי צפי כלל — נספרות ב"בפועל" ולא בהשוואה.`:''}
+    ${T2.susp?`<br><b style="color:var(--amber,#b45309)">⚠ ${T2.susp} רשומות עם צפי חשוד</b> מזרימות ${H(T2.suspSec)} של "חיסכון" מדומה. הצפי נצרב בסריקה ולא תוקן — השורות מסומנות בצהוב.`:''}
+  </div>`;
 }
 function buildStageReport(){
   const T=LANGS[currentLang];
@@ -6700,6 +6812,24 @@ async function exportCSV(){
     const etStr=et?pad2(et.getHours())+':'+pad2(et.getMinutes()):'—';
     rows.push([t.workerName,t.dept,t.cust,t.prod,t.size||'',t.qty,COLORS[t.col]||t.col,stStr,etStr,t.done?Math.round((t.duration||0)/60):Math.round((t.elapsed||0)/60),t.done?'הושלם':'פעיל',d.toLocaleDateString('he-IL')]);
   });
+  // 🎯 הבלוק המרוכז נלקח מ-_expProdRows שנבנה ב-buildExpectedByProduct — נקודת חישוב אחת
+  // לתצוגה, להדפסה ול-CSV. אם הלשונית עוד לא נבנתה בטווח הנוכחי, בונים אותה עכשיו.
+  if(!_expProdRows.length)try{buildExpectedByProduct(all);}catch(e){}
+  if(_expProdRows.length){
+    const h1=s=>(s/3600).toFixed(1);
+    rows.push([]);
+    rows.push(['🎯 בפועל מול צפי — לפי מוצר']);
+    rows.push(['לקוח','מוצר','שם','משימות','יחידות','בפועל (שעות)','צפי (שעות)','פער (שעות)','מעל הצפי (שעות)','מתחת לצפי (שעות)','יעילות %','בלי צפי','צפי חשוד']);
+    const G={act:0,exp:0,over:0,under:0,units:0,n:0,noExp:0,susp:0,actExp:0};
+    _expProdRows.forEach(r=>{
+      G.act+=r.act;G.exp+=r.exp;G.over+=r.over;G.under+=r.under;G.units+=r.units;
+      G.n+=r.tasks.length;G.noExp+=r.noExp;G.susp+=r.susp;G.actExp+=r.actExp;
+      rows.push([r.cust,r.prod,String(r.name||'').replace(/,/g,' '),r.tasks.length,r.units,h1(r.act),r.exp?h1(r.exp):'',r.exp?h1(r.gap):'',
+        h1(r.over),h1(r.under),r.eff!=null?r.eff:'',r.noExp||'',r.susp||'']);
+    });
+    rows.push(['סה"כ','','',G.n,G.units,h1(G.act),h1(G.exp),h1(G.over-G.under),h1(G.over),h1(G.under),
+      G.actExp>0?Math.round(G.exp/G.actExp*100):'',G.noExp||'',G.susp||'']);
+  }
   const csv='﻿'+'sep=,\n'+rows.map(r=>r.join(',')).join('\n');
   const blob2=new Blob([csv],{type:'text/csv;charset=utf-8'});
   const a=document.createElement('a');a.href=URL.createObjectURL(blob2);
@@ -12060,6 +12190,9 @@ function doPrintChoice(){
   if(val==='summary'||val==='all'){
     html+=`<div class="card" style="margin-top:12px"><div class="sec">👥 דוח מרוכז — שעות לפי עובד</div>${document.getElementById('rp-summary-body')?.innerHTML||''}</div>`;
   }
+  if(val==='expprod'||val==='all'){
+    html+=`<div class="card" style="margin-top:12px"><div class="sec">🎯 בפועל מול צפי — לפי מוצר</div>${document.getElementById('rp-expprod-body')?.innerHTML||''}</div>`;
+  }
   if(val==='stages'||val==='all'){
     html+=`<div class="card" style="margin-top:12px"><div class="sec">📦 דוח ייצור לפי שלב</div>${document.getElementById('rp-stages-body')?.innerHTML||''}</div>`;
   }
@@ -12071,7 +12204,7 @@ function doPrintChoice(){
     const body=(document.getElementById('rp-profit-body')?.innerHTML||'').replace(/<details/g,'<details open');
     if(body)html+=`<div class="card" style="margin-top:12px"><div class="sec">💰 רווח בפועל מול יעד — לפי מוצר</div>${body}</div>`;
   }
-  printViaIframe(`<!DOCTYPE html><html dir="rtl" lang="he"><head><meta charset="UTF-8"/><title>דוח משימות</title><style>*{box-sizing:border-box;margin:0;padding:0}body{font-family:Arial,sans-serif;padding:20px;color:#000;background:#fff;font-size:13px;-webkit-print-color-adjust:exact;print-color-adjust:exact}h1{font-size:18px;margin-bottom:4px;color:#185FA5}.print-date{font-size:11px;color:#666;margin-bottom:16px}.card{background:#fff;border:1px solid #ddd;border-radius:8px;padding:12px 16px;margin-bottom:12px}.sec{font-size:14px;font-weight:700;margin-bottom:8px}table{width:100%;border-collapse:collapse;font-size:12px}th{background:#f0f0f0;padding:7px 8px;text-align:right;font-weight:600;border-bottom:2px solid #ddd}td{padding:6px 8px;border-bottom:1px solid #eee}.badge{display:inline-block;padding:2px 8px;border-radius:999px;font-size:11px;font-weight:600;border:1px solid #ccc}.badge.green{background:#dcfce7;color:#166534}.badge.red{background:#fee2e2;color:#b91c1c}.badge.amber{background:#fef3c7;color:#92400e}.badge.gray{background:#f0f0f0;color:#555}.bc-seg{display:inline-block;padding:1px 6px;border-radius:6px;background:#eef2ff;font-weight:700;font-size:11px}summary{list-style:none}details{page-break-inside:avoid}@media print{body{padding:10px}}</style></head><body><h1>TextileOps — דוח משימות</h1><div class="print-date">${now}</div>${html}</body></html>`);
+  printViaIframe(`<!DOCTYPE html><html dir="rtl" lang="he"><head><meta charset="UTF-8"/><title>דוח משימות</title><style>*{box-sizing:border-box;margin:0;padding:0}body{font-family:Arial,sans-serif;padding:20px;color:#000;background:#fff;font-size:13px;-webkit-print-color-adjust:exact;print-color-adjust:exact}h1{font-size:18px;margin-bottom:4px;color:#185FA5}.print-date{font-size:11px;color:#666;margin-bottom:16px}.card{background:#fff;border:1px solid #ddd;border-radius:8px;padding:12px 16px;margin-bottom:12px}.sec{font-size:14px;font-weight:700;margin-bottom:8px}table{width:100%;border-collapse:collapse;font-size:12px}th{background:#f0f0f0;padding:7px 8px;text-align:right;font-weight:600;border-bottom:2px solid #ddd}td{padding:6px 8px;border-bottom:1px solid #eee}.badge{display:inline-block;padding:2px 8px;border-radius:999px;font-size:11px;font-weight:600;border:1px solid #ccc}.badge.green{background:#dcfce7;color:#166534}.badge.red{background:#fee2e2;color:#b91c1c}.badge.amber{background:#fef3c7;color:#92400e}.badge.gray{background:#f0f0f0;color:#555}.badge.blue{background:#dbeafe;color:#1e40af}.bc-seg{display:inline-block;padding:1px 6px;border-radius:6px;background:#eef2ff;font-weight:700;font-size:11px}.g4{display:flex;gap:8px;margin-bottom:10px}.g4 .card{flex:1;padding:8px 10px;margin-bottom:0}.mlbl{font-size:10px;color:#666}.mval{font-size:15px;font-weight:700}summary{list-style:none}details{page-break-inside:avoid}@media print{body{padding:10px}}</style></head><body><h1>TextileOps — דוח משימות</h1><div class="print-date">${now}</div>${html}</body></html>`);
 }
 function printPage(pageId, title){
   const content=document.getElementById(pageId)?.innerHTML||'';
