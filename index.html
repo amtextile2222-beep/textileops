@@ -2364,6 +2364,16 @@ function stepManualMin(s){return(s&&typeof s==='object'&&+s.manualMin>0)?+s.manu
 // ולא נגזר מהתחנה: ב-19 משימות הגזירה שבהיסטוריה שדה `station` ריק לחלוטין, ולכן זיהוי
 // לפי תחנה בדיעבד מחזיר אפס. ראה gotcha_station_display.
 function stepIsCut(s){return!!(s&&typeof s==='object'&&s.cut);}
+// ✂ אחוז רווח היעד של הגזירה — שדה נפרד מ-`targetProfitPct` של התפירה. שני העיסוקים
+// מתומחרים אחרת ולכן גם הרווח עליהם שונה (החלטת המשתמש 30/08).
+// 🛑 כל עוד `cutProfitPct` לא הוזן, החישוב **נופל לאחוז התפירה** — בדיוק ההתנהגות שהייתה
+// עד היום. ברירת מחדל אחרת (0%, למשל) הייתה משנה מספרים חיים בשקט בכל מוצר עם `cutPrice`.
+// מה שדוחף להזין הוא האזהרה האדומה בכרטיס המוצר, לא שינוי שקט בנתונים.
+function cutProfitPctOf(p){
+  const v=p&&p.cutProfitPct;
+  return(v!=null&&v!==''&&isFinite(+v))?+v:(+(p&&p.targetProfitPct)||0);
+}
+function hasCutProfitPct(p){const v=p&&p.cutProfitPct;return v!=null&&v!==''&&isFinite(+v);}
 function stepBadge(s){const l=stepLevel(s);return(s&&typeof s==='object'&&s.quick?` <span style="font-size:11px;padding:1px 7px;border-radius:8px;background:var(--amber-bg);color:var(--amber-txt);border:1px solid var(--brd)">⚡ מהיר</span>`:'')+(s&&typeof s==='object'&&s.merge?` <span style="font-size:11px;padding:1px 7px;border-radius:8px;background:var(--blue-bg);color:var(--blue-txt);border:1px solid var(--brd)">🔗 מאחד</span>`:'')+(l?` <span style="font-size:11px;padding:1px 7px;border-radius:8px;background:var(--bg2);color:var(--txt3);border:1px solid var(--brd)">${levelName(l)}</span>`:'');}
 // שלב "מהיר" ⚡ — פטור מהגבלת 2 שלבים/2 ברקודים בשני הסורקים
 function isQuickStep(cust,prod,stepNm){
@@ -6644,7 +6654,14 @@ function splitStepBudget(mins,levels,rates,budgetUnit,weights){
 }
 function _prodBudget(p,ctx){
   const price=+p.unitPrice||0;if(!price)return null;
-  const lvl=(p.workSteps||[]).filter(s=>stepLevel(s)||stepManualMin(s)>0);if(!lvl.length)return null;
+  const priced=(p.workSteps||[]).filter(s=>stepLevel(s)||stepManualMin(s)>0);if(!priced.length)return null;
+  // ✂ הפרדת הגזירה מהתפירה (30/08): שלבי ✂ **יוצאים מ-`lvl`** ולכן אינם מקבלים עוד נתח
+  // מתקציב התפירה. עד היום הם קיבלו 0.5%–5.9% ממנו (ממוצע 3.3%) **וגם** תקציב גזירה
+  // משלהם = כפל תשלום. `lvl` הוא מעכשיו "שלבי תפירה בלבד", וכל הצרכנים שמאנדקסים אותו
+  // (דוח היעילות, דוח בפועל-מול-צפי) נעשים אוטומטית נכונים מול `unitPrice`.
+  // ⚠️ המשמעות: הצפי של שלבי התפירה **עולה** ב-~3.3% — אותו תקציב, פחות שלבים.
+  const lvl=priced.filter(s=>!stepIsCut(s));
+  const cutLvl=priced.filter(s=>stepIsCut(s));
   const budgetUnit=price*(1-(+p.targetProfitPct||0)/100)-(+p.directMaterialsCost||0);
   // רק שלבים אוטומטיים (קושי בלי override ידני) מתחלקים את התקציב לפי משקל
   const totW=lvl.filter(s=>stepLevel(s)&&!(stepManualMin(s)>0)).reduce((s,x)=>s+(+ctx.weights[stepLevel(x)]||1),0);
@@ -6656,16 +6673,23 @@ function _prodBudget(p,ctx){
   const stepBud=splitStepBudget(mins,lvl.map(s=>stepLevel(s)),rates,budgetUnit,ctx.weights);
   const budMinUnit=stepBud.reduce((t,b)=>t+b.min,0);
   const budCostUnit=(+p.directMaterialsCost||0)+stepBud.reduce((t,b)=>t+b.ils,0);
-  // ✂ הגזירה מתומחרת בנפרד ממחיר המכירה: `cutPrice` הוא הכנסה נוספת ליחידה, ורווח היעד
-  // חל גם עליו (החלטת המשתמש 28/08). שמות שלבי הגזירה נלקחים מ-`p.workSteps` **המלא** ולא
-  // מ-`lvl`, כי שלב גזירה עשוי לא לשאת רמת קושי או דקות ידניות ובכל זאת נסרק ונמדד.
-  // ⚠️ `budgetUnit` ו-`stepBud` **אינם** מושפעים כאן — שלבי הגזירה עדיין מקבלים נתח מתקציב
-  // התפירה כמו קודם (ממוצע 3.3%). הוצאתם משם היא שינוי נפרד שמחייב גם את calcTaskExpected
-  // בשרת, אחרת נוצר פער לקוח/שרת. ראה gotcha_client_server_formula_drift.
+  // ✂ הגזירה מתומחרת בנפרד ממחיר המכירה: `cutPrice` הוא הכנסה נוספת ליחידה, **ואחוז רווח
+  // היעד שלה נפרד** (`cutProfitPct`) — עיסוק אחר, מרווח אחר. ראה cutProfitPctOf.
+  // שמות שלבי הגזירה נלקחים מ-`p.workSteps` **המלא** ולא מ-`cutLvl`, כי שלב גזירה עשוי לא
+  // לשאת רמת קושי או דקות ידניות ובכל זאת נסרק ונמדד בדוח.
+  // תקציב הגזירה מתחלק בין שלבי ה-✂ **לפי הדקות שהוזנו** — אותו splitStepBudget של התפירה.
+  // 🛑 זה עדיין לא נותן `expectedMin` פר-משימת גזירה: הגזירה נסרקת בברקוד ספירה ללא כמות
+  // (13 מ-19 המשימות `qty=0`), ואין במה להכפיל. המדידה נשארת ברמת ההזמנה ב-buildCutReport.
   const cutPrice=+p.cutPrice||0;
+  const cutPct=cutProfitPctOf(p);
   const cutNames=(p.workSteps||[]).filter(s=>stepIsCut(s)).map(s=>stepName(s)).filter(Boolean);
-  const cutBudgetUnit=cutPrice>0?cutPrice*(1-(+p.targetProfitPct||0)/100):0;
-  return{price,budgetUnit,autoBudget,totW,allManual,lvl,rates,stepBud,budMinUnit,budCostUnit,materials:+p.directMaterialsCost||0,targetPct:+p.targetProfitPct||0,cutPrice,cutBudgetUnit,cutNames};
+  const cutBudgetUnit=cutPrice>0?cutPrice*(1-cutPct/100):0;
+  const cutRates=cutLvl.map(s=>_pricingStepRate(stepStation(s),stepLevel(s),ctx.avgAll)+ctx.oh);
+  const cutStepBud=splitStepBudget(cutLvl.map(s=>stepManualMin(s)),cutLvl.map(s=>stepLevel(s)),cutRates,cutBudgetUnit,ctx.weights);
+  const cutMinUnit=cutStepBud.reduce((t,b)=>t+b.min,0);
+  const cutCostUnit=cutStepBud.reduce((t,b)=>t+b.ils,0);
+  return{price,budgetUnit,autoBudget,totW,allManual,lvl,rates,stepBud,budMinUnit,budCostUnit,materials:+p.directMaterialsCost||0,targetPct:+p.targetProfitPct||0,
+    cutPrice,cutPct,cutHasPct:hasCutProfitPct(p),cutBudgetUnit,cutNames,cutLvl,cutRates,cutStepBud,cutMinUnit,cutCostUnit};
 }
 function buildBudgetReport(fl){
   const card=document.getElementById('rp-budget-card'),el=document.getElementById('rp-budget-body');
@@ -6681,8 +6705,12 @@ function buildBudgetReport(fl){
     if(!t.done||!(t.duration>0))continue;
     const p=findProd(t.cust,t.prod);if(!p)continue;
     const pb=_prodBudget(p,ctx);if(!pb||pb.budgetUnit<=0)continue;
-    const si=pb.lvl.findIndex(s=>stepName(s)===t.taskType);if(si<0)continue;
-    const st=pb.lvl[si];
+    // ✂ שלבי הגזירה אינם ב-`lvl` יותר — הם נמדדים מול תקציב הגזירה ולא מול תקציב התפירה.
+    // בפועל רוב משימות הגזירה נסרקות בלי כמות ⇒ `units=0` ⇒ alloc=0 ⇒ הן נושרות מהדוח
+    // כמו קודם. הענף כאן קיים כדי שמשימת גזירה שכן נושאת כמות תימדד מול המספר הנכון.
+    let si=pb.lvl.findIndex(s=>stepName(s)===t.taskType),isCut=false;
+    if(si<0){si=pb.cutLvl.findIndex(s=>stepName(s)===t.taskType);if(si<0)continue;isCut=true;}
+    const st=isCut?pb.cutLvl[si]:pb.lvl[si];
     // מוקצב: עדיף חישוב מהתמחור הנוכחי (מתעדכן רטרואקטיבית אם נוספו/הוסרו שלבים למוצר
     // אחרי שהמשימה נפתחה — אחרת שלב שהיה לבד בזמן הפתיחה "בולע" את כל התקציב).
     // ליפול לצפי השמור במשימה רק אם אין תעריף שעה זמין לחישוב.
@@ -6692,7 +6720,9 @@ function buildBudgetReport(fl){
     // ⚠️ התעריף הוא של **העובד שביצע**, לא הממוצע שב-stepBud — הצפי במשימה נקבע כך
     // ב-calcTaskExpected, וחישוב אחר כאן היה מייצר "חריגה" מול מספר שהעובדת מעולם לא ראתה.
     const rate=(loadedHourlyRate(t.workerId)||ctx.avgAll)+ctx.oh;
-    if(pb.allManual){ // חלוקה יחסית לפי זמן — ראה splitStepBudget
+    if(isCut){ // ✂ תקציב הגזירה, מחולק בין שלבי ה-✂ לפי הדקות שהוזנו
+      alloc=rate>0?pb.cutStepBud[si].ils*units/rate*60:0;
+    }else if(pb.allManual){ // חלוקה יחסית לפי זמן — ראה splitStepBudget
       alloc=rate>0?pb.stepBud[si].ils*units/rate*60:0;
     }else if(mm>0){alloc=mm*units;} // ערבוב ידני+אוטומטי — התנהגות ישנה: דקות×כמות
     else{
@@ -6757,7 +6787,8 @@ function buildCutReport(fl){
     // בסיס הכמות: מה שיצא ללקוח, ואם טרם יצא — הכמות שהוזנה בכרטיס
     const shipped=p.shippedQty!=null?Math.max(0,+p.shippedQty||0):null;
     const base=shipped!=null&&shipped>0?shipped:_prodQty(p);
-    const budget=(pb?pb.cutBudgetUnit:cutPrice*(1-(+p.targetProfitPct||0)/100))*base;
+    const cutPct=pb?pb.cutPct:cutProfitPctOf(p);
+    const budget=(pb?pb.cutBudgetUnit:cutPrice*(1-cutPct/100))*base;
     let actual=0,hrs=0;const byW={};
     for(const t of ts){
       const h=(nd[t.id]||0)/3600;
@@ -6766,8 +6797,9 @@ function buildCutReport(fl){
       const g=byW[t.workerName||'—']||(byW[t.workerName||'—']={h:0,c:0,n:0});
       g.h+=h;g.c+=c;g.n++;
     }
-    rows.push({p,cutPrice,cutNames,n:ts.length,base,budget,actual,hrs,byW,
-      waiting:!(base>0),noSteps:cutPrice>0&&!cutNames.length,noPrice:!cutPrice&&cutNames.length>0});
+    rows.push({p,cutPrice,cutPct,cutNames,n:ts.length,base,budget,actual,hrs,byW,
+      waiting:!(base>0),noSteps:cutPrice>0&&!cutNames.length,noPrice:!cutPrice&&cutNames.length>0,
+      noPct:cutPrice>0&&!(pb?pb.cutHasPct:hasCutProfitPct(p))});
   }
   if(!rows.length){card.classList.add('hidden');return;}
   card.classList.remove('hidden');
@@ -6778,19 +6810,22 @@ function buildCutReport(fl){
   const badge=(b,a)=>{const e=a>0?b/a*100:0;
     return`<span class="badge ${e>=100?'green':e>=80?'amber':'red'}">${Math.round(e)}%</span>`;};
   el.innerHTML=`<div style="font-size:11px;color:var(--txt3);margin-bottom:6px">
-      תקציב גזירה = עלות גזירה ליח' × (1 − רווח יעד%) × הכמות · בפועל = שעות שלבי ה-✂ × עלות שעה עמוסה+תקורה ·
-      יעילות = תקציב ÷ בפועל, מעל 100% = זול מהתקציב</div>
+      תקציב גזירה = עלות גזירה ליח' × (1 − <b>רווח גזירה%</b>) × הכמות · בפועל = שעות שלבי ה-✂ × עלות שעה עמוסה+תקורה ·
+      יעילות = תקציב ÷ בפועל, מעל 100% = זול מהתקציב<br>
+      ✂ הגזירה מתומחרת ונמדדת בנפרד מהתפירה — שלבי ה-✂ אינם מקבלים עוד נתח מתקציב התפירה</div>
     <div class="tbl-wrap"><table>
-      <thead><tr><th>מוצר</th><th>₪/יח'</th><th>כמות</th><th>תקציב</th><th>בפועל</th><th>שעות</th><th>יעילות</th><th>מי גזר</th></tr></thead>
+      <thead><tr><th>מוצר</th><th>₪/יח'</th><th>רווח%</th><th>כמות</th><th>תקציב</th><th>בפועל</th><th>שעות</th><th>יעילות</th><th>מי גזר</th></tr></thead>
       <tbody>${rows.map(r=>{
         const over=!r.waiting&&r.n>0&&r.actual>r.budget;
         const who=Object.entries(r.byW).sort((a,b)=>b[1].h-a[1].h)
           .map(([k,v])=>`${esc(k)} ${v.h.toFixed(1)}שע'`).join(' · ')||'<span style="color:var(--txt3)">אין סריקות</span>';
-        const note=r.noSteps?'<div style="font-size:11px;color:var(--red-txt)">⚠ אין שלב ✂ מסומן</div>'
-          :(r.noPrice?'<div style="font-size:11px;color:var(--red-txt)">⚠ אין מחיר גזירה</div>':'');
+        const note=(r.noSteps?'<div style="font-size:11px;color:var(--red-txt)">⚠ אין שלב ✂ מסומן</div>':'')
+          +(r.noPrice?'<div style="font-size:11px;color:var(--red-txt)">⚠ אין מחיר גזירה</div>':'')
+          +(r.noPct?'<div style="font-size:11px;color:var(--red-txt)">⚠ לא הוזן אחוז רווח לגזירה — מחושב לפי אחוז התפירה</div>':'');
         return`<tr${over?' style="background:var(--red-bg,#fee2e2)"':''}>
           <td><span class="bc-seg bc-c">${r.p.cust}</span> <span class="bc-seg bc-p">${r.p.prod}</span>${r.p.orderNo?` <span style="font-size:10px;color:var(--txt3)">#${r.p.orderNo}</span>`:''}${note}</td>
           <td>${r.cutPrice?'₪'+r.cutPrice.toFixed(2):'—'}</td>
+          <td${r.noPct?' style="color:var(--red-txt)"':''}>${r.cutPct.toFixed(0)}%${r.noPct?' ⚠':''}</td>
           <td>${r.waiting?'<span style="color:var(--amber-txt)">ממתין לכמות</span>':r.base}</td>
           <td>${r.waiting?'—':'₪'+r.budget.toFixed(0)}</td>
           <td>${r.n?'₪'+r.actual.toFixed(0):'—'}</td>
@@ -6798,7 +6833,7 @@ function buildCutReport(fl){
           <td>${r.waiting||!r.n?'—':badge(r.budget,r.actual)}</td>
           <td style="font-size:11px">${who}</td></tr>`;}).join('')}</tbody>
       ${meas.length?`<tfoot><tr style="border-top:1.5px solid var(--b);font-weight:600;background:var(--bg2)">
-        <td colspan="3">סה"כ (${meas.length} הזמנות נמדדות)</td>
+        <td colspan="4">סה"כ (${meas.length} הזמנות נמדדות)</td>
         <td>₪${totB.toFixed(0)}</td><td>₪${totA.toFixed(0)}</td><td>${totH.toFixed(1)}</td>
         <td>${badge(totB,totA)}</td><td></td></tr></tfoot>`:''}
     </table></div>`;
@@ -6827,6 +6862,16 @@ function buildProfitReport(fl){
     if(!pTasks.length)continue;
     let costUnit=pb.materials,withData=0;
     const actMinTot=pTasks.reduce((s,t)=>s+(nd[t.id]||0)/60,0); // כל שעות העבודה על המוצר בטווח
+    // ✂ שלבי הגזירה **אינם** ב-`pb.lvl` ולכן אינם נכנסים ל-`costUnit`: הם נמדדים מול
+    // `cutPrice` ולא מול `unitPrice`. עד 30/08 הם כן נספרו כאן ⇒ עלות הגזירה נזקפה לחובת
+    // מחיר התפירה בזמן שההכנסה שלה כלל לא נספרה, והרווח המוצג יצא נמוך מדי.
+    const cutRows=pb.cutLvl.map((s,i)=>{
+      const ts=pTasks.filter(t=>t.taskType===stepName(s));
+      const units=ts.reduce((sum,t)=>sum+taskUnits(t),0);
+      const min=ts.reduce((sum,t)=>sum+(nd[t.id]||0)/60,0);
+      return{name:stepName(s),budPU:pb.cutStepBud[i].ils,units,min,n:ts.length};
+    });
+    const cutActMin=cutRows.reduce((s,r)=>s+r.min,0);
     const stepRows=pb.lvl.map((s,i)=>{
       const budPU=pb.stepBud[i].ils; // מהמנוע המשותף — מכבד דקות ידניות ותעריף לפי תחנה
       const ts=pTasks.filter(t=>t.taskType===stepName(s));
@@ -6844,7 +6889,7 @@ function buildProfitReport(fl){
     // כמות שיצאה בפועל (מברקוד "יצא ללקוח") — לרווח האמיתי של ההזמנה: הכנסה רק על מה שיצא
     const shipped=p.shippedQty!=null?Math.max(0,+p.shippedQty||0):null;
     const planned=_prodQty(p); // פר-רשומה — אותו באג בדיוק כמו בדוח "כמות שהושלמה לפי שלב"
-    blocks.push({p,pb,stepRows,withData,profit,profitPct,shipped,planned,actMinTot});
+    blocks.push({p,pb,stepRows,cutRows,cutActMin,withData,profit,profitPct,shipped,planned,actMinTot});
   }
   if(!blocks.length){el.innerHTML='<div style="color:var(--txt3);font-size:12px;padding:.5rem 0">אין מוצרים מתומחרים עם משימות שהושלמו בטווח הנבחר</div>';return;}
   el.innerHTML=`<div style="font-size:11px;color:var(--txt3);margin-bottom:6px">רווח בפועל ליחידה = מחיר − חומרים − עלות עבודה+תקורה בפועל · שלבים בלי נתונים מחושבים לפי המוקצב · 🚚 אמיתי = הכנסה רק על הכמות שיצאה ללקוח בפועל</div>`+blocks.map(b=>{
@@ -6863,8 +6908,10 @@ function buildProfitReport(fl){
           const base=Math.max(b.planned,b.shipped||0);
           const totBud=b.pb.budMinUnit*base;
           if(!(totBud>0))return'';
-          const left=totBud-b.actMinTot;
-          return`<span style="font-size:12px;font-weight:600;color:${left<0?'var(--red-txt)':'var(--txt2)'}" title="${base} יח' × ${b.pb.budMinUnit.toFixed(1)} דק'/יח'">⏱ סה"כ להזמנה ${fmtExpMin(totBud)} · בפועל ${fmtExpMin(b.actMinTot)} · ${left<0?'חריגה ':'נותר '}${fmtExpMin(Math.abs(left))}</span>`;
+          // ✂ שעות הגזירה יורדות מ"בפועל" של התפירה — התקציב כאן הוא תקציב התפירה בלבד.
+          const sewAct=Math.max(0,b.actMinTot-b.cutActMin);
+          const left=totBud-sewAct;
+          return`<span style="font-size:12px;font-weight:600;color:${left<0?'var(--red-txt)':'var(--txt2)'}" title="${base} יח' × ${b.pb.budMinUnit.toFixed(1)} דק'/יח' — תפירה בלבד${b.cutActMin>0?`, ללא ${fmtExpMin(b.cutActMin)} גזירה`:''}">⏱ תפירה להזמנה ${fmtExpMin(totBud)} · בפועל ${fmtExpMin(sewAct)} · ${left<0?'חריגה ':'נותר '}${fmtExpMin(Math.abs(left))}</span>`;
         })()}
         ${(()=>{ // רווח אמיתי לפי כמות שיצאה: הכנסה על מה שיצא בלבד, עלות על כל מה שיוצר (המקסימום מתוכנן/יצא)
           if(b.shipped==null)return'';
@@ -6874,7 +6921,7 @@ function buildProfitReport(fl){
           const effPct=b.pb.price>0?effPU/b.pb.price*100:0;
           return`<span class="badge gray">🚚 יצא ${b.shipped}/${b.planned}</span><span class="badge ${effPct>=b.pb.targetPct-1?'green':'red'}" title="הכנסה על ${b.shipped} יח' שיצאו · עלות על ${base} יח' שיוצרו">אמיתי ${effPct.toFixed(1)}% (₪${effPU.toFixed(2)} ליח')</span>`;
         })()}
-        ${b.pb.cutPrice>0?`<span class="badge gray" title="הגזירה מתומחרת בנפרד ונמדדת בכרטיס '✂ גזירה — תקציב מול בפועל'. הרווח שמוצג כאן הוא על מחיר המכירה בלבד.">✂ +₪${b.pb.cutPrice.toFixed(2)}/יח' — נמדד בנפרד</span>`:''}
+        ${b.pb.cutPrice>0?`<span class="badge gray" title="הגזירה מתומחרת בנפרד עם אחוז רווח משלה ונמדדת בכרטיס '✂ גזירה — תקציב מול בפועל'. הרווח שמוצג כאן הוא על מחיר המכירה בלבד, ללא שעות הגזירה.">✂ +₪${b.pb.cutPrice.toFixed(2)}/יח' · רווח ${b.pb.cutPct.toFixed(0)}%${b.pb.cutHasPct?'':' ⚠'} — נמדד בנפרד</span>`:''}
         <span style="font-size:11px;color:var(--txt3)">${b.withData}/${b.stepRows.length} שלבים עם נתונים</span>
       </summary>
       <div style="padding:6px 8px 2px">${b.stepRows.map(s=>{
@@ -6885,7 +6932,15 @@ function buildProfitReport(fl){
           <span style="color:var(--txt3)">מוקצב ₪${s.budPU.toFixed(2)}</span>
           <span style="font-weight:600">${has?`בפועל ₪${s.actPU.toFixed(2)} (${s.units} יח')`:'— אין נתונים'}</span>
           ${has?`<span style="font-weight:700">${leak>0?'▲ +':'▼ '}₪${Math.abs(leak).toFixed(2)}</span>`:''}
-        </div>`;}).join('')}</div>
+        </div>`;}).join('')}${b.cutRows.length?`
+        <div style="margin-top:6px;padding-top:5px;border-top:1px solid var(--brd)">
+          <div style="font-size:11px;color:var(--txt3);margin-bottom:2px">✂ גזירה — נמדד מול ₪${b.pb.cutPrice.toFixed(2)}/יח' ברווח ${b.pb.cutPct.toFixed(0)}%, לא מול מחיר התפירה</div>
+          ${b.cutRows.map(s=>`<div style="display:flex;gap:8px;align-items:center;font-size:12px;padding:3px 0;border-bottom:0.5px dashed var(--brd)">
+            <span style="flex:1;min-width:110px">✂ ${esc(s.name)}</span>
+            <span style="color:var(--txt3)">מוקצב ₪${s.budPU.toFixed(2)}/יח'</span>
+            <span style="font-weight:600">${s.n?`בפועל ${fmtExpMin(s.min)}${s.units?` (${s.units} יח')`:' <span style="color:var(--txt3)">ללא כמות</span>'}`:'— לא נסרק'}</span>
+          </div>`).join('')}
+        </div>`:''}</div>
     </details>`;}).join('');
 }
 
@@ -11685,6 +11740,7 @@ function openProductModal(id){
       <div class="field"><label>רווח יעד ₪</label><input id="pm-profit-ils" type="number" min="0" step="0.1" value="${p&&+p.unitPrice&&p.targetProfitPct!=null?((+p.unitPrice)*(+p.targetProfitPct)/100).toFixed(2):''}" placeholder="0" style="font-size:13px" oninput="syncProfitFields('ils')"/></div>
       <div class="field"><label>חומרים ₪ <span style="font-size:10px;color:var(--txt3)">(+אריזה+הובלה)</span></label><input id="pm-materials" type="number" min="0" step="0.1" value="${p?.directMaterialsCost||''}" placeholder="0" style="font-size:13px" oninput="renderProductPricing()"/></div>
       <div class="field"><label>✂ עלות גזירה ₪ <span style="font-size:10px;color:var(--txt3)">(ליחידה)</span></label><input id="pm-cutprice" type="number" min="0" step="0.1" value="${p?.cutPrice||''}" placeholder="0" title="מחיר הגזירה ליחידה — נוסף למחיר המכירה. מוזן בהקמת המוצר, לפני שהכמות ידועה. סמן ✂ על שלבי הגזירה כדי שייספרו מולו." style="font-size:13px" oninput="renderProductPricing()"/></div>
+      <div class="field"><label>✂ רווח יעד גזירה %</label><input id="pm-cutprofit" type="number" min="0" max="99" step="1" value="${p?.cutProfitPct??''}" placeholder="לפי התפירה" title="אחוז רווח היעד של הגזירה — נפרד מאחוז התפירה. כל עוד ריק, החישוב משתמש באחוז התפירה." style="font-size:13px" oninput="renderProductPricing()"/></div>
     </div>
     <div id="pm-pricing-result" style="margin-bottom:8px"></div>`;
   document.getElementById('prod-modal-wrap').classList.remove('hidden');
@@ -11790,6 +11846,7 @@ function pmCopyFromPrev(pid){
   set('pm-profit',p.targetProfitPct!=null?+p.targetProfitPct:'');
   set('pm-materials',+p.directMaterialsCost||'');
   set('pm-cutprice',+p.cutPrice||''); // ✂ מחיר הגזירה הוא חלק מהתמחור ומועתק איתו (הכמות עדיין לא)
+  set('pm-cutprofit',hasCutProfitPct(p)?+p.cutProfitPct:''); // ✂ אחוז רווח הגזירה נוסע יחד עם המחיר
   const pr=+p.unitPrice||0,pc=+p.targetProfitPct||0;
   set('pm-profit-ils',pr&&pc?(pr*pc/100).toFixed(2):'');
   try{renderProductPricing();}catch(e){}
@@ -11883,8 +11940,11 @@ function renderProductPricing(){
     manualMin:parseFloat(r.querySelector('[data-f="manualMin"]')?.value)||0,
     cut:!!r.querySelector('[data-f="cut"]')?.checked
   })).filter(s=>s.name);
-  const shownSteps=steps.filter(s=>s.level||s.manualMin>0);
-  if(!shownSteps.length){
+  // ✂ שלבי הגזירה יוצאים מתקציב התפירה ומקבלים בלוק ותקציב משלהם (30/08).
+  const pricedSteps=steps.filter(s=>s.level||s.manualMin>0);
+  const shownSteps=pricedSteps.filter(s=>!s.cut);
+  const cutPriced=pricedSteps.filter(s=>s.cut);
+  if(!pricedSteps.length){
     box.innerHTML=`<div style="background:var(--bg2);border-radius:8px;padding:8px 10px">${head}
       <div style="font-size:11px;color:var(--txt3);margin-top:4px">הגדר רמת קושי לשלבים (או דקות ידני) כדי לחלק את התקציב לדקות עבודה</div></div>`;
     return;
@@ -11946,24 +12006,41 @@ function renderProductPricing(){
   // מחיר בלי שלבים מסומנים = תקציב שאיש לא נמדד מולו; שלבים בלי מחיר = עבודה בלי הכנסה.
   const cutPrice=parseFloat(document.getElementById('pm-cutprice')?.value)||0;
   const cutSteps=steps.filter(s=>s.cut);
+  const cutPctRaw=document.getElementById('pm-cutprofit')?.value;
+  const cutPctSet=cutPctRaw!=null&&cutPctRaw!==''&&isFinite(+cutPctRaw);
+  const cutPct=cutPctSet?+cutPctRaw:profitPct; // ריק ⇒ נופל לאחוז התפירה, כמו בחישוב
   let cutLine='';
   if(cutPrice>0||cutSteps.length){
-    const cutBudget=cutPrice*(1-profitPct/100);
-    const warn=cutPrice>0&&!cutSteps.length
-      ? `<div style="font-size:12px;color:var(--red-txt);font-weight:600;margin-top:4px">⚠ הוזן מחיר גזירה אך לא סומן אף שלב ✂ — לא יהיה מול מה למדוד</div>`
-      : (!(cutPrice>0)&&cutSteps.length
-        ? `<div style="font-size:12px;color:var(--red-txt);font-weight:600;margin-top:4px">⚠ ${cutSteps.length} שלבי ✂ גזירה בלי מחיר גזירה — העבודה תיספר בלי הכנסה כנגדה</div>`
-        : '');
-    cutLine=`<div style="background:var(--bg2);border-radius:8px;padding:8px 10px;margin-top:8px">
-      <div style="font-size:12px;line-height:1.8">✂ גזירה ₪${cutPrice.toFixed(2)} ליח' − רווח ${profitPct}% (₪${(cutPrice*profitPct/100).toFixed(2)}) = <b>תקציב גזירה: ₪${cutBudget.toFixed(2)} ליח'</b></div>
-      ${cutSteps.length?`<div style="font-size:11px;color:var(--txt3);margin-top:2px">${cutSteps.length} שלבים מסומנים: ${cutSteps.map(s=>esc(s.name)).join(' · ')}</div>`:''}
+    const cutBudget=cutPrice*(1-cutPct/100);
+    // פירוט פר-שלב: תקציב הגזירה מתחלק בין שלבי ה-✂ לפי הדקות שהוזנו, בדיוק כמו התפירה
+    const cRates=cutPriced.map(s=>_pricingStepRate(s.station,s.level,avgAll)+oh);
+    const cBud=splitStepBudget(cutPriced.map(s=>+s.manualMin>0?+s.manualMin:0),cutPriced.map(s=>s.level),cRates,cutBudget,weights);
+    let cutMin=0;
+    const cutRows=cutPriced.map((s,i)=>{
+      const manual=s.manualMin>0,min=manual?s.manualMin:cBud[i].min;
+      cutMin+=min;
+      return`<div style="display:flex;align-items:center;gap:8px;padding:3px 0;border-bottom:0.5px solid var(--brd);font-size:12px">
+        <span style="flex:1;min-width:110px">✂ ${esc(s.name)}${manual?' <span style="font-size:10px;color:var(--txt3)">✎ ידני</span>':''}</span>
+        <span style="color:var(--txt3)">₪${cBud[i].ils.toFixed(2)}</span>
+        <span style="font-weight:700">${min.toFixed(1)} דק'</span></div>`;
+    }).join('');
+    const warns=[
+      cutPrice>0&&!cutSteps.length?'הוזן מחיר גזירה אך לא סומן אף שלב ✂ — לא יהיה מול מה למדוד':'',
+      !(cutPrice>0)&&cutSteps.length?`${cutSteps.length} שלבי ✂ גזירה בלי מחיר גזירה — העבודה תיספר בלי הכנסה כנגדה`:'',
+      cutPrice>0&&!cutPctSet?'לא הוזן אחוז רווח לגזירה — כרגע מחושב לפי אחוז התפירה. הזן אחוז משלה':''
+    ].filter(Boolean).map(w=>`<div style="font-size:12px;color:var(--red-txt);font-weight:600;margin-top:4px">⚠ ${w}</div>`).join('');
+    cutLine=`<div style="background:var(--bg2);border-radius:8px;padding:8px 10px;margin-top:8px;border:1px solid var(--brd)">
+      <div style="font-size:12px;line-height:1.8">✂ גזירה ₪${cutPrice.toFixed(2)} ליח' − רווח <b${cutPctSet?'':' style="color:var(--red-txt)"'}>${cutPct}%</b>${cutPctSet?'':' (של התפירה)'} (₪${(cutPrice*cutPct/100).toFixed(2)}) = <b>תקציב גזירה: ₪${cutBudget.toFixed(2)} ליח'</b></div>
+      ${cutRows||(cutSteps.length?`<div style="font-size:11px;color:var(--txt3);margin-top:2px">${cutSteps.length} שלבים מסומנים ללא רמת קושי/דקות: ${cutSteps.map(s=>esc(s.name)).join(' · ')}</div>`:'')}
+      ${cutMin>0?`<div style="font-size:13px;font-weight:700;color:var(--green-txt);margin-top:6px">⏱ סה"כ זמן גזירה ליחידה: ${cutMin.toFixed(1)} דק'</div>`:''}
+      <div style="font-size:11px;color:var(--txt3);margin-top:2px">✂ נמדד בנפרד מהתפירה — שלבים אלה אינם מקבלים נתח מתקציב התפירה</div>
       <div style="font-size:11px;color:var(--txt3);margin-top:2px">הגזירה נסרקת ללא כמות — ההשוואה מתבצעת בדוח, אחרי שהכמות מוזנת</div>
-      ${warn}</div>`;
+      ${warns}</div>`;
   }
   box.innerHTML=`<div style="background:var(--bg2);border-radius:8px;padding:8px 10px">${head}
     <div style="font-size:11px;color:var(--txt3);margin:4px 0 2px">${headLine}</div>
     ${rows}
-    <div style="font-size:13px;font-weight:700;color:var(--green-txt);margin-top:6px">⏱ סה"כ ${allManual?'זמן שהוזן':'זמן עבודה מתוקצב'} ליחידה: ${totalMin.toFixed(1)} דק'</div>
+    <div style="font-size:13px;font-weight:700;color:var(--green-txt);margin-top:6px">⏱ סה"כ ${allManual?'זמן שהוזן':'זמן עבודה מתוקצב'} ליחידה${cutPriced.length?' <span style="font-size:11px;font-weight:400;color:var(--txt3)">(תפירה בלבד — הגזירה בנפרד למטה)</span>':''}: ${totalMin.toFixed(1)} דק'</div>
     ${derivedLine}
     ${actualLine}
     ${shortWarn}</div>${cutLine}`;
@@ -12224,8 +12301,11 @@ async function saveProduct(){
   const unitPrice=parseFloat(document.getElementById('pm-price')?.value)||0;
   const targetProfitPct=parseFloat(document.getElementById('pm-profit')?.value)||0;
   const directMaterialsCost=parseFloat(document.getElementById('pm-materials')?.value)||0;
-  // ✂ מחיר הגזירה — הכנסה נוספת ליחידה, נפרדת ממחיר המכירה. רווח היעד חל גם עליו.
+  // ✂ מחיר הגזירה — הכנסה נוספת ליחידה, נפרדת ממחיר המכירה, עם **אחוז רווח יעד משלה**.
+  // ריק נשמר כ-`null` ולא כ-0: 0 הוא "גזירה בלי רווח", null הוא "לא הוזן ⇒ לפי התפירה".
   const cutPrice=parseFloat(document.getElementById('pm-cutprice')?.value)||0;
+  const _cpv=document.getElementById('pm-cutprofit')?.value;
+  const cutProfitPct=(_cpv!=null&&_cpv!==''&&isFinite(+_cpv))?Math.max(0,Math.min(99,+_cpv)):null;
   if(_editProdId){
     const p=S.products.find(x=>x.id===_editProdId);
     if(p){
@@ -12239,7 +12319,7 @@ async function saveProduct(){
           sendTelegram('📦 TextileOps — מוצר עבר שלב ייצור\n🏷 מוצר: '+name+' ('+cust+'-'+prod+')\n📍 שלב: '+stageName+'\n📅 תאריך: '+s.date+' '+s.time+'\n🕐 עודכן: '+now).catch(()=>{});
         }
       }
-      Object.assign(p,{prod,cust,name,images:_prodImgs,imgCount:_prodImgs.length,docs:_prodDocs,quantities,stageLog,stageSkipped,workSteps,unitPrice,targetProfitPct,directMaterialsCost,cutPrice});
+      Object.assign(p,{prod,cust,name,images:_prodImgs,imgCount:_prodImgs.length,docs:_prodDocs,quantities,stageLog,stageSkipped,workSteps,unitPrice,targetProfitPct,directMaterialsCost,cutPrice,cutProfitPct});
     }
   }else{
     const id='p'+Date.now();
@@ -12249,7 +12329,7 @@ async function saveProduct(){
       stageLog.unshift({id:'receive',date:now.getFullYear()+'-'+pad2(now.getMonth()+1)+'-'+pad2(now.getDate()),time:pad2(now.getHours())+':'+pad2(now.getMinutes()),note:'',auto:true});
       stageLog.sort((a,b)=>PROD_STAGES.findIndex(x=>x.id===a.id)-PROD_STAGES.findIndex(x=>x.id===b.id));
     }
-    S.products.push({id,createdAt:Date.now(),...newProdOrderFields(cust,prod),prod,cust,name,images:_prodImgs,imgCount:_prodImgs.length,docs:_prodDocs,quantities,stageLog,stageSkipped,workSteps,unitPrice,targetProfitPct,directMaterialsCost,cutPrice});
+    S.products.push({id,createdAt:Date.now(),...newProdOrderFields(cust,prod),prod,cust,name,images:_prodImgs,imgCount:_prodImgs.length,docs:_prodDocs,quantities,stageLog,stageSkipped,workSteps,unitPrice,targetProfitPct,directMaterialsCost,cutPrice,cutProfitPct});
   }
   saveLS();
   if(S.fbConnected){

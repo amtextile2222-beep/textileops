@@ -473,6 +473,13 @@ exports.calcTaskExpected = functions.https.onCall(async (data, context) => {
   if (!price) return { ok: false, reason: 'no-pricing' };
   const budget = price * (1 - profit / 100) - mats;
   if (budget <= 0) return { ok: false, reason: 'negative-budget' };
+  // ✂ הגזירה מתומחרת בנפרד: `cutPrice` עם אחוז רווח משלו (`cutProfitPct`), וכשהוא ריק —
+  // נופל לאחוז התפירה, בדיוק כמו cutProfitPctOf בלקוח. חייב להישאר תואם: אחוז שונה כאן
+  // מייצר צפי שהעובדת רואה ושהדוח לא מכיר. ראה gotcha_client_server_formula_drift.
+  const cutPrice = +p.cutPrice || 0;
+  const _cpv = p.cutProfitPct;
+  const cutProfit = (_cpv != null && _cpv !== '' && isFinite(+_cpv)) ? +_cpv : profit;
+  const cutBudget = cutPrice > 0 ? cutPrice * (1 - cutProfit / 100) : 0;
   const costsSnap = await db.collection('adminSettings').doc('costs').get();
   if (!costsSnap.exists) return { ok: false, reason: 'no-costs' };
   const costs = costsSnap.data();
@@ -489,10 +496,17 @@ exports.calcTaskExpected = functions.https.onCall(async (data, context) => {
   if (!(hourCost > 0)) return { ok: false, reason: 'no-rate' };
   const weights = costs.difficultyWeights || { 1: 1, 2: 1.5, 3: 2, 4: 2.5, 5: 3.5 };
   // שלב שמיש = יש לו רמת קושי או דקות ידניות (manualMin > 0 = override)
-  const usable = (p.workSteps || []).filter(s => s && typeof s === 'object' && (+s.level > 0 || +s.manualMin > 0));
+  const priced = (p.workSteps || []).filter(s => s && typeof s === 'object' && (+s.level > 0 || +s.manualMin > 0));
+  if (!priced.length) return { ok: false, reason: 'no-levels' };
+  // ✂ שלבי הגזירה יוצאים מתקציב התפירה (30/08) — עד כה קיבלו נתח ממנו **וגם** תקציב
+  // גזירה משלהם = כפל תשלום. חייב להישאר תואם ל-_prodBudget בלקוח.
+  // ⚠️ הצפי של שלבי התפירה עולה ב-~3.3%: אותו תקציב, פחות שלבים שמתחלקים בו.
+  const usable = priced.filter(s => !s.cut);
+  const cutUsable = priced.filter(s => !!s.cut);
   // רק שלבים אוטומטיים (קושי בלי override ידני) מתחלקים את התקציב לפי משקל
   const totW = usable.filter(s => +s.level > 0 && !(+s.manualMin > 0)).reduce((s, x) => s + (+weights[+x.level] || 1), 0);
-  if (!usable.length) return { ok: false, reason: 'no-levels' };
+  // ✂ תקציב הגזירה מתחלק בין שלבי ה-✂ **לפי הדקות שהוזנו** (החלטת המשתמש 30/08)
+  const cutTotMin = cutUsable.reduce((s, x) => s + (+x.manualMin > 0 ? +x.manualMin : 0), 0);
   // ⚠️ כשכל השלבים המתומחרים ידניים, הדקות שהוזנו הן **משקל יחסי ולא תקן מוחלט**:
   // כל שלב מקבל `תקציב × (דקותיו ÷ סה"כ הדקות)`, והכסף מומר חזרה לדקות לפי עלות השעה
   // של **העובד הספציפי** — ולכן עובד יקר מקבל פחות זמן וזול מקבל יותר, בדיוק כמו במסלול
@@ -504,6 +518,16 @@ exports.calcTaskExpected = functions.https.onCall(async (data, context) => {
   const perStep = {};
   let total = 0;
   for (const name of stepNames) {
+    // ✂ שלב גזירה נמדד מול תקציב הגזירה ולא מול תקציב התפירה. בפועל הגזירה נסרקת
+    // בברקוד ספירה ללא כמות, והקריאה נופלת קודם על `!qty` ⇒ הענף הזה יורה רק כשיש כמות.
+    const cst = cutUsable.find(s => s.name === name);
+    if (cst) {
+      if (!(cutBudget > 0) || !(cutTotMin > 0) || !(+cst.manualMin > 0)) continue;
+      const cmin = cutBudget * (+cst.manualMin / cutTotMin) * qty / hourCost * 60;
+      perStep[name] = Math.round(cmin * 10) / 10;
+      total += cmin;
+      continue;
+    }
     const st = usable.find(s => s.name === name);
     if (!st) continue;
     let min;
