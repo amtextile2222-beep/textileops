@@ -579,6 +579,7 @@ code{background:var(--bg2);border:0.5px solid var(--b);border-radius:4px;padding
     </div>
     <div id="print-choice-panel" class="hidden" style="background:var(--bg);border:1px solid var(--b2);border-radius:var(--rl);padding:1rem;margin-bottom:1rem;display:flex;flex-wrap:wrap;align-items:center;gap:12px">
       <span style="font-size:13px;font-weight:600">מה להדפיס?</span>
+      <label style="display:flex;align-items:center;gap:6px;font-size:13px;cursor:pointer"><input type="radio" name="print-choice" value="pipe" style="width:auto"/> 🏭 לוח מצב הזמנות</label>
       <label style="display:flex;align-items:center;gap:6px;font-size:13px;cursor:pointer"><input type="radio" name="print-choice" value="detail" checked style="width:auto"/> פירוט משימות</label>
       <label style="display:flex;align-items:center;gap:6px;font-size:13px;cursor:pointer"><input type="radio" name="print-choice" value="summary" style="width:auto"/> דוח מרוכז</label>
       <label style="display:flex;align-items:center;gap:6px;font-size:13px;cursor:pointer"><input type="radio" name="print-choice" value="expprod" style="width:auto"/> 🎯 בפועל מול צפי</label>
@@ -596,6 +597,10 @@ code{background:var(--bg2);border:0.5px solid var(--b);border-radius:4px;padding
       <div class="card"><div class="mlbl" data-i18n="rep_eff">יעילות</div><div class="mval" id="rp-eff">—</div></div>
     </div>
     <div class="card">
+      <div class="sec">🏭 לוח מצב הזמנות</div>
+      <div id="rp-pipe-body"></div>
+    </div>
+    <div class="card" style="margin-top:1rem">
       <div class="sec">👥 דוח מרוכז — שעות לפי עובד</div>
       <div id="rp-summary-body"></div>
     </div>
@@ -2399,6 +2404,90 @@ function stepFamily(s){const st=stepStation(s);return st?stationFamily(stationNa
 function workerFamily(w){return stationFamily(w?.currentStation?.name||'');}
 // האם השלב פתוח לעובד לפי התחנה שסרק
 function stepAtWorkerStation(s,w){const sf=stepFamily(s);return!!sf&&sf===workerFamily(w);}
+
+// ─── לוח מצב הזמנות (צנרת ייצור) ─────────────────────────────────
+// שמונה רשימות שמשקפות את זרימת העבודה במפעל כפי שהמשתמש תיאר אותה (30/08):
+//   הקמת כרטיס → סריקה בקבלה → הזנת כמויות → סריקה בתפירה → סיום שלבי התפירה
+//   → סריקה באריזה → סיום שלבי האריזה → ברקוד "יצא ללקוח"
+//
+// ⚠️ **המנוע כאן הוא המחלקה שנסרקה (`t.dept`) — לא `stageLog`.** `stageLog`/`deptStageMap`
+// משרתים את "דוח ייצור לפי שלב", והם מסמנים שלב בסריקה **הראשונה** במחלקה ⇒ אינם יודעים
+// להבחין בין "התחיל" ל"סיים", וזו בדיוק ההבחנה שהלוח הזה בנוי סביבה. הדבר היחיד שנלקח
+// מ-`stageLog` הוא `shipped` — הוא נקבע בברקוד "יצא ללקוח" ולא בסריקת עובד, ולכן אמין.
+// 🛑 אל תמפה את הלוח הזה ל-`deptStageMap`: שם `قسم اريزه` ממופה ל-`iron` ולא ל-`pack`,
+//    ו-`قسم الخياطة 2` לא ממופה כלל (89 שלבי עבודה). המיפוי כאן עצמאי ומכסה את שתיהן.
+const PIPE_LISTS=[
+  {id:'intake',    label:'📥 כניסת הזמנה',   hint:'הכרטיס הוקם, טרם נסרק דבר'},
+  {id:'countcut',  label:'🔢 ספירה וגזירה',  hint:'נסרק בקבלת סחורה, הכמות עדיין לא הוזנה'},
+  {id:'ready_sew', label:'🧵 מוכן לתפירה',   hint:'הכמות ידועה, התפירה טרם התחילה'},
+  {id:'sewing',    label:'🪡 בתפירה',        hint:'נסרק לפחות ברקוד אחד בתפירה'},
+  {id:'ready_pack',label:'📦 מוכן לאריזה',   hint:'כל שלבי התפירה הגיעו לכמות המלאה'},
+  {id:'packing',   label:'🧥 באריזה',        hint:'נסרק לפחות ברקוד אחד באריזה'},
+  {id:'ready_ship',label:'🚚 מוכן ליציאה',   hint:'כל שלבי האריזה הגיעו לכמות המלאה'},
+  {id:'shipped',   label:'✅ יצא ללקוח',     hint:'נסרק ברקוד "יצא ללקוח"'},
+];
+const PIPE_IDX=id=>PIPE_LISTS.findIndex(l=>l.id===id);
+// התווית בלי האמוג'י — לכפתור הדחיפה, שאחרת נשבר לשתי שורות בתוך כרטיס של 190px
+const pipeShortLabel=L=>String(L?.label||'').replace(/^\S+\s*/,'');
+// מחלקה → משפחת צנרת. מזוהה לפי מילות מפתח ולא לפי רשימת המחלקות הנוכחית, כי בהיסטוריה
+// יש 8 שמות מחלקה שכבר לא קיימים (`قسم الخياطة` בלי מספר — 1,222 משימות · `חיתוך` 534 ·
+// `خياطة` 220 · `תפירה` 141 · `فحص` 76 · `אריזה` 41 · `تغليف` 11 · `كوي تغليف` 1).
+// נמדד 30/08: 13 מתוך 13 שמות המחלקה שנצפו בנתונים מזוהים, ו-100% מסריקות המוצרים החיים.
+// ⚠️ גיהוץ/ניקוי/ביקורת נכנסים ל-`pack` בכוונה — במפעל הם מבוצעים ב-`قسم اريزه`.
+function pipeFamOfDept(d){
+  const s=String(d||'').toLowerCase();
+  if(/استقبال|قص|קבל|חית|גזיר/.test(s))return 'recv';
+  if(/خياط|خيط|תפיר/.test(s))return 'sew';
+  if(/اريز|تغليف|كوي|فحص|אריז|גיהו|ניקו|ביקור/.test(s))return 'pack';
+  return '';
+}
+function pipeFamOfStep(s){return pipeFamOfDept(String(stepStation(s)||'').split('::')[0]);}
+// מצב הצנרת של רשומת מוצר אחת. `tasks` = כל המשימות **של ההזמנה הזו בלבד** (שויכו ב-taskOrderStamp).
+function pipeStateOf(p,tasks){
+  const qty=_prodQty(p);
+  const scans={recv:0,sew:0,pack:0,none:0};
+  for(const t of tasks){const f=pipeFamOfDept(t.dept);if(f)scans[f]++;else scans.none++;}
+  // שלבי העבודה מחולקים למשפחות לפי התחנה שלהם
+  const steps={recv:[],sew:[],pack:[],none:[]};
+  for(const s of (p.workSteps||[])){const nm=stepName(s);if(!nm)continue;(steps[pipeFamOfStep(s)||'none']).push(nm);}
+  // כמה יחידות בוצעו בכל שלב — ניכוי ספירה כפולה של אצווה, בדיוק כמו stepDoneMap
+  const seen=new Set(),done={};
+  for(const t of tasks){
+    if(!(t.duration>0))continue;
+    const k=coverKey(t);if(seen.has(k))continue;seen.add(k);
+    done[String(t.taskType||'').trim()]=(done[String(t.taskType||'').trim()]||0)+taskUnits(t);
+  }
+  const fam=f=>{const ss=steps[f];if(!ss.length)return null;
+    return{full:ss.filter(nm=>qty>0&&(done[nm]||0)>=qty).length,of:ss.length};};
+  const sew=fam('sew'),pack=fam('pack');
+  const shipped=(p.stageLog||[]).some(e=>e.id==='shipped')||+p.shippedQty>0;
+  let id;
+  if(shipped)                                    id='shipped';
+  else if(pack&&pack.of>0&&pack.full===pack.of)  id='ready_ship';
+  else if(scans.pack>0)                          id='packing';
+  else if(sew&&sew.of>0&&sew.full===sew.of)      id='ready_pack';
+  else if(scans.sew>0)                           id='sewing';
+  else if(qty>0&&scans.recv>0)                   id='ready_sew';
+  else if(scans.recv>0)                          id='countcut';
+  else                                           id='intake';
+  // 📌 דחיפה ידנית של מנהל. **קדימה בלבד** — אם המצב האמיתי כבר עקף אותה היא נבלעת
+  // מעצמה ולא מחזיקה כרטיס אחורה. `shipped` תמיד גובר.
+  const nat=id;
+  const ov=p.pipeOverride&&PIPE_IDX(p.pipeOverride.list)>=0?p.pipeOverride:null;
+  if(ov&&nat!=='shipped'&&PIPE_IDX(ov.list)>PIPE_IDX(nat))id=ov.list;
+  return{id,nat,ov:id===ov?.list?ov:null,qty,scans,steps,sew,pack,shipped,tasks:tasks.length};
+}
+// תאריך הכניסה למפעל: מועד הקמת הכרטיס, ובהיעדרו תאריך "קבלת סחורה" מהלוג.
+function pipeEntryDate(p){
+  if(+p.createdAt)return new Date(+p.createdAt).toISOString().slice(0,10);
+  const r=(p.stageLog||[]).find(e=>e.id==='receive');
+  return r?.date||'';
+}
+function pipeShipDate(p){
+  const s=(p.stageLog||[]).find(e=>e.id==='shipped');
+  if(s?.date)return s.date;
+  return p.shippedAt?String(p.shippedAt).slice(0,10):'';
+}
 
 // ─── שער התחנה: חובת סריקה + נעילת שלב לתחנה ──────────────────────
 // מדיניות (03/08): עובד חייב תחנה סרוקה; שלב מותר רק בתחנה מאותה משפחה;
@@ -6366,6 +6455,7 @@ async function buildRep(){
   rfw.innerHTML='<option value="">כל העובדים</option>'+wOpts.map(w=>`<option value="${esc(w)}" ${w===wf?'selected':''}>${esc(w)}</option>`).join('');
   rfc.innerHTML='<option value="">כל הלקוחות</option>'+cOpts.map(c=>`<option value="${c}" ${c===cf?'selected':''}>לקוח ${c}</option>`).join('');
   rfp.innerHTML='<option value="">כל המוצרים</option>'+pOpts.map(p=>`<option value="${p}" ${p===pf?'selected':''}>מוצר ${p}</option>`).join('');
+  buildPipelineReport();
   buildSummaryReport(fl);
   buildExpectedByProduct(fl);
   buildStageReport();
@@ -6525,6 +6615,138 @@ function buildExpectedByProduct(fl){
     ${T2.noExp?`<br>${T2.noExp} משימות (${H(T2.noExpSec)}) בלי צפי כלל — נספרות ב"בפועל" ולא בהשוואה.`:''}
     ${T2.susp?`<br><b style="color:var(--amber,#b45309)">⚠ ${T2.susp} רשומות עם צפי חשוד</b> מזרימות ${H(T2.suspSec)} של "חיסכון" מדומה. הצפי נצרב בסריקה ולא תוקן — השורות מסומנות בצהוב.`:''}
   </div>`;
+}
+// ─── לוח מצב הזמנות ──────────────────────────────────────────
+// כמו buildStepQtyReport — טוען היסטוריה **מלאה** ומתעלם מטווח התאריכים של הדוחות
+// במכוון: זהו מצב נוכחי מצטבר, ולא אמור "להיעלם" כשמסננים לשבוע. שני הדוחות קוראים
+// לאותו loadHistRange('','') באותה קריאת buildRep ולכן חולקים את המטמון (30 שנ').
+let _pipeRows=null;
+let _pipeShip={from:null,to:''};   // from===null ⇒ טרם אותחל, נקבע ל-30 יום אחורה
+function pipeShipRange(k,v){_pipeShip[k]=v;buildPipelineReport();}
+async function buildPipelineReport(){
+  const el=document.getElementById('rp-pipe-body');if(!el)return;
+  const prods=S.products||[];
+  if(!prods.length){el.innerHTML='<div style="color:var(--txt3);font-size:13px;padding:8px">אין מוצרים</div>';return;}
+  el.innerHTML='<div style="color:var(--txt3);font-size:12px;padding:.5rem 0">⏳ טוען…</div>';
+  const hist=await loadHistRange('','');
+  if(!document.getElementById('page-reports')?.classList.contains('active'))return; // המשתמש עזב בזמן הטעינה
+  // שיוך כל משימה להזמנה שלה — אותה נקודת אמת כמו דוח הכמות ודוח הרווח
+  const byOrder={},oldCache={};
+  for(const t of [...hist,...(S.activeTasks||[])]){
+    const k=t.cust+'|'+t.prod+'|'+taskOrderStamp(t,oldCache);
+    (byOrder[k]||(byOrder[k]=[])).push(t);
+  }
+  const rows=prods.map(p=>({p,st:pipeStateOf(p,byOrder[p.cust+'|'+p.prod+'|'+prodStampOf(p)]||[]),
+                            entry:pipeEntryDate(p),ship:pipeShipDate(p)}));
+  _pipeRows=rows;
+  // "יצא ללקוח" — 30 יום אחורה כברירת מחדל, עם בוררי תאריך משלו.
+  // ⚠️ הטווח נשמר ב-`_pipeShip` ולא נקרא מה-DOM: בקריאה הראשונה שדות התאריך עדיין לא
+  // קיימים (הם נוצרים ב-innerHTML בסוף הפונקציה), ולכן ברירת המחדל נבלעה והוצגו כל 53.
+  if(_pipeShip.from===null)_pipeShip.from=new Date(Date.now()-30*86400000).toISOString().slice(0,10);
+  const sFrom=_pipeShip.from||'',sTo=_pipeShip.to||'';
+  const isMgr=S.user?.role==='manager';
+  const B=(v,c)=>`<span class="badge ${c}">${v}</span>`;
+  const prog=(f,lbl)=>!f?'':`<span class="badge ${f.full===f.of?'green':'gray'}" style="font-size:9px" title="${esc(lbl+': '+f.full+' מתוך '+f.of+' שלבים הגיעו לכמות המלאה')}">${lbl} ${f.full}/${f.of}</span>`;
+
+  let hidden=0;
+  const cols=PIPE_LISTS.map((L,li)=>{
+    let list=rows.filter(r=>r.st.id===L.id);
+    if(L.id==='shipped'){
+      const before=list.length;
+      list=list.filter(r=>(!sFrom||(r.ship&&r.ship>=sFrom))&&(!sTo||(r.ship&&r.ship<=sTo)));
+      hidden=before-list.length;
+    }
+    // סדר הכניסה למפעל — הוותיק ראשון. "יצא ללקוח" ממוין לפי תאריך היציאה, החדש ראשון.
+    list.sort((a,b)=>L.id==='shipped'?String(b.ship).localeCompare(String(a.ship))
+                                     :String(a.entry||'9999').localeCompare(String(b.entry||'9999')));
+    const units=list.reduce((s,r)=>s+r.st.qty,0);
+    const cards=list.map(r=>{
+      const p=r.p,st=r.st;
+      const nxt=PIPE_LISTS[li+1];
+      return `<div style="border:1px solid var(--b);border-radius:8px;padding:6px 8px;margin-bottom:6px;background:var(--bg)">
+        <div style="display:flex;align-items:center;gap:4px;flex-wrap:wrap">
+          <span class="bc-seg bc-c">${p.cust}</span><span class="bc-seg bc-p">${p.prod}</span>
+          ${(parseInt(p.orderNo,10)||0)?`<span class="bc-seg" style="background:var(--green-bg,#dcfce7);color:var(--green-txt,#16a34a);font-weight:700">#${String(p.orderNo).padStart(3,'0')}</span>`:''}
+          ${st.ov?`<span class="badge amber" style="font-size:9px" title="${esc('הועבר ידנית על ידי '+(st.ov.by||'—')+' ב-'+(st.ov.at||'').slice(0,10)+'. המצב האמיתי: '+(PIPE_LISTS[PIPE_IDX(st.nat)]?.label||st.nat))}">📌 ידני</span>`:''}
+        </div>
+        <div style="font-size:12px;color:var(--txt2);margin:2px 0">${esc(p.name||'—')}</div>
+        <div style="display:flex;align-items:center;gap:4px;flex-wrap:wrap;font-size:10px;color:var(--txt3)">
+          <span>${L.id==='shipped'?('יצא '+(r.ship||'—')):('נכנס '+(r.entry||'—'))}</span>
+          <span>·</span><span>${st.qty?st.qty+" יח'":'<span style="color:var(--red-txt)">אין כמות</span>'}</span>
+          ${prog(st.sew,'תפירה')}${prog(st.pack,'אריזה')}
+        </div>
+        ${isMgr&&nxt&&L.id!=='shipped'?`<div style="margin-top:4px;display:flex;gap:4px">
+          <button class="btn" style="font-size:10px;padding:2px 6px;white-space:nowrap" onclick="pipePush('${escj(p.id)}','${nxt.id}')" title="${esc('העבר ידנית ל'+nxt.label+' — לשימוש כשהמונה נתקע')}">➜ ${esc(pipeShortLabel(nxt))}</button>
+          ${st.ov?`<button class="btn" style="font-size:10px;padding:2px 6px" onclick="pipePush('${escj(p.id)}','')">↺ בטל</button>`:''}
+        </div>`:''}
+      </div>`;
+    }).join('')||'<div style="color:var(--txt3);font-size:11px;padding:6px 2px">—</div>';
+    // עמודה ריקה מצטמצמת ל-110px — כך כל 8 הרשימות נכנסות למסך 1366 בלי גלילה כשחלקן ריקות,
+    // והן נשארות גלויות (המשתמש צריך לראות ש"מוכן לאריזה" ריקה, לא שהיא נעלמה).
+    return `<div style="flex:0 0 auto;width:${list.length?190:110}px;background:var(--bg2);border-radius:10px;padding:8px">
+      <div style="font-size:12px;font-weight:700;margin-bottom:2px">${L.label}</div>
+      <div style="font-size:10px;color:var(--txt3);margin-bottom:6px">${list.length} הזמנות · ${units} יח'<br>${esc(L.hint)}</div>
+      ${cards}
+    </div>`;
+  }).join('');
+
+  el.innerHTML=`
+  <div style="display:flex;align-items:center;gap:8px;flex-wrap:wrap;margin-bottom:8px;font-size:11px;color:var(--txt2)">
+    <span>🚚 טווח "יצא ללקוח":</span>
+    <input type="date" id="pipe-ship-from" value="${esc(sFrom)}" style="font-size:11px;width:auto" onchange="pipeShipRange('from',this.value)"/>
+    <span>עד</span>
+    <input type="date" id="pipe-ship-to" value="${esc(sTo)}" style="font-size:11px;width:auto" onchange="pipeShipRange('to',this.value)"/>
+    <button class="btn" style="font-size:11px;padding:2px 8px" onclick="pipeShipAll()">הצג הכל</button>
+    ${hidden?`<span style="color:var(--txt3)">(${hidden} הזמנות מחוץ לטווח)</span>`:''}
+  </div>
+  <div style="display:flex;gap:8px;overflow-x:auto;padding-bottom:4px;align-items:flex-start">${cols}</div>
+  <div style="font-size:11px;color:var(--txt3);margin-top:8px;line-height:1.6">
+    המעבר בין הרשימות נקבע לפי <b>המחלקה שבה נסרקה המשימה</b>, הכמות בכרטיס וברקוד "יצא ללקוח" — לא לפי סימוני "דוח ייצור לפי שלב".
+    <br>⚠️ <b>"מוכן לאריזה" ו"מוכן ליציאה" דורשים שכל שלבי המשפחה יגיעו לכמות המלאה.</b> בפועל שלבים מהירים וממוזגים לא תמיד נסרקים עד הסוף, ולכן הרשימות האלה כמעט תמיד ריקות והכרטיס קופץ ישירות לרשימה הבאה בסריקה. המונה <span class="badge gray" style="font-size:9px">תפירה 13/20</span> על כל כרטיס מראה את המצב האמיתי${isMgr?', והכפתור ➜ דוחף ידנית קדימה כשנתקע':''}.
+  </div>`;
+}
+// להדפסה הלוח נפרש לטבלה אחת ולא כעמודות flex — כרום שובר עמודות flex בין דפים
+// (אותה משפחת בעיות כמו break-inside:avoid על CSS grid, ראה gotcha ההדפסה).
+function pipePrintHtml(){
+  if(!_pipeRows)return '<div>הדוח טרם נטען</div>';
+  const sFrom=_pipeShip.from||'',sTo=_pipeShip.to||'';
+  let out='';
+  for(const L of PIPE_LISTS){
+    let list=_pipeRows.filter(r=>r.st.id===L.id);
+    if(L.id==='shipped')list=list.filter(r=>(!sFrom||(r.ship&&r.ship>=sFrom))&&(!sTo||(r.ship&&r.ship<=sTo)));
+    list.sort((a,b)=>L.id==='shipped'?String(b.ship).localeCompare(String(a.ship))
+                                     :String(a.entry||'9999').localeCompare(String(b.entry||'9999')));
+    const units=list.reduce((s,r)=>s+r.st.qty,0);
+    out+=`<div style="margin-top:10px"><div style="font-weight:700;font-size:13px">${L.label} — ${list.length} הזמנות · ${units} יח'</div>`;
+    out+=list.length?`<table><thead><tr><th>לקוח / מוצר</th><th>שם</th><th>${L.id==='shipped'?'יצא':'נכנס'}</th><th>יח'</th><th>תפירה</th><th>אריזה</th></tr></thead><tbody>${
+      list.map(r=>`<tr><td>${r.p.cust} / ${r.p.prod}${(parseInt(r.p.orderNo,10)||0)?' #'+String(r.p.orderNo).padStart(3,'0'):''}${r.st.ov?' 📌':''}</td>
+        <td>${esc(r.p.name||'—')}</td><td>${(L.id==='shipped'?r.ship:r.entry)||'—'}</td><td>${r.st.qty||'—'}</td>
+        <td>${r.st.sew?r.st.sew.full+'/'+r.st.sew.of:'—'}</td><td>${r.st.pack?r.st.pack.full+'/'+r.st.pack.of:'—'}</td></tr>`).join('')
+    }</tbody></table>`:'<div style="font-size:11px;color:#666">—</div>';
+    out+='</div>';
+  }
+  return out;
+}
+function pipeShipAll(){_pipeShip={from:'',to:''};buildPipelineReport();}
+// 📌 דחיפה ידנית קדימה. list ריק = ביטול. נשמר על מסמך המוצר בשדה pipeOverride.
+async function pipePush(pid,list){
+  if(S.user?.role!=='manager')return;
+  const p=(S.products||[]).find(x=>String(x.id)===String(pid));if(!p)return;
+  const L=PIPE_LISTS[PIPE_IDX(list)];
+  const ok=await showConfirm(list?'העברה ידנית':'ביטול העברה ידנית',
+    list?`להעביר את ${p.cust}/${p.prod} לרשימת "${L.label}"?\n\nההעברה היא סימון ידני בלבד — היא לא משנה משימות, כמויות או זמנים, והיא נבלעת מאליה ברגע שהסריקות עוקפות אותה.`
+        :`לבטל את ההעברה הידנית של ${p.cust}/${p.prod} ולהחזיר אותו לרשימה לפי הסריקות?`);
+  if(!ok)return; // ⚠️ showConfirm מחזיר false גם בלחיצה על הרקע — לכן היציאה, לא ענף אחר
+  // ⚠️ הביטול כותב `null` ולא מוחק את השדה: `fbSet`=setDoc(merge:true) לא מוחק מפתחות,
+  // ו-`deleteField` לא מיוצא ב-`window._fb`. הקורא בודק truthiness ⇒ `null` מתנהג כמו היעדר.
+  p.pipeOverride=list?{list,at:new Date().toISOString(),by:S.user?.name||''}:null;
+  saveLS();
+  if(S.fbConnected){
+    try{await fbSet('products',p.id,{pipeOverride:p.pipeOverride});}
+    catch(e){showToast('שמירה נכשלה: '+e.message,'var(--red-txt)',6000);return;}
+  }
+  showToast(list?('הועבר ל'+L.label):'ההעברה הידנית בוטלה','var(--green-txt)',3000);
+  await buildPipelineReport();
 }
 function buildStageReport(){
   const T=LANGS[currentLang];
@@ -12388,6 +12610,9 @@ function doPrintChoice(){
   document.getElementById('print-choice-panel').classList.add('hidden');
   const now=new Date().toLocaleDateString('he-IL');
   let html='';
+  if(val==='pipe'||val==='all'){
+    html+=`<div class="card"><div class="sec">🏭 לוח מצב הזמנות</div>${pipePrintHtml()}</div>`;
+  }
   if(val==='detail'||val==='all'){
     html+=`<div class="card"><div class="sec">פירוט לפי לקוח ומוצר</div><div class="tbl-wrap"><table><thead><tr><th>עובד</th><th>מחלקה</th><th>סוג משימה</th><th>לקוח</th><th>מוצר</th><th>מידה</th><th>כמות</th><th>צבע</th><th>התחלה</th><th>סיום</th><th>משך</th><th>סטטוס</th></tr></thead><tbody>${document.getElementById('rp-body')?.innerHTML||''}</tbody></table></div></div>`;
   }
