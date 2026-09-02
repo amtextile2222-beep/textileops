@@ -60,6 +60,20 @@ service cloud.firestore {
       allow write: if isMgr();
     }
 
+    // 🧾 קופת המפעל: כל בעל גישה רואה את התנועות ורושם **לקיחה** על שמו בלבד.
+    // הכנסת כסף (type=='in') והמחיקה — מנהל בלבד. הסתרת הכפתור בלקוח אינה
+    // אכיפה; בלי החוק הזה עובד יכול לרשום הפקדה ולנפח את היתרה.
+    // uid בטוקן שווה למזהה העובד (createCustomToken(w.id)) ⇒ אי אפשר לרשום על שם אחר.
+    match /cashbox/{id} {
+      allow read: if hasRole();
+      allow create: if isMgr() || (hasRole()
+        && request.resource.data.type == 'out'
+        && request.resource.data.workerId == request.auth.uid
+        && request.resource.data.amount is number
+        && request.resource.data.amount > 0);
+      allow update, delete: if isMgr();
+    }
+
     // שאר האוספים — כל משתמש מחובר עם role
     // (stationLog נשאר כאן בכוונה — עובדים כותבים רשומות שיוך לתחנה)
     match /{collection}/{docId} {

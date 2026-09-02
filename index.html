@@ -317,6 +317,7 @@ code{background:var(--bg2);border:0.5px solid var(--b);border-radius:4px;padding
       <button class="nb hidden" onclick="goPage('setup')" id="nb-setup">🔗 <span data-i18n="nav_setup">Firebase</span></button>
       <button class="nb hidden" onclick="goPage('costs')" id="nb-costs">💰 <span data-i18n="nav_costs">עלויות</span></button>
       <button class="nb hidden" onclick="goPage('expenses')" id="nb-expenses">💸 <span data-i18n="nav_expenses">הוצאות</span></button>
+      <button class="nb hidden" onclick="goPage('cashbox')" id="nb-cashbox">🧾 <span data-i18n="nav_cashbox">קופה</span></button>
       <button class="nb hidden" onclick="goPage('products')" id="nb-products">👗 <span data-i18n="nav_products">מוצרים</span></button>
       <button class="nb hidden" onclick="goPage('barcodes')" id="nb-barcodes">🏷️ <span data-i18n="nav_barcodes">ברקודים</span></button>
     </div>
@@ -1095,10 +1096,12 @@ code{background:var(--bg2);border:0.5px solid var(--b);border-radius:4px;padding
         </div>
         <div style="margin-top:.75rem">
           <div class="sec" style="font-size:12px;margin-bottom:6px">הוצאות משתנות</div>
+          <div style="font-size:11px;color:var(--txt3);margin-bottom:6px">חשבונית שמגיעה אחרי סוף החודש (הובלה וכד') — הזן את <b>תאריך התשלום</b> בשדה התאריך, ובחר את <b>חודש השיוך</b> כדי שתיזקף לחודש שאליו היא שייכת. ריק = לפי התאריך.</div>
           <div style="display:flex;gap:6px;margin-bottom:6px;flex-wrap:wrap">
-            <input type="date" id="vexp-date" style="flex:1;font-size:12px"/>
+            <input type="date" id="vexp-date" title="תאריך התשלום בפועל" style="flex:1;font-size:12px"/>
+            <input type="month" id="vexp-month" title="חודש שיוך — לאיזה חודש ההוצאה נזקפת. חשבונית הובלה של אוגוסט שמגיעה בספטמבר: בחר כאן את אוגוסט. ריק = לפי תאריך התשלום." style="flex:1;font-size:12px"/>
             <input type="number" id="vexp-amount" placeholder="סכום ₪" min="0" style="flex:1;font-size:12px"/>
-            <input type="text" id="vexp-desc" placeholder="תיאור (אריזה, חומר...)" style="flex:2;font-size:12px"/>
+            <input type="text" id="vexp-desc" placeholder="תיאור (הובלה, אריזה, חומר...)" style="flex:2;font-size:12px"/>
             <button class="btn primary" onclick="addVarExp()" style="font-size:12px;padding:6px 10px">+ הוסף</button>
           </div>
           <div id="vexp-list" style="max-height:120px;overflow-y:auto"></div>
@@ -1195,6 +1198,60 @@ code{background:var(--bg2);border:0.5px solid var(--b);border-radius:4px;padding
         <div id="exp-total-badge" style="font-size:13px;font-weight:600;color:var(--primary)"></div>
       </div>
       <div id="exp-list"></div>
+    </div>
+  </div>
+
+  <!-- 🧾 עמוד קופה — מעקב מזומן בלבד, לא הוצאות -->
+  <div class="page" id="page-cashbox">
+    <div class="card" style="margin-bottom:12px">
+      <div style="display:flex;justify-content:space-between;align-items:center;flex-wrap:wrap;gap:8px">
+        <div>
+          <div style="font-size:12px;color:var(--txt3)" data-i18n="cash_balance_lbl">יתרה בקופה</div>
+          <div id="cash-balance" style="font-size:26px;font-weight:800">₪0</div>
+        </div>
+        <div style="text-align:left;font-size:12px;color:var(--txt3);line-height:1.9">
+          <div><span data-i18n="cash_in_total">הוכנס</span>: <b id="cash-in-total" style="color:var(--green-txt)">₪0</b></div>
+          <div><span data-i18n="cash_out_total">נלקח</span>: <b id="cash-out-total" style="color:var(--red-txt)">₪0</b></div>
+        </div>
+      </div>
+      <div style="font-size:11px;color:var(--txt3);margin-top:8px" data-i18n="cash_note">מעקב אחרי המזומן בקופה בלבד — לא נכנס לחישוב הוצאות, תקורה או רווח.</div>
+    </div>
+
+    <!-- הכנסת כסף — מנהל בלבד -->
+    <div class="card hidden" id="cash-in-card" style="margin-bottom:12px">
+      <div class="sec" data-i18n="cash_in_new">➕ הכנסת כסף לקופה (מנהל בלבד)</div>
+      <div class="field"><label data-i18n="cash_amount">סכום (₪)</label><input type="number" id="cash-in-amount" min="0" step="0.01" placeholder="0.00" style="font-size:16px;font-weight:600"/></div>
+      <div class="field"><label data-i18n="cash_in_desc">הערה (אופציונלי)</label><input type="text" id="cash-in-desc" data-i18n-ph="cash_in_desc_ph" placeholder="לדוגמה: הפקדה שבועית" style="font-size:14px"/></div>
+      <button class="btn success" onclick="submitCashIn()" style="margin-top:12px;width:100%;font-size:15px" data-i18n="cash_in_submit">💰 הכנס לקופה</button>
+      <div id="cash-in-msg" style="margin-top:8px;font-size:13px;text-align:center;min-height:20px"></div>
+    </div>
+
+    <!-- לקיחת כסף — כל מי שיש לו גישה -->
+    <div class="card" style="margin-bottom:12px">
+      <div class="sec" data-i18n="cash_out_new">➖ לקיחת כסף מהקופה</div>
+      <div class="field"><label data-i18n="cash_amount">סכום (₪)</label><input type="number" id="cash-out-amount" min="0" step="0.01" placeholder="0.00" style="font-size:16px;font-weight:600"/></div>
+      <div class="field"><label data-i18n="cash_out_desc">על מה הכסף (חובה)</label><input type="text" id="cash-out-desc" data-i18n-ph="cash_out_desc_ph" placeholder="לדוגמה: תשלום להובלה, קניית חוטים..." style="font-size:14px"/></div>
+      <div class="field"><label data-i18n="cash_photo_lbl">צילום קבלה (אופציונלי)</label><input type="file" id="cash-photo" accept="image/*" capture="environment" onchange="previewCashPhoto(this)" style="font-size:13px"/></div>
+      <div id="cash-photo-preview" style="margin-top:6px"></div>
+      <button class="btn primary" onclick="submitCashOut()" style="margin-top:12px;width:100%;font-size:15px" data-i18n="cash_out_submit">📤 רשום לקיחה</button>
+      <div id="cash-out-msg" style="margin-top:8px;font-size:13px;text-align:center;min-height:20px"></div>
+    </div>
+
+    <div class="card" style="margin-bottom:12px">
+      <div class="sec" data-i18n="exp_filter">📅 סינון לפי תאריך</div>
+      <div style="display:flex;gap:8px;align-items:flex-end;flex-wrap:wrap">
+        <div class="field" style="margin:0;flex:1"><label data-i18n="exp_from">מ-</label><input type="date" id="cash-from" style="font-size:13px" onchange="renderCashbox()"/></div>
+        <div class="field" style="margin:0;flex:1"><label data-i18n="exp_to">עד-</label><input type="date" id="cash-to" style="font-size:13px" onchange="renderCashbox()"/></div>
+        <button class="btn" style="font-size:12px;padding:6px 12px" onclick="clearCashFilter()" data-i18n="exp_show_all">הכל</button>
+      </div>
+    </div>
+
+    <div class="card">
+      <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:10px">
+        <div class="sec" id="cash-list-title" style="margin:0"></div>
+        <div id="cash-range-badge" style="font-size:13px;font-weight:600;color:var(--primary)"></div>
+      </div>
+      <div id="cash-list"></div>
     </div>
   </div>
 
@@ -1662,6 +1719,29 @@ const LANGS={
     exp_total:'סה"כ',
     exp_view_receipt:'🖼 קבלה',
     exp_delete_confirm:'מחק הוצאה זו?',
+    nav_cashbox:'קופה',
+    cash_balance_lbl:'יתרה בקופה',
+    cash_in_total:'הוכנס',
+    cash_out_total:'נלקח',
+    cash_note:'מעקב אחרי המזומן בקופה בלבד — לא נכנס לחישוב הוצאות, תקורה או רווח.',
+    cash_in_new:'➕ הכנסת כסף לקופה (מנהל בלבד)',
+    cash_out_new:'➖ לקיחת כסף מהקופה',
+    cash_amount:'סכום (₪)',
+    cash_in_desc:'הערה (אופציונלי)',
+    cash_in_desc_ph:'לדוגמה: הפקדה שבועית',
+    cash_out_desc:'על מה הכסף (חובה)',
+    cash_out_desc_ph:'לדוגמה: תשלום להובלה, קניית חוטים...',
+    cash_photo_lbl:'צילום קבלה (אופציונלי)',
+    cash_in_submit:'💰 הכנס לקופה',
+    cash_out_submit:'📤 רשום לקיחה',
+    cash_list:'📋 תנועות הקופה',
+    cash_empty:'אין תנועות',
+    cash_tag_in:'הכנסה',
+    cash_tag_out:'לקיחה',
+    cash_saved:'✅ נרשם',
+    cash_err_mgr:'⚠️ הכנסת כסף מותרת למנהל בלבד',
+    cash_err_denied:'⚠️ הפעולה נדחתה — אין הרשאה',
+    cash_delete_confirm:'למחוק את הרשומה?',
     exp_filter:'📅 סינון לפי תאריך',
     exp_from:'מ-',
     exp_to:'עד-',
@@ -1907,6 +1987,29 @@ const LANGS={
     exp_total:'الإجمالي',
     exp_view_receipt:'🖼 الفاتورة',
     exp_delete_confirm:'حذف هذا المصروف؟',
+    nav_cashbox:'الصندوق',
+    cash_balance_lbl:'الرصيد في الصندوق',
+    cash_in_total:'أُدخل',
+    cash_out_total:'أُخذ',
+    cash_note:'متابعة النقد في الصندوق فقط — لا يدخل في حساب المصاريف أو الأرباح.',
+    cash_in_new:'➕ إدخال مال للصندوق (المدير فقط)',
+    cash_out_new:'➖ أخذ مال من الصندوق',
+    cash_amount:'المبلغ (₪)',
+    cash_in_desc:'ملاحظة (اختياري)',
+    cash_in_desc_ph:'مثال: إيداع أسبوعي',
+    cash_out_desc:'على ماذا صُرف المال (إلزامي)',
+    cash_out_desc_ph:'مثال: دفعة نقل، شراء خيطان...',
+    cash_photo_lbl:'صورة الفاتورة (اختياري)',
+    cash_in_submit:'💰 أدخل للصندوق',
+    cash_out_submit:'📤 سجّل الأخذ',
+    cash_list:'📋 حركات الصندوق',
+    cash_empty:'لا توجد حركات',
+    cash_tag_in:'إدخال',
+    cash_tag_out:'أخذ',
+    cash_saved:'✅ تم التسجيل',
+    cash_err_mgr:'⚠️ إدخال المال للمدير فقط',
+    cash_err_denied:'⚠️ تم رفض العملية — لا صلاحية',
+    cash_delete_confirm:'حذف هذا السجل؟',
     exp_filter:'📅 تصفية حسب التاريخ',
     exp_from:'من',
     exp_to:'إلى',
@@ -2099,6 +2202,29 @@ const LANGS={
     exp_total:'Total',
     exp_view_receipt:'🖼 Receipt',
     exp_delete_confirm:'Delete this expense?',
+    nav_cashbox:'Cash box',
+    cash_balance_lbl:'Cash box balance',
+    cash_in_total:'Added',
+    cash_out_total:'Taken',
+    cash_note:'Tracks cash in the box only — not counted as an expense, overhead or profit.',
+    cash_in_new:'➕ Add cash to box (manager only)',
+    cash_out_new:'➖ Take cash from box',
+    cash_amount:'Amount (₪)',
+    cash_in_desc:'Note (optional)',
+    cash_in_desc_ph:'e.g. weekly deposit',
+    cash_out_desc:'What the money is for (required)',
+    cash_out_desc_ph:'e.g. delivery payment, buying thread...',
+    cash_photo_lbl:'Receipt photo (optional)',
+    cash_in_submit:'💰 Add to box',
+    cash_out_submit:'📤 Record withdrawal',
+    cash_list:'📋 Cash box movements',
+    cash_empty:'No movements',
+    cash_tag_in:'Added',
+    cash_tag_out:'Taken',
+    cash_saved:'✅ Recorded',
+    cash_err_mgr:'⚠️ Only the manager can add cash',
+    cash_err_denied:'⚠️ Action denied — no permission',
+    cash_delete_confirm:'Delete this record?',
     exp_filter:'📅 Filter by date',
     exp_from:'From',
     exp_to:'To',
@@ -2146,6 +2272,7 @@ const WORKER_PAGES=[
   {id:'alerts',label:'התראות'},
   {id:'taskscan',label:'סורק משימות'},
   {id:'expenses',label:'💸 הוצאות'},
+  {id:'cashbox',label:'🧾 קופה'},
 ];
 const SUPERVISOR_EXTRA_PAGES=[
   {id:'mgrtasks',label:'ניהול משימות'},
@@ -2350,6 +2477,9 @@ let S={
     workerTransport:{}, workerInsurance:{}, severancePct:8.33, holidayDays:4, giftsAnnual:0, tripAnnual:0, overheadBufferPct:10, costMonths:[],
     difficultyWeights:{1:1,2:1.5,3:2,4:2.5,5:3.5}},
   workerExpenses:[],
+  // 🧾 קופת המפעל — מעקב מזומן בלבד. **לא הוצאות**: לא נכנסת לתקורה,
+  // לא ל-recordedExpenseSum ולא לשום חישוב עלות או רווח.
+  cashbox:[],
   customerNames:{},
   customColors:{},
   costTab:'prod',
@@ -3256,6 +3386,12 @@ function listenFb(){
     snap.forEach(d=>{if(d.data().id)S.workerExpenses.push(d.data());});
     S.workerExpenses.sort((a,b)=>b.ts-a.ts);
     renderExpenses();
+  });
+  onSnapshot(collection(db,'cashbox'),snap=>{
+    S.cashbox=[];
+    snap.forEach(d=>{if(d.data().id)S.cashbox.push(d.data());});
+    S.cashbox.sort((a,b)=>b.ts-a.ts);
+    try{renderCashbox();}catch(e){}
   });
 }
 
@@ -4242,6 +4378,7 @@ function goPage(p){
   if(p==='costs')initCostsPage();
   if(p==='products')renderProducts();
   if(p==='expenses')renderExpenses();
+  if(p==='cashbox')renderCashbox();
 }
 
 function renderAll(){
@@ -4258,6 +4395,7 @@ function renderAll(){
   if(id==='attrep')initAttRep();
   if(id==='alerts'){checkAlerts();renderAlerts();loadWaSettings();loadPushSettings();}
   if(id==='expenses')renderExpenses();
+  if(id==='cashbox')renderCashbox();
   // מסך הניהול מצויר רק ברגע הכניסה אליו (goPage) ולכן נשאר תקוע על העותק שהיה
   // בזיכרון באותו רגע. זה נראה כמו "הכול התאפס" — תחנות, שלב ייצור ורישום פנים
   // נעלמים מהמסך בזמן שב-Firestore הכול שלם. רינדור ישן, לא נזק לנתונים.
@@ -10356,6 +10494,9 @@ function renderWorkerRates(){
   </div>`;
 }
 
+// חודש השיוך של הוצאה משתנה: `month` אם הוזן, אחרת החודש של תאריך התשלום.
+// רשומות ישנות נשמרו בלי `month` ולכן נופלות לתאריך — התנהגות זהה לקודם.
+function vexpMonth(e){return (e&&e.month)||String(e&&e.date||'').slice(0,7);}
 function renderVarExpList(){
   const el=document.getElementById('vexp-list');
   if(!el)return;
@@ -10363,10 +10504,11 @@ function renderVarExpList(){
   if(!exps.length){el.innerHTML='<div style="font-size:11px;color:var(--txt3);text-align:center;padding:8px">אין הוצאות משתנות</div>';return;}
   el.innerHTML=exps.slice().reverse().map((e,ri)=>{
     const i=exps.length-1-ri;
+    const shifted=e.month&&e.month!==String(e.date||'').slice(0,7);
     return`<div style="display:flex;align-items:center;gap:6px;padding:5px 0;border-bottom:0.5px solid var(--b);font-size:12px">
-      <span style="color:var(--txt3);width:80px;flex-shrink:0">${e.date}</span>
+      <span style="color:var(--txt3);width:80px;flex-shrink:0">${esc(e.date||'')}</span>
       <span style="font-weight:600;color:var(--blue-txt);width:60px;flex-shrink:0">₪${Number(e.amount).toLocaleString()}</span>
-      <span style="flex:1;color:var(--txt2)">${esc(e.desc||'')}</span>
+      <span style="flex:1;color:var(--txt2)">${esc(e.desc||'')}${shifted?` <span class="badge gray" style="font-size:10px" title="ההוצאה נזקפת לחודש הזה ולא לחודש התשלום">↩ נזקף ל-${esc(e.month)}</span>`:''}</span>
       <button onclick="delVarExp(${i})" style="background:none;border:none;color:var(--red-txt);cursor:pointer;font-size:14px;padding:0 4px">×</button>
     </div>`;
   }).join('');
@@ -10374,18 +10516,28 @@ function renderVarExpList(){
 
 function addVarExp(){
   const date=document.getElementById('vexp-date').value||todayStr();
+  const month=document.getElementById('vexp-month')?.value||'';
   const amount=parseFloat(document.getElementById('vexp-amount').value)||0;
   const desc=(document.getElementById('vexp-desc').value||'').trim();
   if(!amount){alert('הזן סכום');return;}
-  S.costs.variableExpenses.push({date,amount,desc});
+  // חודש שיוך נשמר רק אם הוא באמת שונה מחודש התשלום — אחרת רק רעש במסמך
+  const rec={date,amount,desc};
+  if(month&&month!==date.slice(0,7))rec.month=month;
+  S.costs.variableExpenses.push(rec);
   document.getElementById('vexp-amount').value='';
   document.getElementById('vexp-desc').value='';
-  saveLS();renderVarExpList();
+  if(document.getElementById('vexp-month'))document.getElementById('vexp-month').value='';
+  saveLS();
+  if(S.fbConnected)fbSet('adminSettings','costs',S.costs);
+  renderVarExpList();renderCostMonths();
 }
 
 function delVarExp(i){
   S.costs.variableExpenses.splice(i,1);
-  saveLS();renderVarExpList();
+  saveLS();
+  // נשמר מיד ולא ממתין לכפתור "שמור" — הרשימה הזאת מזינה את סה"כ החודש
+  if(S.fbConnected)fbSet('adminSettings','costs',S.costs);
+  renderVarExpList();renderCostMonths();
 }
 
 // ─── הוצאות עובדים ───────────────────────────────────────────
@@ -10512,6 +10664,155 @@ async function deleteExpense(id){
 }
 // ─────────────────────────────────────────────────────────────
 
+// ─── 🧾 קופת המפעל ────────────────────────────────────────────
+// מעקב מזומן בלבד. **אינה הוצאה**: לא נכנסת ל-recordedExpenseSum, לא ל-costMonths,
+// לא לתקורה ולא לדוחות הרווח. הכסף שנלקח מהקופה משמש לתשלומים שכבר נרשמים
+// במקומם הנכון (לשונית הוצאות / הוצאות משתנות) — ספירה כאן תהיה ספירה כפולה.
+// `type`: 'in' = הכנסת כסף (מנהל בלבד) · 'out' = לקיחה (כל בעל גישה).
+function previewCashPhoto(input){
+  const prev=document.getElementById('cash-photo-preview');
+  if(!prev)return;
+  const f=input.files[0];
+  if(!f){prev.innerHTML='';return;}
+  compressImageFile(f,400,0.6).then(b64=>{
+    prev.innerHTML=`<img src="${b64}" style="max-width:100%;max-height:140px;border-radius:8px;border:1px solid var(--brd)"/>`;
+  }).catch(()=>{prev.innerHTML='';});
+}
+function cashIsMgr(){return S.user?.role==='manager';}
+function _cashMsg(el,txt,ok){const m=document.getElementById(el);if(!m)return;
+  m.style.color=ok?'green':'var(--danger)';m.textContent=txt;
+  if(ok)setTimeout(()=>{if(m)m.textContent='';},3000);}
+
+async function _addCashEntry(type,amount,desc,photo,msgEl){
+  const T=LANGS[currentLang]||LANGS.he;
+  const id='cash_'+Date.now()+'_'+S.user.id;
+  const now=new Date();
+  const rec={id,type,workerId:S.user.id,workerName:S.user.name,dept:S.user.dept||'',
+    amount,desc,photo:photo||'',date:todayStr(),
+    time:pad2(now.getHours())+':'+pad2(now.getMinutes()),ts:Date.now()};
+  S.cashbox.unshift(rec);
+  if(S.fbConnected&&db){
+    try{await fbSet('cashbox',id,rec);}
+    catch(e){
+      // חוק Firestore דוחה הפקדה שאינה ממנהל — מסירים מהמצב המקומי כדי
+      // שהיתרה לא תשקר עד לרענון
+      S.cashbox=S.cashbox.filter(x=>x.id!==id);
+      _cashMsg(msgEl,T.cash_err_denied||'הפעולה נדחתה',false);
+      renderCashbox();return false;
+    }
+  }
+  _cashMsg(msgEl,T.cash_saved||'✅ נרשם',true);
+  renderCashbox();return true;
+}
+async function submitCashIn(){
+  if(!S.user)return;
+  const T=LANGS[currentLang]||LANGS.he;
+  if(!cashIsMgr()){_cashMsg('cash-in-msg',T.cash_err_mgr||'מנהל בלבד',false);return;}
+  const amount=parseFloat(document.getElementById('cash-in-amount')?.value);
+  if(!amount||amount<=0){_cashMsg('cash-in-msg',T.exp_err_amount,false);return;}
+  const desc=(document.getElementById('cash-in-desc')?.value||'').trim();
+  if(await _addCashEntry('in',amount,desc,'','cash-in-msg')){
+    document.getElementById('cash-in-amount').value='';
+    document.getElementById('cash-in-desc').value='';
+  }
+}
+async function submitCashOut(){
+  if(!S.user)return;
+  const T=LANGS[currentLang]||LANGS.he;
+  const amount=parseFloat(document.getElementById('cash-out-amount')?.value);
+  const desc=(document.getElementById('cash-out-desc')?.value||'').trim();
+  if(!amount||amount<=0){_cashMsg('cash-out-msg',T.exp_err_amount,false);return;}
+  if(!desc){_cashMsg('cash-out-msg',T.exp_err_desc,false);return;}
+  const photoFile=document.getElementById('cash-photo')?.files[0];
+  let photo='';
+  if(photoFile){try{photo=await compressImageFile(photoFile,800,0.5);}catch(e){}}
+  if(await _addCashEntry('out',amount,desc,photo,'cash-out-msg')){
+    document.getElementById('cash-out-amount').value='';
+    document.getElementById('cash-out-desc').value='';
+    document.getElementById('cash-photo').value='';
+    document.getElementById('cash-photo-preview').innerHTML='';
+  }
+}
+function clearCashFilter(){
+  const f=document.getElementById('cash-from'),t=document.getElementById('cash-to');
+  if(f)f.value='';if(t)t.value='';
+  renderCashbox();
+}
+async function deleteCashEntry(id){
+  const T=LANGS[currentLang]||LANGS.he;
+  if(!cashIsMgr())return;
+  if(!confirm(T.cash_delete_confirm||'למחוק את הרשומה?'))return;
+  S.cashbox=S.cashbox.filter(e=>e.id!==id);
+  if(S.fbConnected&&db)await fbDel('cashbox',id);
+  renderCashbox();
+}
+function renderCashbox(){
+  const listEl=document.getElementById('cash-list');
+  if(!listEl)return;
+  const T=LANGS[currentLang]||LANGS.he;
+  document.getElementById('cash-in-card')?.classList.toggle('hidden',!cashIsMgr());
+  const all=S.cashbox||[];
+  // 🔑 היתרה תמיד על **כל** ההיסטוריה — סינון התאריכים משנה רק את הרשימה.
+  // יתרה שמסתננת לפי טווח היא מספר חסר משמעות.
+  const sum=(a,t)=>a.filter(e=>e.type===t).reduce((s,e)=>s+Number(e.amount||0),0);
+  const cin=sum(all,'in'),cout=sum(all,'out');
+  const set=(id,v)=>{const el=document.getElementById(id);if(el)el.textContent=v;};
+  set('cash-in-total','₪'+cin.toLocaleString(undefined,{maximumFractionDigits:2}));
+  set('cash-out-total','₪'+cout.toLocaleString(undefined,{maximumFractionDigits:2}));
+  const bal=cin-cout,balEl=document.getElementById('cash-balance');
+  if(balEl){balEl.textContent='₪'+bal.toLocaleString(undefined,{maximumFractionDigits:2});
+    balEl.style.color=bal<0?'var(--red-txt)':'var(--txt)';}
+
+  const from=document.getElementById('cash-from')?.value||'';
+  const to=document.getElementById('cash-to')?.value||'';
+  let rows=[...all];
+  if(from)rows=rows.filter(e=>(e.date||'')>=from);
+  if(to)rows=rows.filter(e=>(e.date||'')<=to);
+  const tEl=document.getElementById('cash-list-title');
+  if(tEl)tEl.textContent=(T.cash_list||'📋 תנועות הקופה')+' ('+rows.length+')';
+  const rBadge=document.getElementById('cash-range-badge');
+  if(rBadge)rBadge.textContent=(from||to)
+    ? '+₪'+sum(rows,'in').toLocaleString()+' / −₪'+sum(rows,'out').toLocaleString() : '';
+
+  if(!rows.length){listEl.innerHTML='<div style="font-size:12px;color:var(--txt3);text-align:center;padding:14px">'+(T.cash_empty||'אין תנועות')+'</div>';return;}
+  listEl.innerHTML=rows.map(e=>{
+    const out=e.type==='out';
+    const col=out?'var(--red-txt)':'var(--green-txt)';
+    return`<div style="border-bottom:0.5px solid var(--brd);padding:8px 0">
+      <div style="display:flex;justify-content:space-between;align-items:flex-start;gap:8px">
+        <div style="flex:1;min-width:0">
+          <div style="font-weight:600;font-size:14px;color:${col}">${out?'−':'+'}₪${Number(e.amount||0).toLocaleString(undefined,{maximumFractionDigits:2})}</div>
+          <div style="font-size:13px;color:var(--txt2);word-break:break-word">${esc(e.desc||'')}</div>
+          <div style="font-size:11px;color:var(--txt3);margin-top:2px">👤 ${esc(e.workerName||'')}${e.dept?' — '+esc(e.dept):''}</div>
+          <div style="font-size:11px;color:var(--txt3)">📅 ${esc(e.date||'')} 🕐 ${esc(e.time||'')}</div>
+        </div>
+        <div style="display:flex;flex-direction:column;gap:4px;align-items:flex-end">
+          <span class="badge ${out?'red':'green'}" style="font-size:10px">${out?(T.cash_tag_out||'לקיחה'):(T.cash_tag_in||'הכנסה')}</span>
+          ${e.photo?`<button class="btn" style="font-size:11px;padding:3px 8px" onclick="showCashPhoto('${escj(e.id)}')">🧾</button>`:''}
+          ${cashIsMgr()?`<button class="btn danger" style="font-size:11px;padding:3px 8px" onclick="deleteCashEntry('${escj(e.id)}')">🗑</button>`:''}
+        </div>
+      </div>
+    </div>`;}).join('');
+}
+// חלון-על בתוך הדף (לא window.open) — ב-PWA במסך הבית אין סרגל דפדפן לסגירה
+function closeCashPhoto(){const o=document.getElementById('cash-photo-overlay');if(o)o.remove();}
+function showCashPhoto(id){
+  const e=(S.cashbox||[]).find(x=>x.id===id);
+  if(!e?.photo)return;
+  closeCashPhoto();
+  const ov=document.createElement('div');
+  ov.id='cash-photo-overlay';
+  ov.style.cssText='position:fixed;inset:0;background:rgba(0,0,0,.9);z-index:99999;display:flex;flex-direction:column;align-items:center;justify-content:center;gap:10px;padding:16px';
+  ov.onclick=closeCashPhoto;
+  const cap='👤 '+esc(e.workerName||'')+' · '+esc(e.desc||'')+' · '+esc(e.date||'')+' · ₪'+Number(e.amount).toFixed(2);
+  ov.innerHTML=`<button onclick="closeCashPhoto()" style="position:absolute;top:12px;left:12px;background:#fff;color:#111;border:none;border-radius:999px;width:44px;height:44px;font-size:22px;font-weight:700;cursor:pointer;box-shadow:0 2px 8px rgba(0,0,0,.4)">✕</button>
+    <p style="color:#eee;font-size:13px;text-align:center;margin:0;max-width:92vw">${cap}</p>
+    <img src="${e.photo}" style="max-width:96vw;max-height:80vh;border-radius:6px" onclick="event.stopPropagation()"/>
+    <button onclick="closeCashPhoto()" style="background:#fff;color:#111;border:none;border-radius:8px;padding:10px 28px;font-size:15px;font-weight:600;cursor:pointer">✕ ${(LANGS[currentLang]||LANGS.he).close||'סגור'}</button>`;
+  document.body.appendChild(ov);
+}
+// ─────────────────────────────────────────────────────────────
+
 function saveCostSettings(){
   S.costs.fixedDaily=parseFloat(document.getElementById('cost-fixed').value)||0;
   S.costs.fixedMonthly=parseFloat(document.getElementById('cost-fixed-monthly').value)||0;
@@ -10591,11 +10892,30 @@ function renderLoadedHourTable(){
   }).join('');
   el.innerHTML=rows||'<div style="font-size:12px;color:var(--txt3);text-align:center;padding:8px">הזן שכר יומי לעובדים בכרטיס למעלה כדי לראות חישוב</div>';
 }
+// חודשים שנאספו חלקית ולכן לא נכתבו — מוצגים כאזהרה. מוגדר כאן ולא ליד
+// autoFillCostMonth כדי שלא ייכנס ל-TDZ אם renderCostMonths תרוץ לפניו.
+var _partialCostMonths=[];
+// מסמן חודש שנאסף חלקית — הכריע ידנית במקום שהמערכת תכתוב סכום שגוי
+function pickCostMonth(mo){
+  const el=document.getElementById('cm-month');
+  if(el){el.value=mo;el.scrollIntoView({behavior:'smooth',block:'center'});}
+}
 function renderCostMonths(){
   const el=document.getElementById('cm-list');if(!el)return;
+  ensureAutoCostMonths();   // מרענן את רשימת הממתינים — לא כותב כלום
+  const warn=(_partialCostMonths||[]).map(p=>`
+    <div style="background:var(--bg2);border:1px solid ${p.low?'var(--red-txt)':'var(--brd)'};border-radius:var(--r);padding:8px 10px;margin-bottom:6px;font-size:11px;line-height:1.8">
+      <b style="font-size:12px">⏳ ${esc(p.month)} — ממתין לסגירה</b>
+      <br>📄 הוצאות משתנות: <b>₪${Math.round(p.vars).toLocaleString()}</b>${p.shifted>0?` <span class="badge gray" style="font-size:10px">כולל ₪${Math.round(p.shifted).toLocaleString()} שנזקפו מחודש אחר</span>`:''}
+      <br>💸 הוצאות יומיות: <b>₪${Math.round(p.wexp).toLocaleString()}</b>
+      <br>סה"כ נרשם: <b style="color:var(--blue-txt);font-size:12px">₪${Math.round(p.total).toLocaleString()}</b>
+      ${p.low?`<br><span style="color:var(--red-txt)">🔴 נמוך מ-${Math.round(PARTIAL_MONTH_RATIO*100)}% מממוצע החודשים הסגורים (₪${Math.round(p.avg).toLocaleString()}) — בדוק שכל חשבוניות סוף החודש הוזנו.</span>`:''}
+      <br><button class="btn success" style="font-size:11px;padding:4px 8px;margin-top:4px" onclick="approveCostMonth('${escj(p.month)}')">✅ אשר וסגור את ${esc(p.month)}</button>
+      <button class="btn" style="font-size:11px;padding:4px 8px;margin-top:4px" onclick="pickCostMonth('${escj(p.month)}')">✏️ להזנה ידנית</button>
+    </div>`).join('');
   const months=(S.costs.costMonths||[]).slice().sort((a,b)=>b.month.localeCompare(a.month));
-  if(!months.length){el.innerHTML='<div style="font-size:11px;color:var(--txt3);text-align:center;padding:8px">אין חודשים מוזנים — התקורה תחושב מהקבועות בלבד</div>';return;}
-  el.innerHTML=months.map(m=>`
+  if(!months.length){el.innerHTML=warn+'<div style="font-size:11px;color:var(--txt3);text-align:center;padding:8px">אין חודשים מוזנים — התקורה תחושב מהקבועות בלבד</div>';return;}
+  el.innerHTML=warn+months.map(m=>`
     <div style="display:flex;align-items:center;gap:8px;padding:5px 0;border-bottom:0.5px solid var(--brd);font-size:12px">
       <span style="width:70px;color:var(--txt2)">${esc(m.month)}</span>
       <span style="font-weight:600;color:var(--blue-txt)">₪${Number(m.variableTotal||0).toLocaleString()}</span>
@@ -10620,13 +10940,54 @@ function addCostMonth(){
   _upsertCostMonth(month,amount,'manual');
   document.getElementById('cm-amount').value='';
 }
+// ─── איסוף הוצאות החודש — שני מקורות ───
+// יש שני מאגרי הוצאות נפרדים, ושניהם אמיתיים:
+//   `S.costs.variableExpenses` — מה שהמנהל מזין ידנית בדף העלויות
+//   `S.workerExpenses`         — לשונית 💸 שהעובדים מגישים (עם קבלה)
+// עד 02/09 נאסף רק הראשון ⇒ הכפתור "חשב מההוצאות הרשומות" החזיר סכום חלקי בשקט.
+// 🛑 המשתנות נספרות לפי **חודש השיוך** (`vexpMonth`) ולא לפי תאריך התשלום —
+// חשבונית הובלה של אוגוסט שמשולמת ב-03/09 שייכת לאוגוסט. הוצאות הלשונית הן
+// יומיות מעצם טבען ולכן נספרות לפי התאריך שלהן.
+function recordedExpenseSum(month){
+  const ve=(S.costs.variableExpenses||[]).filter(e=>vexpMonth(e)===month);
+  const vars=ve.reduce((s,e)=>s+Number(e.amount||0),0);
+  const wexp=(S.workerExpenses||[]).filter(e=>(e.date||'').slice(0,7)===month)
+    .reduce((s,e)=>s+Number(e.amount||0),0);
+  const shifted=ve.filter(e=>e.month&&e.month!==String(e.date||'').slice(0,7))
+    .reduce((s,e)=>s+Number(e.amount||0),0);
+  return {vars,wexp,shifted,total:vars+wexp};
+}
+// ממוצע החודשים שכבר אושרו — הבסיס להשוואה מול סכום שנאסף אוטומטית
+function knownMonthsAvg(exclude){
+  const ms=(S.costs.costMonths||[]).filter(m=>m.month!==exclude&&Number(m.variableTotal)>0);
+  return ms.length?ms.reduce((s,m)=>s+Number(m.variableTotal||0),0)/ms.length:0;
+}
+// 🛑 ההוצאות הרשומות במערכת הן בדרך כלל **חלק** מההוצאות האמיתיות של החודש
+// (שכר דירה, חשבונות, רו"ח ומיסים לא עוברים בלשונית) ⇒ סכום נמוך משמעותית
+// מהחודשים הידועים הוא סימן לאיסוף חלקי, לא לחודש זול.
+const PARTIAL_MONTH_RATIO=0.6;
 function autoFillCostMonth(){
   const month=document.getElementById('cm-month')?.value;
   if(!month){alert('בחר חודש');return;}
-  const sum=(S.costs.variableExpenses||[]).filter(e=>(e.date||'').slice(0,7)===month).reduce((s,e)=>s+Number(e.amount||0),0);
-  if(!sum){alert('לא נמצאו הוצאות משתנות רשומות בחודש '+month);return;}
-  if(!confirm(`נמצאו הוצאות בסך ₪${sum.toLocaleString()} בחודש ${month}. לשמור כסה"כ החודש?`))return;
-  _upsertCostMonth(month,sum,'auto');
+  const r=recordedExpenseSum(month);
+  if(!r.total){alert('לא נמצאו הוצאות רשומות בחודש '+month);return;}
+  const ex=(S.costs.costMonths||[]).find(m=>m.month===month);
+  const avg=knownMonthsAvg(month);
+  let msg='הוצאות שנרשמו במערכת בחודש '+month+':\n'
+    +'  📄 הוצאות משתנות: ₪'+r.vars.toLocaleString()
+    +(r.shifted>0?' (מהן ₪'+Math.round(r.shifted).toLocaleString()+' חשבוניות שנזקפו לחודש הזה)':'')+'\n'
+    +'  💸 הוצאות יומיות: ₪'+r.wexp.toLocaleString()+'\n'
+    +'  ────────────────\n'
+    +'  סה"כ: ₪'+r.total.toLocaleString()+'\n\n';
+  if(ex)msg+='⚠️ החודש כבר מוזן: ₪'+Number(ex.variableTotal||0).toLocaleString()
+    +' ('+(ex.source==='auto'?'אוטומטי':'ידני')+') — הערך יידרס.\n\n';
+  if(avg>0&&r.total<avg*PARTIAL_MONTH_RATIO)
+    msg+='🔴 הסכום נמוך מ-'+Math.round(PARTIAL_MONTH_RATIO*100)+'% מממוצע החודשים המוזנים (₪'
+      +Math.round(avg).toLocaleString()+').\nסביר שחסרות הוצאות שלא נרשמות במערכת (שכר דירה, חשבונות, רו"ח).\n'
+      +'שמירה כזו תוריד את התקורה ותנפח את הרווח בכל הדוחות.\n\n';
+  msg+='לשמור כסה"כ החודש?';
+  if(!confirm(msg))return;
+  _upsertCostMonth(month,r.total,'auto');
 }
 function delCostMonth(month){
   S.costs.costMonths=(S.costs.costMonths||[]).filter(m=>m.month!==month);
@@ -10673,18 +11034,40 @@ function renderReconciliation(){
       <span class="badge ${over?'red':'green'}">${over?'▲ חריגה':'▼ חיסכון'} ₪${Math.abs(r.gap).toLocaleString(undefined,{maximumFractionDigits:0})} (${pct.toFixed(0)}%)</span>
     </div>`;}).join('')+status;
 }
-// משלים אוטומטית חודשים שהסתיימו וחסרים ב-costMonths מתוך ההוצאות המשתנות הרשומות.
-// לא נוגע בחודשים שהוזנו ידנית — רק מוסיף חסרים.
+// מזהה חודשים שהסתיימו וחסרים ב-costMonths, ומכין להם סכום מההוצאות הרשומות
+// (משתנות לפי חודש שיוך + לשונית ההוצאות היומיות).
+// 🛑 **אף פעם לא כותב לבד.** חשבוניות סוף חודש מגיעות באיחור, ולכן כל סכום
+// שנאסף לפני שהמנהל אישר הוא חלקי בהגדרה. כתיבה שקטה כאן מורידה את התקורה
+// ומנפחת את הרווח בכל הדוחות בלי שאיש רואה שקרה משהו.
 function ensureAutoCostMonths(){
   if(S.user?.role!=='manager')return;
+  _partialCostMonths=[];
   const now=new Date();
   for(let k=1;k<=3;k++){
     const d=new Date(now.getFullYear(),now.getMonth()-k,1);
     const mo=d.getFullYear()+'-'+pad2(d.getMonth()+1);
     if((S.costs.costMonths||[]).find(m=>m.month===mo))continue;
-    const sum=(S.costs.variableExpenses||[]).filter(e=>(e.date||'').slice(0,7)===mo).reduce((s,e)=>s+Number(e.amount||0),0);
-    if(sum>0)_upsertCostMonth(mo,sum,'auto');
+    const r=recordedExpenseSum(mo);
+    if(!(r.total>0))continue;
+    const avg=knownMonthsAvg(mo);
+    _partialCostMonths.push({month:mo,...r,avg,low:avg>0&&r.total<avg*PARTIAL_MONTH_RATIO});
   }
+}
+// אישור המנהל — רק כאן החודש באמת נסגר ונכנס לתקורה
+function approveCostMonth(mo){
+  const p=(_partialCostMonths||[]).find(x=>x.month===mo);
+  if(!p){alert('החודש כבר נסגר או שאין לו הוצאות רשומות');return;}
+  let msg='לסגור את '+mo+' בסך ₪'+Math.round(p.total).toLocaleString()+'?\n\n'
+    +'  📄 הוצאות משתנות: ₪'+Math.round(p.vars).toLocaleString()
+    +(p.shifted>0?' (מהן ₪'+Math.round(p.shifted).toLocaleString()+' חשבוניות שנזקפו לחודש הזה)':'')+'\n'
+    +'  💸 הוצאות יומיות: ₪'+Math.round(p.wexp).toLocaleString()+'\n\n';
+  if(p.low)msg+='🔴 הסכום נמוך מ-'+Math.round(PARTIAL_MONTH_RATIO*100)+'% מממוצע החודשים הסגורים (₪'
+    +Math.round(p.avg).toLocaleString()+').\nבדוק שכל חשבוניות סוף החודש כבר הוזנו.\n\n';
+  msg+='הסכום ייכנס לחישוב התקורה ולכל הדוחות.';
+  if(!confirm(msg))return;
+  _upsertCostMonth(mo,p.total,'auto');
+  _partialCostMonths=_partialCostMonths.filter(x=>x.month!==mo);
+  renderCostMonths();
 }
 
 function showCostTab(tab){
