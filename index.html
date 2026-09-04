@@ -10226,6 +10226,64 @@ function _shipRowsCollect(){
     .map(i=>({size:i.dataset.size,color:i.dataset.color,grade:i.dataset.grade||GRADE_A,qty:Math.max(0,parseInt(i.value)||0)}))
     .filter(r=>r.qty>0);
 }
+// ─── 📦 אריזה — חבילות × יחידות בחבילה ────────────────────────
+// המפעל אורז ב**קבוצות של חבילות זהות** ולא לפי מידה/צבע: 35 חבילות של 5 יח',
+// ועוד 3 של 4, ועוד חבילה אחת של 1. לכן האריזה נרשמת כשורות (חבילות × יח')
+// ולא כעמודה במטריצת הצבעים — לחבילה אין שום התאמה לשורת צבע או למידה.
+function packsUnits(a){return (a||[]).reduce((t,x)=>t+(+x.n||0)*(+x.per||0),0);}
+function packsCount(a){return (a||[]).reduce((t,x)=>t+(+x.n||0),0);}
+function shipPackRowHtml(n,per){
+  const inp='flex:1;min-width:0;font-size:13px;padding:6px;border-radius:6px;border:1px solid var(--brd);background:var(--bg);color:var(--txt)';
+  return `<div class="pack-row" style="display:flex;align-items:center;gap:5px;margin-bottom:5px">
+    <input class="pack-n" type="number" inputmode="numeric" min="0" value="${n||''}" placeholder="חבילות" oninput="shipPackTotal()" style="${inp}"/>
+    <span style="font-size:13px;color:var(--txt3)">×</span>
+    <input class="pack-per" type="number" inputmode="numeric" min="0" value="${per||''}" placeholder="יח' בחבילה" oninput="shipPackTotal()" style="${inp}"/>
+    <span class="pack-eq" style="font-size:12px;font-weight:800;min-width:34px;text-align:center;color:var(--txt3)">—</span>
+    <button class="btn" style="font-size:11px;padding:4px 7px" onclick="delPackRow(this)">🗑</button>
+  </div>`;
+}
+function shipPackRowsHtml(packs){
+  const list=(Array.isArray(packs)&&packs.length)?packs:[{n:'',per:''}];
+  return list.map(x=>shipPackRowHtml(x.n,x.per)).join('');
+}
+function addPackRow(){
+  const w=document.getElementById('pack-rows');
+  if(!w)return;
+  w.insertAdjacentHTML('beforeend',shipPackRowHtml('',''));
+  w.lastElementChild?.querySelector('.pack-n')?.focus();
+  shipPackTotal();
+}
+// השורה האחרונה לא נמחקת אלא מתרוקנת — טופס בלי שום שורה נראה שבור
+function delPackRow(el){
+  const rows=[...document.querySelectorAll('.pack-row')];
+  const tr=el.closest('.pack-row');
+  if(rows.length<=1){if(tr)tr.querySelectorAll('input').forEach(i=>i.value='');}
+  else tr?.remove();
+  shipPackTotal();
+}
+function _shipPacksCollect(){
+  return [...document.querySelectorAll('.pack-row')].map(r=>({
+    n:Math.max(0,parseInt(r.querySelector('.pack-n')?.value)||0),
+    per:Math.max(0,parseInt(r.querySelector('.pack-per')?.value)||0)
+  })).filter(x=>x.n>0&&x.per>0);
+}
+// סכום האריזה מושווה לכמות שיוצאת ומסומן בכתום כשהוא שונה — **בלי לחסום**:
+// לפעמים נארזת חבילה חלקית. האזהרה חוזרת גם באישור וגם על התעודה המודפסת.
+function shipPackTotal(){
+  document.querySelectorAll('.pack-row').forEach(r=>{
+    const n=Math.max(0,parseInt(r.querySelector('.pack-n')?.value)||0);
+    const per=Math.max(0,parseInt(r.querySelector('.pack-per')?.value)||0);
+    const eq=r.querySelector('.pack-eq');
+    if(eq){eq.textContent=(n&&per)?String(n*per):'—';eq.style.color=(n&&per)?'var(--txt)':'var(--txt3)';}
+  });
+  const el=document.getElementById('pack-sum');
+  if(!el)return;
+  const packs=_shipPacksCollect();
+  if(!packs.length){el.textContent='לא הוזנה';el.style.color='var(--txt3)';return;}
+  const u=packsUnits(packs),q=_shipQtySum();
+  el.textContent=packsCount(packs)+' חבילות · '+u+" יח'"+(u!==q?' ⚠ במשלוח '+q:'');
+  el.style.color=(u!==q)?'var(--amber-txt)':'var(--green-txt,#16a34a)';
+}
 function shipRowsTotal(){
   const t=_shipQtySum(),el=document.getElementById('ship-total');
   if(el){
@@ -10241,6 +10299,7 @@ function shipRowsTotal(){
     const over=[...per.values()].some(v=>v.sum>v.max);
     el.style.color=over?'var(--amber-txt)':'var(--green-txt,#16a34a)';
   }
+  try{shipPackTotal();}catch(e){}
   return t;
 }
 // ─── מספר הזמנה פר-דגם ────────────────────────────────────────
@@ -10314,6 +10373,20 @@ function openShipModal(cust,prod,orderNo){
     <label style="font-size:13px;font-weight:600">כמות בפועל שיצאה — פר מידה וצבע</label>
     <div id="ship-rows-wrap" style="margin-top:6px">${shipRowsHtml(p)}</div>
     <div style="font-size:11px;color:var(--txt3);margin-top:4px">משלוח חלקי: השאר בשורות שלא יצאו 0. הסכום נרשם אוטומטית.</div>
+    <details id="ship-pack-det" style="margin-top:10px;border:1px solid var(--brd);border-radius:8px;padding:7px 9px">
+      <summary style="font-size:12px;font-weight:700;cursor:pointer">📦 אריזה — <span id="pack-sum" style="font-weight:600;color:var(--txt3)">לא הוזנה</span></summary>
+      <div style="font-size:11px;color:var(--txt3);margin:7px 0">כל גודל חבילה בשורה: 35 חבילות × 5 יח'. שורה נוספת לכל גודל אחר.</div>
+      <div id="pack-rows">${shipPackRowsHtml([])}</div>
+      <button class="btn" style="width:100%;font-size:12px;padding:5px;margin-top:4px" onclick="addPackRow()">➕ עוד גודל חבילה</button>
+    </details>
+    <div style="margin-top:9px">
+      <label style="font-size:12px;font-weight:600">📝 הערה לתעודה</label>
+      <input id="ship-note" type="text" maxlength="140" placeholder="לא חובה — תודפס בתעודה" style="width:100%;margin-top:4px;font-size:13px;padding:7px;border-radius:8px;border:1px solid var(--brd);background:var(--bg);color:var(--txt)"/>
+    </div>
+    <label style="display:flex;align-items:center;gap:7px;font-size:12px;font-weight:600;margin-top:10px;cursor:pointer">
+      <input type="checkbox" id="ship-autoprint"${S.settings?.dnAutoPrint===false?'':' checked'} style="width:16px;height:16px"/>
+      🖨 הדפס את התעודה מיד אחרי האישור
+    </label>
     <div style="display:flex;gap:8px;margin-top:16px">
       <button class="btn primary" style="flex:1;font-size:14px" onclick="confirmShip()">✅ אשר יציאה</button>
       <button class="btn" style="flex:1;font-size:14px" onclick="closeShipModal()">ביטול</button>
@@ -10354,6 +10427,12 @@ function shipPickChanged(){
   // הטבלה נבנית מחדש לרשומה הנבחרת — לכל הזמנה פירוט מידות משלה
   const wrap=document.getElementById('ship-rows-wrap');
   if(wrap){wrap.innerHTML=shipRowsHtml(p);shipRowsTotal();}
+  // האריזה וההערה מתאפסות — הן תיארו את ההזמנה הקודמת ולא את זו שנבחרה עכשיו
+  const pw=document.getElementById('pack-rows');
+  if(pw)pw.innerHTML=shipPackRowsHtml([]);
+  const nt=document.getElementById('ship-note');
+  if(nt)nt.value='';
+  shipPackTotal();
 }
 async function confirmShip(){
   // לפי id ייחודי מהבורר — לא לפי לקוח+מוצר, שעמום כשיש כמה הזמנות לאותו דגם
@@ -10361,6 +10440,9 @@ async function confirmShip(){
   if(!p){closeShipModal();return;}
   const rows=_shipRowsCollect();
   const qty=_shipQtySum();
+  const packs=_shipPacksCollect();
+  const dnote=(document.getElementById('ship-note')?.value||'').trim();
+  const autoPrint=!!document.getElementById('ship-autoprint')?.checked;
   if(!Array.isArray(p.stageLog))p.stageLog=[];
   const now=new Date();
   const date=now.getFullYear()+'-'+pad2(now.getMonth()+1)+'-'+pad2(now.getDate());
@@ -10368,11 +10450,18 @@ async function confirmShip(){
   if(!qty){
     if(!await showConfirm('משלוח ריק','לא הוזנה שום כמות. לרשום בכל זאת?','רשום','ביטול'))return;
   }
+  // 📦 פער בין האריזה לכמות שיוצאת **מסומן ולא נחסם** — אבל נשאלת שאלה, כי
+  // בדרך כלל זו טעות הקלדה בגודל חבילה ולא אריזה חלקית אמיתית
+  if(packs.length&&packsUnits(packs)!==qty){
+    if(!await showConfirm('אריזה לא תואמת','באריזה '+packsUnits(packs)+" יח' ובמשלוח "+qty+" יח'. לרשום בכל זאת?",'רשום','חזור'))return;
+  }
   // 🚚 **כל אישור יוצר משלוח חדש עם תעודה משלו** — לא דורס את הקודם.
   // ההזמנה יוצאת בפעימות, ולכל פעימה נמסר ללקוח נייר נפרד עם מספר נפרד.
-  const list=prodShipments(p).map(s=>({no:+s.no||0,date:s.date||'',at:s.at||'',rows:s.rows||[],total:+s.total||0}));
+  // packs ו-note נגררים מהמשלוחים הקיימים — בלעדיהם בנייה מחדש של הרשימה הייתה
+  // מוחקת בשקט את האריזה וההערה של כל תעודה שכבר נמסרה ללקוח
+  const list=prodShipments(p).map(s=>({no:+s.no||0,date:s.date||'',at:s.at||'',rows:s.rows||[],total:+s.total||0,packs:Array.isArray(s.packs)?s.packs:[],note:s.note||''}));
   const no=await nextDeliveryNoteNo();
-  list.push({no:no||0,date,at:now.toISOString(),rows,total:qty});
+  list.push({no:no||0,date,at:now.toISOString(),rows,total:qty,packs,note:dnote});
   p.shipments=list;
   // הסך המצטבר נשמר בשדות הוותיקים כדי שדוח הרווח וכל שאר הקוראים לא ישתנו
   p.shippedQty=list.reduce((t,s)=>t+(+s.total||0),0);
@@ -10384,12 +10473,18 @@ async function confirmShip(){
   if(ex){ex.date=date;ex.time=time;ex.note=note;ex.auto=true;}
   else p.stageLog.push({id:'shipped',date,time,note,auto:true});
   p.stageLog.sort((a,b)=>PROD_STAGES.findIndex(x=>x.id===a.id)-PROD_STAGES.findIndex(x=>x.id===b.id));
+  // העדפת ההדפסה היא **פר מכשיר** ונשמרת מקומית בלבד: במסך מגע ליד הסורק רוצים
+  // נייר מיד, ובנייד של המנהל דיאלוג הדפסה בכל סריקה רק מפריע
+  S.settings.dnAutoPrint=autoPrint;
   saveLS();
   if(S.fbConnected)try{await fbSet('products',p.id,{...p});}catch(e){}
   closeShipModal();
   showToast('✅ תעודת משלוח '+String(no||0).padStart(4,'0')+' · '+qty+" יח'"+(list.length>1?' (משלוח '+list.length+')':''));
   try{buildStageReport();}catch(e){}
   try{renderProducts();}catch(e){}
+  // 🖨 הדפסה מיד אחרי האישור — עד כאן היה צריך לחזור לכרטיס המוצר וללחוץ על
+  // הכפתור. ההשהיה נותנת לרינדור ול-toast להסתיים לפני שגיליון ההדפסה חוטף מיקוד.
+  if(autoPrint)setTimeout(()=>{try{printDeliveryNote(p.id,list.length-1);}catch(e){}},400);
 }
 function addStation(d,btn){
   const inp=btn.previousElementSibling;const v=(inp?.value||'').trim();
@@ -12344,7 +12439,7 @@ function showShipments(pid){
     <div style="font-size:12px;color:var(--txt3);margin-bottom:10px">${esc(p.name||p.prod)} · סה"כ יצא ${shipmentsTotal(p)} מתוך ${_prodQty(p)||'?'} יח'</div>
     ${list.map((s,i)=>`<div class="row" style="align-items:center">
       <span class="bc-seg" style="background:var(--green-bg,#dcfce7);color:var(--green-txt,#16a34a);font-weight:700;flex-shrink:0">${s.no?String(s.no).padStart(4,'0'):'—'}</span>
-      <span style="flex:1;font-size:12px;margin-right:8px">${heDate(s.date)} · <b>${s.total}</b> יח'</span>
+      <span style="flex:1;font-size:12px;margin-right:8px">${heDate(s.date)} · <b>${s.total}</b> יח'${packsCount(s.packs)?' · 📦 '+packsCount(s.packs):''}${s.note?' · 📝':''}</span>
       <button class="btn" style="font-size:11px;padding:4px 9px" onclick="printDeliveryNote('${escj(pid)}',${i})">📄 הדפס</button>
       <button class="btn danger" style="font-size:11px;padding:4px 8px" onclick="document.getElementById('shl-wrap').remove();delShipment('${escj(pid)}',${i})">🗑</button>
     </div>`).join('')}
@@ -12378,6 +12473,11 @@ function deliveryNoteHtml(p,sh,idx,count){
   // בן 5 הספרות הוא מזהה פנימי, ואצל חלק מהלקוחות הוא גזור ממספר הדגם שלהם ולכן
   // לא זהה לשום דבר שרשום אצלם. p.prod נשאר רק כגיבוי למוצר בלי שם, כדי שהתעודה
   // לא תצא בלי שום מזהה מוצר בכלל.
+  // 📦 האריזה וההערה שמורות על **המשלוח עצמו** ולא על המוצר ⇒ הדפסה חוזרת של
+  // תעודה ישנה מציגה את האריזה שנמסרה באותו יום, לא את זו של המשלוח האחרון
+  const packs=(sh&&Array.isArray(sh.packs))?sh.packs.filter(x=>(+x.n||0)>0&&(+x.per||0)>0):[];
+  const packUnits=packsUnits(packs),packCount=packsCount(packs);
+  const dnote=(sh&&sh.note)||'';
   const mtx=dnMatrix(rows);
   return `<!DOCTYPE html><html dir="rtl" lang="he"><head><meta charset="UTF-8"/><title>תעודת משלוח ${p.dnNo||''}</title><style>
 *{box-sizing:border-box;margin:0;padding:0}
@@ -12408,6 +12508,10 @@ tr{page-break-inside:avoid}
 .sign div{flex:1;border-top:1px solid #666;padding-top:5px;font-size:11px;color:#444}
 .sign b{display:block;font-size:12px;color:#000;margin-bottom:16px}
 .foot{margin-top:20px;padding-top:8px;border-top:1px solid #e2e2e2;font-size:10px;color:#888;text-align:center}
+table.pk{width:auto;min-width:54%;margin-top:14px}
+table.pk th.ttl{background:#eef2ff;font-size:12px;text-align:center}
+.note{margin-top:14px;border:1px solid #bbb;border-radius:6px;padding:8px 10px;font-size:12px;line-height:1.6}
+.note b{color:#185FA5}
 @media print{body{padding:10mm}}
 </style></head><body>
 <div class="top">
@@ -12444,6 +12548,7 @@ tr{page-break-inside:avoid}
     ${line('תאריך יציאה:',heDate(dDate))}
     ${ordered?line('כמות בהזמנה:',ordered+" יח'"):''}
     ${ordered?line('יתרה להשלמה:',balance+" יח'"):''}
+    ${packCount?line('חבילות:',packCount):''}
   </div>
 </div>
 ${detailed?'':'<div class="warn">⚠ אין פירוט יציאה פר מידה למשלוח הזה — הטבלה מציגה את פירוט ההזמנה. סמן שוב "יצא ללקוח" כדי לרשום את הפירוט בפועל.</div>'}
@@ -12467,6 +12572,16 @@ ${mtx.colorRows.length?`<table>
     ${detailed?'':`<tr><td colspan="${mtx.sizes.length+1}" style="font-weight:700">מתוך זה יצא בפועל</td><td class="n">${total}</td></tr>`}
   </tfoot>
 </table>`:`<table><tbody><tr><td style="text-align:center;color:#888;padding:14px">אין פירוט מידות — סה"כ ${total} יח'</td></tr></tbody></table>`}
+${packs.length?`<table class="pk">
+  <thead>
+    <tr><th colspan="3" class="ttl">פירוט אריזה</th></tr>
+    <tr><th class="c">מס' חבילות</th><th class="c">יח' בחבילה</th><th class="n">סה"כ יח'</th></tr>
+  </thead>
+  <tbody>${packs.map(x=>`<tr><td class="c">${+x.n}</td><td class="c">${+x.per}</td><td class="n">${(+x.n)*(+x.per)}</td></tr>`).join('')}</tbody>
+  <tfoot><tr><td class="c">${packCount} חבילות</td><td class="c">—</td><td class="n">${packUnits}</td></tr></tfoot>
+</table>
+${packUnits!==total?`<div class="warn">⚠ סכום האריזה (${packUnits}) שונה מהכמות שיצאה במשלוח (${total}).</div>`:''}`:''}
+${dnote?`<div class="note"><b>הערות:</b> ${esc(dnote)}</div>`:''}
 <div class="sign">
   <div><b>שם וחתימת המוסר</b>____________________</div>
   <div><b>שם וחתימת המקבל</b>____________________</div>
