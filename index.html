@@ -3103,6 +3103,14 @@ async function fillProductBalance(p){
 // HIST_RETENTION_DAYS — כמה זמן משימות נשמרות ב-Firestore לפני ארכוב+מחיקה (Cloud Function).
 const HIST_WINDOW_DAYS=14;
 const HIST_RETENTION_DAYS=60;
+// ─── היסטוריית נוכחות: חלון חי ──────────────────────────────
+// ATT_WINDOW_DAYS — כמה ימי נוכחות נטענים לזיכרון בזמן אמת.
+// לפני החלון הזה המאזין קרא את כל האוסף בכל טעינה (950 מסמכים ב-04/09/2026),
+// ו-attHistory הוא האוסף היחיד שאף ארכוב לא מקצץ — כלומר הוא גדל לנצח.
+// 45 יום ולא 14: דוח השכר מחושב חודשי, ולכן חודש שלם + חיץ חייב להישאר בחלון.
+// 🛑 טווח ישן יותר נשלף לפי דרישה דרך loadAttRange — כל דוח שנותן למשתמש
+//    לבחור טווח חייב לעבור דרכה, אחרת יחזיר נתונים בחסר בשקט (ובשכר = תשלום בחסר).
+const ATT_WINDOW_DAYS=45;
 
 // ─── LOCAL STORAGE ──────────────────────────────────────────
 function saveLS(){
@@ -3316,8 +3324,11 @@ function listenFb(){
     S.histTasks=snap.docs.map(d=>{const dd=d.data();return{...dd,id:d.id,startTime:dd.startTime?.toDate?dd.startTime.toDate():new Date(dd.startTime),endTime:dd.endTime?.toDate?dd.endTime.toDate():new Date(dd.endTime)};});
     renderAll();
   });
-  // attendance history
-  onSnapshot(query(collection(db,'attHistory'),orderBy('date','desc')),snap=>{
+  // attendance history — חלון חי של ATT_WINDOW_DAYS ימים אחרונים בלבד.
+  // קודם לכן נקרא כל האוסף בכל טעינה. ישן יותר נשלף לפי דרישה (loadAttRange).
+  // date הוא מחרוזת YYYY-MM-DD ⇒ השוואה לקסיקוגרפית; אומת ש-950/950 הרשומות נושאות אותו.
+  const _attCutoff=new Date(Date.now()-ATT_WINDOW_DAYS*86400000).toISOString().slice(0,10);
+  onSnapshot(query(collection(db,'attHistory'),where('date','>=',_attCutoff),orderBy('date','desc')),snap=>{
     S.attHistory=snap.docs.map(d=>({...d.data()}));
     renderAll();
   });
@@ -3707,12 +3718,14 @@ async function runDailyBackup(){
   localStorage.setItem('txops_backup_done',today);
   // גיבוי כולל את כל ההיסטוריה השמורה (עד HIST_RETENTION_DAYS), לא רק חלון החי
   const histFull=await loadHistRange('','');
+  // 🛑 גיבוי חייב את כל הנוכחות, לא את חלון ה-45 יום — אחרת הגיבוי עצמו חלקי בשקט
+  const attFull=await loadAttRange('','');
   const data={
     exportDate:new Date().toISOString(),
     workers:S.workers,
     activeTasks:S.activeTasks,
     histTasks:histFull,
-    attHistory:S.attHistory,
+    attHistory:attFull,
     products:S.products||[],
     settings:S.settings
   };
@@ -3727,7 +3740,8 @@ async function manualBackup(){
   if(!S.user||S.user.role!=='manager')return;
   const st=document.getElementById('backup-status');
   const histFull=await loadHistRange('','');
-  const data={exportDate:new Date().toISOString(),workers:S.workers,activeTasks:S.activeTasks,histTasks:histFull,attHistory:S.attHistory,products:S.products||[],settings:S.settings};
+  const attFull=await loadAttRange('','');   // 🛑 כל הנוכחות, לא חלון 45 יום
+  const data={exportDate:new Date().toISOString(),workers:S.workers,activeTasks:S.activeTasks,histTasks:histFull,attHistory:attFull,products:S.products||[],settings:S.settings};
   try{
     const blob=new Blob([JSON.stringify(data,null,2)],{type:'application/json'});
     const a=document.createElement('a');
@@ -4417,10 +4431,12 @@ function initAttRep(){
   if(sel){sel.innerHTML='<option value="">כל העובדים</option>'+S.workers.map(w=>`<option value="${esc(w.id)}">${esc(w.name)}</option>`).join('');}
   buildAttRep();
 }
-function buildAttRep(){
+async function buildAttRep(){
   const from=document.getElementById('ar-from')?.value;
   const to=document.getElementById('ar-to')?.value;
   const wid=document.getElementById('ar-worker')?.value;
+  // טווח נבחר ⇒ שליפה לפי דרישה. S.attHistory מחזיק רק ATT_WINDOW_DAYS.
+  const att=await loadAttRange(from,to);
   // include today's active workers too
   const todayRecs=S.workers.filter(w=>w.checkin&&w.checkin.slice(0,10)===todayStr()).map(w=>({
     workerId:w.id,workerName:w.name,dept:w.dept,date:todayStr(),
@@ -4428,7 +4444,7 @@ function buildAttRep(){
     breakStart:w.breakStart||'',breakEnd:w.breakEnd||'',breakActive:!!w.breakActive,
     netMs:calcNetWork(w),live:!w.checkout
   }));
-  const hist=S.attHistory.map(r=>({...r,live:false}));
+  const hist=att.map(r=>({...r,live:false}));
   // merge — avoid duplicates for today
   const allRecs=[...todayRecs,...hist.filter(r=>r.date!==todayStr())];
   let fl=allRecs;
@@ -4466,12 +4482,13 @@ function buildAttRep(){
     </tr>`;
   }).join('');
 }
-function exportAttCSV(){
+async function exportAttCSV(){
   const from=document.getElementById('ar-from')?.value;
   const to=document.getElementById('ar-to')?.value;
   const wid=document.getElementById('ar-worker')?.value;
+  const att=await loadAttRange(from,to);
   const todayRecs=S.workers.filter(w=>w.checkin&&w.checkin.slice(0,10)===todayStr()).map(w=>({workerId:w.id,workerName:w.name,dept:w.dept,date:w.checkin?.slice(0,10)||todayStr(),checkin:w.checkin,checkout:w.checkout||null,breakStart:w.breakStart||'',breakEnd:w.breakEnd||'',breakActive:!!w.breakActive,netMs:calcNetWork(w)}));
-  let fl=[...todayRecs,...S.attHistory.filter(r=>!todayRecs.find(t=>t.date===r.date&&t.workerId===r.workerId))];
+  let fl=[...todayRecs,...att.filter(r=>!todayRecs.find(t=>t.date===r.date&&t.workerId===r.workerId))];
   if(from)fl=fl.filter(r=>r.date>=from);
   if(to)fl=fl.filter(r=>r.date<=to);
   if(wid)fl=fl.filter(r=>r.workerId===wid);
@@ -6427,6 +6444,29 @@ async function loadHistRange(fromD,toD){
     return data;
   }catch(e){console.error('loadHistRange:',e);return S.histTasks.slice();}
 }
+// שליפת נוכחות לפי טווח תאריכים — לפי דרישה, מעבר לחלון החי (ATT_WINDOW_DAYS=45).
+// date הוא מחרוזת YYYY-MM-DD ⇒ השוואה ישירה, בלי המרות ISO כמו ב-loadHistRange.
+// ריק = ללא גבול. אינדקס: שדה יחיד (date) ⇒ אין צורך באינדקס מורכב.
+// 🛑 כל דוח שנותן למשתמש לבחור טווח תאריכים חייב לעבור דרך כאן. שימוש ישיר
+//    ב-S.attHistory לטווח נבחר יחזיר בחסר בשקט ברגע שהטווח חורג מ-45 יום.
+// var ולא let — מוצהר מתחת לפונקציות שמשתמשות בו (runDailyBackup וכו'), ו-let היה TDZ.
+var _attRangeCache={key:'',ts:0,data:null};
+async function loadAttRange(fromD,toD){
+  const key=(fromD||'')+'|'+(toD||'');
+  if(_attRangeCache.key===key&&_attRangeCache.data&&Date.now()-_attRangeCache.ts<30000)return _attRangeCache.data;
+  if(!db||!S.fbConnected)return (S.attHistory||[]).slice();
+  try{
+    const{collection,query,where,orderBy,getDocs}=window._fb;
+    const cs=[];
+    if(fromD)cs.push(where('date','>=',fromD));
+    if(toD)cs.push(where('date','<=',toD));
+    cs.push(orderBy('date','desc'));
+    const snap=await getDocs(query(collection(db,'attHistory'),...cs));
+    const data=snap.docs.map(d=>({...d.data()}));
+    _attRangeCache={key,ts:Date.now(),data};
+    return data;
+  }catch(e){console.error('loadAttRange:',e);return (S.attHistory||[]).slice();}
+}
 async function buildPersonalReport(){
   const el=document.getElementById('pr-body');if(!el)return;
   const isMgr=S.user?.role==='manager'||S.user?.role==='supervisor';
@@ -6458,8 +6498,10 @@ async function buildPersonalReport(){
   }).sort((a,b)=>b.secs-a.secs);
   const T=LANGS[currentLang];
   // סה"כ שעות נוכחות מ-attHistory + היום
+  // טווח נבחר ⇒ שליפה לפי דרישה; S.attHistory מחזיק רק ATT_WINDOW_DAYS.
+  const _attPR=await loadAttRange(fromD,toD);
   let totalAttMs=0;
-  (S.attHistory||[]).forEach(rec=>{
+  (_attPR||[]).forEach(rec=>{
     if(rec.workerId!==uid)return;
     const d=rec.date||'';
     if(fromD&&d<fromD)return;
@@ -6496,13 +6538,15 @@ async function buildPersonalReport(){
         <td style="padding:7px 8px"><span class="badge blue">${(r.secs/3600).toFixed(1)} ${T.hours||"שע'"}</span></td>
       </tr>`).join('')}</tbody>
     </table>
-    ${buildAttDayTable(uid,fromD,toD,T)}`;
+    ${buildAttDayTable(uid,fromD,toD,T,_attPR)}`;
 }
-function buildAttDayTable(uid,fromD,toD,T){
+// att — הנוכחות של הטווח שכבר נשלפה ב-buildPersonalReport (loadAttRange).
+// בלעדיה הטבלה נופלת לחלון 45 יום ומציגה פחות ימים בשקט.
+function buildAttDayTable(uid,fromD,toD,T,att){
   // build attendance by day from attHistory + today's sessions
   const rows=[];
   // historical days
-  (S.attHistory||[]).forEach(rec=>{
+  (att||S.attHistory||[]).forEach(rec=>{
     if(rec.workerId!==uid)return;
     const d=rec.date||'';
     if(fromD&&d<fromD)return;
@@ -11081,6 +11125,10 @@ function showCostTab(tab){
   renderCostTab();
 }
 
+// נוכחות של טווח העלויות הנוכחי, נטענת ב-calcCosts ונצרכת ב-renderCostTab הסינכרונית.
+// var ולא let: renderCostTab עשויה לרוץ מ-showCostTab לפני שהשורה הזאת הוערכה ⇒ TDZ.
+// null = טרם חושב; הצרכנים נופלים חזרה ל-S.attHistory כדי לא לקרוס.
+var _costAtt=null;
 async function calcCosts(){
   const from=document.getElementById('cost-from')?.value;
   const to=document.getElementById('cost-to')?.value;
@@ -11132,8 +11180,11 @@ async function calcCosts(){
     +(S.costs.fixedAnnual||0)/(S.costs.workDaysYear||250);
 
   // ─── שעות נוכחות לכל עובד לפי יום ───
+  // 🛑 טווח העלויות נבחר ע"י המשתמש ויכול לחרוג מחלון ה-45 יום ⇒ שליפה לפי דרישה.
+  // נשמר ל-_costAtt כי renderCostTab סינכרונית וצורכת את אותם נתונים.
+  _costAtt=await loadAttRange(from,to);
   const attByWorkerDay={}; // key: workerId+'_'+date → netMs
-  S.attHistory.forEach(rec=>{
+  _costAtt.forEach(rec=>{
     const d=rec.date;
     if(d<from||d>to)return;
     const k=rec.workerId+'_'+d;
@@ -11177,7 +11228,7 @@ async function calcCosts(){
 
   // שכר עוזרים/מנהלים/אחראים ללא משימות — יתחלק על המוצרים
   const nonTaskWageByDay={};
-  S.attHistory.forEach(rec=>{
+  _costAtt.forEach(rec=>{
     const d=rec.date;
     if(d<from||d>to)return;
     if(_isOv(rec.workerId))return;   // מסומן — עובר במסלול הפיקוח למטה, לא כאן
@@ -11391,8 +11442,8 @@ function renderCostTab(){
       if(!map[k])map[k]={id:k,name:t.workerName||k,tasks:0,wage:0,totalSec:0,attMs:0};
       map[k].tasks++;map[k].wage+=t.wage;map[k].totalSec+=(t.duration||0);
     });
-    // שעות נוכחות אמיתיות מ-attHistory
-    S.attHistory.forEach(rec=>{
+    // שעות נוכחות אמיתיות מ-attHistory — הטווח נטען ב-calcCosts (חורג מ-45 יום)
+    (_costAtt||S.attHistory||[]).forEach(rec=>{
       if(rec.date<from||rec.date>to)return;
       if(!map[rec.workerId])return;
       map[rec.workerId].attMs+=(rec.netMs||0);
@@ -11402,7 +11453,7 @@ function renderCostTab(){
     // עובדים ללא משימות (עוזרים/מנהלים/אחראים) מתוך attHistory
     const taskWorkerIds=new Set(enriched.map(t=>t.workerId));
     const nonTaskMap={};
-    S.attHistory.forEach(rec=>{
+    (_costAtt||S.attHistory||[]).forEach(rec=>{
       if(rec.date<from||rec.date>to)return;
       if(taskWorkerIds.has(rec.workerId))return;
       const dailyRate=S.costs.workerRates[rec.workerId]||0;
@@ -11466,9 +11517,9 @@ function renderCostTab(){
   } else if(tab==='payroll'){
     const from=document.getElementById('cost-from')?.value||'';
     const to=document.getElementById('cost-to')?.value||'';
-    // קיבוץ לפי עובד מ-attHistory
+    // קיבוץ לפי עובד מ-attHistory — 🛑 שכר: הטווח חייב להיות מלא, לא חלון 45 יום
     const pMap={};
-    S.attHistory.forEach(rec=>{
+    (_costAtt||S.attHistory||[]).forEach(rec=>{
       if(rec.date<from||rec.date>to)return;
       const k=rec.workerId;
       if(!pMap[k])pMap[k]={id:k,name:rec.workerName||k,days:0,netMs:0};
