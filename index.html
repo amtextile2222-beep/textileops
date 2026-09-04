@@ -788,6 +788,25 @@ code{background:var(--bg2);border:0.5px solid var(--b);border-radius:4px;padding
         </div>
         <div id="adm-customers"></div>
       </div>
+      <!-- 📄 פרטי המפעל לתעודת משלוח -->
+      <div class="card">
+        <div class="sec">📄 פרטי העסק — לתעודת משלוח</div>
+        <div style="font-size:11px;color:var(--txt3);margin-bottom:.75rem">מופיעים בראש כל תעודת משלוח שמודפסת</div>
+        <div style="display:grid;grid-template-columns:1fr 1fr;gap:6px">
+          <input type="text" id="co-name" placeholder="שם העסק" style="grid-column:1/-1;font-size:13px"/>
+          <input type="text" id="co-addr" placeholder="רחוב ומספר" style="font-size:13px"/>
+          <input type="text" id="co-city" placeholder="עיר" style="font-size:13px"/>
+          <input type="text" id="co-phone" placeholder="טלפון" style="font-size:13px"/>
+          <input type="text" id="co-taxid" placeholder="ח.פ. / ע.מ." style="font-size:13px"/>
+          <input type="text" id="co-email" placeholder="אימייל (לא חובה)" style="grid-column:1/-1;font-size:13px"/>
+        </div>
+        <div style="margin-top:10px;padding-top:9px;border-top:1px solid var(--brd)">
+          <label style="font-size:12px;font-weight:600">🔢 מספר התעודה הבא</label>
+          <input type="number" id="co-dnstart" min="1" style="width:100%;font-size:13px;margin-top:4px"/>
+          <div id="co-dnlast" style="font-size:11px;color:var(--txt3);margin-top:3px"></div>
+        </div>
+        <button class="btn primary" onclick="saveCompanyInfo()" style="width:100%;margin-top:8px;font-size:13px">💾 שמור פרטי עסק</button>
+      </div>
       <!-- ניהול צבעים -->
       <div class="card">
         <div class="sec">🎨 ניהול צבעים</div>
@@ -2461,7 +2480,11 @@ let S={
   activeTasks:[],
   histTasks:[],
   alerts:[],
-  settings:{thresh:60,absent:5,waEnabled:false,waInterval:60,waFrom:'07:00',waTo:'18:00',waLong:true,waAbsent:true,factoryIP:'188.225.231.120',shiftStart:'06:30',shiftEnd:'15:00',roundMinutes:5,endOfDayTime:'15:05',ipBypassMin:0,ipBypassStartMs:0,stationLock:false,stepOrderLock:false,stepOrderStrict:false,stepOrderStrictFrom:0},
+  settings:{thresh:60,absent:5,waEnabled:false,waInterval:60,waFrom:'07:00',waTo:'18:00',waLong:true,waAbsent:true,factoryIP:'188.225.231.120',shiftStart:'06:30',shiftEnd:'15:00',roundMinutes:5,endOfDayTime:'15:05',ipBypassMin:0,ipBypassStartMs:0,stationLock:false,stepOrderLock:false,stepOrderStrict:false,stepOrderStrictFrom:0,
+    // 📄 פרטי העסק לתעודת משלוח — ניתנים לעריכה בלשונית ניהול; אלה ברירות המחדל
+    company:{name:'א.מ טקסטיל',addr:'באקה אלגרבייה',city:'',phone:'052-3381376',taxId:'066055450',email:''},
+    // המספר הראשון שיונפק — ממשיך את הפנקס הידני
+    dnStart:645},
   waLastSent:0,
   wifiAlertSent:{},
   tgSentAlerts:{},
@@ -2481,6 +2504,11 @@ let S={
   // לא ל-recordedExpenseSum ולא לשום חישוב עלות או רווח.
   cashbox:[],
   customerNames:{},
+  // 📄 פרטי לקוח לתעודת משלוח — כתובת/איש קשר/טלפון/ח.פ.
+  // ⚠️ מפה **נפרדת** מ-customerNames בכוונה: customerNames הוא מפת code→string
+  // שחמישה צרכנים קוראים כמחרוזת (custName, טלגרם, דוחות, בורר מוצרים). הפיכתו
+  // לאובייקט = שינוי חוזה שמתאפס בשקט אצל כל צרכן שלא עודכן. ראה gotcha_shared_map_key_change.
+  customerInfo:{},  // {code:{addr,city,contact,phone,taxId}}
   customColors:{},
   costTab:'prod',
   workStations:[], // תחנות עבודה פיזיות (QR STN:{id}) — {id,name,dept,dvrChannel}; שונה מ-deptStations (תמחור)
@@ -3115,7 +3143,7 @@ const ATT_WINDOW_DAYS=45;
 // ─── LOCAL STORAGE ──────────────────────────────────────────
 function saveLS(){
   try{
-    const d={workers:S.workers,depts:S.depts,deptStations:S.deptStations,activeTasks:S.activeTasks.map(t=>({...t,startTime:t.startTime instanceof Date?t.startTime.toISOString():t.startTime})),histTasks:S.histTasks.map(t=>({...t,startTime:t.startTime instanceof Date?t.startTime.toISOString():t.startTime,endTime:t.endTime instanceof Date?t.endTime.toISOString():t.endTime})),settings:S.settings,nextTId:S.nextTId,attHistory:S.attHistory,costs:S.costs,customerNames:S.customerNames,customColors:S.customColors,
+    const d={workers:S.workers,depts:S.depts,deptStations:S.deptStations,activeTasks:S.activeTasks.map(t=>({...t,startTime:t.startTime instanceof Date?t.startTime.toISOString():t.startTime})),histTasks:S.histTasks.map(t=>({...t,startTime:t.startTime instanceof Date?t.startTime.toISOString():t.startTime,endTime:t.endTime instanceof Date?t.endTime.toISOString():t.endTime})),settings:S.settings,nextTId:S.nextTId,attHistory:S.attHistory,costs:S.costs,customerNames:S.customerNames,customerInfo:S.customerInfo,customColors:S.customColors,
       // ⚠️ בלי התמונות. איתן המטמון שקל 17 MB מול מכסה של ~5 MB, setItem נכשל,
       // ה-catch בלע את השגיאה — ו**שום דבר לא נשמר**. כל פתיחה הורידה הכל מהרשת.
       products:S.products.map(p=>{const q={...p};delete q.images;q.imgCount=prodImgCount(p);return q;}),
@@ -3141,6 +3169,7 @@ function loadLS(){
     if(d.attHistory)S.attHistory=d.attHistory;
     if(d.costs)S.costs={...S.costs,...d.costs};
     if(d.customerNames)S.customerNames=d.customerNames;
+    if(d.customerInfo)S.customerInfo=d.customerInfo;
     if(d.customColors){S.customColors=d.customColors;Object.assign(COLORS,d.customColors);}
     if(d.products)S.products=d.products;
     if(d.tgSentAlerts)S.tgSentAlerts=d.tgSentAlerts;
@@ -3342,6 +3371,8 @@ function listenFb(){
     snap.docs.forEach(d=>{
       const data=d.data();
       if(d.id==='customerNames'){S.customerNames=data;saveLS();}
+      if(d.id==='customerInfo'){S.customerInfo=data;saveLS();}
+      if(d.id==='company'){S.settings.company={...(S.settings.company||{}),...data};saveLS();}
       if(d.id==='customColors'){S.customColors=data;Object.assign(COLORS,data);saveLS();}
       if(d.id==='depts'&&data.list&&data.list.length){S.depts=data.list;S.deptStations=data.stations||S.deptStations||{};S.deptStageMap=data.stageMap||S.deptStageMap||{};saveLS();fillDeptSelects();}
       if(d.id==='telegramSettings'){
@@ -3357,6 +3388,7 @@ function listenFb(){
         if(data.shiftStart)S.settings.shiftStart=data.shiftStart;
         if(data.shiftEnd)S.settings.shiftEnd=data.shiftEnd;
         if(data.roundMinutes!==undefined)S.settings.roundMinutes=data.roundMinutes;
+        if(data.dnStart!==undefined)S.settings.dnStart=parseInt(data.dnStart,10)||S.settings.dnStart;
         // 🔒 מתג האכיפה של נעילת התחנה — מסונכרן לכל המכשירים דרך אותו מסמך הגדרות,
         // כדי שכיבוי חירום מהניהול ישחרר את כל רצפת הייצור מיד ולא מכשיר-מכשיר.
         if(data.stationLock!==undefined)S.settings.stationLock=!!data.stationLock;
@@ -9360,12 +9392,16 @@ function renderAdmin(){
   const custEl=document.getElementById('adm-customers');
   if(custEl){
     const entries=Object.entries(S.customerNames);
-    custEl.innerHTML=entries.length?entries.sort((a,b)=>a[0].localeCompare(b[0])).map(([code,name])=>`
-      <div class="row"><span class="bc-seg bc-c" style="flex-shrink:0">${esc(code)}</span>
+    custEl.innerHTML=entries.length?entries.sort((a,b)=>a[0].localeCompare(b[0])).map(([code,name])=>{
+      const hasInfo=!!(S.customerInfo?.[code]&&Object.values(S.customerInfo[code]).some(v=>String(v||'').trim()));
+      return `<div class="row"><span class="bc-seg bc-c" style="flex-shrink:0">${esc(code)}</span>
       <span style="flex:1;font-size:13px;margin-right:8px">${esc(name)}</span>
-      <button class="btn danger" style="font-size:11px;padding:4px 8px" onclick="delCustomerName('${escj(code)}')">🗑</button></div>`).join('')
+      <button class="btn" style="font-size:11px;padding:4px 8px;${hasInfo?'color:var(--green-txt,#16a34a)':'color:var(--txt3)'}" title="כתובת ואיש קשר לתעודת משלוח" onclick="editCustomerInfo('${escj(code)}')">📍${hasInfo?'':' חסר'}</button>
+      <button class="btn danger" style="font-size:11px;padding:4px 8px" onclick="delCustomerName('${escj(code)}')">🗑</button></div>`;}).join('')
       :'<div style="font-size:12px;color:var(--txt3);text-align:center;padding:8px">אין לקוחות מוגדרים</div>';
   }
+  // 📄 פרטי העסק לתעודת משלוח
+  fillCompanyInfo();
   // צבעים
   const colEl=document.getElementById('adm-colors');
   if(colEl){
@@ -10066,6 +10102,106 @@ function prodMatches(cust,prod){
   return (S.products||[]).filter(p=>p.cust===cust&&p.prod===prod).sort((a,b)=>rank(b)-rank(a));
 }
 function _prodQty(p){return (p.quantities||[]).reduce((s,q)=>s+(parseInt(q.qty)||0),0);}
+// 🏷️ סוג הסחורה. לא כל הכמות במידה+צבע יוצאת בהכרח באותה איכות — לכן התעודה
+// הידנית מחזיקה שתי שורות לכל צבע. ברירת המחדל היא סוג א; רשומה ישנה בלי
+// שדה grade נחשבת סוג א, ולכן הפיצ'ר לא משנה שום נתון קיים.
+const GRADE_A='א',GRADE_B='ב';
+// ─── שורות יציאה פר מידה/צבע ─────────────────────────────────
+// עד כאן היציאה נשמרה כמספר בודד (shippedQty) ⇒ במשלוח חלקי לא היה ידוע **אילו**
+// מידות יצאו, ותעודת משלוח מפורטת הייתה בלתי אפשרית. shippedRows מוסיף את הפירוט;
+// shippedQty נשאר הסכום כדי שכל הקוראים הקיימים שלו ימשיכו לעבוד ללא שינוי.
+function shipRowsHtml(p){
+  const rows=(p.quantities||[]).filter(q=>parseInt(q.qty)>0);
+  // מוצר בלי כמויות ידועות תקין לגמרי — ההזמנה מגיעה בלי כמות ונספרת בדיעבד
+  // (ראה gotcha_qty_read_from_newest). במקרה כזה נשארים בשדה סכום בודד.
+  if(!rows.length){
+    const cur=p.shippedQty!=null?p.shippedQty:(_prodQty(p)||getTotalQty(p.cust,p.prod)||0);
+    return `<div style="font-size:11px;color:var(--amber-txt);background:var(--amber-bg);padding:6px 8px;border-radius:8px;margin-bottom:6px">⚠ אין פירוט מידות במוצר — נרשם סכום בלבד</div>
+      <input id="ship-qty-inp" type="number" inputmode="numeric" min="0" value="${cur}" oninput="shipRowsTotal()" style="width:100%;font-size:16px;padding:8px;border-radius:8px;border:1px solid var(--brd);background:var(--bg);color:var(--txt)"/>`;
+  }
+  // 🏷️ סוג א / סוג ב — **מימד נפרד מהצבע ולא צבע נוסף.** הברקוד מקודד צבע בשתי
+  // ספרות ואין בו סוג, ולכן הסוג נקבע רק ברגע היציאה. פתרון של "אפור סוג ב" כקוד
+  // צבע נפרד היה מזהם את רשימת הצבעים ושובר את הברקודים.
+  // סוג ב הוא **החריג** (בתעודה של 01/09: יחידה אחת מתוך 230), ולכן טבלת סוג ב
+  // מוסתרת כברירת מחדל ונפתחת רק כשצריך — או כשכבר יש בה נתונים משמירה קודמת.
+  const prev=new Map((p.shippedRows||[]).map(r=>[r.size+'|'+r.color+'|'+(r.grade||GRADE_A),parseInt(r.qty)||0]));
+  const hasPrev=prev.size>0;
+  const val=(q,g)=>hasPrev?(prev.get(q.size+'|'+q.color+'|'+g)||0):(g===GRADE_A?(parseInt(q.qty)||0):0);
+  // הסכום ההתחלתי מחושב כאן ולא מושאר 0 עד ש-shipRowsTotal יורה ב-setTimeout —
+  // אחרת נראה רגע של "סה"כ יוצא 0" בזמן שהשדות כבר מלאים
+  const initSum=rows.reduce((s,q)=>s+val(q,GRADE_A)+val(q,GRADE_B),0);
+  const cell=(q,g)=>`<input class="ship-row-inp${g===GRADE_B?' ship-b':' ship-a'}" data-size="${esc(q.size)}" data-color="${esc(q.color)}" data-grade="${esc(g)}" data-max="${parseInt(q.qty)||0}" type="number" inputmode="numeric" min="0" value="${val(q,g)}" oninput="${g===GRADE_B?'shipGradeBEdit(this)':'shipGradeAEdit(this)'}" style="width:100%;font-size:14px;padding:5px;border-radius:6px;border:1px solid var(--brd);background:var(--bg);color:var(--txt)"/>`;
+  return `<table style="width:100%;border-collapse:collapse;font-size:12px">
+    <tr style="color:var(--txt3)">
+      <th style="text-align:right;padding:2px 4px">מידה</th>
+      <th style="text-align:right;padding:2px 4px">צבע</th>
+      <th style="text-align:left;padding:2px 4px">בהזמנה</th>
+      <th style="text-align:center;padding:2px 4px;width:66px">סוג א</th>
+      <th style="text-align:center;padding:2px 4px;width:66px">סוג ב</th>
+    </tr>
+    ${rows.map(q=>`<tr data-rowtotal="${val(q,GRADE_A)+val(q,GRADE_B)}">
+        <td style="padding:2px 4px">${esc(q.size)}</td>
+        <td style="padding:2px 4px">${esc(COLORS[q.color]||q.color)}</td>
+        <td style="padding:2px 4px;text-align:left;color:var(--txt3)">${parseInt(q.qty)||0}</td>
+        <td style="padding:2px 4px">${cell(q,GRADE_A)}</td>
+        <td style="padding:2px 4px">${cell(q,GRADE_B)}</td>
+      </tr>`).join('')}
+    <tr style="border-top:1px solid var(--brd)">
+      <td colspan="3" style="padding:6px 4px;font-weight:700">סה"כ יוצא</td>
+      <td id="ship-total" colspan="2" style="padding:6px 4px;font-weight:800;text-align:center;color:var(--green-txt,#16a34a)">${initSum}</td>
+    </tr>
+  </table>`;
+}
+// ✏️ עריכה ידנית של סוג א = קביעת הכמות שיוצאת בשורה הזו (משלוח חלקי).
+// הערך נשמר כ"סך השורה" כדי שהזנת סוג ב אחר כך תגרע ממנו ולא מהכמות שבהזמנה —
+// אחרת משלוח חלקי של 15 מתוך 20 היה קופץ בחזרה ל-20 ברגע שמזינים סוג ב.
+function shipGradeAEdit(el){
+  const tr=el.closest('tr');
+  if(tr){
+    const b=tr.querySelector('.ship-b');
+    tr.dataset.rowtotal=Math.max(0,parseInt(el.value)||0)+Math.max(0,parseInt(b?.value)||0);
+  }
+  shipRowsTotal();
+}
+// ✏️ הזנת סוג ב **גורעת מסוג א** ומשאירה את סך השורה קבוע: 20 יח' שחור מידה 1,
+// הזנת 2 בסוג ב ⇒ סוג א יורד ל-18. זו הדרישה המרכזית — בלעדיה היו נספרות 22.
+function shipGradeBEdit(el){
+  const tr=el.closest('tr');
+  if(tr){
+    const a=tr.querySelector('.ship-a');
+    const tot=Math.max(0,parseInt(tr.dataset.rowtotal)||0);
+    const bq=Math.max(0,parseInt(el.value)||0);
+    if(a)a.value=Math.max(0,tot-bq);
+  }
+  shipRowsTotal();
+}
+function _shipQtySum(){
+  const inps=[...document.querySelectorAll('.ship-row-inp')];
+  if(!inps.length)return Math.max(0,parseInt(document.getElementById('ship-qty-inp')?.value)||0);
+  return inps.reduce((s,i)=>s+Math.max(0,parseInt(i.value)||0),0);
+}
+function _shipRowsCollect(){
+  return [...document.querySelectorAll('.ship-row-inp')]
+    .map(i=>({size:i.dataset.size,color:i.dataset.color,grade:i.dataset.grade||GRADE_A,qty:Math.max(0,parseInt(i.value)||0)}))
+    .filter(r=>r.qty>0);
+}
+function shipRowsTotal(){
+  const t=_shipQtySum(),el=document.getElementById('ship-total');
+  if(el){
+    el.textContent=t;
+    // חריגה מהכמות שבהזמנה **מסומנת ולא נחסמת** — לפעמים באמת יוצא יותר ממה שתוכנן.
+    // ההשוואה היא על **סכום שני הסוגים** לאותה מידה+צבע: 12 סוג א ועוד 1 סוג ב על
+    // שורה של 12 היא חריגה אמיתית, אבל כל שדה בנפרד נראה תקין.
+    const per=new Map();
+    document.querySelectorAll('.ship-row-inp').forEach(i=>{
+      const k=i.dataset.size+'|'+i.dataset.color;
+      per.set(k,{sum:(per.get(k)?.sum||0)+(parseInt(i.value)||0),max:+i.dataset.max||0});
+    });
+    const over=[...per.values()].some(v=>v.sum>v.max);
+    el.style.color=over?'var(--amber-txt)':'var(--green-txt,#16a34a)';
+  }
+  return t;
+}
 // ─── מספר הזמנה פר-דגם ────────────────────────────────────────
 // המספור הוא **פר לקוח+מוצר** ולא גלובלי: הזמנה חוזרת של אותו דגם היא #002, בלי
 // קשר לכמה הזמנות נפתחו בינתיים לדגמים אחרים. 61 הרשומות הקיימות מוספרו ב-24/08.
@@ -10134,37 +10270,66 @@ function openShipModal(cust,prod,orderNo){
       :`<div style="background:var(--amber-bg);color:var(--amber-txt);font-size:12px;font-weight:700;padding:7px 9px;border-radius:8px;margin-bottom:8px">⚠ יש ${all.length} רשומות למספר הדגם הזה — ודא שזו ההזמנה שיצאה</div>`):''}
     <select id="ship-prod-sel" onchange="shipPickChanged()" style="width:100%;font-size:13px;padding:8px;margin-bottom:10px;border-radius:8px;border:1px solid var(--brd);background:var(--bg);color:var(--txt);${multi?'':'display:none'}">${opts}</select>
     <div style="font-size:12px;color:var(--txt3);margin-bottom:8px">כמות מתוכננת בהזמנה: <b id="ship-planned" style="color:var(--txt)">${planned}</b> יח'</div>
-    <label style="font-size:13px;font-weight:600">כמות בפועל שיצאה ללקוח</label>
-    <input id="ship-qty-inp" type="number" inputmode="numeric" min="0" value="${cur}" style="width:100%;font-size:16px;padding:8px;margin-top:6px;border-radius:8px;border:1px solid var(--brd);background:var(--bg);color:var(--txt)"/>
-    <div style="font-size:11px;color:var(--txt3);margin-top:4px">לפעמים הכמות הסופית שונה מהמתוכננת — עדכן לפי מה שבאמת נשלח.</div>
+    <label style="font-size:13px;font-weight:600">כמות בפועל שיצאה — פר מידה וצבע</label>
+    <div id="ship-rows-wrap" style="margin-top:6px">${shipRowsHtml(p)}</div>
+    <div style="font-size:11px;color:var(--txt3);margin-top:4px">משלוח חלקי: השאר בשורות שלא יצאו 0. הסכום נרשם אוטומטית.</div>
     <div style="display:flex;gap:8px;margin-top:16px">
       <button class="btn primary" style="flex:1;font-size:14px" onclick="confirmShip()">✅ אשר יציאה</button>
       <button class="btn" style="flex:1;font-size:14px" onclick="closeShipModal()">ביטול</button>
     </div>
   </div>`;
   document.body.appendChild(wrap);
-  setTimeout(()=>{const i=document.getElementById('ship-qty-inp');if(i){i.focus();i.select();}},50);
+  setTimeout(()=>{shipRowsTotal();const i=document.getElementById('ship-qty-inp')||document.querySelector('.ship-row-inp');if(i){i.focus();i.select();}},50);
 }
 function closeShipModal(){document.getElementById('ship-modal-wrap')?.remove();}
+// מונה תעודות משלוח — **בטרנזקציה**. שני מנהלים שמוציאים סחורה באותו רגע חייבים לקבל
+// מספרים שונים; מונה מקומי היה מנפיק את אותו מספר פעמיים בשקט. הבסיס נלקח גם מהרשומות
+// הקיימות כדי שמונה שאופס בטעות לא ימחזר מספר שכבר הודפס ונמסר ללקוח.
+async function nextDeliveryNoteNo(){
+  const localMax=()=>(S.products||[]).reduce((m,x)=>Math.max(m,parseInt(x.dnNo,10)||0),0);
+  // 🔢 המספור ממשיך את הפנקס הידני ולא מתחיל מ-1. dnStart = **המספר הראשון שיונפק**,
+  // ולכן הבסיס הוא dnStart-1. אחרי ההנפקה הראשונה localMax כבר גדול ממנו ומוביל.
+  const base=()=>Math.max(localMax(),(parseInt(S.settings?.dnStart,10)||1)-1);
+  if(!db||!S.fbConnected)return base()+1;
+  try{
+    const{doc,runTransaction}=window._fb;
+    let out=0;
+    await runTransaction(db,async tx=>{
+      const ref=doc(db,'appSettings','deliveryNote');
+      const s=await tx.get(ref);
+      const cur=s.exists()?(parseInt(s.data().last,10)||0):0;
+      out=Math.max(cur,base())+1;
+      tx.set(ref,{last:out},{merge:true});
+    });
+    return out;
+  }catch(e){console.warn('dnNo:',e.message);return base()+1;}
+}
 // החלפת הזמנה בבורר — הכמות המתוכננת ושדה הקלט עוברים לרשומה הנבחרת
 function shipPickChanged(){
   const p=S.products.find(x=>x.id===document.getElementById('ship-prod-sel')?.value);
   if(!p)return;
   const planned=_prodQty(p)||getTotalQty(p.cust,p.prod)||0;
   const el=document.getElementById('ship-planned');if(el)el.textContent=planned;
-  const inp=document.getElementById('ship-qty-inp');
-  if(inp){inp.value=p.shippedQty!=null?p.shippedQty:planned;inp.focus();inp.select();}
+  // הטבלה נבנית מחדש לרשומה הנבחרת — לכל הזמנה פירוט מידות משלה
+  const wrap=document.getElementById('ship-rows-wrap');
+  if(wrap){wrap.innerHTML=shipRowsHtml(p);shipRowsTotal();}
 }
 async function confirmShip(){
   // לפי id ייחודי מהבורר — לא לפי לקוח+מוצר, שעמום כשיש כמה הזמנות לאותו דגם
   const p=S.products.find(x=>x.id===document.getElementById('ship-prod-sel')?.value);
   if(!p){closeShipModal();return;}
-  const qty=Math.max(0,parseInt(document.getElementById('ship-qty-inp')?.value)||0);
+  const rows=_shipRowsCollect();
+  const qty=_shipQtySum();
   if(!Array.isArray(p.stageLog))p.stageLog=[];
   const now=new Date();
   const date=now.getFullYear()+'-'+pad2(now.getMonth()+1)+'-'+pad2(now.getDate());
   const time=pad2(now.getHours())+':'+pad2(now.getMinutes());
   p.shippedQty=qty;p.shippedAt=now.toISOString();
+  // הפירוט נשמר רק כשיש טבלת מידות; מוצר בלי quantities נשאר עם סכום בלבד
+  if(rows.length)p.shippedRows=rows;
+  // מספר תעודת משלוח מוקצה פעם אחת ונשאר קבוע — הוצאה חוזרת מעדכנת כמות, לא ממספרת מחדש
+  if(!p.dnNo){const n=await nextDeliveryNoteNo();if(n)p.dnNo=n;}
+  if(p.dnNo&&!p.dnDate)p.dnDate=date;
   const note='כמות בפועל: '+qty+" יח'";
   const ex=p.stageLog.find(s=>s.id==='shipped');
   if(ex){ex.date=date;ex.time=time;ex.note=note;ex.auto=true;}
@@ -10411,6 +10576,76 @@ function delCustomerName(code){
   saveLS();
   if(S.fbConnected)fbSet('appSettings','customerNames',S.customerNames);
   renderAdmin();
+}
+// ─── 📄 פרטי עסק ולקוח לתעודת משלוח ──────────────────────────
+function saveCompanyInfo(){
+  const g=id=>(document.getElementById(id)?.value||'').trim();
+  const co={name:g('co-name'),addr:g('co-addr'),city:g('co-city'),phone:g('co-phone'),taxId:g('co-taxid'),email:g('co-email')};
+  S.settings.company=co;
+  const dn=parseInt(g('co-dnstart'),10)||0;
+  // 🛑 המספר הבא לא יורד מתחת למה שכבר הודפס ונמסר ללקוח — שני לקוחות עם אותו
+  // מספר תעודה הם בלגן חשבונאי שאי אפשר לתקן בדיעבד
+  const issued=(S.products||[]).reduce((m,x)=>Math.max(m,parseInt(x.dnNo,10)||0),0);
+  if(dn>0&&issued&&dn<=issued){
+    alert('כבר הונפקה תעודה מספר '+issued+'.\nהמספר הבא חייב להיות '+(issued+1)+' ומעלה.');
+    return;
+  }
+  if(dn>0)S.settings.dnStart=dn;
+  saveLS();
+  if(S.fbConnected){fbSet('appSettings','company',co);fbSet('appSettings','telegramSettings',{dnStart:S.settings.dnStart});}
+  showToast('✅ פרטי העסק נשמרו');
+  renderAdmin();
+}
+function fillCompanyInfo(){
+  const co=S.settings?.company||{};
+  const s=(id,v)=>{const el=document.getElementById(id);if(el&&document.activeElement!==el)el.value=v||'';};
+  s('co-name',co.name);s('co-addr',co.addr);s('co-city',co.city);s('co-phone',co.phone);s('co-taxid',co.taxId);s('co-email',co.email);
+  const issued=(S.products||[]).reduce((m,x)=>Math.max(m,parseInt(x.dnNo,10)||0),0);
+  s('co-dnstart',Math.max(parseInt(S.settings?.dnStart,10)||1,issued+1));
+  const el=document.getElementById('co-dnlast');
+  if(el)el.textContent=issued?('התעודה האחרונה שהונפקה במערכת: '+String(issued).padStart(4,'0')):'עדיין לא הונפקה תעודה במערכת';
+}
+function editCustomerInfo(code){
+  const ci=(S.customerInfo||{})[code]||{};
+  const nm=S.customerNames?.[code]||code;
+  document.getElementById('cinfo-wrap')?.remove();
+  const wrap=document.createElement('div');
+  wrap.id='cinfo-wrap';
+  wrap.style.cssText='position:fixed;inset:0;background:rgba(0,0,0,.5);display:flex;align-items:center;justify-content:center;z-index:9999;padding:16px';
+  wrap.onclick=e=>{if(e.target===wrap)wrap.remove();};
+  const fld=(id,ph,v)=>`<input type="text" id="${id}" placeholder="${esc(ph)}" value="${esc(v||'')}" style="width:100%;font-size:13px;padding:8px;margin-top:6px;border-radius:8px;border:1px solid var(--brd);background:var(--bg);color:var(--txt)"/>`;
+  wrap.innerHTML=`<div style="background:var(--card);border-radius:14px;padding:20px;max-width:360px;width:100%;box-shadow:0 10px 40px rgba(0,0,0,.3)">
+    <div style="font-size:16px;font-weight:800;margin-bottom:2px">📍 פרטי לקוח</div>
+    <div style="font-size:13px;color:var(--txt3);margin-bottom:10px"><span class="bc-seg bc-c">${esc(code)}</span> ${esc(nm)}</div>
+    ${fld('cinfo-addr','רחוב ומספר',ci.addr)}
+    ${fld('cinfo-city','עיר',ci.city)}
+    ${fld('cinfo-contact','איש קשר',ci.contact)}
+    ${fld('cinfo-phone','טלפון',ci.phone)}
+    ${fld('cinfo-taxid','ח.פ. / ע.מ.',ci.taxId)}
+    <div style="display:flex;gap:8px;margin-top:16px">
+      <button class="btn primary" style="flex:1;font-size:14px" onclick="saveCustomerInfo('${escj(code)}')">💾 שמור</button>
+      <button class="btn" style="flex:1;font-size:14px" onclick="document.getElementById('cinfo-wrap').remove()">ביטול</button>
+    </div>
+  </div>`;
+  document.body.appendChild(wrap);
+  setTimeout(()=>document.getElementById('cinfo-addr')?.focus(),50);
+}
+function saveCustomerInfo(code){
+  const g=id=>(document.getElementById(id)?.value||'').trim();
+  const ci={addr:g('cinfo-addr'),city:g('cinfo-city'),contact:g('cinfo-contact'),phone:g('cinfo-phone'),taxId:g('cinfo-taxid')};
+  if(!S.customerInfo)S.customerInfo={};
+  const empty=!Object.values(ci).some(v=>v);
+  if(empty)delete S.customerInfo[code]; else S.customerInfo[code]=ci;
+  saveLS();
+  // ⚠️ **בלי merge בכוונה.** fbSet הוא setDoc(merge:true) ולכן ריקון פרטי לקוח לא היה
+  // מוחק את המפתח בשרת אלא משאיר את הכתובת הישנה (gotcha_fbset_merge_mapkeys). המפה
+  // כולה יושבת במסמך אחד, ולכן החלפה מלאה היא הכתיבה הנכונה כאן.
+  if(S.fbConnected&&db){
+    try{const{doc,setDoc}=window._fb;setDoc(doc(db,'appSettings','customerInfo'),S.customerInfo).catch(()=>{});}catch(e){}
+  }
+  document.getElementById('cinfo-wrap')?.remove();
+  renderAdmin();
+  showToast('✅ פרטי הלקוח נשמרו');
 }
 function addCustomColor(){
   let code=(document.getElementById('col-code').value||'').trim();
@@ -11960,6 +12195,176 @@ function printViaIframe(html){
   f.onload=()=>setTimeout(go,300);
   setTimeout(go,600);
 }
+// ─── 📄 תעודת משלוח ──────────────────────────────────────────
+// סדר מידות: מספריות לפי ערך, ואחריהן אותיות לפי סדר מידות מקובל (S<M<L<XL).
+// בלי זה המיון היה לקסיקוגרפי — "10" לפני "2", ו-"XL" לפני "M".
+const DN_SIZES=['XXS','XS','S','M','L','XL','XXL','2XL','XXXL','3XL','4XL'];
+function dnSizeRank(s){
+  const u=String(s??'').toUpperCase().trim();
+  const n=parseFloat(u);
+  if(!isNaN(n)&&/^[\d.]+$/.test(u))return n;
+  const i=DN_SIZES.indexOf(u);
+  return i>=0?1000+i:2000;
+}
+// מטריצת צבעים×מידות — **המבנה שהמפעל כבר מוציא היום ללקוחות**: צבע בשורה,
+// מידה בעמודה. רשימה שטוחה של שורה לכל צירוף הייתה נותנת 24 שורות ל-6 מידות
+// ו-4 צבעים; כאן זה 4 שורות, וזה גם מה שהלקוח כבר מכיר ויודע לקרוא.
+function dnMatrix(rows){
+  const sizes=[...new Set(rows.map(r=>String(r.size??'')))].sort((a,b)=>dnSizeRank(a)-dnSizeRank(b)||String(a).localeCompare(String(b)));
+  const at=new Map(rows.map(r=>[String(r.size??'')+'|'+String(r.color??'')+'|'+(r.grade||GRADE_A),parseInt(r.qty)||0]));
+  const cell=(c,g,s)=>at.get(s+'|'+c+'|'+g)||0;
+  // 🏷️ שורה לכל **צבע × סוג** — כמו בתעודה הידנית ("אפור סוג א" / "אפור סוג ב").
+  // שורת סוג ב מודפסת רק כשיש בה כמות: ברוב המשלוחים היא ריקה, ושורה ריקה על
+  // מסמך שנמסר ללקוח רק מבלבלת.
+  const colors=[...new Set(rows.map(r=>String(r.color??'')))];
+  const colorRows=[];
+  colors.forEach(c=>{
+    [GRADE_A,GRADE_B].forEach(g=>{
+      const cells=sizes.map(s=>cell(c,g,s));
+      const total=cells.reduce((t,v)=>t+v,0);
+      if(g===GRADE_B&&!total)return;
+      colorRows.push({color:c,grade:g,label:(COLORS[c]||c||'—')+' סוג '+g,cells,total});
+    });
+  });
+  return{
+    sizes,
+    colorRows,
+    sizeTotals:sizes.map((s,i)=>colorRows.reduce((t,r)=>t+r.cells[i],0)),
+    grand:colorRows.reduce((t,r)=>t+r.total,0)
+  };
+}
+// נבנית מ-shippedRows (מה ש**באמת** יצא). מוצר שסומן כיצא לפני שהפיצול לשורות
+// נוסף שמור רק כסכום — ואז מוצג פירוט ההזמנה עם הערה גלויה שאין פירוט יציאה,
+// כדי שלא תיווצר תעודה שנראית מדויקת אבל מתארת את המתוכנן ולא את הנשלח.
+// טבלה ולא grid בכוונה: כרום מתעלם מ-break-inside:avoid על פריטי grid וחותך
+// את השורה האחרונה בדף (ראה gotcha_print_grid_pagebreak); ל-thead יש חזרה מובנית.
+async function printDeliveryNote(pid){
+  const p=(S.products||[]).find(x=>x.id===pid);
+  if(!p){showToast('⚠ מוצר לא נמצא','var(--red-txt)');return;}
+  // תעודה למוצר שיצא לפני הפיצ'ר — מקבלת מספר בהדפסה הראשונה ונשמרת
+  if(!p.dnNo){
+    const n=await nextDeliveryNoteNo();
+    if(n){
+      p.dnNo=n;
+      if(!p.dnDate)p.dnDate=(p.shippedAt?new Date(p.shippedAt):new Date()).toISOString().slice(0,10);
+      saveLS();
+      if(S.fbConnected)try{await fbSet('products',p.id,{...p});}catch(e){}
+      try{renderProducts();}catch(e){}
+    }
+  }
+  printViaIframe(deliveryNoteHtml(p));
+}
+// בניית ה-HTML מופרדת מההדפסה כדי שאפשר יהיה לרנדר ולבדוק אותה בלי לפתוח גיליון הדפסה
+function deliveryNoteHtml(p){
+  const co=S.settings?.company||{};
+  const ci=(S.customerInfo||{})[p.cust]||{};
+  const cname=S.customerNames?.[p.cust]||'';
+  const detailed=!!(p.shippedRows&&p.shippedRows.length);
+  const rows=detailed?p.shippedRows:(p.quantities||[]).filter(q=>parseInt(q.qty)>0);
+  const rowSum=rows.reduce((s,r)=>s+(parseInt(r.qty)||0),0);
+  const total=p.shippedQty!=null?+p.shippedQty:rowSum;
+  const dDate=p.dnDate||(p.shippedAt?String(p.shippedAt).slice(0,10):'');
+  const heDate=d=>d?d.slice(8,10)+'/'+d.slice(5,7)+'/'+d.slice(0,4):'';
+  const orderTxt=(parseInt(p.orderNo,10)||0)?'#'+String(p.orderNo).padStart(3,'0'):'—';
+  const line=(lbl,val)=>val?`<div><span class="l">${esc(lbl)}</span> ${esc(val)}</div>`:'';
+  // התעודה מציגה **דגם בלבד** (p.name) כמו התעודה שהמפעל מוציא היום — מספר המוצר
+  // בן 5 הספרות הוא מזהה פנימי, ואצל חלק מהלקוחות הוא גזור ממספר הדגם שלהם ולכן
+  // לא זהה לשום דבר שרשום אצלם. p.prod נשאר רק כגיבוי למוצר בלי שם, כדי שהתעודה
+  // לא תצא בלי שום מזהה מוצר בכלל.
+  const mtx=dnMatrix(rows);
+  return `<!DOCTYPE html><html dir="rtl" lang="he"><head><meta charset="UTF-8"/><title>תעודת משלוח ${p.dnNo||''}</title><style>
+*{box-sizing:border-box;margin:0;padding:0}
+body{font-family:Arial,Helvetica,sans-serif;color:#000;background:#fff;font-size:13px;padding:16mm 14mm;-webkit-print-color-adjust:exact;print-color-adjust:exact}
+.top{display:flex;justify-content:space-between;align-items:flex-start;border-bottom:3px solid #185FA5;padding-bottom:10px;margin-bottom:14px}
+.co{font-size:19px;font-weight:800;color:#185FA5;margin-bottom:3px}
+.co-d{font-size:11px;color:#444;line-height:1.6}
+.doc{text-align:left;flex-shrink:0;margin-right:16px}
+.doc h1{font-size:20px;font-weight:800;margin-bottom:6px}
+.doc .no{font-size:15px;font-weight:800;color:#b91c1c}
+.doc .dt{font-size:12px;color:#444;margin-top:3px}
+.boxes{display:flex;gap:12px;margin-bottom:14px}
+.box{flex:1;border:1px solid #bbb;border-radius:6px;padding:9px 11px;line-height:1.7}
+.box h2{font-size:12px;font-weight:800;color:#185FA5;margin-bottom:5px;border-bottom:1px solid #e2e2e2;padding-bottom:3px}
+.box .l{color:#666;font-size:11px;display:inline-block;min-width:52px}
+table{width:100%;border-collapse:collapse;font-size:13px;margin-bottom:4px}
+thead th{background:#eef2ff;padding:8px;text-align:right;font-weight:700;border:1px solid #bbb}
+td{padding:7px 8px;border:1px solid #ddd}
+td.n,th.n{text-align:center;font-weight:800;width:64px;background:#fafafa}
+td.c,th.c{text-align:center}
+th.sz{font-size:12px;padding:5px 4px}
+td.hd,th.hd{text-align:right;font-weight:700;min-width:110px}
+td.z{color:#ccc}
+tfoot td{background:#f6f6f6;font-weight:800;font-size:14px;border:1px solid #bbb}
+tr{page-break-inside:avoid}
+.warn{background:#fef3c7;color:#92400e;border:1px solid #fcd34d;border-radius:6px;padding:7px 9px;font-size:11px;font-weight:700;margin-bottom:10px}
+.sign{display:flex;gap:14px;margin-top:26px}
+.sign div{flex:1;border-top:1px solid #666;padding-top:5px;font-size:11px;color:#444}
+.sign b{display:block;font-size:12px;color:#000;margin-bottom:16px}
+.foot{margin-top:20px;padding-top:8px;border-top:1px solid #e2e2e2;font-size:10px;color:#888;text-align:center}
+@media print{body{padding:10mm}}
+</style></head><body>
+<div class="top">
+  <div>
+    <div class="co">${esc(co.name||'— שם העסק לא הוגדר —')}</div>
+    <div class="co-d">
+      ${co.addr?esc(co.addr)+(co.city?', '+esc(co.city):''):''}
+      ${co.phone?'<br>טלפון: '+esc(co.phone):''}
+      ${co.taxId?'<br>ח.פ./ע.מ.: '+esc(co.taxId):''}
+      ${co.email?'<br>'+esc(co.email):''}
+    </div>
+  </div>
+  <div class="doc">
+    <h1>תעודת משלוח</h1>
+    <div class="no">מס' ${p.dnNo?String(p.dnNo).padStart(4,'0'):'—'}</div>
+    <div class="dt">תאריך: ${esc(heDate(dDate)||'—')}</div>
+  </div>
+</div>
+<div class="boxes">
+  <div class="box">
+    <h2>לכבוד</h2>
+    <div style="font-weight:800;font-size:14px;margin-bottom:3px">${esc(cname||('לקוח '+p.cust))}</div>
+    ${line('קוד לקוח:',p.cust)}
+    ${line('כתובת:',[ci.addr,ci.city].filter(Boolean).join(', '))}
+    ${line('איש קשר:',ci.contact)}
+    ${line('טלפון:',ci.phone)}
+    ${line('ח.פ./ע.מ.:',ci.taxId)}
+  </div>
+  <div class="box">
+    <h2>פרטי ההזמנה</h2>
+    ${line('דגם:',p.name||p.prod)}
+    ${line('הזמנה:',orderTxt)}
+    ${line('תאריך יציאה:',heDate(p.shippedAt?String(p.shippedAt).slice(0,10):''))}
+  </div>
+</div>
+${detailed?'':'<div class="warn">⚠ אין פירוט יציאה פר מידה למשלוח הזה — הטבלה מציגה את פירוט ההזמנה. סמן שוב "יצא ללקוח" כדי לרשום את הפירוט בפועל.</div>'}
+${detailed&&rowSum!==total?`<div class="warn">⚠ סכום השורות (${rowSum}) שונה מהכמות הרשומה כיוצאת (${total}).</div>`:''}
+${mtx.colorRows.length?`<table>
+  <thead>
+    <tr>
+      <th rowspan="2" class="hd">צבע</th>
+      <th colspan="${mtx.sizes.length}" class="c">מידות</th>
+      <th rowspan="2" class="n">כמות</th>
+    </tr>
+    <tr>${mtx.sizes.map(s=>`<th class="c sz">${esc(s)||'—'}</th>`).join('')}</tr>
+  </thead>
+  <tbody>${mtx.colorRows.map(r=>`<tr>
+      <td class="hd">${esc(r.label)}</td>
+      ${r.cells.map(v=>`<td class="c${v?'':' z'}">${v||''}</td>`).join('')}
+      <td class="n">${r.total}</td>
+    </tr>`).join('')}</tbody>
+  <tfoot>
+    <tr><td class="hd">סה"כ</td>${mtx.sizeTotals.map(v=>`<td class="c">${v||''}</td>`).join('')}<td class="n">${mtx.grand}</td></tr>
+    ${detailed?'':`<tr><td colspan="${mtx.sizes.length+1}" style="font-weight:700">מתוך זה יצא בפועל</td><td class="n">${total}</td></tr>`}
+  </tfoot>
+</table>`:`<table><tbody><tr><td style="text-align:center;color:#888;padding:14px">אין פירוט מידות — סה"כ ${total} יח'</td></tr></tbody></table>`}
+<div class="sign">
+  <div><b>שם וחתימת המוסר</b>____________________</div>
+  <div><b>שם וחתימת המקבל</b>____________________</div>
+  <div><b>תאריך קבלה</b>____________________</div>
+</div>
+<div class="foot">הופק ממערכת TextileOps · ${esc(heDate(new Date().toISOString().slice(0,10)))}</div>
+</body></html>`;
+}
 function bcPrint(mode){
   const labels=mode==='labels'; // מצב מדבקות: רשת 105×56 מ"מ קבועה (TW-2510), 10 בדף A4, בלי מרווח/כותרות
   const area=document.getElementById('bc-print-area');
@@ -12297,6 +12702,7 @@ function renderProducts(){
         </div>
         <div style="display:flex;gap:6px;flex-shrink:0">
           ${(p.workSteps||[]).some(s=>stepLevel(s)&&stepStation(s))?`<button class="btn" style="font-size:11px;padding:4px 10px;color:var(--blue-txt)" onclick="showProductPlan('${p.id}')">🎯 שיבוץ</button>`:''}
+          ${isDone?`<button class="btn" style="font-size:11px;padding:4px 10px;color:var(--green-txt,#16a34a)" onclick="printDeliveryNote('${p.id}')">📄 תעודת משלוח</button>`:''}
           <button class="btn" style="font-size:11px;padding:4px 10px" onclick="bcFromProduct('${p.id}')">🏷️ ברקודים</button>
           <button class="btn" style="font-size:11px;padding:4px 10px" onclick="openProductModal('${p.id}')">✏️ עריכה</button>
           <button class="btn danger" style="font-size:11px;padding:4px 8px;opacity:.7" onclick="deleteProduct('${p.id}')">🗑</button>
