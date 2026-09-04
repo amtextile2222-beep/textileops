@@ -320,6 +320,7 @@ code{background:var(--bg2);border:0.5px solid var(--b);border-radius:4px;padding
       <button class="nb hidden" onclick="goPage('cashbox')" id="nb-cashbox">🧾 <span data-i18n="nav_cashbox">קופה</span></button>
       <button class="nb hidden" onclick="goPage('products')" id="nb-products">👗 <span data-i18n="nav_products">מוצרים</span></button>
       <button class="nb hidden" onclick="goPage('barcodes')" id="nb-barcodes">🏷️ <span data-i18n="nav_barcodes">ברקודים</span></button>
+      <button class="nb hidden" onclick="goPage('dnotes')" id="nb-dnotes">📄 <span data-i18n="nav_dnotes">תעודות משלוח</span></button>
     </div>
     <div style="display:flex;align-items:center;gap:8px">
       <div class="lang-switcher">
@@ -1290,6 +1291,21 @@ code{background:var(--bg2);border:0.5px solid var(--b);border-radius:4px;padding
     <div id="products-list"></div>
   </div>
 
+  <!-- דף תעודות משלוח -->
+  <div class="page" id="page-dnotes">
+    <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:12px;flex-wrap:wrap;gap:8px">
+      <div style="font-size:16px;font-weight:700">📄 תעודות משלוח</div>
+      <div id="dn-sum" style="font-size:12px;color:var(--txt3)"></div>
+    </div>
+    <div style="display:flex;gap:8px;margin-bottom:12px;flex-wrap:wrap">
+      <input id="dn-search" type="text" placeholder="🔍 מספר תעודה / לקוח / דגם / מספר מוצר" style="flex:1;min-width:170px;padding:7px 10px;border-radius:8px;border:1px solid var(--brd);background:var(--card);color:var(--txt);font-size:13px" oninput="renderDNotes()">
+      <input id="dn-from" type="date" onchange="renderDNotes()" style="padding:7px 10px;border-radius:8px;border:1px solid var(--brd);background:var(--card);color:var(--txt);font-size:13px">
+      <input id="dn-to" type="date" onchange="renderDNotes()" style="padding:7px 10px;border-radius:8px;border:1px solid var(--brd);background:var(--card);color:var(--txt);font-size:13px">
+      <button class="btn" style="font-size:12px" onclick="dnClearFilter()">נקה</button>
+    </div>
+    <div id="dnotes-list"></div>
+  </div>
+
   <!-- דף מחולל ברקודים -->
   <div class="page" id="page-barcodes">
     <div style="font-size:16px;font-weight:700;margin-bottom:14px">🏷️ מחולל ברקודים למשימות</div>
@@ -1584,6 +1600,7 @@ const LANGS={
     nav_costs:'עלויות',
     nav_products:'מוצרים',
     nav_barcodes:'ברקודים',
+    nav_dnotes:'תעודות משלוח',
     nav_setup:'Firebase',
     dash_realtime:'בזמן אמת',
     dash_tasks_sub:'משימות',
@@ -1852,6 +1869,7 @@ const LANGS={
     nav_costs:'التكاليف',
     nav_products:'المنتجات',
     nav_barcodes:'الباركودات',
+    nav_dnotes:'سندات التسليم',
     nav_setup:'Firebase',
     dash_realtime:'الوقت الفعلي',
     dash_tasks_sub:'مهام',
@@ -2292,6 +2310,7 @@ const WORKER_PAGES=[
   {id:'taskscan',label:'סורק משימות'},
   {id:'expenses',label:'💸 הוצאות'},
   {id:'cashbox',label:'🧾 קופה'},
+  {id:'dnotes',label:'📄 תעודות משלוח'},
 ];
 const SUPERVISOR_EXTRA_PAGES=[
   {id:'mgrtasks',label:'ניהול משימות'},
@@ -2299,6 +2318,12 @@ const SUPERVISOR_EXTRA_PAGES=[
   {id:'products',label:'מוצרים'},
   {id:'barcodes',label:'מחולל ברקודים'},
 ];
+// 🔓 עמודים שנפתחים **רק בסימון מפורש** של המנהל ואף פעם לא בברירת מחדל.
+// עובד ותיק שנשמר בלי שדה permissions נופל לרשימת העמודים המלאה של התפקיד שלו,
+// ובלי החריג הזה תעודות המשלוח (עם שמות, כתובות וטלפונים של לקוחות) היו נפתחות
+// לכולם בשקט ברגע שהעמוד נוסף.
+const OPTIN_PAGES=['dnotes'];
+const defaultPerms=avail=>avail.filter(p=>!OPTIN_PAGES.includes(p));
 const ALL_WORKER_PAGE_IDS=WORKER_PAGES.map(p=>p.id);
 const ALL_SUPERVISOR_PAGE_IDS=[...ALL_WORKER_PAGE_IDS,...SUPERVISOR_EXTRA_PAGES.map(p=>p.id)];
 const pad2=n=>String(n).padStart(2,'0');
@@ -3850,7 +3875,7 @@ function applyPerms(w){
   } else {
     ['admin','setup'].forEach(p=>document.getElementById('nb-'+p)?.classList.add('hidden'));
     const availPages=w.role==='supervisor'?ALL_SUPERVISOR_PAGE_IDS:ALL_WORKER_PAGE_IDS; // helper ו-worker מקבלים אותן הרשאות
-    const perms=w.permissions||availPages;
+    const perms=w.permissions||defaultPerms(availPages);
     ALL_SUPERVISOR_PAGE_IDS.forEach(p=>{
       const btn=document.getElementById('nb-'+p);
       if(btn){(availPages.includes(p)&&perms.includes(p))?btn.classList.remove('hidden'):btn.classList.add('hidden');}
@@ -4423,6 +4448,7 @@ function goPage(p){
   if(p==='attrep')initAttRep();
   if(p==='costs')initCostsPage();
   if(p==='products')renderProducts();
+  if(p==='dnotes')renderDNotes();
   if(p==='expenses')renderExpenses();
   if(p==='cashbox')renderCashbox();
 }
@@ -4442,6 +4468,7 @@ function renderAll(){
   if(id==='alerts'){checkAlerts();renderAlerts();loadWaSettings();loadPushSettings();}
   if(id==='expenses')renderExpenses();
   if(id==='cashbox')renderCashbox();
+  if(id==='dnotes')renderDNotes();
   // מסך הניהול מצויר רק ברגע הכניסה אליו (goPage) ולכן נשאר תקוע על העותק שהיה
   // בזיכרון באותו רגע. זה נראה כמו "הכול התאפס" — תחנות, שלב ייצור ורישום פנים
   // נעלמים מהמסך בזמן שב-Firestore הכול שלם. רינדור ישן, לא נזק לנתונים.
@@ -9590,7 +9617,7 @@ function openModal(action,id){
     document.getElementById('modal-title').textContent=w?'עריכת עובד':'הוספת עובד חדש';
     const dOpts=S.depts.map(d=>`<option value="${esc(d)}" ${w?.dept===d?'selected':''}>${esc(d)}</option>`).join('');
     const wRole=w?.role||'worker';
-    const wPerms=w?.permissions||(wRole==='supervisor'?ALL_SUPERVISOR_PAGE_IDS:ALL_WORKER_PAGE_IDS);
+    const wPerms=w?.permissions||defaultPerms(wRole==='supervisor'?ALL_SUPERVISOR_PAGE_IDS:ALL_WORKER_PAGE_IDS);
     const allPermPages=[...WORKER_PAGES,...SUPERVISOR_EXTRA_PAGES];
     const deptsWithSt=Object.entries(S.deptStations||{}).filter(([,a])=>a&&a.length);
     const skillsHtml=deptsWithSt.length?`
@@ -12446,6 +12473,71 @@ function showShipments(pid){
     <button class="btn" style="width:100%;margin-top:12px;font-size:13px" onclick="document.getElementById('shl-wrap').remove()">סגור</button>
   </div>`;
   document.body.appendChild(wrap);
+}
+// ─── 📄 לשונית תעודות משלוח ───────────────────────────────────
+// עד כאן תעודה הייתה נגישה **רק דרך כרטיס המוצר שלה**: לקוח שהתקשר עם מספר
+// תעודה ביד לא היה דרך למצוא אותה בלי לנחש איזו הזמנה זו. כאן כל התעודות
+// יחד, ממוינות לפי מספר יורד, עם חיפוש וטווח תאריכים.
+function allDeliveryNotes(){
+  const out=[];
+  (S.products||[]).forEach(p=>{
+    const list=prodShipments(p);
+    list.forEach((s,i)=>out.push({p,s,i,count:list.length}));
+  });
+  // מיון לפי מספר התעודה יורד. משלוח ותיק שעדיין בלי מספר (נרשם לפני המספור)
+  // נשאר ברשימה ונופל למטה — הוא מקבל מספר רק בהדפסה הראשונה שלו.
+  return out.sort((a,b)=>((+b.s.no||0)-(+a.s.no||0))||String(b.s.date||'').localeCompare(String(a.s.date||'')));
+}
+function dnClearFilter(){
+  ['dn-search','dn-from','dn-to'].forEach(id=>{const el=document.getElementById(id);if(el)el.value='';});
+  renderDNotes();
+}
+function renderDNotes(){
+  const box=document.getElementById('dnotes-list');
+  if(!box)return;
+  const g=id=>(document.getElementById(id)?.value||'').trim();
+  const q=g('dn-search').toLowerCase(),from=g('dn-from'),to=g('dn-to');
+  // משלוח בלי תאריך לא נופל מהסינון — עדיף להראות אותו מאשר להעלים תעודה שקיימת
+  const rows=allDeliveryNotes().filter(r=>{
+    const d=r.s.date||'';
+    if(from&&d&&d<from)return false;
+    if(to&&d&&d>to)return false;
+    if(!q)return true;
+    const hay=[String(r.s.no||''),String(r.s.no||'').padStart(4,'0'),r.p.cust||'',S.customerNames?.[r.p.cust]||'',
+      r.p.prod||'',r.p.name||'',String(parseInt(r.p.orderNo,10)||'')].join(' ').toLowerCase();
+    return hay.includes(q);
+  });
+  const units=rows.reduce((t,r)=>t+(+r.s.total||0),0);
+  const packs=rows.reduce((t,r)=>t+packsCount(r.s.packs),0);
+  const sum=document.getElementById('dn-sum');
+  if(sum)sum.textContent=(rows.length===1?'תעודה אחת':rows.length+' תעודות')+' · '+units+" יח'"+(packs?' · '+packs+' חבילות':'');
+  const heDate=d=>d?String(d).slice(8,10)+'/'+String(d).slice(5,7)+'/'+String(d).slice(0,4):'—';
+  if(!rows.length){
+    box.innerHTML=`<div class="card" style="text-align:center;color:var(--txt3);font-size:13px;padding:18px">אין תעודות תואמות</div>`;
+    return;
+  }
+  box.innerHTML=`<div class="card" style="padding:0"><div class="tbl-wrap"><table>
+    <thead><tr>
+      <th>תעודה</th><th>תאריך</th><th>לקוח</th><th>דגם</th><th>הזמנה</th>
+      <th style="text-align:center">יח'</th><th style="text-align:center">חבילות</th><th></th>
+    </tr></thead>
+    <tbody>${rows.map(r=>{
+      const pk=packsCount(r.s.packs);
+      return `<tr>
+        <td><span class="bc-seg" style="background:var(--green-bg,#dcfce7);color:var(--green-txt,#16a34a);font-weight:700">${r.s.no?String(r.s.no).padStart(4,'0'):'—'}</span>${r.count>1?`<span style="font-size:10px;color:var(--txt3)"> ${r.i+1}/${r.count}</span>`:''}</td>
+        <td style="white-space:nowrap">${heDate(r.s.date)}</td>
+        <td>${esc(S.customerNames?.[r.p.cust]||('לקוח '+(r.p.cust||'')))}</td>
+        <td>${esc(r.p.name||r.p.prod||'')}${r.s.note?`<span title="${esc(r.s.note)}"> 📝</span>`:''}</td>
+        <td style="color:var(--txt3)">${(parseInt(r.p.orderNo,10)||0)?'#'+String(r.p.orderNo).padStart(3,'0'):'—'}</td>
+        <td style="text-align:center;font-weight:700">${+r.s.total||0}</td>
+        <td style="text-align:center">${pk||''}</td>
+        <td style="white-space:nowrap;text-align:left">
+          <button class="btn" style="font-size:11px;padding:4px 9px" onclick="printDeliveryNote('${escj(r.p.id)}',${r.i})">📄 הדפס</button>
+          <button class="btn" style="font-size:11px;padding:4px 9px" onclick="showShipments('${escj(r.p.id)}')">🚚 משלוחים</button>
+        </td>
+      </tr>`;
+    }).join('')}</tbody>
+  </table></div></div>`;
 }
 // בניית ה-HTML מופרדת מההדפסה כדי שאפשר יהיה לרנדר ולבדוק אותה בלי לפתוח גיליון הדפסה
 function deliveryNoteHtml(p,sh,idx,count){
