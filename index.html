@@ -10106,6 +10106,38 @@ function _prodQty(p){return (p.quantities||[]).reduce((s,q)=>s+(parseInt(q.qty)|
 // הידנית מחזיקה שתי שורות לכל צבע. ברירת המחדל היא סוג א; רשומה ישנה בלי
 // שדה grade נחשבת סוג א, ולכן הפיצ'ר לא משנה שום נתון קיים.
 const GRADE_A='א',GRADE_B='ב';
+// ─── 🚚 מאגר משלוחים ─────────────────────────────────────────
+// הזמנה יוצאת ללקוח **בכמה פעימות**: 100 היום, היתרה בשבוע הבא. לכל פעימה תעודה
+// ומספר משלה. לפני זה נשמר משלוח אחד בלבד ⇒ הסריקה השנייה דרסה את הראשונה
+// והמספר הישן נשאר על שתיהן.
+// `shippedQty` נשאר **סכום כל המשלוחים** כדי שדוח הרווח וכל שאר הקוראים לא ישתנו.
+function prodShipments(p){
+  if(!p)return[];
+  if(Array.isArray(p.shipments)&&p.shipments.length)return p.shipments;
+  // רשומה מלפני המאגר — משוחזרת כמשלוח בודד מהשדות הישנים, בלי לגעת בנתון
+  if(p.shippedQty!=null)return[{no:parseInt(p.dnNo,10)||0,date:p.dnDate||(p.shippedAt?String(p.shippedAt).slice(0,10):''),at:p.shippedAt||'',rows:Array.isArray(p.shippedRows)?p.shippedRows:[],total:Math.max(0,+p.shippedQty||0)}];
+  return[];
+}
+function shipmentsTotal(p){return prodShipments(p).reduce((t,s)=>t+(+s.total||0),0);}
+// כמה כבר יצא לכל מידה+צבע (שני הסוגים יחד) — הבסיס לחישוב היתרה בסריקה הבאה
+function shippedCellMap(p){
+  const m=new Map();
+  prodShipments(p).forEach(s=>(s.rows||[]).forEach(r=>{
+    const k=String(r.size??'')+'|'+String(r.color??'');
+    m.set(k,(m.get(k)||0)+(parseInt(r.qty)||0));
+  }));
+  return m;
+}
+// איחוד שורות כל המשלוחים — נשמר ב-shippedRows כדי שקורא שמסתכל על המוצר
+// ולא על משלוח מסוים יראה את התמונה המצטברת
+function mergeShipRows(list){
+  const m=new Map();
+  list.forEach(s=>(s.rows||[]).forEach(r=>{
+    const k=String(r.size??'')+'|'+String(r.color??'')+'|'+(r.grade||GRADE_A);
+    m.set(k,(m.get(k)||0)+(parseInt(r.qty)||0));
+  }));
+  return[...m.entries()].map(([k,qty])=>{const[size,color,grade]=k.split('|');return{size,color,grade,qty};});
+}
 // ─── שורות יציאה פר מידה/צבע ─────────────────────────────────
 // עד כאן היציאה נשמרה כמספר בודד (shippedQty) ⇒ במשלוח חלקי לא היה ידוע **אילו**
 // מידות יצאו, ותעודת משלוח מפורטת הייתה בלתי אפשרית. shippedRows מוסיף את הפירוט;
@@ -10124,18 +10156,26 @@ function shipRowsHtml(p){
   // צבע נפרד היה מזהם את רשימת הצבעים ושובר את הברקודים.
   // סוג ב הוא **החריג** (בתעודה של 01/09: יחידה אחת מתוך 230), ולכן טבלת סוג ב
   // מוסתרת כברירת מחדל ונפתחת רק כשצריך — או כשכבר יש בה נתונים משמירה קודמת.
-  const prev=new Map((p.shippedRows||[]).map(r=>[r.size+'|'+r.color+'|'+(r.grade||GRADE_A),parseInt(r.qty)||0]));
-  const hasPrev=prev.size>0;
-  const val=(q,g)=>hasPrev?(prev.get(q.size+'|'+q.color+'|'+g)||0):(g===GRADE_A?(parseInt(q.qty)||0):0);
+  // 🚚 המסך הזה רושם **את המשלוח הנוכחי בלבד**, לא את הסך המצטבר. לכן סוג א
+  // מתמלא ב**יתרה** (בהזמנה פחות מה שכבר יצא) ולא בכמות המלאה — אחרת סריקה שנייה
+  // הייתה מציעה לשלוח שוב את מה שכבר נמסר.
+  const done=shippedCellMap(p);
+  const already=q=>done.get(String(q.size)+'|'+String(q.color))||0;
+  const val=(q,g)=>g===GRADE_A?Math.max(0,(parseInt(q.qty)||0)-already(q)):0;
+  const anyPrev=done.size>0;
   // הסכום ההתחלתי מחושב כאן ולא מושאר 0 עד ש-shipRowsTotal יורה ב-setTimeout —
   // אחרת נראה רגע של "סה"כ יוצא 0" בזמן שהשדות כבר מלאים
   const initSum=rows.reduce((s,q)=>s+val(q,GRADE_A)+val(q,GRADE_B),0);
-  const cell=(q,g)=>`<input class="ship-row-inp${g===GRADE_B?' ship-b':' ship-a'}" data-size="${esc(q.size)}" data-color="${esc(q.color)}" data-grade="${esc(g)}" data-max="${parseInt(q.qty)||0}" type="number" inputmode="numeric" min="0" value="${val(q,g)}" oninput="${g===GRADE_B?'shipGradeBEdit(this)':'shipGradeAEdit(this)'}" style="width:100%;font-size:14px;padding:5px;border-radius:6px;border:1px solid var(--brd);background:var(--bg);color:var(--txt)"/>`;
-  return `<table style="width:100%;border-collapse:collapse;font-size:12px">
+  // data-max = **היתרה** ולא הכמות בהזמנה: אחרי משלוח של 12 מתוך 20, שליחת 10
+  // נוספות היא חריגה אמיתית (22 מתוך 20) וצריכה להסתמן ככזו
+  const cell=(q,g)=>`<input class="ship-row-inp${g===GRADE_B?' ship-b':' ship-a'}" data-size="${esc(q.size)}" data-color="${esc(q.color)}" data-grade="${esc(g)}" data-max="${Math.max(0,(parseInt(q.qty)||0)-already(q))}" type="number" inputmode="numeric" min="0" value="${val(q,g)}" oninput="${g===GRADE_B?'shipGradeBEdit(this)':'shipGradeAEdit(this)'}" style="width:100%;font-size:14px;padding:5px;border-radius:6px;border:1px solid var(--brd);background:var(--bg);color:var(--txt)"/>`;
+  return `${anyPrev?`<div style="font-size:11px;color:var(--blue-txt,#1e40af);background:var(--blue-bg,#dbeafe);padding:6px 8px;border-radius:8px;margin-bottom:6px">🚚 יצאו כבר ${shipmentsTotal(p)} יח' ב-${prodShipments(p).length} משלוחים. הטבלה מציגה את <b>היתרה</b> — זהו משלוח חדש עם תעודה נפרדת.</div>`:''}
+  <table style="width:100%;border-collapse:collapse;font-size:12px">
     <tr style="color:var(--txt3)">
       <th style="text-align:right;padding:2px 4px">מידה</th>
       <th style="text-align:right;padding:2px 4px">צבע</th>
       <th style="text-align:left;padding:2px 4px">בהזמנה</th>
+      ${anyPrev?'<th style="text-align:left;padding:2px 4px">כבר יצא</th>':''}
       <th style="text-align:center;padding:2px 4px;width:66px">סוג א</th>
       <th style="text-align:center;padding:2px 4px;width:66px">סוג ב</th>
     </tr>
@@ -10143,11 +10183,12 @@ function shipRowsHtml(p){
         <td style="padding:2px 4px">${esc(q.size)}</td>
         <td style="padding:2px 4px">${esc(COLORS[q.color]||q.color)}</td>
         <td style="padding:2px 4px;text-align:left;color:var(--txt3)">${parseInt(q.qty)||0}</td>
+        ${anyPrev?`<td style="padding:2px 4px;text-align:left;color:var(--blue-txt,#1e40af);font-weight:600">${already(q)||''}</td>`:''}
         <td style="padding:2px 4px">${cell(q,GRADE_A)}</td>
         <td style="padding:2px 4px">${cell(q,GRADE_B)}</td>
       </tr>`).join('')}
     <tr style="border-top:1px solid var(--brd)">
-      <td colspan="3" style="padding:6px 4px;font-weight:700">סה"כ יוצא</td>
+      <td colspan="${anyPrev?4:3}" style="padding:6px 4px;font-weight:700">סה"כ במשלוח הזה</td>
       <td id="ship-total" colspan="2" style="padding:6px 4px;font-weight:800;text-align:center;color:var(--green-txt,#16a34a)">${initSum}</td>
     </tr>
   </table>`;
@@ -10324,13 +10365,21 @@ async function confirmShip(){
   const now=new Date();
   const date=now.getFullYear()+'-'+pad2(now.getMonth()+1)+'-'+pad2(now.getDate());
   const time=pad2(now.getHours())+':'+pad2(now.getMinutes());
-  p.shippedQty=qty;p.shippedAt=now.toISOString();
-  // הפירוט נשמר רק כשיש טבלת מידות; מוצר בלי quantities נשאר עם סכום בלבד
-  if(rows.length)p.shippedRows=rows;
-  // מספר תעודת משלוח מוקצה פעם אחת ונשאר קבוע — הוצאה חוזרת מעדכנת כמות, לא ממספרת מחדש
-  if(!p.dnNo){const n=await nextDeliveryNoteNo();if(n)p.dnNo=n;}
-  if(p.dnNo&&!p.dnDate)p.dnDate=date;
-  const note='כמות בפועל: '+qty+" יח'";
+  if(!qty){
+    if(!await showConfirm('משלוח ריק','לא הוזנה שום כמות. לרשום בכל זאת?','רשום','ביטול'))return;
+  }
+  // 🚚 **כל אישור יוצר משלוח חדש עם תעודה משלו** — לא דורס את הקודם.
+  // ההזמנה יוצאת בפעימות, ולכל פעימה נמסר ללקוח נייר נפרד עם מספר נפרד.
+  const list=prodShipments(p).map(s=>({no:+s.no||0,date:s.date||'',at:s.at||'',rows:s.rows||[],total:+s.total||0}));
+  const no=await nextDeliveryNoteNo();
+  list.push({no:no||0,date,at:now.toISOString(),rows,total:qty});
+  p.shipments=list;
+  // הסך המצטבר נשמר בשדות הוותיקים כדי שדוח הרווח וכל שאר הקוראים לא ישתנו
+  p.shippedQty=list.reduce((t,s)=>t+(+s.total||0),0);
+  p.shippedRows=mergeShipRows(list);
+  p.shippedAt=now.toISOString();
+  p.dnNo=no||p.dnNo;p.dnDate=date;
+  const note='משלוח '+list.length+': '+qty+" יח' · סה\"כ "+p.shippedQty+" יח'";
   const ex=p.stageLog.find(s=>s.id==='shipped');
   if(ex){ex.date=date;ex.time=time;ex.note=note;ex.auto=true;}
   else p.stageLog.push({id:'shipped',date,time,note,auto:true});
@@ -10338,7 +10387,7 @@ async function confirmShip(){
   saveLS();
   if(S.fbConnected)try{await fbSet('products',p.id,{...p});}catch(e){}
   closeShipModal();
-  showToast('✅ '+(p.name||p.prod)+' — יצא ללקוח ('+qty+" יח')");
+  showToast('✅ תעודת משלוח '+String(no||0).padStart(4,'0')+' · '+qty+" יח'"+(list.length>1?' (משלוח '+list.length+')':''));
   try{buildStageReport();}catch(e){}
   try{renderProducts();}catch(e){}
 }
@@ -12238,32 +12287,90 @@ function dnMatrix(rows){
 // כדי שלא תיווצר תעודה שנראית מדויקת אבל מתארת את המתוכנן ולא את הנשלח.
 // טבלה ולא grid בכוונה: כרום מתעלם מ-break-inside:avoid על פריטי grid וחותך
 // את השורה האחרונה בדף (ראה gotcha_print_grid_pagebreak); ל-thead יש חזרה מובנית.
-async function printDeliveryNote(pid){
+// idx = איזה משלוח להדפיס (ברירת מחדל: האחרון). כל משלוח = תעודה עם מספר משלו.
+async function printDeliveryNote(pid,idx){
   const p=(S.products||[]).find(x=>x.id===pid);
   if(!p){showToast('⚠ מוצר לא נמצא','var(--red-txt)');return;}
-  // תעודה למוצר שיצא לפני הפיצ'ר — מקבלת מספר בהדפסה הראשונה ונשמרת
-  if(!p.dnNo){
+  let list=prodShipments(p);
+  if(!list.length){showToast('⚠ למוצר הזה לא נרשמה יציאה','var(--red-txt)');return;}
+  const i=(idx==null||idx<0||idx>=list.length)?list.length-1:idx;
+  // משלוח שנרשם לפני המספור (או לפני מאגר המשלוחים) מקבל מספר בהדפסה הראשונה ונשמר
+  if(!list[i].no){
     const n=await nextDeliveryNoteNo();
     if(n){
-      p.dnNo=n;
-      if(!p.dnDate)p.dnDate=(p.shippedAt?new Date(p.shippedAt):new Date()).toISOString().slice(0,10);
+      list=list.map((s,k)=>k===i?{...s,no:n,date:s.date||new Date().toISOString().slice(0,10)}:s);
+      p.shipments=list;p.dnNo=n;p.dnDate=p.dnDate||list[i].date;
       saveLS();
       if(S.fbConnected)try{await fbSet('products',p.id,{...p});}catch(e){}
       try{renderProducts();}catch(e){}
     }
   }
-  printViaIframe(deliveryNoteHtml(p));
+  printViaIframe(deliveryNoteHtml(p,list[i],i,list.length));
+}
+// מחיקת משלוח שנרשם בטעות. **המספר לא ממוחזר** — ייתכן שהנייר כבר נמסר ללקוח,
+// ומספר שחוזר על שני משלוחים שונים הוא בלגן שאי אפשר לתקן בדיעבד.
+async function delShipment(pid,idx){
+  const p=(S.products||[]).find(x=>x.id===pid);
+  if(!p)return;
+  const list=prodShipments(p);
+  const s=list[idx];
+  if(!s)return;
+  if(!await showConfirm('מחיקת משלוח','למחוק את תעודה '+String(s.no||0).padStart(4,'0')+' ('+s.total+" יח')?\nהמספר לא יוחזר לשימוש.",'מחק','ביטול'))return;
+  const left=list.filter((_,k)=>k!==idx);
+  p.shipments=left;
+  p.shippedQty=left.reduce((t,x)=>t+(+x.total||0),0);
+  p.shippedRows=mergeShipRows(left);
+  p.dnNo=left.length?left[left.length-1].no:0;
+  if(!left.length){delete p.shippedAt;p.shippedQty=null;p.stageLog=(p.stageLog||[]).filter(e=>e.id!=='shipped');}
+  saveLS();
+  if(S.fbConnected)try{await fbReplaceFields('products',p.id,{shipments:left,shippedQty:p.shippedQty,shippedRows:p.shippedRows,dnNo:p.dnNo,stageLog:p.stageLog||[]});}catch(e){}
+  showToast('🗑 המשלוח נמחק');
+  try{buildStageReport();}catch(e){}
+  try{renderProducts();}catch(e){}
+}
+// רשימת המשלוחים של הזמנה — הדפסה חוזרת של כל תעודה, ומחיקה של רישום שגוי
+function showShipments(pid){
+  const p=(S.products||[]).find(x=>x.id===pid);
+  if(!p)return;
+  const list=prodShipments(p);
+  document.getElementById('shl-wrap')?.remove();
+  const wrap=document.createElement('div');
+  wrap.id='shl-wrap';
+  wrap.style.cssText='position:fixed;inset:0;background:rgba(0,0,0,.5);display:flex;align-items:center;justify-content:center;z-index:9999;padding:16px';
+  wrap.onclick=e=>{if(e.target===wrap)wrap.remove();};
+  const heDate=d=>d?String(d).slice(8,10)+'/'+String(d).slice(5,7)+'/'+String(d).slice(0,4):'—';
+  wrap.innerHTML=`<div style="background:var(--card);border-radius:14px;padding:20px;max-width:400px;width:100%;box-shadow:0 10px 40px rgba(0,0,0,.3)">
+    <div style="font-size:16px;font-weight:800;margin-bottom:2px">🚚 משלוחים</div>
+    <div style="font-size:12px;color:var(--txt3);margin-bottom:10px">${esc(p.name||p.prod)} · סה"כ יצא ${shipmentsTotal(p)} מתוך ${_prodQty(p)||'?'} יח'</div>
+    ${list.map((s,i)=>`<div class="row" style="align-items:center">
+      <span class="bc-seg" style="background:var(--green-bg,#dcfce7);color:var(--green-txt,#16a34a);font-weight:700;flex-shrink:0">${s.no?String(s.no).padStart(4,'0'):'—'}</span>
+      <span style="flex:1;font-size:12px;margin-right:8px">${heDate(s.date)} · <b>${s.total}</b> יח'</span>
+      <button class="btn" style="font-size:11px;padding:4px 9px" onclick="printDeliveryNote('${escj(pid)}',${i})">📄 הדפס</button>
+      <button class="btn danger" style="font-size:11px;padding:4px 8px" onclick="document.getElementById('shl-wrap').remove();delShipment('${escj(pid)}',${i})">🗑</button>
+    </div>`).join('')}
+    <button class="btn" style="width:100%;margin-top:12px;font-size:13px" onclick="document.getElementById('shl-wrap').remove()">סגור</button>
+  </div>`;
+  document.body.appendChild(wrap);
 }
 // בניית ה-HTML מופרדת מההדפסה כדי שאפשר יהיה לרנדר ולבדוק אותה בלי לפתוח גיליון הדפסה
-function deliveryNoteHtml(p){
+function deliveryNoteHtml(p,sh,idx,count){
+  const list=prodShipments(p);
+  if(!sh)sh=list[list.length-1]||null;
+  if(idx==null)idx=Math.max(0,list.indexOf(sh));
+  if(count==null)count=list.length||1;
   const co=S.settings?.company||{};
   const ci=(S.customerInfo||{})[p.cust]||{};
   const cname=S.customerNames?.[p.cust]||'';
-  const detailed=!!(p.shippedRows&&p.shippedRows.length);
-  const rows=detailed?p.shippedRows:(p.quantities||[]).filter(q=>parseInt(q.qty)>0);
+  const detailed=!!(sh&&Array.isArray(sh.rows)&&sh.rows.length);
+  const rows=detailed?sh.rows:(p.quantities||[]).filter(q=>parseInt(q.qty)>0);
   const rowSum=rows.reduce((s,r)=>s+(parseInt(r.qty)||0),0);
-  const total=p.shippedQty!=null?+p.shippedQty:rowSum;
-  const dDate=p.dnDate||(p.shippedAt?String(p.shippedAt).slice(0,10):'');
+  const total=sh?(+sh.total||0):rowSum;
+  // מאזן ההזמנה **עד המשלוח הזה כולל** — תעודה ישנה חייבת להראות את המצב בזמנה
+  // ולא את המצב היום, אחרת הדפסה חוזרת של תעודה מלפני חודש תסתור את מה שנמסר
+  const ordered=_prodQty(p)||0;
+  const upto=list.slice(0,idx+1).reduce((t,s)=>t+(+s.total||0),0);
+  const balance=ordered?Math.max(0,ordered-upto):0;
+  const dDate=(sh&&sh.date)||p.dnDate||(p.shippedAt?String(p.shippedAt).slice(0,10):'');
   const heDate=d=>d?d.slice(8,10)+'/'+d.slice(5,7)+'/'+d.slice(0,4):'';
   const orderTxt=(parseInt(p.orderNo,10)||0)?'#'+String(p.orderNo).padStart(3,'0'):'—';
   const line=(lbl,val)=>val?`<div><span class="l">${esc(lbl)}</span> ${esc(val)}</div>`:'';
@@ -12315,7 +12422,8 @@ tr{page-break-inside:avoid}
   </div>
   <div class="doc">
     <h1>תעודת משלוח</h1>
-    <div class="no">מס' ${p.dnNo?String(p.dnNo).padStart(4,'0'):'—'}</div>
+    <div class="no">מס' ${sh&&sh.no?String(sh.no).padStart(4,'0'):'—'}</div>
+    ${count>1?`<div class="dt" style="font-weight:700">משלוח ${idx+1} מתוך ${count}</div>`:''}
     <div class="dt">תאריך: ${esc(heDate(dDate)||'—')}</div>
   </div>
 </div>
@@ -12333,7 +12441,9 @@ tr{page-break-inside:avoid}
     <h2>פרטי ההזמנה</h2>
     ${line('דגם:',p.name||p.prod)}
     ${line('הזמנה:',orderTxt)}
-    ${line('תאריך יציאה:',heDate(p.shippedAt?String(p.shippedAt).slice(0,10):''))}
+    ${line('תאריך יציאה:',heDate(dDate))}
+    ${ordered?line('כמות בהזמנה:',ordered+" יח'"):''}
+    ${ordered?line('יתרה להשלמה:',balance+" יח'"):''}
   </div>
 </div>
 ${detailed?'':'<div class="warn">⚠ אין פירוט יציאה פר מידה למשלוח הזה — הטבלה מציגה את פירוט ההזמנה. סמן שוב "יצא ללקוח" כדי לרשום את הפירוט בפועל.</div>'}
@@ -12702,7 +12812,9 @@ function renderProducts(){
         </div>
         <div style="display:flex;gap:6px;flex-shrink:0">
           ${(p.workSteps||[]).some(s=>stepLevel(s)&&stepStation(s))?`<button class="btn" style="font-size:11px;padding:4px 10px;color:var(--blue-txt)" onclick="showProductPlan('${p.id}')">🎯 שיבוץ</button>`:''}
-          ${isDone?`<button class="btn" style="font-size:11px;padding:4px 10px;color:var(--green-txt,#16a34a)" onclick="printDeliveryNote('${p.id}')">📄 תעודת משלוח</button>`:''}
+          ${isDone?(prodShipments(p).length>1
+            ?`<button class="btn" style="font-size:11px;padding:4px 10px;color:var(--green-txt,#16a34a)" onclick="showShipments('${p.id}')">📄 ${prodShipments(p).length} תעודות</button>`
+            :`<button class="btn" style="font-size:11px;padding:4px 10px;color:var(--green-txt,#16a34a)" onclick="printDeliveryNote('${p.id}')">📄 תעודת משלוח</button>`):''}
           <button class="btn" style="font-size:11px;padding:4px 10px" onclick="bcFromProduct('${p.id}')">🏷️ ברקודים</button>
           <button class="btn" style="font-size:11px;padding:4px 10px" onclick="openProductModal('${p.id}')">✏️ עריכה</button>
           <button class="btn danger" style="font-size:11px;padding:4px 8px;opacity:.7" onclick="deleteProduct('${p.id}')">🗑</button>
