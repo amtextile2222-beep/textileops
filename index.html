@@ -10218,7 +10218,8 @@ function shipRowsHtml(p){
       <td colspan="${anyPrev?4:3}" style="padding:6px 4px;font-weight:700">סה"כ במשלוח הזה</td>
       <td id="ship-total" colspan="2" style="padding:6px 4px;font-weight:800;text-align:center;color:var(--green-txt,#16a34a)">${initSum}</td>
     </tr>
-  </table>`;
+  </table>
+  <div id="ship-over" style="display:none;font-size:11px;font-weight:700;color:var(--amber-txt);background:var(--amber-bg);padding:6px 8px;border-radius:8px;margin-top:6px"></div>`;
 }
 // ✏️ עריכה ידנית של סוג א = קביעת הכמות שיוצאת בשורה הזו (משלוח חלקי).
 // הערך נשמר כ"סך השורה" כדי שהזנת סוג ב אחר כך תגרע ממנו ולא מהכמות שבהזמנה —
@@ -10325,6 +10326,14 @@ function shipRowsTotal(){
     });
     const over=[...per.values()].some(v=>v.sum>v.max);
     el.style.color=over?'var(--amber-txt)':'var(--green-txt,#16a34a)';
+    // 🟠 חריגה **מותרת ולא נחסמת** — לפעמים באמת יוצא יותר ממה שהוזמן. הצבע הכתום
+    // לבדו נקרא כמו שגיאה שחוסמת, ולכן נאמר במפורש כמה עודף יירשם.
+    const extra=[...per.values()].reduce((t,v)=>t+Math.max(0,v.sum-v.max),0);
+    const ov=document.getElementById('ship-over');
+    if(ov){
+      ov.style.display=extra?'block':'none';
+      if(extra)ov.textContent='⚠ '+extra+" יח' מעל הכמות שנותרה בהזמנה — מותר, יירשם וידפיס כעודף בתעודה";
+    }
   }
   try{shipPackTotal();}catch(e){}
   return t;
@@ -12560,6 +12569,9 @@ function deliveryNoteHtml(p,sh,idx,count){
   const ordered=_prodQty(p)||0;
   const upto=list.slice(0,idx+1).reduce((t,s)=>t+(+s.total||0),0);
   const balance=ordered?Math.max(0,ordered-upto):0;
+  // יצא יותר ממה שהוזמן: "יתרה להשלמה: 0" הסתיר את העובדה. העודף מוצג במפורש,
+  // ולפי המצב **באותו משלוח** — כמו כל שאר המספרים על התעודה.
+  const surplus=ordered?Math.max(0,upto-ordered):0;
   const dDate=(sh&&sh.date)||p.dnDate||(p.shippedAt?String(p.shippedAt).slice(0,10):'');
   const heDate=d=>d?d.slice(8,10)+'/'+d.slice(5,7)+'/'+d.slice(0,4):'';
   const orderTxt=(parseInt(p.orderNo,10)||0)?'#'+String(p.orderNo).padStart(3,'0'):'—';
@@ -12642,7 +12654,7 @@ table.pk th.ttl{background:#eef2ff;font-size:12px;text-align:center}
     ${line('הזמנה:',orderTxt)}
     ${line('תאריך יציאה:',heDate(dDate))}
     ${ordered?line('כמות בהזמנה:',ordered+" יח'"):''}
-    ${ordered?line('יתרה להשלמה:',balance+" יח'"):''}
+    ${ordered?(surplus?line('עודף מעל ההזמנה:',surplus+" יח'"):line('יתרה להשלמה:',balance+" יח'")):''}
     ${packCount?line('חבילות:',packCount):''}
   </div>
 </div>
