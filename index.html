@@ -5189,7 +5189,7 @@ async function bcStartBatch(){
       if(S.activeTasks.some(x=>x.workerId===u.id&&taskBc(x)===b.raw&&(x.taskType||'')===(b.taskType||'')&&!x.paused)){dupSkip.push((b.taskType||b.prod)+' — '+(T.scan_dup_active||'פעיל כעת'));continue;}
       if(findDupIn(srvActive,b.raw,b.taskType)){dupSkip.push((b.taskType||b.prod)+' — '+(T.scan_dup_active||'פעיל כעת'));continue;}
       // wu ולא u: S.user הוא עותק מרגע ההתחברות — currentStation שלו לא מתעדכן בסריקת תחנה
-      const newTask={id:String(Date.now())+Math.random().toString(36).slice(2,6),workerId:u.id,workerName:u.name,dept:b.taskDept||effDept(wu),station:wu.currentStation?.name||'',cust:b.cust,prod:b.prod,size:b.size,qty:b.qty,col:b.col,taskType:b.taskType,bc:b.raw,isTotal:b.isTotal||false,startTime:bcStart,elapsed:0,prodStamp:b.prodStamp};
+      const newTask={id:String(Date.now())+Math.random().toString(36).slice(2,6),workerId:u.id,workerName:u.name,scannedBy:S.user?.id||'',scannedByName:S.user?.name||'',dept:b.taskDept||effDept(wu),station:wu.currentStation?.name||'',cust:b.cust,prod:b.prod,size:b.size,qty:b.qty,col:b.col,taskType:b.taskType,bc:b.raw,isTotal:b.isTotal||false,startTime:bcStart,elapsed:0,prodStamp:b.prodStamp};
       if(bcBatchId)newTask.batchId=bcBatchId;
       if(b.expMin!=null)newTask.expectedMin=b.expMin;
       if(!(await claimTaskGuard(newTask)).ok){dupSkip.push((b.taskType||b.prod)+' — '+(T.scan_dup_active||'פעיל כעת'));continue;}
@@ -7195,8 +7195,10 @@ function buildBudgetReport(fl){
     if(!(alloc>0))continue;
     const actual=(nd[t.id]||0)/60;
     const key=t.workerId+'|'+t.cust+'|'+t.prod+'|'+t.taskType;
-    const g=grp[key]||(grp[key]={workerName:t.workerName,taskType:t.taskType,cust:t.cust,prod:t.prod,qty:0,alloc:0,actual:0});
+    const g=grp[key]||(grp[key]={workerName:t.workerName,taskType:t.taskType,cust:t.cust,prod:t.prod,qty:0,alloc:0,actual:0,scan:new Set(),old:0});
     g.qty+=units;g.alloc+=alloc;g.actual+=actual;
+    // רק סורק **אחר** מעניין: סריקה עצמית היא ברירת המחדל ואינה ממצא. משימה בלי השדה = לפני 10/09.
+    if(t.scannedByName===undefined)g.old++;else if(t.scannedByName&&t.scannedByName!==t.workerName)g.scan.add(t.scannedByName);
   }
   const rows=Object.values(grp).map(g=>({...g,eff:g.actual>0?g.alloc/g.actual*100:0}));
   if(!rows.length){el.innerHTML='<div style="color:var(--txt3);font-size:12px;padding:.5rem 0">אין משימות שהושלמו עם תמחור בטווח הנבחר</div>';return;}
@@ -7204,18 +7206,19 @@ function buildBudgetReport(fl){
   const totAlloc=rows.reduce((s,r)=>s+r.alloc,0),totAct=rows.reduce((s,r)=>s+r.actual,0);
   const overCnt=rows.filter(r=>r.actual>r.alloc).length;
   const effBadge=e=>`<span class="badge ${e>=100?'green':e>=80?'amber':'red'}">${Math.round(e)}%</span>`;
-  el.innerHTML=`<div style="font-size:11px;color:var(--txt3);margin-bottom:6px">יעילות = מוקצב ÷ בפועל · מעל 100% = מהיר מהמוקצב · ${overCnt?`<b style="color:var(--red-txt)">${overCnt} משימות חרגו</b>`:'✅ אין חריגות'}</div>
+  el.innerHTML=`<div style="font-size:11px;color:var(--txt3);margin-bottom:6px">יעילות = מוקצב ÷ בפועל · מעל 100% = מהיר מהמוקצב · <b>מי סרק</b> = מי הפעיל את הסורק כשהסורק אינו העובד עצמו (נרשם מ-10/09/2026; ‎—‎ = רשומה ישנה) · ${overCnt?`<b style="color:var(--red-txt)">${overCnt} משימות חרגו</b>`:'✅ אין חריגות'}</div>
   <div class="tbl-wrap"><table>
-    <thead><tr><th>עובד</th><th>שלב</th><th>מוצר</th><th>כמות</th><th>מוקצב</th><th>בפועל</th><th>יעילות</th></tr></thead>
+    <thead><tr><th>עובד</th><th>שלב</th><th>מוצר</th><th>כמות</th><th>מוקצב</th><th>בפועל</th><th>יעילות</th><th>מי סרק</th></tr></thead>
     <tbody>${rows.map(r=>`<tr${r.actual>r.alloc?' style="background:var(--red-bg,#fee2e2)"':''}>
       <td>${esc(r.workerName)}</td><td style="font-size:12px">${esc(r.taskType||'—')}</td>
       <td><span class="bc-seg bc-c">${r.cust}</span> <span class="bc-seg bc-p">${r.prod}</span></td>
       <td>${r.qty||0}</td><td>${fmtExpMin(r.alloc)}</td><td>${fmtExpMin(r.actual)}</td>
-      <td>${effBadge(r.eff)}</td></tr>`).join('')}</tbody>
+      <td>${effBadge(r.eff)}</td>
+      <td style="font-size:11px">${r.scan.size?`<span class="badge amber">${esc([...r.scan].join(' · '))}</span>`:(r.old?'<span style="color:var(--txt3)">—</span>':'<span style="color:var(--txt3)">עצמי</span>')}</td></tr>`).join('')}</tbody>
     <tfoot><tr style="border-top:1.5px solid var(--b);font-weight:600;background:var(--bg2)">
       <td colspan="4">סה"כ (${rows.length} משימות)</td>
       <td>${fmtExpMin(totAlloc)}</td><td>${fmtExpMin(totAct)}</td>
-      <td>${effBadge(totAct>0?totAlloc/totAct*100:0)}</td></tr></tfoot>
+      <td>${effBadge(totAct>0?totAlloc/totAct*100:0)}</td><td></td></tr></tfoot>
   </table></div>`;
 }
 // ✂ גזירה — תקציב מול בפועל, פר הזמנה ופר עובד.
@@ -8951,7 +8954,11 @@ async function tsStartTask(){
       // חסימה חוזרת ברגע הפתיחה — סוגר מרוץ של פתיחה כפולה של אותה משימה (עובד+ברקוד+שלב פעיל)
       if(S.activeTasks.some(x=>x.workerId===w.id&&taskBc(x)===b.raw&&(x.taskType||'')===(b.taskType||'')&&!x.paused))continue;
       if(findDupIn(tsSrvActive,b.raw,b.taskType)){tsDupSkip.push((b.taskType||b.prod)+' — '+(T.scan_dup_active||'פעיל כעת'));continue;}
-      const task={id:String(Date.now())+Math.random().toString(36).slice(2,6),workerId:w.id,workerName:w.name,dept:b.taskDept||effDept(w),station:w.currentStation?.name||'',cust:b.cust,prod:b.prod,size:b.size,qty:b.qty,col:b.col,taskType:b.taskType,bc:b.raw,isTotal:b.isTotal||false,startTime,elapsed:0,accumulatedSec:0,prodStamp:b.prodStamp};
+      // scannedBy/scannedByName — **מי הפעיל את הסורק**, להבדיל מ-workerId שהוא **למי** המשימה.
+      // האחראי محمد פותח משימות עבור עובדות אחרות, ולכן startTime הוא רגע חלוקת העבודה ולא
+      // רגע ההתחלה בפועל. בלי השדה הזה אי אפשר להפריד קצב עבודה מזמן חלוקה. נוסף 10/09/2026
+      // בכל ארבע נקודות היצירה (5197 עצמי · כאן · 9268 מנהל · 9322 פיצול); רשומות ישנות בלעדיו.
+      const task={id:String(Date.now())+Math.random().toString(36).slice(2,6),workerId:w.id,workerName:w.name,scannedBy:S.user?.id||'',scannedByName:S.user?.name||'',dept:b.taskDept||effDept(w),station:w.currentStation?.name||'',cust:b.cust,prod:b.prod,size:b.size,qty:b.qty,col:b.col,taskType:b.taskType,bc:b.raw,isTotal:b.isTotal||false,startTime,elapsed:0,accumulatedSec:0,prodStamp:b.prodStamp};
       const exp=await fetchExpected(b.cust,b.prod,w.id,b.qty);
       if(exp?.ok&&exp.perStep?.[b.taskType]!=null)task.expectedMin=exp.perStep[b.taskType];
       if(batchId)task.batchId=batchId;
@@ -9264,7 +9271,7 @@ async function mgrStartTask(){
     // המסלול הזה סוגר קודם את המשימות הפעילות שב-cache המקומי — אבל משימה שנפתחה
     // ממכשיר אחר לא נמצאת שם כלל, ולכן לא נסגרה ולא נחסמה. כאן היא נתפסת.
     if(findDupIn(mgrSrvActive,b.raw,b.taskType)){mgrDupSkip.push((b.taskType||b.prod)+' — '+(T.scan_dup_active||'פעיל כעת'));continue;}
-    const newTask={id:String(Date.now())+Math.random().toString(36).slice(2,6),workerId:empId,workerName:w.name,dept:b.taskDept||effDept(w),station:w.currentStation?.name||'',cust:b.cust,prod:b.prod,size:b.size,qty:b.qty,col:b.col,taskType:b.taskType,bc:b.raw,isTotal:b.isTotal||false,startTime,elapsed:0,accumulatedSec:0,prodStamp:b.prodStamp};
+    const newTask={id:String(Date.now())+Math.random().toString(36).slice(2,6),workerId:empId,workerName:w.name,scannedBy:S.user?.id||'',scannedByName:S.user?.name||'',dept:b.taskDept||effDept(w),station:w.currentStation?.name||'',cust:b.cust,prod:b.prod,size:b.size,qty:b.qty,col:b.col,taskType:b.taskType,bc:b.raw,isTotal:b.isTotal||false,startTime,elapsed:0,accumulatedSec:0,prodStamp:b.prodStamp};
     const expM=await fetchExpected(b.cust,b.prod,empId,b.qty);
     if(expM?.ok&&expM.perStep?.[b.taskType]!=null)newTask.expectedMin=expM.perStep[b.taskType];
     if(batchId)newTask.batchId=batchId;
@@ -9319,7 +9326,7 @@ async function transferTask(taskId){
     const splitId='sp'+Date.now().toString(36)+Math.random().toString(36).slice(2,5);
     // dept/station נלקחים מהעובד המקבל — בלי זה ה-spread משאיר את התחנה של העובד
     // הקודם על המשימה, והלוח מראה אותה יושבת במקום הלא נכון
-    const newTask={...t,id:String(Date.now())+Math.random().toString(36).slice(2,6),workerId:newWorker.id,workerName:newWorker.name,dept:effDept(newWorker),station:newWorker.currentStation?.name||'',qty:partQty,startTime:srvNow(),elapsed:0,accumulatedSec:0,splitId};
+    const newTask={...t,id:String(Date.now())+Math.random().toString(36).slice(2,6),workerId:newWorker.id,workerName:newWorker.name,scannedBy:S.user?.id||'',scannedByName:S.user?.name||'',dept:effDept(newWorker),station:newWorker.currentStation?.name||'',qty:partQty,startTime:srvNow(),elapsed:0,accumulatedSec:0,splitId};
     delete newTask.batchId;
     // לעובד היעד כבר יש משימה חיה על אותו ברקוד+שלב ⇒ הפיצול ייצור כפילות
     if(!(await claimTaskGuard(newTask)).ok){showToast((tt||t.prod)+' — '+(T.scan_dup_active||'פעיל כעת'),'var(--red-txt)');return;}
