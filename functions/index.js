@@ -111,6 +111,19 @@ exports.login = functions.https.onCall(async (data, context) => {
   const { token: tgToken, chatId: tgChatId } = tgCfg();
   const tg = text => (tgToken && tgChatId) ? sendTelegram(tgToken, tgChatId, text).catch(() => {}) : Promise.resolve();
 
+  // ── התראה על פתיחת פאנל החירום (5 לחיצות על הלוגו) ──
+  // נשלחת מכאן ולא דרך tgSend: הפאנל נפתח במסך הכניסה, לפני שיש משתמש מחובר,
+  // ו-tgSend דוחה קריאה לא מאומתת — ההתראה נבלעה בשקט. מוגבל להתראה אחת בדקה.
+  if (d.emergencyPanel) {
+    const emRef = db.collection('credentials').doc('_emergency');
+    const emSnap = await emRef.get();
+    const em = emSnap.exists ? emSnap.data() : {};
+    if (Date.now() - (em.lastPanelAlert || 0) < 60 * 1000) return { ok: true, throttled: true };
+    await emRef.set({ lastPanelAlert: Date.now() }, { merge: true });
+    await tg('⚠️ TextileOps — נפתח פאנל כניסת חירום\n🕐 שעה: ' + ilTime() + '\n🌐 IP: ' + (callerIp(context) || '?') + '\nמישהו לחץ על הלוגו 5 פעמים ופתח את פאנל החירום.');
+    return { ok: true };
+  }
+
   // ── כניסת חירום ──
   if (d.emergencyCode !== undefined) {
     const cfgHash = (functions.config().app || {}).emergencyhash || '';
