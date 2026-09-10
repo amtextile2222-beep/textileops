@@ -3390,6 +3390,11 @@ function listenFb(){
   onSnapshot(collection(db,'products'),snap=>{
     S.products=snap.docs.map(d=>({id:d.id,...d.data()}));
     saveLS();renderProducts();
+    // 📄 תעודת משלוח נשמרת **בתוך** מסמך המוצר (p.shipments), ולשונית התעודות בונה
+    // את הרשימה מ-S.products. המאזין קרא רק ל-renderProducts ⇒ מי שעמד על הלשונית
+    // (או צפה בה ממכשיר שני) ראה רשימה קפואה עד ניווט או רענון, בזמן שהנתון כבר הגיע.
+    // renderDNotes קוראת את שדות הסינון מה-DOM ולא דורסת אותם — חיפוש/טווח שהוקלדו נשמרים.
+    if(document.querySelector('.page.active')?.id==='page-dnotes')renderDNotes();
   });
   // app settings (customerNames, customColors) — עלויות עברו ל-adminSettings (מנהל בלבד)
   onSnapshot(collection(db,'appSettings'),snap=>{
