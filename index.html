@@ -1085,7 +1085,7 @@ code{background:var(--bg2);border:0.5px solid var(--b);border-radius:4px;padding
     </div>
     <!-- כרטיסי סיכום -->
     <div class="g4" style="margin-bottom:1rem">
-      <div class="card"><div class="mlbl">עלות ייצור כוללת</div><div class="mval" id="cost-total">—</div><div class="msub">בטווח הנבחר</div></div>
+      <div class="card"><div class="mlbl">עלות ייצור כוללת</div><div class="mval" id="cost-total">—</div><div class="msub">בטווח הנבחר</div><div id="cost-full"></div></div>
       <div class="card"><div class="mlbl">עלות שכר עובדים</div><div class="mval" id="cost-wages">—</div><div class="msub">בטווח הנבחר</div></div>
       <div class="card"><div class="mlbl">עלות הוצאות</div><div class="mval" id="cost-overhead">—</div><div class="msub">קבועות + משתנות</div></div>
       <div class="card"><div class="mlbl">עלות ממוצעת למשימה</div><div class="mval" id="cost-avg">—</div><div class="msub">בטווח הנבחר</div></div>
@@ -11747,6 +11747,7 @@ async function calcCosts(){
     document.getElementById('cost-wages').textContent='—';
     document.getElementById('cost-overhead').textContent='—';
     document.getElementById('cost-avg').textContent='—';
+    const _fEl=document.getElementById('cost-full');if(_fEl)_fEl.innerHTML='';
     document.getElementById('cost-result-content').innerHTML=
       '<div style="text-align:center;padding:2rem;color:var(--txt3)">אין משימות בטווח הנבחר</div>';
     return;
@@ -11826,6 +11827,16 @@ async function calcCosts(){
   // עובד בתשלום-ליחידה אינו מקור פיקוח: שכרו אינו נגזר משעות, ואין ממה להפחית.
   const _isOv=w=>_ovCap(w)>0&&_ovDepts(w).length>0&&!((S.costs.workerUnitRates||{})[w]>0);
 
+  // ─── 💎 עלות מלאה — אותן שעות שהשכר הגולמי מכסה, בתעריף של שאר הדוחות ───
+  // שעה עמוסה (פיצויים/חגים/מתנות/טיול/הסעה/ביטוח) + תקורה לשעה — כמו ברווח האמיתי ובתמחור.
+  // ⚠️ התקורה **מחליפה** את ההוצאות הרשומות בטווח ולא מתווספת להן: היא כבר כוללת את
+  //    הקבועות ואת ממוצע המשתנות החודשי ⇒ חיבור שניהם היה סופר את אותן הוצאות פעמיים.
+  // ⚠️ תקורה רק על שעות של לא-מנהל: המכנה שלה (_costWorkers) אינו סופר מנהלים.
+  const _oh=overheadBreakdown().perHour;
+  const _mgr={};(S.workers||[]).forEach(w=>{if(w.role==='manager')_mgr[w.id]=1;});
+  const _ohOf=wid=>_mgr[wid]?0:_oh;
+  let fullLoaded=0, fullOh=0;
+
   // שכר עוזרים/מנהלים/אחראים ללא משימות — יתחלק על המוצרים
   const nonTaskWageByDay={};
   _costAtt.forEach(rec=>{
@@ -11838,6 +11849,8 @@ async function calcCosts(){
     const hoursWorked=(rec.netMs||0)/3600000;
     const wage=(dailyRate/8)*hoursWorked;
     nonTaskWageByDay[d]=(nonTaskWageByDay[d]||0)+wage;
+    // 💎 רק ביום עם משימות — ביום בלי משימות גם הגולמי לא מתחלק לשום מקום
+    if(byDay[d]){fullLoaded+=hoursWorked*loadedHourlyRate(rec.workerId);fullOh+=hoursWorked*_ohOf(rec.workerId);}
   });
 
   // ─── 🎯 הקצאת זמן פיקוח ──────────────────────────────────────────
@@ -11873,6 +11886,8 @@ async function calcCosts(){
     ovFrac[k]=frac;
     const wage=(dailyRate/8)*(attSec/3600)*frac;
     elig.forEach(ix=>{ovByIdx[ix]+=wage*((tasks[ix].duration||0)/tot);});
+    const _ovH=(attSec/3600)*frac;
+    fullLoaded+=_ovH*loadedHourlyRate(wid);fullOh+=_ovH*_ohOf(wid);
   });
 
   // חישוב עלות לכל משימה
@@ -11898,6 +11913,10 @@ async function calcCosts(){
     // חלק הפיקוח שהועבר מהעובד הזה ביום הזה יורד משכרו על משימותיו שלו
     const ovCut=1-(ovFrac[t.workerId+'_'+d]||0);
     const wage=byUnit?(unitRate*(t.qty||0)):(dailyRate/8)*attHours*taskShare*ovCut;
+    // 💎 אותן שעות בתעריף מלא. ליחידה: השכר כמו שהוא (אין שעה להעמיס) + תקורה על השעות
+    const _hrs=attHours*taskShare*(byUnit?1:ovCut);
+    if(byUnit){fullLoaded+=wage;fullOh+=_hrs*_ohOf(t.workerId);}
+    else if(dailyRate){fullLoaded+=_hrs*loadedHourlyRate(t.workerId);fullOh+=_hrs*_ohOf(t.workerId);}
 
     // חלק מהוצאות קבועות + משתנות
     const dayVar=varByDay[d]||0;
@@ -11930,6 +11949,15 @@ async function calcCosts(){
   document.getElementById('cost-wages').textContent='₪'+Math.round(totalWages).toLocaleString();
   document.getElementById('cost-overhead').textContent='₪'+Math.round(totalOverhead).toLocaleString();
   document.getElementById('cost-avg').textContent=enriched.length?'₪'+Math.round(grandTotal/enriched.length).toLocaleString():'—';
+  const fEl=document.getElementById('cost-full');
+  if(fEl){
+    const full=fullLoaded+fullOh;
+    fEl.innerHTML=`<div style="margin-top:8px;padding-top:8px;border-top:0.5px solid var(--b,#ddd)" title="אותן שעות עבודה, בתעריף של דוחות הרווח והתמחור: שעה עמוסה (פיצויים, חגים, מתנות, טיול, הסעה, ביטוח) + תקורה ₪${_oh.toFixed(2)} לשעה. התקורה מחליפה את ההוצאות הרשומות — לא מתווספת להן.">
+      <div style="font-size:11px;color:var(--txt2,#666)">עלות מלאה</div>
+      <div style="font-size:18px;font-weight:700;color:var(--blue-txt,#1d4ed8)">₪${Math.round(full).toLocaleString()}</div>
+      <div class="msub">שכר עמוס ₪${Math.round(fullLoaded).toLocaleString()} + תקורה ₪${Math.round(fullOh).toLocaleString()}</div>
+    </div>`;
+  }
 
   S._costData=enriched;
   renderCostTab();
