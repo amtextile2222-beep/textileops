@@ -641,6 +641,26 @@ code{background:var(--bg2);border:0.5px solid var(--b);border-radius:4px;padding
       <div class="sec">💰 רווח בפועל מול יעד — לפי מוצר</div>
       <div id="rp-profit-body"></div>
     </div>
+    <div class="card hidden" style="margin-top:1rem" id="rp-real-card">
+      <div style="display:flex;align-items:center;justify-content:space-between;gap:8px">
+        <div class="sec" style="margin-bottom:0">💵 רווח אמיתי — הזמנות שיצאו ללקוח</div>
+        <button class="btn" style="font-size:12px" id="rr-toggle" onclick="rrToggleOpen()">📂 פתח</button>
+      </div>
+      <div id="rp-real-wrap" class="hidden" style="margin-top:8px">
+        <div style="display:flex;flex-wrap:wrap;gap:6px;align-items:center;margin-bottom:8px">
+          <input id="rr-q" placeholder="🔍 לקוח / דגם / שם / מס' הזמנה" style="font-size:12px;width:auto;flex:1;min-width:150px" oninput="rrRender()"/>
+          <label style="font-size:11px;color:var(--txt2)">יצא מ-</label>
+          <input type="date" id="rr-from" style="font-size:12px;width:auto" onchange="rrRender()"/>
+          <label style="font-size:11px;color:var(--txt2)">עד</label>
+          <input type="date" id="rr-to" style="font-size:12px;width:auto" onchange="rrRender()"/>
+          <button class="btn" style="font-size:12px" onclick="rrSelectShown()">✅ בחר את המוצגים</button>
+          <button class="btn" style="font-size:12px" onclick="rrClear()">✖ נקה בחירה</button>
+          <button class="btn" style="font-size:12px" onclick="buildRealProfitReport(true)" title="טען מחדש את כל ההיסטוריה">🔄</button>
+        </div>
+        <div id="rr-sum"></div>
+        <div id="rp-real-body"></div>
+      </div>
+    </div>
   </div>
 
   <!-- ALERTS -->
@@ -6709,6 +6729,7 @@ async function buildRep(){
   buildBudgetReport(fl);
   buildCutReport(fl);
   buildProfitReport(fl);
+  buildRealProfitReport(false); // לא תלוי ב-fl — שולף את כל ההיסטוריה בעצמו, ורק כשהכרטיס פתוח
 }
 function buildSummaryReport(fl){
   const el=document.getElementById('rp-summary-body');if(!el)return;
@@ -7413,6 +7434,138 @@ function buildProfitReport(fl){
           </div>`).join('')}
         </div>`:''}</div>
     </details>`;}).join('');
+}
+
+// ─── 💵 רווח אמיתי — הזמנות שיצאו ללקוח ────────────────────────
+// המנהל מסמן הזמנות שיצאו ומקבל עלות ייצור ורווח אמיתי למה שסומן.
+//   הכנסה = (מחיר יחידה + מחיר גזירה) × הכמות שיצאה בפועל (shippedQty)
+//   עלות  = **כל** שעות העבודה על ההזמנה × (שעה עמוסה של העובד + תקורה) + חומרים
+// זו השיטה של מדידות 28/08 ו-02/09 (pricing_real_profit_method). שונה מ"רווח בפועל מול יעד"
+// בשלושה דברים, כולם במכוון:
+// • לא תלוי בטווח התאריכים של הדוחות — הזמנה שנעבדה ביולי ויצאה בספטמבר חייבת את כל שעותיה.
+// • כל משימות ההזמנה, גם אלה ש-taskType שלהן לא בתמחור (אחרת נופלות בשקט — gotcha_orphan_tasktype).
+// • ההכנסה מ-shippedQty ולא מנתח פר-שלב: שלבי קבלה/חיתוך לא נסרקים, והנתח שלהם היה חסר (−7.2%).
+// ✂ הגזירה נכנסת לשני הצדדים יחד — שעות הגזירה בעלות ו-cutPrice בהכנסה. רק צד אחד = רווח מעוות.
+// 🛑 archiveOldTasks מוחק היסטוריה מעל 60 יום ⇒ הזמנה ותיקה מאבדת שעות ושומרת הכנסה ⇒ רווח
+//    מנופח בשקט. לכן הזמנה שנפתחה לפני המשימה הוותיקה ביותר שנשארה **מסומנת**, לא מוסתרת.
+// נטען רק כשפותחים את הכרטיס: שליפת כל ההיסטוריה היא אלפי קריאות Firestore.
+var _rr={open:false,rows:[],sel:new Set(),ts:0,offline:false};
+function rrToggleOpen(){
+  const w=document.getElementById('rp-real-wrap'),b=document.getElementById('rr-toggle');if(!w)return;
+  _rr.open=!w.classList.toggle('hidden');
+  if(b)b.textContent=_rr.open?'הסתר':'📂 פתח';
+  if(_rr.open)buildRealProfitReport(false);
+}
+async function buildRealProfitReport(force){
+  const card=document.getElementById('rp-real-card'),el=document.getElementById('rp-real-body');
+  if(!card||!el)return;
+  const ctx=_pricingCtx();
+  if(!ctx){card.classList.add('hidden');return;}
+  card.classList.remove('hidden');
+  if(!_rr.open)return;
+  if(!force&&_rr.ts&&Date.now()-_rr.ts<5*60000){rrRender();return;}
+  el.innerHTML='<div style="color:var(--txt3);font-size:12px;padding:.5rem 0">טוען את כל היסטוריית המשימות...</div>';
+  if(force)_histRangeCache.ts=0;
+  const hist=await loadHistRange('','');
+  const done=hist.filter(t=>(t.duration||0)>0);
+  const nd=normalizeBatchDurations(done); // פעם אחת על כל הקבוצה — batch חוצה הזמנות
+  let oldest=Infinity;
+  for(const t of hist){const e=+new Date(t.endTime);if(e>0&&e<oldest)oldest=e;}
+  const cache={},byOrder={},openBy={};
+  const okey=t=>t.cust+'|'+t.prod+'|'+taskOrderStamp(t,cache);
+  for(const t of done){const k=okey(t);(byOrder[k]||(byOrder[k]=[])).push(t);}
+  for(const t of (S.activeTasks||[])){const k=okey(t);openBy[k]=(openBy[k]||0)+1;}
+  _rr.rows=(S.products||[]).filter(p=>+p.shippedQty>0).map(p=>{
+    const pst=prodStampOf(p),k=p.cust+'|'+p.prod+'|'+pst;
+    const ts=byOrder[k]||[];
+    let hrs=0,labor=0;
+    for(const t of ts){const h=(nd[t.id]||0)/3600;hrs+=h;labor+=h*(loadedHourlyRate(t.workerId)||ctx.avgAll);}
+    const shipped=+p.shippedQty||0,planned=_prodQty(p);
+    const price=+p.unitPrice||0,cutPrice=+p.cutPrice||0;
+    const income=(price+cutPrice)*shipped;
+    const overhead=hrs*ctx.oh;
+    const materials=(+p.directMaterialsCost||0)*Math.max(planned,shipped); // נקנה לכל מה שיוצר
+    const cost=labor+overhead+materials;
+    return{p,shipped,planned,price,cutPrice,income,hrs,labor,overhead,materials,cost,profit:income-cost,
+      n:ts.length,open:openBy[k]||0,at:String(p.shippedAt||p.dnDate||'').slice(0,10),
+      archived:pst>1e12&&isFinite(oldest)&&pst<oldest-86400000};
+  }).sort((a,b)=>b.at.localeCompare(a.at));
+  _rr.ts=Date.now();
+  _rr.offline=!db||!S.fbConnected;
+  rrRender();
+}
+function rrShown(){
+  const q=(document.getElementById('rr-q')?.value||'').trim().toLowerCase();
+  const f=document.getElementById('rr-from')?.value||'',to=document.getElementById('rr-to')?.value||'';
+  return _rr.rows.filter(r=>{
+    if(f&&!(r.at&&r.at>=f))return false;
+    if(to&&!(r.at&&r.at<=to))return false;
+    if(!q)return true;
+    const p=r.p;
+    return[p.cust,p.prod,p.name,p.orderNo,(S.customerNames||{})[p.cust]].some(v=>String(v??'').toLowerCase().includes(q));
+  });
+}
+function rrSelectShown(){for(const r of rrShown())if(r.price>0)_rr.sel.add(r.p.id);rrRender();}
+function rrClear(){_rr.sel.clear();rrRender();}
+function rrToggle(id,on){on?_rr.sel.add(id):_rr.sel.delete(id);rrRender();}
+function rrRender(){
+  const el=document.getElementById('rp-real-body'),sm=document.getElementById('rr-sum');if(!el||!sm)return;
+  const ils=v=>(v<0?'−':'')+'₪'+Math.round(Math.abs(v)).toLocaleString('he-IL');
+  const pct=(p,i)=>i>0?(p/i*100).toFixed(1)+'%':'—';
+  const dmy=s=>s?s.slice(8,10)+'/'+s.slice(5,7)+'/'+s.slice(2,4):'—';
+  const note=(t,c)=>`<div style="font-size:11px;color:var(${c||'--amber-txt'})">${t}</div>`;
+  if(!_rr.rows.length){sm.innerHTML='';el.innerHTML='<div style="color:var(--txt3);font-size:12px;padding:.5rem 0">אין הזמנות שיצאו ללקוח</div>';return;}
+  const sel=_rr.rows.filter(r=>r.price>0&&_rr.sel.has(r.p.id));
+  const T={shipped:0,income:0,hrs:0,labor:0,overhead:0,materials:0,cost:0,profit:0,arch:0,part:0,open:0,none:0};
+  for(const r of sel){
+    T.shipped+=r.shipped;T.income+=r.income;T.hrs+=r.hrs;T.labor+=r.labor;T.overhead+=r.overhead;
+    T.materials+=r.materials;T.cost+=r.cost;T.profit+=r.profit;
+    if(r.archived)T.arch++;if(r.shipped<r.planned)T.part++;if(r.open)T.open++;if(!r.n)T.none++;
+  }
+  const tile=(lbl,val,sub,color)=>`<div style="background:var(--bg2);border-radius:var(--r,8px);padding:8px 10px;min-width:120px;flex:1">
+    <div style="font-size:11px;color:var(--txt3)">${lbl}</div>
+    <div style="font-size:18px;font-weight:700${color?';color:var('+color+')':''}">${val}</div>
+    ${sub?`<div style="font-size:11px;color:var(--txt3)">${sub}</div>`:''}</div>`;
+  sm.innerHTML=(_rr.offline?note('⚠ אין חיבור לשרת — מחושב רק מהמשימות שבמכשיר, השעות חסרות והרווח מוצג גבוה מדי','--red-txt'):'')
+    +`<div style="font-size:11px;color:var(--txt3);margin-bottom:6px">הכנסה = (מחיר + מחיר ✂ גזירה) × הכמות שיצאה · עלות = כל שעות העבודה על ההזמנה × (שעה עמוסה + תקורה) + חומרים · לא תלוי בטווח התאריכים של הדוחות</div>`
+    +(sel.length?`<div style="display:flex;flex-wrap:wrap;gap:6px;margin-bottom:6px">
+      ${tile('הזמנות שנבחרו',sel.length,T.shipped.toLocaleString('he-IL')+" יח' יצאו")}
+      ${tile('הכנסה',ils(T.income),'₪'+(T.income/T.shipped).toFixed(2)+" ליח'")}
+      ${tile('עלות ייצור',ils(T.cost),`עבודה ${ils(T.labor)} · תקורה ${ils(T.overhead)}${T.materials?' · חומרים '+ils(T.materials):''} · ${T.hrs.toFixed(1)} שע'`)}
+      ${tile("עלות ליח'",'₪'+(T.cost/T.shipped).toFixed(2),(T.hrs*60/T.shipped).toFixed(1)+" דק' עבודה ליח'")}
+      ${tile('רווח אמיתי',ils(T.profit)+' · '+pct(T.profit,T.income),'₪'+(T.profit/T.shipped).toFixed(2)+" ליח'",T.profit<0?'--red-txt':'--green-txt')}
+    </div>`
+      +(T.arch?note(`⚠ ${T.arch} מההזמנות שנבחרו נפתחו לפני המשימה הוותיקה שנשארה בהיסטוריה — ייתכן שחלק מהשעות שלהן נמחקו בארכוב החודשי, והרווח מוצג גבוה מדי`,'--red-txt'):'')
+      +(T.part?note(`🚚 ${T.part} הזמנות יצאו חלקית — השעות כוללות גם עבודה על היתרה שעוד לא יצאה, ולכן הרווח שלהן נמוך מהסופי`):'')
+      +(T.open?note(`⏳ ב-${T.open} הזמנות יש משימות פתוחות — הזמן שלהן עוד לא נספר`):'')
+      +(T.none?note(`⚠ ${T.none} הזמנות בלי אף משימה רשומה — עלות 0`,'--red-txt'):'')
+    :`<div style="font-size:12px;color:var(--txt2);padding:4px 0 8px">סמן הזמנות ברשימה (או "✅ בחר את המוצגים") כדי לחשב עלות ייצור ורווח</div>`);
+  const shown=rrShown();
+  el.innerHTML=`<div style="font-size:11px;color:var(--txt3);margin-bottom:4px">מוצגות ${shown.length} מתוך ${_rr.rows.length} הזמנות שיצאו</div>
+    <div class="tbl-wrap"><table>
+    <thead><tr><th></th><th style="min-width:150px">הזמנה</th><th>יצא</th><th>כמות</th><th>רווח</th><th>רווח %</th><th>הכנסה</th><th>עלות ייצור</th><th>עלות ליח'</th><th>שעות</th></tr></thead>
+    <tbody>${shown.map(r=>{
+      const p=r.p,on=_rr.sel.has(p.id)&&r.price>0;
+      const notes=(!r.price?note('⚠ אין מחיר יחידה — לא ניתן לחשב','--red-txt'):'')
+        +(r.archived?note('⚠ ייתכן שחסרות שעות (ארכוב)','--red-txt'):'')
+        +(r.shipped<r.planned?note(`🚚 יצא ${r.shipped} מתוך ${r.planned}`):'')
+        +(r.open?note(`⏳ ${r.open} משימות פתוחות`):'')
+        +(!r.n?note('⚠ אין משימות רשומות','--red-txt'):'')
+        +(r.cutPrice>0?note(`כולל ✂ ₪${r.cutPrice.toFixed(2)}/יח'`,'--txt3'):'');
+      const cust=(S.customerNames||{})[p.cust];
+      return`<tr${on?' style="background:var(--blue-bg)"':''}>
+        <td><input type="checkbox" style="width:auto" ${on?'checked':''} ${r.price>0?'':'disabled'} onchange="rrToggle('${escj(p.id)}',this.checked)"/></td>
+        <td><span class="bc-seg bc-c">${esc(p.cust)}</span> <span class="bc-seg bc-p">${esc(p.prod)}</span>${p.orderNo?` <span style="font-size:10px;color:var(--txt3)">#${esc(p.orderNo)}</span>`:''}
+          ${p.name||cust?`<div style="font-size:11px;color:var(--txt2)">${esc(p.name||'')}${p.name&&cust?' · ':''}${esc(cust||'')}</div>`:''}${notes}</td>
+        <td style="white-space:nowrap">${dmy(r.at)}</td>
+        <td>${r.shipped}</td>
+        <td style="font-weight:600;color:var(${r.profit<0?'--red-txt':'--green-txt'})">${r.price?ils(r.profit):'—'}</td>
+        <td>${r.price?`<span class="badge ${r.profit<0?'red':'green'}">${pct(r.profit,r.income)}</span>`:'—'}</td>
+        <td>${r.price?ils(r.income):'—'}</td>
+        <td>${ils(r.cost)}</td>
+        <td>₪${(r.cost/r.shipped).toFixed(2)}</td>
+        <td>${r.hrs.toFixed(1)}</td>
+      </tr>`;}).join('')}</tbody></table></div>`;
 }
 
 async function exportCSV(){
