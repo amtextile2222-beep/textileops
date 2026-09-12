@@ -1542,6 +1542,8 @@ const LANGS={
     scan_dup_in_cart:'כבר בסל',
     scan_dup_active:'פעיל כעת',
     scan_dup_done:'כבר בוצע',
+    smp_label:'👕 דגם ראשון',
+    smp_hint:'בלי שלבים · פתוח לכל המחלקות והתחנות · לחץ "התחל"',
     scan_dup_total:'כבר נסרק "כל הכמות" לשלב הזה',
     scan_dup_sizes:'כבר נסרקו מידות לשלב הזה — "כל הכמות" ייצור כפילות',
     busy_wait:'⏳ כבר מתחיל — רגע, אל תלחץ שוב',
@@ -1811,6 +1813,8 @@ const LANGS={
     scan_dup_in_cart:'موجود في السلة',
     scan_dup_active:'قيد التنفيذ حالياً',
     scan_dup_done:'تم تنفيذه مسبقاً',
+    smp_label:'👕 عينة أولى',
+    smp_hint:'بدون مراحل · مفتوح لكل الأقسام والمحطات · اضغط "ابدأ"',
     scan_dup_total:'تم مسح "كل الكمية" لهذه المرحلة مسبقاً',
     scan_dup_sizes:'تم مسح مقاسات لهذه المرحلة — "كل الكمية" سيُكرّر العدّ',
     busy_wait:'⏳ جارٍ البدء — لحظة، لا تضغط مرة أخرى',
@@ -2080,6 +2084,8 @@ const LANGS={
     scan_dup_in_cart:'Already in cart',
     scan_dup_active:'Currently active',
     scan_dup_done:'Already done',
+    smp_label:'👕 First sample',
+    smp_hint:'No steps · open to all departments and stations · press Start',
     scan_dup_total:'"All quantity" already scanned for this step',
     scan_dup_sizes:'Sizes already scanned for this step — "all quantity" would double-count',
     busy_wait:'⏳ Already starting — one moment, don\'t press again',
@@ -2385,6 +2391,60 @@ function bcFromScan(text){
 function isTotalBc(raw){return !!raw&&isBcLen(raw.length)&&raw.slice(7,8)==='9'&&raw.slice(11,13)==='00';}
 // ברקוד "יצא ללקוח": size='9', col='99' (הצבעים 01-30 בלבד — אין התנגשות). מבנה: לקוח+מוצר+9+000+99
 function isShipBc(raw){return !!raw&&isBcLen(raw.length)&&raw.slice(7,8)==='9'&&raw.slice(11,13)==='99';}
+// ─── 👕 דגם ראשון ──────────────────────────────────────────────
+// ברקוד הדגם: size='9', col='88' (הצבעים 01-30 — אין התנגשות עם '00' כל-הכמות / '99' יצא ללקוח).
+// מבנה: לקוח+מוצר+9+כמות(3)+88[+הזמנה]. עובד **הפוך** מברקוד רגיל: אין שלבים, אין שער תחנה
+// ואין שער סדר, ואין חסימת "כבר בוצע" — כל עובד בכל מחלקה סורק את אותו ברקוד אחרי שהקודם
+// סיים, והמשימה מתחילה מיד. העלות = שעות העבודה בפועל (דוח הרווח האמיתי), המחיר ₪100 ליחידה.
+// 🛑 נשארת חסימה אחת: אותו עובד שכבר פתוח על אותו דגם — זו כפילות אמיתית, לא עבודה.
+const SAMPLE_STEP='👕 דגם ראשון';
+const SAMPLE_UNIT_PRICE=100;
+function isSampleBc(raw){return !!raw&&isBcLen(raw.length)&&raw.slice(7,8)==='9'&&raw.slice(11,13)==='88';}
+// רשומת ההזמנה של ברקוד — לפי מספר ההזמנה כשיש (16 ספרות), אחרת העדכנית.
+function bcOrderProd(raw){
+  const c=String(raw).slice(0,2),p=String(raw).slice(2,7);
+  return prodByOrderNo(c,p,orderNoOf(raw))||findProd(c,p);
+}
+// דגם = ברקוד הדגם עצמו, **או** כל ברקוד של הזמנה שסומנה 👕 בכרטיס המוצר — מדבקות רגילות
+// שהודפסו לפני הסימון ממשיכות לעבוד כדגם.
+function isSampleScan(raw){
+  if(!raw||!isBcLen(raw.length)||isShipBc(raw))return false;
+  return isSampleBc(raw)||!!bcOrderProd(raw)?.isSample;
+}
+function sampleQtyOf(raw){
+  const q=parseInt(String(raw).slice(8,11))||0;if(q)return q;
+  return (bcOrderProd(raw)?.quantities||[]).reduce((s,x)=>s+(parseInt(x.qty)||0),0)||1;
+}
+// פריט סל של דגם. ⚠️ החותמת נלקחת מרשומת ההזמנה של הברקוד ולא מ-prodStampFor, שבוחר תמיד
+// את החדשה ביותר: הזמנת ייצור של אותו דגם שנפתחה בינתיים הייתה בולעת את שעות הדגם.
+function sampleBase(raw,taskDept){
+  const p=bcOrderProd(raw),sb=isSampleBc(raw),cust=raw.slice(0,2),prod=raw.slice(2,7);
+  return{raw,cust,prod,size:sb?'':raw.slice(7,8),qty:sampleQtyOf(raw),col:sb?'':raw.slice(11,13),
+    isTotal:false,taskDept:taskDept||'',taskType:SAMPLE_STEP,isSample:true,
+    prodStamp:p?prodStampOf(p):prodStampFor(cust,prod)};
+}
+// '' = מותר. חוסם רק כפילות בסל, או אותו עובד שכבר פתוח (לא מושהה) על אותו ברקוד דגם.
+function sampleDupFor(workerId,raw,cart){
+  const T=LANGS[currentLang];
+  if((cart||[]).some(b=>b.raw===raw&&b.taskType===SAMPLE_STEP))return T.scan_dup_in_cart||'כבר בסל';
+  if(S.activeTasks.some(t=>t.workerId===workerId&&taskBc(t)===raw&&t.taskType===SAMPLE_STEP&&!t.paused))return T.scan_dup_active||'פעיל כעת';
+  return '';
+}
+function sampleScanPreview(v){
+  const T=LANGS[currentLang];
+  return `<div style="display:flex;gap:5px;flex-wrap:wrap;align-items:center;padding:8px;background:var(--bg2);border-radius:var(--r)">
+      <span class="bc-seg bc-c">לקוח: ${esc(v.slice(0,2))}</span>
+      <span class="bc-seg bc-p">מוצר: ${esc(v.slice(2,7))}</span>${bcOrderChip(v)}
+      <span class="bc-seg" style="background:var(--blue-bg,#dbeafe);color:var(--blue-txt,#1d4ed8);font-weight:700">${T.smp_label||SAMPLE_STEP} — ${sampleQtyOf(v)} יח׳</span>
+    </div>
+    <div style="font-size:11px;color:var(--txt3);margin-top:4px">${T.smp_hint||'בלי שלבים · פתוח לכל המחלקות והתחנות · לחץ "התחל"'}</div>`;
+}
+// מצב דגם בסורק: מסתיר גם את רשימת השלבים וגם את שדה סוג המשימה החופשי
+function showSampleMode(prefix){
+  ['-tasktype-wrap','-steps-wrap'].forEach(s=>{const e=document.getElementById(prefix+s);if(e)e.style.display='none';});
+  clearStepChecks(prefix);
+  ['-expected','-recs'].forEach(s=>{const e=document.getElementById(prefix+s);if(e)e.innerHTML='';});
+}
 function productHasDefinedQty(cust,prod){
   const p=findProd(cust,prod);
   return p&&p.quantities&&p.quantities.some(q=>parseInt(q.qty)>0);
@@ -5190,7 +5250,7 @@ async function bcStartBatch(){
   // 🔒 בדיקה חוזרת ברגע ההתחלה — התחנה יכולה להתחלף בין ההוספה לסל לבין הלחיצה על "התחל".
   // מקובצת לפי לקוח+מוצר כדי שלא יישאלו 5 אישורים על אותה חריגה.
   const _bcGate={};
-  for(const b of items){const k=b.cust+'|'+b.prod;(_bcGate[k]=_bcGate[k]||[]).push(b.taskType||'');}
+  for(const b of items){if(b.isSample)continue;const k=b.cust+'|'+b.prod;(_bcGate[k]=_bcGate[k]||[]).push(b.taskType||'');} // 👕 דגם — פתוח לכל התחנות
   for(const k of Object.keys(_bcGate)){
     const i=k.indexOf('|');
     if(!await passStationGate(wu,k.slice(0,i),k.slice(i+1),_bcGate[k]))return;
@@ -5198,7 +5258,7 @@ async function bcStartBatch(){
   // 🔗 שער סדר השלבים — פר **ברקוד** ולא פר מוצר: הכיסוי נמדד למידה/צבע הספציפיים.
   // כל השלבים של אותו ברקוד בסל נשלחים יחד, ולכן הם נחשבים "אותה סריקה" ולא חוסמים זה את זה.
   const _bcOrd={};
-  for(const b of items){(_bcOrd[b.raw]=_bcOrd[b.raw]||{cust:b.cust,prod:b.prod,steps:[]}).steps.push(b.taskType||'');}
+  for(const b of items){if(b.isSample)continue;(_bcOrd[b.raw]=_bcOrd[b.raw]||{cust:b.cust,prod:b.prod,steps:[]}).steps.push(b.taskType||'');}
   for(const raw of Object.keys(_bcOrd)){
     const o=_bcOrd[raw];
     if(!await passMergeGate(o.cust,o.prod,raw,o.steps,u.id))return;
@@ -5217,11 +5277,12 @@ async function bcStartBatch(){
       const newTask={id:String(Date.now())+Math.random().toString(36).slice(2,6),workerId:u.id,workerName:u.name,scannedBy:S.user?.id||'',scannedByName:S.user?.name||'',dept:b.taskDept||effDept(wu),station:wu.currentStation?.name||'',cust:b.cust,prod:b.prod,size:b.size,qty:b.qty,col:b.col,taskType:b.taskType,bc:b.raw,isTotal:b.isTotal||false,startTime:bcStart,elapsed:0,prodStamp:b.prodStamp};
       if(bcBatchId)newTask.batchId=bcBatchId;
       if(b.expMin!=null)newTask.expectedMin=b.expMin;
+      if(b.isSample)newTask.isSample=true;
       if(!(await claimTaskGuard(newTask)).ok){dupSkip.push((b.taskType||b.prod)+' — '+(T.scan_dup_active||'פעיל כעת'));continue;}
       S.activeTasks.unshift(newTask);created++;
       if(S.fbConnected)await fbSet('activeTasks',newTask.id,{...newTask,startTime:bcStart.toISOString()});
       tgTask(newTask,true);
-      await autoStampStage(b.cust,b.prod,b.taskDept||effDept(wu)); // עדכון אוטומטי של שלב הייצור
+      if(!b.isSample)await autoStampStage(b.cust,b.prod,b.taskDept||effDept(wu)); // עדכון אוטומטי של שלב הייצור (דגם — לא מזיז שלב)
     }
     // סגירת המשימות הקודמות — רק עכשיו, כשידוע שנוצרה משימה חדשה שתחליף אותן.
     // endTime=bcStart (רגע פתיחת החדשות) ⇒ אין חפיפה ואין חור בציר הזמן.
@@ -5783,6 +5844,7 @@ function parseBc(v){
   v=(v||'').replace(/\D/g,'');
   const el=document.getElementById('bc-prev');
   if(v.length<2){el.innerHTML='';bcShowTaskTypeField(true);return;}
+  if(isBcLen(v.length)&&isSampleScan(v)){el.innerHTML=sampleScanPreview(v);showSampleMode('bc');return;}
   const c=v.slice(0,2),p=v.slice(2,7),sz=v.slice(7,8),q=v.slice(8,11),col=v.slice(11,13);
   const isTotal=isTotalBc(v);
   const totalQty=isTotal?getTotalQty(c,p,orderNoOf(v)):0;
@@ -5838,6 +5900,7 @@ async function submitBc(){
   if(!isBcLen(raw.length)){alert('ברקוד חייב להיות 13 או 16 ספרות');return;}
   if(!S.user){alert('יש להתחבר תחילה');return;}
   if(isShipBc(raw)){openShipModal(raw.slice(0,2),raw.slice(2,7),orderNoOf(raw));document.getElementById('bc-inp').value='';parseBc('');return;} // ברקוד "יצא ללקוח" — לא משימה
+  if(isSampleScan(raw)){await bcStartSample(raw);return;} // 👕 דגם ראשון — התחלה מיידית, בלי שלבים ושערים
   const cust=raw.slice(0,2),prod=raw.slice(2,7),size=raw.slice(7,8),col=raw.slice(11,13);
   const isTotal=isTotalBc(raw);
   if(!isTotal&&parseInt(raw.slice(8,11))===0&&productHasDefinedQty(cust,prod)){showToast('⚠ קיים ברקוד עם כמות למוצר זה — השתמש בברקוד הספציפי','var(--red-txt)',6000);return;}
@@ -5889,8 +5952,8 @@ async function submitBc(){
     // נחסמת מלסרוק בכלל — כלומר גם מלהתחיל את הזמנית שבשבילה השהתה. זה היה הופך
     // את ⏸ למלכודת: הודעת "עד 2 ברקודים" בלי שום רמז לסיבה.
     const nonQuickBc=new Set([
-      ...S.activeTasks.filter(t=>t.workerId===u.id&&!t.paused&&!isQuickStep(t.cust,t.prod,t.taskType)).map(t=>taskBc(t)),
-      ..._bcBatch.filter(b=>!isQuickStep(b.cust,b.prod,b.taskType)).map(b=>b.raw)
+      ...S.activeTasks.filter(t=>t.workerId===u.id&&!t.paused&&!t.isSample&&!isQuickStep(t.cust,t.prod,t.taskType)).map(t=>taskBc(t)),
+      ..._bcBatch.filter(b=>!b.isSample&&!isQuickStep(b.cust,b.prod,b.taskType)).map(b=>b.raw)
     ]);
     if(addingNonQuick&&!nonQuickBc.has(raw)&&nonQuickBc.size>=2){showToast(T.lim_bc||'⚠ ניתן לסרוק עד 2 ברקודים','var(--red-txt)');return;}
   }
@@ -5911,6 +5974,28 @@ async function submitBc(){
     if(!startNow){showToast(T.bc_scan_next||'📷 סרוק את הברקוד הבא');document.getElementById('bc-inp').focus();return;}
     await bcStartBatch();
   }catch(e){showToast('❌ שגיאה בפתיחת משימה: '+e.message,'var(--red-txt)',8000);}
+}
+// 👕 דגם ראשון בסורק האישי — התחלה מיידית: בלי שלבים, בלי שערי תחנה/סדר, בלי מגבלת 2 ברקודים
+// ובלי שאלת "לצרף עוד". השאלה על משימה פעילה נשארת — היא לא שער אלא החלטה מה לעשות בזמן שלה.
+async function bcStartSample(raw){
+  const u=S.user;
+  const wu=S.workers.find(x=>x.id===u.id);
+  if(!wu||wu.status!=='in'){alert('לא ניתן להתחיל משימה — יש להירשם כנוכח תחילה (כניסה לעבודה בלשונית נוכחות)');return;}
+  const dup=sampleDupFor(u.id,raw,_bcBatch);
+  if(dup){showToast(SAMPLE_STEP+' — '+dup,'var(--red-txt)',6000);return;}
+  if(!_bcBatch.length){
+    _bcCloseOnStart=[];_bcPauseOnStart=[];
+    const existTasks=S.activeTasks.filter(t=>t.workerId===u.id&&!t.paused);
+    if(existTasks.length){
+      const _sm=await askSwapMode({name:u.name},existTasks);
+      if(_sm==='pause')_bcPauseOnStart=existTasks.map(t=>String(t.id));
+      else _bcCloseOnStart=existTasks.map(t=>String(t.id));
+    }
+  }
+  _bcBatch.push(sampleBase(raw,(document.getElementById('bc-dept')?.value||'').trim()));
+  document.getElementById('bc-inp').value='';parseBc('');
+  renderBcBatchQueue();
+  await bcStartBatch();
 }
 function fillDeptSelects(){
   const selDept=LANGS[currentLang].sel_dept||'-- בחר מחלקה --';
@@ -7551,7 +7636,8 @@ function rrRender(){
         +(r.shipped<r.planned?note(`🚚 יצא ${r.shipped} מתוך ${r.planned}`):'')
         +(r.open?note(`⏳ ${r.open} משימות פתוחות`):'')
         +(!r.n?note('⚠ אין משימות רשומות','--red-txt'):'')
-        +(r.cutPrice>0?note(`כולל ✂ ₪${r.cutPrice.toFixed(2)}/יח'`,'--txt3'):'');
+        +(r.cutPrice>0?note(`כולל ✂ ₪${r.cutPrice.toFixed(2)}/יח'`,'--txt3'):'')
+        +(p.isSample?note(SAMPLE_STEP+' · העלות לפי זמן העבודה','--blue-txt'):'');
       const cust=(S.customerNames||{})[p.cust];
       return`<tr${on?' style="background:var(--blue-bg)"':''}>
         <td><input type="checkbox" style="width:auto" ${on?'checked':''} ${r.price>0?'':'disabled'} onchange="rrToggle('${escj(p.id)}',this.checked)"/></td>
@@ -8197,6 +8283,7 @@ function parseMgrBc(v){
   v=(v||'').replace(/\D/g,'');
   const el=document.getElementById('mgr-bc-prev');if(!el)return;
   if(v.length<2){el.innerHTML='';mgrShowTaskTypeField(true);return;}
+  if(isBcLen(v.length)&&isSampleScan(v)){el.innerHTML=sampleScanPreview(v);showSampleMode('mgr');return;}
   const c=v.slice(0,2),p=v.slice(2,7),sz=v.slice(7,8),q=v.slice(8,11),col=v.slice(11,13);
   const isTotal=isTotalBc(v);const totalQty=isTotal?getTotalQty(c,p,orderNoOf(v)):0;
   el.innerHTML=isTotal
@@ -8915,6 +9002,7 @@ function tsParseBc(v){
     tsShowTaskTypeField(true);
     return;
   }
+  if(isBcLen(v.length)&&isSampleScan(v)){el.innerHTML=sampleScanPreview(v);showSampleMode('ts');return;}
   const c=v.slice(0,2),p=v.slice(2,7),sz=v.slice(7,8),q=v.slice(8,11),col=v.slice(11,13);
   const isTotal=isTotalBc(v);const totalQty=isTotal?getTotalQty(c,p,orderNoOf(v)):0;
   el.innerHTML=isTotal
@@ -8961,7 +9049,7 @@ function tsScanLimitsOk(raw,checkedSteps){
   if(nonQuickSteps.length>2){showToast(T.lim_steps||'⚠ ניתן לבחור עד 2 שלבים לכל ברקוד','var(--red-txt)');return false;}
   // ברקוד שכל שלביו בסל הם ⚡ מהיר אינו נספר; סריקה כולה-מהירה לא נחסמת
   const addingNonQuick=(checkedSteps&&checkedSteps.length)?nonQuickSteps.length>0:true;
-  const nonQuickBc=new Set(_tsBatch.filter(b=>!b.taskType||!isQuickStep(b.cust,b.prod,b.taskType)).map(b=>b.raw));
+  const nonQuickBc=new Set(_tsBatch.filter(b=>!b.isSample&&(!b.taskType||!isQuickStep(b.cust,b.prod,b.taskType))).map(b=>b.raw));
   if(addingNonQuick&&!nonQuickBc.has(raw)&&nonQuickBc.size>=2){showToast(T.lim_bc||'⚠ ניתן לסרוק עד 2 ברקודים','var(--red-txt)');return false;}
   return true;
 }
@@ -9070,7 +9158,12 @@ async function tsStartTask(){
   const w=S.workers.find(x=>x.id===empId);
   if(!w||w.status!=='in'){showToast(T.cfm_worker_not_in||'⚠ העובד לא נמצא בעבודה — וודא שחתם כניסה','var(--red-txt)',5000);return;}
   // אם יש ברקוד בשדה — הוסף לסל
-  if(isBcLen(raw.length)){
+  if(isBcLen(raw.length)&&isSampleScan(raw)){
+    // 👕 דגם ראשון — בלי שלבים, בלי שערי תחנה/סדר ובלי מגבלות הסל
+    const dup=sampleDupFor(w.id,raw,_tsBatch);
+    if(dup){showToast(SAMPLE_STEP+' — '+dup,'var(--red-txt)',6000);if(!_tsBatch.length)return;}
+    else _tsBatch.push(sampleBase(raw,(document.getElementById('ts-dept')?.value||'').trim()));
+  }else if(isBcLen(raw.length)){
     if(!isTotalBc(raw)&&parseInt(raw.slice(8,11))===0&&productHasDefinedQty(raw.slice(0,2),raw.slice(2,7))){showToast('⚠ קיים ברקוד עם כמות למוצר זה','var(--red-txt)',6000);return;}
     const cust=raw.slice(0,2),prod=raw.slice(2,7),size=raw.slice(7,8),col=raw.slice(11,13);
     const isTotal=isTotalBc(raw);const qty=isTotal?getTotalQty(cust,prod,orderNoOf(raw)):parseInt(raw.slice(8,11))||0;
@@ -9117,15 +9210,16 @@ async function tsStartTask(){
       // רגע ההתחלה בפועל. בלי השדה הזה אי אפשר להפריד קצב עבודה מזמן חלוקה. נוסף 10/09/2026
       // בכל ארבע נקודות היצירה (5197 עצמי · כאן · 9268 מנהל · 9322 פיצול); רשומות ישנות בלעדיו.
       const task={id:String(Date.now())+Math.random().toString(36).slice(2,6),workerId:w.id,workerName:w.name,scannedBy:S.user?.id||'',scannedByName:S.user?.name||'',dept:b.taskDept||effDept(w),station:w.currentStation?.name||'',cust:b.cust,prod:b.prod,size:b.size,qty:b.qty,col:b.col,taskType:b.taskType,bc:b.raw,isTotal:b.isTotal||false,startTime,elapsed:0,accumulatedSec:0,prodStamp:b.prodStamp};
-      const exp=await fetchExpected(b.cust,b.prod,w.id,b.qty);
+      const exp=b.isSample?null:await fetchExpected(b.cust,b.prod,w.id,b.qty); // 👕 דגם — אין צפי
       if(exp?.ok&&exp.perStep?.[b.taskType]!=null)task.expectedMin=exp.perStep[b.taskType];
+      if(b.isSample)task.isSample=true;
       if(batchId)task.batchId=batchId;
       if(!(await claimTaskGuard(task)).ok){tsDupSkip.push((b.taskType||b.prod)+' — '+(T.scan_dup_active||'פעיל כעת'));continue;}
       S.activeTasks.push(task);created++;
       if(S.fbConnected)await fbSet('activeTasks',String(task.id),{...task,startTime:task.startTime.toISOString()});
       tgTask(task,true);
       if(w.pushPrefs?.task_assigned!==false)sendPushToWorker(w.id,'📋 משימה חדשה',`${task.prod}${task.taskType?' · '+task.taskType:''} · ${task.qty} יח'`).catch(()=>{});
-      await autoStampStage(b.cust,b.prod,b.taskDept||effDept(w)); // עדכון אוטומטי של שלב הייצור
+      if(!b.isSample)await autoStampStage(b.cust,b.prod,b.taskDept||effDept(w)); // עדכון אוטומטי של שלב הייצור
     }
     // טיפול במשימות הקודמות — רק עכשיו, כשידוע שיש משימה חדשה שתחליף אותן
     if(created>0&&activeCurrent.length>0)await applySwapMode(swapMode,w.id,activeCurrent,swapTime);
@@ -9394,7 +9488,12 @@ async function mgrStartTask(){
   if(!empId){showToast(T.err_sel_worker||'⚠ בחר עובד','var(--red-txt)');return;}
   const w=S.workers.find(x=>x.id===empId);
   if(!w||w.status!=='in'){showToast(T.cfm_worker_not_in||'⚠ העובד לא נמצא בעבודה','var(--red-txt)',5000);return;}
-  if(isBcLen(raw.length)){
+  if(isBcLen(raw.length)&&isSampleScan(raw)){
+    // 👕 דגם ראשון — בלי שלבים ובלי שערי תחנה/סדר
+    const dup=sampleDupFor(empId,raw,_mgrBatch);
+    if(dup){showToast(SAMPLE_STEP+' — '+dup,'var(--red-txt)',6000);if(!_mgrBatch.length)return;}
+    else _mgrBatch.push(sampleBase(raw,(document.getElementById('mgr-dept')?.value||'').trim()));
+  }else if(isBcLen(raw.length)){
     if(!isTotalBc(raw)&&parseInt(raw.slice(8,11))===0&&productHasDefinedQty(raw.slice(0,2),raw.slice(2,7))){showToast('⚠ קיים ברקוד עם כמות למוצר זה','var(--red-txt)',6000);return;}
     const cust=raw.slice(0,2),prod=raw.slice(2,7),size=raw.slice(7,8),col=raw.slice(11,13);
     const isTotal=isTotalBc(raw);const qty=isTotal?getTotalQty(cust,prod,orderNoOf(raw)):parseInt(raw.slice(8,11))||0;
@@ -9430,14 +9529,15 @@ async function mgrStartTask(){
     // ממכשיר אחר לא נמצאת שם כלל, ולכן לא נסגרה ולא נחסמה. כאן היא נתפסת.
     if(findDupIn(mgrSrvActive,b.raw,b.taskType)){mgrDupSkip.push((b.taskType||b.prod)+' — '+(T.scan_dup_active||'פעיל כעת'));continue;}
     const newTask={id:String(Date.now())+Math.random().toString(36).slice(2,6),workerId:empId,workerName:w.name,scannedBy:S.user?.id||'',scannedByName:S.user?.name||'',dept:b.taskDept||effDept(w),station:w.currentStation?.name||'',cust:b.cust,prod:b.prod,size:b.size,qty:b.qty,col:b.col,taskType:b.taskType,bc:b.raw,isTotal:b.isTotal||false,startTime,elapsed:0,accumulatedSec:0,prodStamp:b.prodStamp};
-    const expM=await fetchExpected(b.cust,b.prod,empId,b.qty);
+    const expM=b.isSample?null:await fetchExpected(b.cust,b.prod,empId,b.qty); // 👕 דגם — אין צפי
     if(expM?.ok&&expM.perStep?.[b.taskType]!=null)newTask.expectedMin=expM.perStep[b.taskType];
+    if(b.isSample)newTask.isSample=true;
     if(batchId)newTask.batchId=batchId;
     if(!(await claimTaskGuard(newTask)).ok){mgrDupSkip.push((b.taskType||b.prod)+' — '+(T.scan_dup_active||'פעיל כעת'));continue;}
     S.activeTasks.unshift(newTask);mgrCreated++;
     if(S.fbConnected)await fbSet('activeTasks',newTask.id,{...newTask,startTime:newTask.startTime.toISOString()});
     tgTask(newTask,true);
-    await autoStampStage(b.cust,b.prod,b.taskDept||effDept(w)); // עדכון אוטומטי של שלב הייצור
+    if(!b.isSample)await autoStampStage(b.cust,b.prod,b.taskDept||effDept(w)); // עדכון אוטומטי של שלב הייצור
   }
   // טיפול במשימות הקודמות — רק עכשיו, כשידוע שיש משימה חדשה שתחליף אותן
   if(mgrCreated>0&&activeCurrent.length>0)await applySwapMode(swapMode,empId,activeCurrent,swapTime);
@@ -12491,6 +12591,9 @@ function bcGenerate(){
   const cust=(document.getElementById('bc-gen-cust')?.value||'').replace(/\D/g,'').padStart(2,'0').slice(0,2);
   const prod=(document.getElementById('bc-gen-prod')?.value||'').replace(/\D/g,'').padStart(5,'0').slice(0,5);
   if(cust==='00'||prod==='00000'){alert('הזן מספר לקוח ומספר מוצר');return;}
+  // 👕 הזמנה שסומנה "דגם ראשון" — ברקוד דגם אחד במקום "כל הכמות" + ברקוד לכל מידה/צבע
+  const _st=bcGenTarget();
+  if(_st?.isSample){bcGenerateSample(cust,prod,_st);return;}
   const rows=[...document.querySelectorAll('.bc-row')];
   if(!rows.length){alert('הוסף לפחות שורה אחת');return;}
   const items=rows.map(r=>({
@@ -12569,6 +12672,45 @@ function bcGenerate(){
     new QRCode(qrWrap,{text:code,width:150,height:150,colorDark:'#000000',colorLight:'#ffffff',correctLevel:QRCode.CorrectLevel.M});
     setTimeout(()=>{const im=qrWrap.querySelector('img');if(im)im.style.display='none';},50);
   });
+}
+// 👕 כרטיס ברקוד דגם בודד. הכמות מהמוצר (מקור האמת), ובהיעדרה מהשורות במחולל.
+// items ריק + sample ⇒ bcPrint/bcDownloadPDF מדפיסים רק אותו (וכרטיס "יצא ללקוח" כרגיל).
+function bcGenerateSample(cust,prod,t){
+  const out=document.getElementById('bc-gen-output');if(!out)return;
+  const sfx=bcSuffixFor(t);
+  const prodQty=(t.quantities||[]).reduce((s,x)=>s+(parseInt(x.qty)||0),0);
+  const rowsQty=[...document.querySelectorAll('.bc-row')].reduce((s,r)=>s+(parseInt(r.querySelector('.bc-qty')?.value)||0),0);
+  const qty=Math.min(999,Math.max(1,prodQty||rowsQty||1));
+  const code=cust+prod+'9'+String(qty).padStart(3,'0')+'88'+sfx;
+  window._bcLastGen={cust,prod,items:[],sfx,pid:t.id||null,sample:{code,qty}};
+  out.innerHTML=`
+    <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:12px;flex-wrap:wrap;gap:8px">
+      <div style="font-size:14px;font-weight:600">${SAMPLE_STEP} — לקוח ${cust} · מוצר ${prod}</div>
+      <div style="display:flex;gap:8px;flex-wrap:wrap">
+        <button class="btn" onclick="bcPrint()" style="font-size:13px">🖨️ הדפס הכל</button>
+        <button class="btn" onclick="bcPrint('labels')" style="font-size:13px">🏷️ הדפס למדבקות</button>
+        <button class="btn success" onclick="bcDownloadPDF()" style="font-size:13px">📄 הורד PDF מדבקות</button>
+      </div>
+    </div>
+    <div id="bc-print-area" style="display:grid;grid-template-columns:repeat(auto-fill,minmax(300px,1fr));gap:12px"></div>`;
+  const div=document.createElement('div');
+  div.className='bc-card';div.dataset.col='sample';
+  div.style.cssText='background:#fff;border:3px solid #1d4ed8;border-radius:6px;padding:10px;display:flex;align-items:center;gap:12px;break-inside:avoid;grid-column:1/-1';
+  const qrWrap=document.createElement('div');
+  qrWrap.style.cssText='flex-shrink:0;width:150px;height:150px;overflow:hidden';
+  const info=document.createElement('div');
+  info.style.cssText='text-align:right;line-height:2;flex:1';
+  info.innerHTML=`
+    <div style="font-size:15px;font-weight:800;color:#1d4ed8;margin-bottom:4px">${SAMPLE_STEP}</div>
+    <div style="font-size:13px;font-weight:700;color:#000">לקוח: ${cust}</div>
+    <div style="font-size:13px;font-weight:700;color:#000">מוצר: ${prod}</div>
+    ${bcOrderLbl(code)}
+    <div style="font-size:16px;font-weight:800;color:#1d4ed8">כמות: ${qty} יח׳</div>
+    <div style="font-size:11px;color:#555;margin-top:4px">${code}</div>`;
+  div.appendChild(qrWrap);div.appendChild(info);
+  document.getElementById('bc-print-area').appendChild(div);
+  new QRCode(qrWrap,{text:code,width:150,height:150,colorDark:'#000000',colorLight:'#ffffff',correctLevel:QRCode.CorrectLevel.M});
+  setTimeout(()=>{const im=qrWrap.querySelector('img');if(im)im.style.display='none';},50);
 }
 // הדפסה דרך iframe נסתר במקום window.open — ב-PWA במסך הבית (standalone) window.open נתקע על דף ההדפסה ואי אפשר לסגור אותו אלא בסגירת האפליקציה כולה
 function printViaIframe(html){
@@ -12962,8 +13104,9 @@ function bcPrint(mode){
     const items=[]; // כל פריט = שורה שלמה, כדי שלעולם לא ייחתך באמצע
     [...byColor.entries()].forEach(([col,cards])=>{
       const colName=(COLORS_AR[col]||COLORS[col]||col);
-      const hdr=col==='total'?'':`<div class="colhdr">צבע: ${col} · ${colName} — ${cards.length} יחידות</div>`;
-      const per=col==='total'?1:2; // כרטיס "כל הכמות" תופס שורה שלמה
+      const wide=col==='total'||col==='sample'; // "כל הכמות" / 👕 דגם — בלי כותרת צבע, שורה שלמה
+      const hdr=wide?'':`<div class="colhdr">צבע: ${col} · ${colName} — ${cards.length} יחידות</div>`;
+      const per=wide?1:2; // כרטיס "כל הכמות" תופס שורה שלמה
       for(let i=0;i<cards.length;i+=per){
         const row=`<div class="grid">${cards.slice(i,i+per).join('')}</div>`;
         // הכותרת נצמדת לשורה הראשונה — כדי שלא תישאר לבדה בתחתית דף
@@ -13003,7 +13146,7 @@ function bcPrint(mode){
       .bc-card{border:2px solid #333;border-radius:6px;padding:6px 8px!important;display:inline-flex!important;align-items:center;gap:10px;
         width:calc(50% - 10px);height:46mm;box-sizing:border-box;vertical-align:top;margin:0 4px 2mm;font-size:13px;overflow:hidden;
         break-inside:avoid!important;page-break-inside:avoid!important}
-      .bc-card[data-col="total"]{width:calc(100% - 8px)}
+      .bc-card[data-col="total"],.bc-card[data-col="sample"]{width:calc(100% - 8px)}
       /* line-height מכווץ בהדפסה בלבד — 7 שורות טקסט (כולל "הזמנה #NNN") נכנסות ב-46 מ"מ */
       .bc-card>div:last-child{line-height:1.5!important}
       .bc-card img{width:38mm;height:38mm}
@@ -13051,7 +13194,13 @@ function bcDownloadPDF(){
   const {cust,prod,items}=g,sfx=g.sfx||'';
   const totalQty=items.reduce((s,it)=>s+(parseInt(it.qty)||0),0);
   const totalCode=cust+prod+'900000'+sfx;
-  const cards=[{qr:totalCode,lines:[
+  const cards=g.sample?[{qr:g.sample.code,lines:[
+    {t:SAMPLE_STEP,mm:4,bold:true,color:'#1d4ed8'},
+    {t:'לקוח: '+cust,mm:3.6,bold:true,color:'#000'},
+    {t:'מוצר: '+prod,mm:3.6,bold:true,color:'#000'},
+    ...(sfx?[{t:'🔢 הזמנה #'+sfx,mm:3.6,bold:true,color:'#059669'}]:[]),
+    {t:'כמות: '+g.sample.qty+' יח׳',mm:4,bold:true,color:'#1d4ed8'},
+    {t:g.sample.code,mm:2.8,bold:false,color:'#555'}]}]:[{qr:totalCode,lines:[
     {t:'📦 כל הכמות',mm:4,bold:true,color:'#059669'},
     {t:'לקוח: '+cust,mm:3.6,bold:true,color:'#000'},
     {t:'מוצר: '+prod,mm:3.6,bold:true,color:'#000'},
@@ -13239,7 +13388,7 @@ function renderProducts(){
     return`<div class="card" style="margin-bottom:10px">
       <div style="display:flex;align-items:flex-start;justify-content:space-between;gap:8px">
         <div style="flex:1">
-          <div style="font-size:14px;font-weight:700;color:var(--txt)">מוצר ${esc(p.prod)} &nbsp;·&nbsp; לקוח ${esc(p.cust)}${(parseInt(p.orderNo,10)||0)?` &nbsp;·&nbsp; <span style="color:var(--green-txt,#16a34a)" title="${p.bcLen===BC_LEN_NEW?'ברקודים בני 16 ספרות':'הזמנה מלפני השינוי — ברקודים בני 13 ספרות'}">הזמנה #${String(p.orderNo).padStart(3,'0')}${p.bcLen===BC_LEN_NEW?'':' <span style="color:var(--txt3);font-weight:400">(13)</span>'}</span>`:''}${p.name?` &nbsp;·&nbsp; <span style="color:var(--txt3)">${esc(p.name)}</span>`:''}</div>
+          <div style="font-size:14px;font-weight:700;color:var(--txt)">מוצר ${esc(p.prod)} &nbsp;·&nbsp; לקוח ${esc(p.cust)}${(parseInt(p.orderNo,10)||0)?` &nbsp;·&nbsp; <span style="color:var(--green-txt,#16a34a)" title="${p.bcLen===BC_LEN_NEW?'ברקודים בני 16 ספרות':'הזמנה מלפני השינוי — ברקודים בני 13 ספרות'}">הזמנה #${String(p.orderNo).padStart(3,'0')}${p.bcLen===BC_LEN_NEW?'':' <span style="color:var(--txt3);font-weight:400">(13)</span>'}</span>`:''}${p.name?` &nbsp;·&nbsp; <span style="color:var(--txt3)">${esc(p.name)}</span>`:''}${p.isSample?` &nbsp;·&nbsp; <span style="color:var(--blue-txt)">${SAMPLE_STEP}</span>`:''}</div>
           ${stageHtml}${pricingHtml}${qtyRows}${imgHtml}${docHtml}
         </div>
         <div style="display:flex;gap:6px;flex-shrink:0">
@@ -13340,6 +13489,7 @@ function openProductModal(id){
     <button type="button" class="btn" onclick="addTaskStepRow()" style="font-size:12px">+ הוסף שלב עבודה</button>
 
     <div class="sec" style="margin-top:14px;margin-bottom:6px">💰 תמחור ליחידה</div>
+    <label style="display:flex;align-items:center;gap:6px;font-size:13px;margin-bottom:8px;cursor:pointer;flex-wrap:wrap"><input id="pm-sample" type="checkbox" style="width:auto" ${p?.isSample?'checked':''} onchange="pmSampleToggle(this)"/> <b>👕 דגם ראשון</b> <span style="font-size:11px;color:var(--txt3)">₪${SAMPLE_UNIT_PRICE} ליחידה · ברקוד דגם אחד · בלי שלבים, פתוח לכל התחנות · העלות לפי זמן העבודה</span></label>
     <div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(105px,1fr));gap:8px;margin-bottom:8px">
       <div class="field"><label>מחיר מכירה ₪</label><input id="pm-price" type="number" min="0" step="0.1" value="${p?.unitPrice||''}" placeholder="0" style="font-size:13px" oninput="syncProfitFields('price')"/></div>
       <div class="field"><label>רווח יעד %</label><input id="pm-profit" type="number" min="0" max="95" step="1" value="${p?.targetProfitPct??''}" placeholder="0" style="font-size:13px" oninput="syncProfitFields('pct')"/></div>
@@ -13865,6 +14015,12 @@ function readStagesFromModal(){
   // השלב האחרון עם תאריך = השלב הנוכחי
   return{stageLog,stageSkipped};
 }
+// 👕 סימון דגם ראשון בכרטיס המוצר — המחיר הקבוע נכנס לשדה המחיר (ניתן לעריכה)
+function pmSampleToggle(cb){
+  if(!cb.checked)return;
+  const el=document.getElementById('pm-price');
+  if(el){el.value=SAMPLE_UNIT_PRICE;syncProfitFields('price');}
+}
 async function saveProduct(){
   if(_prodImgsLoading){showToast('⏳ התמונות עדיין נטענות — נסה שוב בעוד רגע','var(--amber-txt)');return;}
   const prod=(document.getElementById('pm-prod')?.value||'').trim().padStart(5,'0').slice(0,5);
@@ -13912,6 +14068,7 @@ async function saveProduct(){
   const cutPrice=parseFloat(document.getElementById('pm-cutprice')?.value)||0;
   const _cpv=document.getElementById('pm-cutprofit')?.value;
   const cutProfitPct=(_cpv!=null&&_cpv!==''&&isFinite(+_cpv))?Math.max(0,Math.min(99,+_cpv)):null;
+  const isSample=!!document.getElementById('pm-sample')?.checked;
   if(_editProdId){
     const p=S.products.find(x=>x.id===_editProdId);
     if(p){
@@ -13925,7 +14082,7 @@ async function saveProduct(){
           sendTelegram('📦 TextileOps — מוצר עבר שלב ייצור\n🏷 מוצר: '+name+' ('+cust+'-'+prod+')\n📍 שלב: '+stageName+'\n📅 תאריך: '+s.date+' '+s.time+'\n🕐 עודכן: '+now).catch(()=>{});
         }
       }
-      Object.assign(p,{prod,cust,name,images:_prodImgs,imgCount:_prodImgs.length,docs:_prodDocs,quantities,stageLog,stageSkipped,workSteps,unitPrice,targetProfitPct,directMaterialsCost,cutPrice,cutProfitPct});
+      Object.assign(p,{prod,cust,name,images:_prodImgs,imgCount:_prodImgs.length,docs:_prodDocs,quantities,stageLog,stageSkipped,workSteps,unitPrice,targetProfitPct,directMaterialsCost,cutPrice,cutProfitPct,isSample});
     }
   }else{
     const id='p'+Date.now();
@@ -13935,7 +14092,7 @@ async function saveProduct(){
       stageLog.unshift({id:'receive',date:now.getFullYear()+'-'+pad2(now.getMonth()+1)+'-'+pad2(now.getDate()),time:pad2(now.getHours())+':'+pad2(now.getMinutes()),note:'',auto:true});
       stageLog.sort((a,b)=>PROD_STAGES.findIndex(x=>x.id===a.id)-PROD_STAGES.findIndex(x=>x.id===b.id));
     }
-    S.products.push({id,createdAt:Date.now(),...newProdOrderFields(cust,prod),prod,cust,name,images:_prodImgs,imgCount:_prodImgs.length,docs:_prodDocs,quantities,stageLog,stageSkipped,workSteps,unitPrice,targetProfitPct,directMaterialsCost,cutPrice,cutProfitPct});
+    S.products.push({id,createdAt:Date.now(),...newProdOrderFields(cust,prod),prod,cust,name,images:_prodImgs,imgCount:_prodImgs.length,docs:_prodDocs,quantities,stageLog,stageSkipped,workSteps,unitPrice,targetProfitPct,directMaterialsCost,cutPrice,cutProfitPct,isSample});
   }
   saveLS();
   if(S.fbConnected){
