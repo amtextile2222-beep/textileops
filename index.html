@@ -2423,6 +2423,13 @@ function sampleBase(raw,taskDept){
     isTotal:false,taskDept:taskDept||'',taskType:SAMPLE_STEP,isSample:true,
     prodStamp:p?prodStampOf(p):prodStampFor(cust,prod)};
 }
+const isSampleTask=t=>!!t&&(t.isSample===true||t.taskType===SAMPLE_STEP);
+// המשימות שעליהן נשאלת שאלת ⏸/✅ בפתיחת סל. סל שכולו דגמים לא נוגע בדגמים הפתוחים של העובד —
+// כמה דגמים במקביל זה מצב עבודה רגיל. סל שיש בו משימה רגילה — ההתנהגות הקיימת, כולל הדגמים.
+function swapCandidates(workerId,batch){
+  const allSample=(batch||[]).length>0&&batch.every(b=>b.isSample);
+  return S.activeTasks.filter(t=>t.workerId===workerId&&!t.paused&&!(allSample&&isSampleTask(t)));
+}
 // '' = מותר. חוסם רק כפילות בסל, או אותו עובד שכבר פתוח (לא מושהה) על אותו ברקוד דגם.
 function sampleDupFor(workerId,raw,cart){
   const T=LANGS[currentLang];
@@ -5985,7 +5992,9 @@ async function bcStartSample(raw){
   if(dup){showToast(SAMPLE_STEP+' — '+dup,'var(--red-txt)',6000);return;}
   if(!_bcBatch.length){
     _bcCloseOnStart=[];_bcPauseOnStart=[];
-    const existTasks=S.activeTasks.filter(t=>t.workerId===u.id&&!t.paused);
+    // דגמים פתוחים ממשיכים לרוץ במקביל — עובד יכול לעבוד על כמה דגמים יחד. השאלה רק על משימות
+    // רגילות. הזמן החופף מתחלק בדוחות (normalizeBatchDurations שלב ב') ולא נספר פעמיים.
+    const existTasks=S.activeTasks.filter(t=>t.workerId===u.id&&!t.paused&&!isSampleTask(t));
     if(existTasks.length){
       const _sm=await askSwapMode({name:u.name},existTasks);
       if(_sm==='pause')_bcPauseOnStart=existTasks.map(t=>String(t.id));
@@ -9192,7 +9201,7 @@ async function tsStartTask(){
   // עקבה (ايمان 08/08: 92 דקות ריקות). לכן: לא נסגר כלום עד שנוצרה לפחות משימה אחת.
   // תוצאת לוואי מכוונת: סריקה חוזרת של אותו ברקוד+שלב נחסמת כפילות ⇒ created===0 ⇒
   // המשימה הקיימת ממשיכה לרוץ במקום להיסגר לריק.
-  const activeCurrent=S.activeTasks.filter(t=>t.workerId===w.id&&!t.paused);
+  const activeCurrent=swapCandidates(w.id,_tsBatch); // 👕 סל של דגמים בלבד — דגמים פתוחים ממשיכים במקביל
   const swapMode=await askSwapMode(w,activeCurrent); // ⏸ זמנית / ✅ חדשה — כוונה בלבד
   const swapTime=srvNow(); // רגע אחד לסגירה ולפתיחה — בלי חפיפה ביניהן
   try{
@@ -9517,7 +9526,7 @@ async function mgrStartTask(){
   if(!canProceed){_mgrBatch=[];renderMgrBatchQueue();saveLS();return;}
   // ⚠️ קודם יוצרים, ורק אז סוגרים — ראה ההסבר המלא ב-tsStartTask. סגירה מוקדמת + יציאה
   // מהלולאה (רענון/כפילות בשרת/claimTaskGuard) = העובדת בלי משימה פתוחה והזמן נמחק.
-  const activeCurrent=S.activeTasks.filter(t=>t.workerId===empId&&!t.paused);
+  const activeCurrent=swapCandidates(empId,_mgrBatch); // 👕 סל של דגמים בלבד — דגמים פתוחים ממשיכים במקביל
   const swapMode=await askSwapMode(w,activeCurrent); // ⏸ זמנית / ✅ חדשה — כוונה בלבד
   const swapTime=srvNow(); // רגע אחד לסגירה ולפתיחה — בלי חפיפה ביניהן
   const batchId=_mgrBatch.length>1?genBatchId():null;
