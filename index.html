@@ -1543,7 +1543,7 @@ const LANGS={
     scan_dup_active:'פעיל כעת',
     scan_dup_done:'כבר בוצע',
     smp_label:'👕 דגם ראשון',
-    smp_hint:'בלי שלבים · פתוח לכל המחלקות והתחנות · לחץ "התחל"',
+    smp_hint:'בלי שלבים · פתוח לכל המחלקות והתחנות · אפשר לצרף לסל עוד דגם',
     scan_dup_total:'כבר נסרק "כל הכמות" לשלב הזה',
     scan_dup_sizes:'כבר נסרקו מידות לשלב הזה — "כל הכמות" ייצור כפילות',
     busy_wait:'⏳ כבר מתחיל — רגע, אל תלחץ שוב',
@@ -1814,7 +1814,7 @@ const LANGS={
     scan_dup_active:'قيد التنفيذ حالياً',
     scan_dup_done:'تم تنفيذه مسبقاً',
     smp_label:'👕 عينة أولى',
-    smp_hint:'بدون مراحل · مفتوح لكل الأقسام والمحطات · اضغط "ابدأ"',
+    smp_hint:'بدون مراحل · مفتوح لكل الأقسام والمحطات · يمكن إضافة عينة أخرى إلى السلة',
     scan_dup_total:'تم مسح "كل الكمية" لهذه المرحلة مسبقاً',
     scan_dup_sizes:'تم مسح مقاسات لهذه المرحلة — "كل الكمية" سيُكرّر العدّ',
     busy_wait:'⏳ جارٍ البدء — لحظة، لا تضغط مرة أخرى',
@@ -2085,7 +2085,7 @@ const LANGS={
     scan_dup_active:'Currently active',
     scan_dup_done:'Already done',
     smp_label:'👕 First sample',
-    smp_hint:'No steps · open to all departments and stations · press Start',
+    smp_hint:'No steps · open to all departments and stations · you can add another sample to the cart',
     scan_dup_total:'"All quantity" already scanned for this step',
     scan_dup_sizes:'Sizes already scanned for this step — "all quantity" would double-count',
     busy_wait:'⏳ Already starting — one moment, don\'t press again',
@@ -2423,13 +2423,6 @@ function sampleBase(raw,taskDept){
     isTotal:false,taskDept:taskDept||'',taskType:SAMPLE_STEP,isSample:true,
     prodStamp:p?prodStampOf(p):prodStampFor(cust,prod)};
 }
-const isSampleTask=t=>!!t&&(t.isSample===true||t.taskType===SAMPLE_STEP);
-// המשימות שעליהן נשאלת שאלת ⏸/✅ בפתיחת סל. סל שכולו דגמים לא נוגע בדגמים הפתוחים של העובד —
-// כמה דגמים במקביל זה מצב עבודה רגיל. סל שיש בו משימה רגילה — ההתנהגות הקיימת, כולל הדגמים.
-function swapCandidates(workerId,batch){
-  const allSample=(batch||[]).length>0&&batch.every(b=>b.isSample);
-  return S.activeTasks.filter(t=>t.workerId===workerId&&!t.paused&&!(allSample&&isSampleTask(t)));
-}
 // '' = מותר. חוסם רק כפילות בסל, או אותו עובד שכבר פתוח (לא מושהה) על אותו ברקוד דגם.
 function sampleDupFor(workerId,raw,cart){
   const T=LANGS[currentLang];
@@ -2444,7 +2437,7 @@ function sampleScanPreview(v){
       <span class="bc-seg bc-p">מוצר: ${esc(v.slice(2,7))}</span>${bcOrderChip(v)}
       <span class="bc-seg" style="background:var(--blue-bg,#dbeafe);color:var(--blue-txt,#1d4ed8);font-weight:700">${T.smp_label||SAMPLE_STEP} — ${sampleQtyOf(v)} יח׳</span>
     </div>
-    <div style="font-size:11px;color:var(--txt3);margin-top:4px">${T.smp_hint||'בלי שלבים · פתוח לכל המחלקות והתחנות · לחץ "התחל"'}</div>`;
+    <div style="font-size:11px;color:var(--txt3);margin-top:4px">${T.smp_hint||'בלי שלבים · פתוח לכל המחלקות והתחנות · אפשר לצרף לסל עוד דגם'}</div>`;
 }
 // מצב דגם בסורק: מסתיר גם את רשימת השלבים וגם את שדה סוג המשימה החופשי
 function showSampleMode(prefix){
@@ -5982,8 +5975,9 @@ async function submitBc(){
     await bcStartBatch();
   }catch(e){showToast('❌ שגיאה בפתיחת משימה: '+e.message,'var(--red-txt)',8000);}
 }
-// 👕 דגם ראשון בסורק האישי — התחלה מיידית: בלי שלבים, בלי שערי תחנה/סדר, בלי מגבלת 2 ברקודים
-// ובלי שאלת "לצרף עוד". השאלה על משימה פעילה נשארת — היא לא שער אלא החלטה מה לעשות בזמן שלה.
+// 👕 דגם ראשון בסורק האישי — בלי שלבים, בלי שערי תחנה/סדר, בלי מגבלת 2 ברקודים. נכנס לסל כמו כל
+// ברקוד: כמה דגמים (או דגם + מידות) על אותו טיימר = סריקה → "➕ סרוק עוד" → סריקה → "▶ התחל"
+// (החלטת המשתמש 12/09 — כמו עבודה על כמה מידות). שאלת ⏸ זמנית / ✅ חדשה נשארת כמו בכל סריקה.
 async function bcStartSample(raw){
   const u=S.user;
   const wu=S.workers.find(x=>x.id===u.id);
@@ -5992,9 +5986,7 @@ async function bcStartSample(raw){
   if(dup){showToast(SAMPLE_STEP+' — '+dup,'var(--red-txt)',6000);return;}
   if(!_bcBatch.length){
     _bcCloseOnStart=[];_bcPauseOnStart=[];
-    // דגמים פתוחים ממשיכים לרוץ במקביל — עובד יכול לעבוד על כמה דגמים יחד. השאלה רק על משימות
-    // רגילות. הזמן החופף מתחלק בדוחות (normalizeBatchDurations שלב ב') ולא נספר פעמיים.
-    const existTasks=S.activeTasks.filter(t=>t.workerId===u.id&&!t.paused&&!isSampleTask(t));
+    const existTasks=S.activeTasks.filter(t=>t.workerId===u.id&&!t.paused);
     if(existTasks.length){
       const _sm=await askSwapMode({name:u.name},existTasks);
       if(_sm==='pause')_bcPauseOnStart=existTasks.map(t=>String(t.id));
@@ -6004,6 +5996,13 @@ async function bcStartSample(raw){
   _bcBatch.push(sampleBase(raw,(document.getElementById('bc-dept')?.value||'').trim()));
   document.getElementById('bc-inp').value='';parseBc('');
   renderBcBatchQueue();
+  // כמו כל ברקוד: לצרף עוד לסל (עוד דגם / עוד מידה) על אותו טיימר, או להתחיל עכשיו.
+  // ⚠️ showConfirm מחזיר false גם בלחיצה על הרקע ⇒ "➕ סרוק עוד" — הענף הלא-הרסני, הסל נשמר.
+  const T=LANGS[currentLang];
+  const totExp=_bcBatch.reduce((s,b)=>s+(+b.expMin||0),0);
+  const qMsg=`🛒 ${_bcBatch.length} ${T.bc_tasks_in_cart||'משימות בסל'}`+(totExp>0?` · ${T.bc_total_exp||'🎯 צפי כולל'}: ${fmtExpMin(totExp)}`:'')+`\n${T.bc_cart_q_msg||'סרוק עוד ברקוד לאותו טיימר (צפי משותף לכל המשימות), או התחל עכשיו'}`;
+  const startNow=await showConfirm(T.bc_cart_q_title||'לצרף עוד משימות?',qMsg,T.bc_start_now||'▶ התחל עכשיו',T.bc_add_more||'➕ סרוק עוד');
+  if(!startNow){showToast(T.bc_scan_next||'📷 סרוק את הברקוד הבא');document.getElementById('bc-inp').focus();return;}
   await bcStartBatch();
 }
 function fillDeptSelects(){
@@ -9139,6 +9138,16 @@ function tsAddToBatch(){
   if(!empId){showToast(T.err_sel_worker||'⚠ בחר עובד','var(--red-txt)');return;}
   if(!isBcLen(raw.length)){showToast(T.err_barcode_13||'⚠ ברקוד חייב להיות 13 או 16 ספרות','var(--red-txt)');return;}
   if(isShipBc(raw)){openShipModal(raw.slice(0,2),raw.slice(2,7),orderNoOf(raw));document.getElementById('ts-bc-inp').value='';return;} // ברקוד "יצא ללקוח"
+  if(isSampleScan(raw)){
+    // 👕 דגם ראשון — נכנס לסל כמשימת דגם (בלי שלבים ובלי שערים). כמה דגמים בסל = טיימר משותף.
+    // ⚠️ בלי הענף הזה רשימת השלבים מוסתרת (מצב דגם) ⇒ נכנסה לסל משימה רגילה עם שלב ריק.
+    const dup=sampleDupFor(empId,raw,_tsBatch);
+    document.getElementById('ts-bc-inp').value='';document.getElementById('ts-bc-prev').innerHTML='';tsShowTaskTypeField(true);
+    if(dup){showToast(SAMPLE_STEP+' — '+dup,'var(--red-txt)',6000);return;}
+    _tsBatch.push(sampleBase(raw,(document.getElementById('ts-dept')?.value||'').trim()));
+    renderTsBatchQueue();showToast(T.scan_added_cart);
+    return;
+  }
   const cust=raw.slice(0,2),prod=raw.slice(2,7),size=raw.slice(7,8),col=raw.slice(11,13);
   const isTotal=isTotalBc(raw);
   const qty=isTotal?getTotalQty(cust,prod,orderNoOf(raw)):parseInt(raw.slice(8,11))||0;
@@ -9201,7 +9210,7 @@ async function tsStartTask(){
   // עקבה (ايمان 08/08: 92 דקות ריקות). לכן: לא נסגר כלום עד שנוצרה לפחות משימה אחת.
   // תוצאת לוואי מכוונת: סריקה חוזרת של אותו ברקוד+שלב נחסמת כפילות ⇒ created===0 ⇒
   // המשימה הקיימת ממשיכה לרוץ במקום להיסגר לריק.
-  const activeCurrent=swapCandidates(w.id,_tsBatch); // 👕 סל של דגמים בלבד — דגמים פתוחים ממשיכים במקביל
+  const activeCurrent=S.activeTasks.filter(t=>t.workerId===w.id&&!t.paused);
   const swapMode=await askSwapMode(w,activeCurrent); // ⏸ זמנית / ✅ חדשה — כוונה בלבד
   const swapTime=srvNow(); // רגע אחד לסגירה ולפתיחה — בלי חפיפה ביניהן
   try{
@@ -9474,6 +9483,14 @@ function mgrAddToBatch(){
   if(!empId){showToast(T.err_sel_worker||'⚠ בחר עובד','var(--red-txt)');return;}
   if(!isBcLen(raw.length)){showToast(T.err_barcode_13||'⚠ ברקוד חייב להיות 13 או 16 ספרות','var(--red-txt)');return;}
   if(isShipBc(raw)){openShipModal(raw.slice(0,2),raw.slice(2,7),orderNoOf(raw));document.getElementById('mgr-bc-inp').value='';parseMgrBc('');return;} // ברקוד "יצא ללקוח"
+  if(isSampleScan(raw)){ // 👕 דגם ראשון — לסל כמשימת דגם, כמו ב-tsAddToBatch
+    const dup=sampleDupFor(empId,raw,_mgrBatch);
+    document.getElementById('mgr-bc-inp').value='';parseMgrBc('');
+    if(dup){showToast(SAMPLE_STEP+' — '+dup,'var(--red-txt)',6000);return;}
+    _mgrBatch.push(sampleBase(raw,(document.getElementById('mgr-dept')?.value||'').trim()));
+    renderMgrBatchQueue();showToast(T.scan_added_cart);
+    return;
+  }
   const cust=raw.slice(0,2),prod=raw.slice(2,7),size=raw.slice(7,8),col=raw.slice(11,13);
   const isTotal=isTotalBc(raw);const qty=isTotal?getTotalQty(cust,prod,orderNoOf(raw)):parseInt(raw.slice(8,11))||0;
   const mgrStepsWrap=document.getElementById('mgr-steps-wrap');const mgrUseSteps=mgrStepsWrap&&mgrStepsWrap.style.display!=='none';
@@ -9526,7 +9543,7 @@ async function mgrStartTask(){
   if(!canProceed){_mgrBatch=[];renderMgrBatchQueue();saveLS();return;}
   // ⚠️ קודם יוצרים, ורק אז סוגרים — ראה ההסבר המלא ב-tsStartTask. סגירה מוקדמת + יציאה
   // מהלולאה (רענון/כפילות בשרת/claimTaskGuard) = העובדת בלי משימה פתוחה והזמן נמחק.
-  const activeCurrent=swapCandidates(empId,_mgrBatch); // 👕 סל של דגמים בלבד — דגמים פתוחים ממשיכים במקביל
+  const activeCurrent=S.activeTasks.filter(t=>t.workerId===empId&&!t.paused);
   const swapMode=await askSwapMode(w,activeCurrent); // ⏸ זמנית / ✅ חדשה — כוונה בלבד
   const swapTime=srvNow(); // רגע אחד לסגירה ולפתיחה — בלי חפיפה ביניהן
   const batchId=_mgrBatch.length>1?genBatchId():null;
