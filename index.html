@@ -2455,6 +2455,24 @@ function prodByOrderNo(cust,prod,orderNo){
   if(!no)return null;
   return (S.products||[]).find(p=>p&&p.cust===cust&&p.prod===prod&&(parseInt(p.orderNo,10)||0)===no)||null;
 }
+// 🔑 לאיזו הזמנה שייכת סריקה — **לפי מספר ההזמנה שבברקוד** (16 ספרות), אחרת החדשה ביותר.
+// 🔴 עד 15/09/2026 כל סריקה נחתמה ב-prodStampFor = ההזמנה **החדשה ביותר** של הדגם, גם כשהברקוד
+// נשא מספר הזמנה אחר. נמדד חי ב-02/04335 (5 הזמנות): 66 משימות של #003 ו-26 של #002 נחתמו על
+// #005 ⇒ דוח הכמות הציג את העבודה על #005 ו-#003 נשארה 0/95, ודוח הרווח ייחס אליה את השעות.
+// ברקוד 13 ספרות / מספר הזמנה בלי רשומה ⇒ ההתנהגות הקודמת בדיוק.
+function bcOrderStamp(raw){
+  const s=String(raw||''),c=s.slice(0,2),p=s.slice(2,7);
+  const rec=prodByOrderNo(c,p,orderNoOf(s));
+  return rec?prodStampOf(rec):prodStampFor(c,p);
+}
+// החותמת האפקטיבית של משימה: מספר ההזמנה שבברקוד **גובר** על prodStamp השמור — כך גם משימות
+// שכבר נחתמו שגוי חוזרות להזמנה הנכונה בלי לגעת בנתונים. אחרת prodStamp השמור (null = משימה
+// ותיקה בלי חותמת; כל מתקשר ממשיך להתייחס אליה כמו קודם).
+function taskStampOf(t){
+  const no=orderNoOf(t?.bc||'');
+  if(no){const rec=prodByOrderNo(t.cust,t.prod,no);if(rec)return prodStampOf(rec);}
+  return t?t.prodStamp:null;
+}
 // ⚠️ סך היחידות של ההזמנה. **`orderNo` הוא ארגומנט קריטי, לא נוחות.**
 //
 // ההזמנה מגיעה למפעל בלי כמות ידועה — או גזרים שצריך לספור, או בדים שצריך לגזור
@@ -2539,6 +2557,14 @@ function taskUnits(t){
 // `cache` שייך לקורא ולא גלובלי — במכוון. מפה גלובלית הייתה מתיישנת מול S.products
 // בלי שאיש ישים לב, וזו משפחת באגים שכבר נשרפנו בה (_expMap).
 function taskOrderStamp(t,cache){
+  // מספר ההזמנה שבברקוד גובר על prodStamp השמור — ראה bcOrderStamp
+  const no=orderNoOf(t.bc||'');
+  if(no){
+    const nk=t.cust+'|'+t.prod+'|#'+no;
+    let v=cache&&(nk in cache)?cache[nk]:undefined;
+    if(v===undefined){const rec=prodByOrderNo(t.cust,t.prod,no);v=rec?prodStampOf(rec):null;if(cache)cache[nk]=v;}
+    if(v!=null)return v;
+  }
   if(t.prodStamp!=null)return t.prodStamp;
   const k=t.cust+'|'+t.prod;
   if(cache&&(k in cache))return cache[k];
@@ -2557,23 +2583,6 @@ function stepDoneMap(tasks){
   }
   return map;
 }
-// כיווץ המפה חזרה לרמת הדגם, **רק ההזמנה הנוכחית** — בדיוק המספרים שמסך התצוגה הציג קודם.
-// מופרד מ-stepDoneMap כי לשני הצרכנים יש שאלות שונות: הדוח שואל "כמה על ההזמנה הזו",
-// הלוח שואל "כמה על הדגם שרץ עכשיו".
-function stepDoneByModel(map){
-  const out={};
-  for(const k in map){
-    const i=k.lastIndexOf('|');if(i<0)continue;
-    const base=k.slice(0,i),stamp=+k.slice(i+1);
-    const c=base.slice(0,base.indexOf('|'));
-    const rest=base.slice(base.indexOf('|')+1);
-    const p=rest.slice(0,rest.indexOf('|'));
-    if(stamp!==prodStampFor(c,p))continue;
-    out[base]=(out[base]||0)+map[k];
-  }
-  return out;
-}
-
 // ─── STATE ──────────────────────────────────────────────────
 let S={
   user:null,
@@ -2850,11 +2859,11 @@ function stepOrderLockOn(){return !!S.settings?.stepOrderLock;}
 // בלי הגבלת הזמן הזו, הדלקה באמצע הזמנה מקפיאה אותה מיידית: כל שלב 🔗 שלא נסרק עד היום
 // הופך לחוסם רטרואקטיבי על כל הברקודים (ב-07135 נמדד 92%). הזמנה רצה מסיימת בכללים
 // שלפיהם התחילה; הזמנה חדשה נאכפת מהברקוד הראשון — שם ממילא אין היסטוריה לשבור.
-function stepOrderStrictOn(cust,prod){
+function stepOrderStrictOn(cust,prod,stamp){
   if(!S.settings?.stepOrderStrict)return false;
   const from=+S.settings.stepOrderStrictFrom||0;
   if(!from)return true;                       // הודלק בלי חותמת (נתון ישן) — חל על הכל
-  return (prodStampFor(cust,prod)||0)>=from;
+  return ((stamp!=null?stamp:prodStampFor(cust,prod))||0)>=from;
 }
 function isMergeStep(s){return !!(s&&typeof s==='object'&&s.merge);}
 // מה כבר הסתיים במופע-המוצר הנוכחי: פר ברקוד+שלב, פר שלב, ודרך ברקוד "כל הכמות".
@@ -2869,19 +2878,19 @@ function isMergeStep(s){return !!(s&&typeof s==='object'&&s.merge);}
 // מושהית נספרת גם היא: היא "באמצע", ובלעדיה עובדת שיצאה להפסקה נתקעת באותה מלכודת.
 // ⚠️ נכנס ל-bcStep/totStep בלבד ו**לא** ל-anyStep — anyStep מזין את ההקלה "המעבר הראשון
 // בכל נקודת ביקורת חופשי", ומשימה שרק *נפתחה* לא אמורה להפעיל חסימה שטרם הייתה קיימת.
-function _mergeCover(cust,prod,workerId){
-  const stamp=prodStampFor(cust,prod);
+function _mergeCover(cust,prod,workerId,stamp){
+  if(stamp==null)stamp=prodStampFor(cust,prod); // ההזמנה שבברקוד הנסרק — ראה bcOrderStamp
   const bcStep=new Set(),anyStep=new Set(),totStep=new Set();
   for(const t of (S.histTasks||[])){
     if(t.cust!==cust||t.prod!==prod||!(t.duration>0))continue;
-    if(t.prodStamp!=null&&stamp&&t.prodStamp!==stamp)continue;
+    {const ts=taskStampOf(t);if(ts!=null&&stamp&&ts!==stamp)continue;}
     const st=String(t.taskType||'').trim().toLowerCase();if(!st)continue;
     anyStep.add(st);bcStep.add(taskBc(t)+'|'+st);
     if(t.isTotal)totStep.add(st);
   }
   if(workerId!=null)for(const t of (S.activeTasks||[])){
     if(String(t.workerId)!==String(workerId)||t.cust!==cust||t.prod!==prod)continue;
-    if(t.prodStamp!=null&&stamp&&t.prodStamp!==stamp)continue;
+    {const ts=taskStampOf(t);if(ts!=null&&stamp&&ts!==stamp)continue;}
     const st=String(t.taskType||'').trim().toLowerCase();if(!st)continue;
     bcStep.add(taskBc(t)+'|'+st);
     if(t.isTotal)totStep.add(st);
@@ -2895,8 +2904,9 @@ function mergeGate(cust,prod,bc,stepNames,workerId){
   const want=(stepNames||[]).filter(Boolean);
   if(!steps.length||!want.length)return{ok:true};
   const sameScan=new Set(want.map(n=>String(n).trim().toLowerCase())); // הקלה 2
-  const cov=_mergeCover(cust,prod,workerId); // כולל השלבים שהעובד הזה פתוח עליהם כרגע
-  const strict=stepOrderStrictOn(cust,prod); // מבטלת את הקלה 1 — ראה stepOrderStrictOn
+  const stamp=bc?bcOrderStamp(bc):prodStampFor(cust,prod); // ההזמנה שבברקוד — ראה bcOrderStamp
+  const cov=_mergeCover(cust,prod,workerId,stamp); // כולל השלבים שהעובד הזה פתוח עליהם כרגע
+  const strict=stepOrderStrictOn(cust,prod,stamp); // מבטלת את הקלה 1 — ראה stepOrderStrictOn
   const blocked=[];
   for(const nm of want){
     const idx=steps.findIndex(x=>stepName(x)===nm);
@@ -5022,7 +5032,7 @@ function stepAlreadyTaken(raw,taskType,stamp){
   const tt=taskType||'';
   const same=t=>t.bc===raw&&(t.taskType||'')===tt;
   if(S.activeTasks.some(t=>same(t)&&!t.paused))return 'active';
-  if(S.histTasks.some(t=>same(t)&&(t.prodStamp==null||t.prodStamp===stamp)))return 'done';
+  if(S.histTasks.some(t=>{if(!same(t))return false;const s=taskStampOf(t);return s==null||s===stamp;}))return 'done';
   return '';
 }
 // ─── חסימת כפילות חוצת-מכשירים ────────────────────────────────
@@ -5138,7 +5148,7 @@ function _orderStampOf(cust,prod,size,col,qty,isTot){
 }
 function totalScanConflict(base,taskType,stamp,cart){
   const tt=taskType||'';
-  const live=t=>t.prodStamp==null||t.prodStamp===stamp;
+  const live=t=>{const s=taskStampOf(t);return s==null||s===stamp;};
   // 🔴 prodStamp לבדו **אינו מפריד בין שתי הזמנות פעילות של אותו מוצר** — prodStampFor
   // מחזיר תמיד את חותמת הרשומה החדשה ביותר. בלי ההפרדה כאן, סריקת "כל הכמות" בהזמנה
   // אחת נעלה את השלב בכל ההזמנות: 05215 ב-11/08/2026 — رهام סרקה כל-הכמות להזמנת
@@ -5161,7 +5171,8 @@ function totalScanConflict(base,taskType,stamp,cart){
 // מוסיף שלבים לסל עם חסימת כפילויות (בסל / פעיל / בוצע / התנגשות "כל הכמות"). מחזיר תיאורי הנחסמים.
 function addStepsToBatch(batch,base,types){
   const T=LANGS[currentLang];
-  const stamp=prodStampFor(base.cust,base.prod);
+  // ההזמנה **שבברקוד**, לא החדשה ביותר של הדגם — ראה bcOrderStamp
+  const stamp=base.raw?bcOrderStamp(base.raw):prodStampFor(base.cust,base.prod);
   const skipped=[];
   for(const t of types){
     const tt=t||'';const label=tt||T.scan_dup_no_step;
@@ -5206,12 +5217,12 @@ function renderMgrBatchQueue(){
 // (עובד אחר על אותו שלב = הצטרפות מותרת דרך אישור otherSame), ושומר צפי לשלב (expMin) לתצוגת סה"כ.
 function addStepsToBcCart(base,types,exp){
   const T=LANGS[currentLang];
-  const stamp=prodStampFor(base.cust,base.prod);
+  const stamp=base.raw?bcOrderStamp(base.raw):prodStampFor(base.cust,base.prod); // ראה bcOrderStamp
   const skipped=[];
   for(const t of types){
     const tt=t||'';const label=tt||T.scan_dup_no_step;
     if(_bcBatch.some(b=>b.raw===base.raw&&(b.taskType||'')===tt)){skipped.push(label+' — '+T.scan_dup_in_cart);continue;}
-    if(S.histTasks.some(x=>x.bc===base.raw&&(x.taskType||'')===tt&&(x.prodStamp==null||x.prodStamp===stamp))){skipped.push(label+' — '+T.scan_dup_done);continue;}
+    if(S.histTasks.some(x=>{if(x.bc!==base.raw||(x.taskType||'')!==tt)return false;const s=taskStampOf(x);return s==null||s===stamp;})){skipped.push(label+' — '+T.scan_dup_done);continue;}
     if(S.activeTasks.some(x=>x.workerId===S.user?.id&&taskBc(x)===base.raw&&(x.taskType||'')===tt&&!x.paused)){skipped.push(label+' — '+T.scan_dup_active);continue;}
     const tc=totalScanConflict(base,tt,stamp,_bcBatch);
     if(tc){skipped.push(label+' — '+(tc==='total'?T.scan_dup_total:T.scan_dup_sizes));continue;}
@@ -6372,7 +6383,7 @@ function renderKiosk(){
     const ids=tasks.map(t=>t.id).join(',');
     const chips=`<span class="k-chip">לקוח ${lead.cust}</span><span class="k-chip k-p">${esc(lead.prod)}</span>${lead.size?`<span class="k-chip k-s">מידה ${esc(lead.size)}</span>`:''}<span class="k-chip k-q">${lead.qty} יח'</span><span class="k-chip k-col">${COLORS[lead.col]||esc(lead.col)}</span>`;
     const stepTasks=multi?tasks:(lead.taskType?[lead]:[]);
-    const steps=stepTasks.length?`<div class="k-steps">${stepTasks.map(t=>_kStepRow(t.cust,t.prod,t.taskType,dm)).join('')}</div>`:'';
+    const steps=stepTasks.length?`<div class="k-steps">${stepTasks.map(t=>_kStepRow(t,dm)).join('')}</div>`:'';
     const exp=hasExp?`<div class="k-exp">🎯 צפי ${fmtExpMin(expSec/60)}</div>`:'';
     const timer=allPaused
       ?`<div class="k-tmr k-tmr-paused">⏸ ${fmtS(lead.accumulatedSec||0)}</div>`
@@ -6392,32 +6403,39 @@ function renderKiosk(){
 // Firestore נוספות. מכוון: הלוח רץ כל היום ומתרנדר בכל שינוי נתונים — שליפת היסטוריה מלאה
 // כאן (כמו בדוח buildStepQtyReport) הייתה עולה מאות אלפי קריאות ביום. אותה החלטה שהתקבלה
 // ל"מצטבר קודם" בסורק. המשמעות: הזמנה שרצה מעל 14 יום תוצג כאן נמוך מהדוח שבלשונית דוחות.
-// ⚠️ **חייב לכווץ.** מאז שהמפתח כולל חותמת הזמנה, קריאה ישירה עם stepDoneKey בן 3
-// ארגומנטים הייתה מחזירה undefined לכל שלב ומאפסת את הלוח כולו — בלי שום שגיאה.
-function _kioskStepDone(){return stepDoneByModel(stepDoneMap(S.histTasks));}
+// ⚠️ המפה **פר-הזמנה** (לקוח|מוצר|שלב|חותמת) — כל קריאה חייבת את חותמת ההזמנה של המשימה.
+// stepDoneKey בן 3 ארגומנטים מחזיר undefined לכל שלב ומאפס את הלוח כולו בלי שום שגיאה.
+// עד 15/09 הלוח כיווץ לרמת הדגם ("ההזמנה החדשה ביותר") — ולכן לא חשף את באג bcOrderStamp.
+function _kioskStepDone(){return stepDoneMap(S.histTasks);}
+// רשומת ההזמנה לפי חותמת. אין התאמה ⇒ החדשה ביותר, כמו קודם.
+function prodByStamp(cust,prod,stamp){
+  return (S.products||[]).find(p=>p&&p.cust===cust&&p.prod===prod&&prodStampOf(p)===stamp)||findProd(cust,prod);
+}
 function _kProgHtml(done,total){
   if(!total)return `<span class="k-progtxt">${done}</span>`;
   const pct=Math.min(100,Math.round(done/total*100));
   return `<span class="k-prog"><span class="k-progbar"><i class="${pct>=100?'k-full':''}" style="width:${pct}%"></i></span><span class="k-progtxt">${done}/${total}</span></span>`;
 }
-function _kStepRow(cust,prod,stepNm,dm){
-  const done=dm[stepDoneKey(cust,prod,stepNm)]||0;
-  return `<div class="k-steprow"><span class="k-step">📋 ${esc(stepNm||'—')}</span>${_kProgHtml(done,getTotalQty(cust,prod))}</div>`;
+function _kStepRow(t,dm){
+  const stamp=taskOrderStamp(t),p=prodByStamp(t.cust,t.prod,stamp);
+  const done=dm[stepDoneKey(t.cust,t.prod,t.taskType,stamp)]||0;
+  const total=(p&&_prodQty(p))||getTotalQty(t.cust,t.prod,orderNoOf(t.bc||''));
+  return `<div class="k-steprow"><span class="k-step">📋 ${esc(t.taskType||'—')}</span>${_kProgHtml(done,total)}</div>`;
 }
 // רשימת שלבי מוצר לתצוגה = איחוד של שלבי התמחור (כולל כאלה שטרם התחילו) עם כל שלב שנסרק
 // בפועל להזמנה הנוכחית. מוצר בלי workSteps מוגדרים (כמו 05345/05132) עדיין מוצג — לפי מה
 // שנסרק — במקום להיעלם מהפאנל בשקט.
-function _prodStepList(cust,prod,p){
+function _prodStepList(cust,prod,p,stamp){
   const out=[],seen=new Set();
   const add=nm=>{const k=String(nm||'').trim();if(!k||seen.has(k))return;seen.add(k);out.push(k);};
   (p?.workSteps||[]).forEach(s=>add(stepName(s)));
-  const stamp=prodStampFor(cust,prod);
+  if(stamp==null)stamp=prodStampFor(cust,prod);
   for(const t of S.histTasks){
     if(t.cust!==cust||t.prod!==prod)continue;
-    if(t.prodStamp!=null&&stamp&&t.prodStamp!==stamp)continue; // הזמנה קודמת — ראה stepDoneMap
+    {const ts=taskStampOf(t);if(ts!=null&&stamp&&ts!==stamp)continue;} // הזמנה קודמת — ראה stepDoneMap
     add(t.taskType);
   }
-  for(const t of S.activeTasks)if(t.cust===cust&&t.prod===prod)add(t.taskType);
+  for(const t of S.activeTasks)if(t.cust===cust&&t.prod===prod){const ts=taskStampOf(t);if(ts==null||!stamp||ts===stamp)add(t.taskType);}
   return out;
 }
 // פאנל מסכם: כל מוצר שיש לו עכשיו משימה פעילה — עם כל שלבי העבודה שלו וההתקדמות.
@@ -6426,16 +6444,18 @@ function _kioskProdPanel(dm){
   const T=LANGS[currentLang];
   const seen=new Set(),blocks=[];
   for(const t of S.activeTasks){
-    const key=t.cust+'|'+t.prod;
+    // כרטיס לכל **הזמנה** פעילה — אותו דגם רץ לפעמים בכמה הזמנות במקביל (04335: #002 + #003)
+    const stamp=taskOrderStamp(t);
+    const key=t.cust+'|'+t.prod+'|'+stamp;
     if(seen.has(key))continue;seen.add(key);
-    const p=findProd(t.cust,t.prod);
-    const steps=_prodStepList(t.cust,t.prod,p);
+    const p=prodByStamp(t.cust,t.prod,stamp);
+    const steps=_prodStepList(t.cust,t.prod,p,stamp);
     if(!steps.length)continue;
-    const total=getTotalQty(t.cust,t.prod);
+    const total=(p&&_prodQty(p))||getTotalQty(t.cust,t.prod,orderNoOf(t.bc||''));
     blocks.push(`<div class="k-pp-card">
       <div class="k-pp-head"><span class="k-chip">${T.kiosk_cust||'לקוח'} ${esc(t.cust)}</span><span class="k-chip k-p">${esc(t.prod)}</span>${p?.name?`<span class="k-pp-nm">${esc(p.name)}</span>`:''}${total?`<span class="k-pp-tot">${total} ${T.kiosk_units||"יח'"}</span>`:''}</div>
       <div class="k-pp-steps">${steps.map(nm=>{
-        const done=dm[stepDoneKey(t.cust,t.prod,nm)]||0;
+        const done=dm[stepDoneKey(t.cust,t.prod,nm,stamp)]||0;
         return `<div class="k-pp-row"><span class="k-pp-step">${esc(nm)}</span>${_kProgHtml(done,total)}</div>`;
       }).join('')}</div>
     </div>`);
@@ -6910,7 +6930,7 @@ function buildExpectedByProduct(fl){
     // ⚠️ הקיבוץ כאן הוא **לפי מוצר** (החלטת המשתמש), אבל `findProd` מחזיר תמיד את רשומת
     // המוצר החדשה — כלומר את שם ההזמנה האחרונה. שורה שמאגדת כמה הזמנות תציג שם של
     // הזמנה אחת, וזו בדיוק הטעות שדוח הרווח עשה. לכן סופרים חותמות ומסמנים במפורש.
-    r.orders=new Set(r.tasks.map(t=>t.prodStamp||0)).size;
+    r.orders=new Set(r.tasks.map(t=>taskStampOf(t)||0)).size;
     r.name=findProd(r.cust,r.prod)?.name||'';
     return r;
   }).sort((a,b)=>b.act-a.act);
@@ -8744,7 +8764,7 @@ function auditStepOrder(){
     const steps=findProd(cust,prod)?.workSteps||[];
     if(!steps.some(isMergeStep))continue; // מוצר בלי סימוני 🔗 — אין מה לבדוק
     const stamp=prodStampFor(cust,prod);
-    const list=byProd[key].filter(t=>t.duration>0&&(t.prodStamp==null||!stamp||t.prodStamp===stamp))
+    const list=byProd[key].filter(t=>{if(!(t.duration>0))return false;const s=taskStampOf(t);return s==null||!stamp||s===stamp;})
       .slice().sort((a,b)=>new Date(a.startTime)-new Date(b.startTime));
     // כיסוי מצטבר לפי סדר הזמן — "מה היה ידוע ברגע ההתחלה"
     const bcStep=new Set(),anyStep=new Set(),totStep=new Set();
