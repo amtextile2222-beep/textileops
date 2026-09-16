@@ -5118,6 +5118,9 @@ _guardReentrant('tsStartTask','ts');
 _guardReentrant('mgrStartTask','mgr');
 _guardReentrant('submitBc','submitBc');
 _guardReentrant('bcStartBatch','bcStartBatch');
+// 🚚 נצפה חי 16/09: שלוש תעודות (0662-0664) לאותה הזמנה, 176 יח' כל אחת — החלון נשאר
+// פתוח בזמן מונה המספור והשמירה, וכל לחיצה נוספת על "אשר יציאה" הוסיפה משלוח ומספר חדש
+_guardReentrant('confirmShip','confirmShip');
 // ─── התנגשות "כל הכמות" מול מידה בודדת, לאותו שלב ────────────
 // ברקוד "כל הכמות" (size='9', col='00') מייצג את *כל* יחידות ההזמנה לשלב. סריקת מידה בודדת
 // לאותו שלב סופרת שוב יחידות שכבר נכללות בו — וגם ההפך. chk: stepAlreadyTaken חוסם רק ברקוד
