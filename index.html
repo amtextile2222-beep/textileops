@@ -10662,8 +10662,18 @@ function nextOrderNo(cust,prod){
 // החותמת שכל מוצר **חדש** מקבל ברגע ההקמה. bcLen=16 הוא בדיוק הכלל שנקבע:
 // "מוצר שיוקם אחרי ההתקנה מקבל 16 ספרות". רשומות קיימות אין להן את השדה ⇒ 13 לנצח,
 // והמדבקות שתלויות במפעל ממשיכות לעבוד עד שההזמנות האלה ייצאו ללקוח.
-function newProdOrderFields(cust,prod){
-  return{orderNo:nextOrderNo(cust,prod),bcLen:BC_LEN_NEW};
+// 🔢 נצפה חי 17/09: שני כרטיסי "דגם ראשון" ל-04191 הוקמו בהפרש 2.5 דקות ושניהם קיבלו #001 —
+// המכשיר של השני עוד לא ראה את הראשון ברשימה המקומית. לכן נבדקת גם הרשימה בשרת;
+// אופליין או שגיאה ⇒ נופלים לרשימה המקומית כמו קודם
+async function newProdOrderFields(cust,prod){
+  let orderNo=nextOrderNo(cust,prod);
+  if(db&&S.fbConnected)try{
+    const{collection,query,where,getDocsFromServer}=window._fb;
+    const snap=await getDocsFromServer(query(collection(db,'products'),where('cust','==',cust),where('prod','==',prod)));
+    const mx=snap.docs.reduce((m,d)=>Math.max(m,parseInt(d.data().orderNo,10)||0),0);
+    orderNo=Math.max(orderNo,Math.min(999,mx+1));
+  }catch(e){console.warn('orderNo:',e.message);}
+  return{orderNo,bcLen:BC_LEN_NEW};
 }
 // ברקוד "יצא ללקוח" בן 13 ספרות הוא לקוח+מוצר בלבד — הוא לא מבדיל בין שתי הזמנות של
 // אותו מספר דגם. ברקוד בן 16 נושא את מספר ההזמנה ומכריע לבד.
@@ -14141,7 +14151,8 @@ async function saveProduct(){
       stageLog.unshift({id:'receive',date:now.getFullYear()+'-'+pad2(now.getMonth()+1)+'-'+pad2(now.getDate()),time:pad2(now.getHours())+':'+pad2(now.getMinutes()),note:'',auto:true});
       stageLog.sort((a,b)=>PROD_STAGES.findIndex(x=>x.id===a.id)-PROD_STAGES.findIndex(x=>x.id===b.id));
     }
-    S.products.push({id,createdAt:Date.now(),...newProdOrderFields(cust,prod),prod,cust,name,images:_prodImgs,imgCount:_prodImgs.length,docs:_prodDocs,quantities,stageLog,stageSkipped,workSteps,unitPrice,targetProfitPct,directMaterialsCost,cutPrice,cutProfitPct,isSample});
+    const _ordF=await newProdOrderFields(cust,prod);
+    S.products.push({id,createdAt:Date.now(),..._ordF,prod,cust,name,images:_prodImgs,imgCount:_prodImgs.length,docs:_prodDocs,quantities,stageLog,stageSkipped,workSteps,unitPrice,targetProfitPct,directMaterialsCost,cutPrice,cutProfitPct,isSample});
   }
   saveLS();
   if(S.fbConnected){
@@ -14740,7 +14751,8 @@ async function raumaConfirm(){
     if(size||color)quantities.push({size,color,qty});
   });
   const id='p'+Date.now();
-  const newProd={id,createdAt:Date.now(),...newProdOrderFields(cust,prod),prod,cust,name,images:[],docs:[],quantities,stageLog:[],stageSkipped:[]};
+  const _ordF=await newProdOrderFields(cust,prod);
+  const newProd={id,createdAt:Date.now(),..._ordF,prod,cust,name,images:[],docs:[],quantities,stageLog:[],stageSkipped:[]};
   S.products.push(newProd);
   saveLS();
   if(S.fbConnected)await fbSet('products',id,{...newProd});
