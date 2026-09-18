@@ -12151,11 +12151,23 @@ async function calcCosts(){
   //    הופכים אותם לחריגים ורק מזיזים את הבעיה.
   // ⚠️ אם אין לאן לחלק (אף משימה מתאימה באותו יום) — לא מפחיתים ממנו כלום,
   //    אחרת השכר היה נעלם.
+  // ⇄ ימים שבהם יש נתוני סריקה אמיתיים מטופלים במסלול החדש (לפי מספר סריקות)
+  //    ולא במסלול הישן — אחרת אותו עובד היה מעביר פעמיים באותו יום.
+  const _scanDays=new Set();
+  if(scanMinPer()>0)tasks.forEach(t=>{
+    const by=t.scannedBy;if(!by||by===t.workerId)return;
+    const d=(t.startTime instanceof Date?t.startTime:new Date(t.startTime)).toISOString().slice(0,10);
+    if(d<from||d>to)return;
+    // רק אם יש לו משימות משלו באותו יום — אחרת אין ממה לגרוע, וכל יומו
+    // כבר מטופל ב-nonTaskWageByDay ונוספה כאן עלות ללא גריעה.
+    if(taskSecByWorkerDay[by+'_'+d]>0)_scanDays.add(by+'_'+d);
+  });
   const ovFrac={};                              // workerId_date → החלק שהועבר
   const ovByIdx=new Array(tasks.length).fill(0);
   Object.keys(attByWorkerDay).forEach(k=>{
     const _i=k.lastIndexOf('_');
     const wid=k.slice(0,_i), d=k.slice(_i+1);
+    if(_scanDays.has(k))return;                 // ⇄ מטופל במסלול הסריקות
     if(!_isOv(wid))return;
     const dailyRate=S.costs.workerRates[wid]||0;if(!dailyRate)return;
     const attSec=(attByWorkerDay[k]||0)/1000;if(attSec<=0)return;
@@ -12180,6 +12192,50 @@ async function calcCosts(){
     fullLoaded+=_ovH*loadedHourlyRate(wid);fullOh+=_ovH*_ohOf(wid);
   });
 
+  // ─── ⇄ עלות חלוקת עבודה — לפי **מספר הסריקות בפועל**, לא לפי אחוז ──────────
+  // החלטת המשתמש 18/09/2026: הכמות נקבעת ממספר הסריקות שהעובד ביצע עבור אחרים
+  // כפול `scanMinPerTask` — **לא** תקרת אחוז שרירותית. הגבול היחיד הוא שעות
+  // הנוכחות שלו באותו יום; אי אפשר להעביר יותר ממה שהשתכר.
+  // 🔑 **העלות נזקפת למוצר, לא לעובד** — היא אינה נכנסת ל-wage של אף משימה ואינה
+  //    מופיעה בלשונית "לפי עובד". רק במוצר, בלקוח וביום.
+  // 🔑 מפתח החלוקה = **מספר הסריקות פר מוצר**, כי מעשה החלוקה עולה אותו דבר בין
+  //    אם המשימה שנסרקה ארוכה או קצרה. זו הסיבה שלא משתמשים ב-taskRatio.
+  // ⚠️ דורש `scannedBy` על המשימה ⇒ פועל רק מ-12/09/2026. לתאריכים קודמים
+  //    אין נתוני סריקה והמנגנון הישן (oversightPct) ממשיך לטפל ביום כרגיל.
+  const scanFrac={};                            // workerId_date → החלק שהועבר
+  const scanCostByProd={}, scanCostByDay={}, scanNByProd={};
+  let totalScanCost=0;
+  if(scanMinPer()>0){
+    const byWD={};                              // workerId_date → המשימות שהוא סרק לאחרים
+    tasks.forEach(t=>{
+      const by=t.scannedBy;
+      if(!by||by===t.workerId)return;
+      const d=(t.startTime instanceof Date?t.startTime:new Date(t.startTime)).toISOString().slice(0,10);
+      if(d<from||d>to)return;
+      (byWD[by+'_'+d]=byWD[by+'_'+d]||[]).push(t);
+    });
+    Object.keys(byWD).forEach(k=>{
+      const _i=k.lastIndexOf('_'), wid=k.slice(0,_i), d=k.slice(_i+1);
+      if(!_scanDays.has(k))return;                     // 🛑 בלי משימות משלו אין ממה לגרוע
+      const dailyRate=S.costs.workerRates[wid]||0;if(!dailyRate)return;
+      if((S.costs.workerUnitRates||{})[wid]>0)return;   // תשלום ליחידה — אין שעות להפחית
+      const attH=(attByWorkerDay[k]||0)/3600000;if(attH<=0)return;
+      const list=byWD[k];
+      const hrs=Math.min(list.length*scanMinPer()/60,attH);
+      if(hrs<=0)return;
+      scanFrac[k]=hrs/attH;
+      const wage=(dailyRate/8)*hrs;
+      totalScanCost+=wage;
+      scanCostByDay[d]=(scanCostByDay[d]||0)+wage;
+      list.forEach(t=>{
+        const pk=(t.cust||'—')+'_'+(t.prod||'—');
+        scanCostByProd[pk]=(scanCostByProd[pk]||0)+wage/list.length;
+        scanNByProd[pk]=(scanNByProd[pk]||0)+1;
+      });
+      fullLoaded+=hrs*loadedHourlyRate(wid);fullOh+=hrs*_ohOf(wid);
+    });
+  }
+
   // חישוב עלות לכל משימה
   let totalWages=0, totalOverhead=0, totalNonTaskWage=0;
   // מוצרים שנעשה בהם שימוש בברקוד "כל הכמות" — לא לספור גם את הברקודים הפרטניים
@@ -12200,8 +12256,10 @@ async function calcCosts(){
     const workerTotalTaskSec=taskSecByWorkerDay[t.workerId+'_'+d]||1;
     const taskShare=(t.duration||0)/workerTotalTaskSec;
     const byUnit=unitRate>0&&(t.qty||0)>0;
-    // חלק הפיקוח שהועבר מהעובד הזה ביום הזה יורד משכרו על משימותיו שלו
-    const ovCut=1-(ovFrac[t.workerId+'_'+d]||0);
+    // חלק הפיקוח שהועבר מהעובד הזה ביום הזה יורד משכרו על משימותיו שלו.
+    // ⇄ וגם חלק חלוקת העבודה — אחרת אותן שעות היו נספרות פעמיים: פעם על
+    //   משימותיו שלו ופעם כעלות המוצר שנסרק.
+    const ovCut=Math.max(0,1-(ovFrac[t.workerId+'_'+d]||0)-(scanFrac[t.workerId+'_'+d]||0));
     const wage=byUnit?(unitRate*(t.qty||0)):(dailyRate/8)*attHours*taskShare*ovCut;
     // 💎 אותן שעות בתעריף מלא. ליחידה: השכר כמו שהוא (אין שעה להעמיס) + תקורה על השעות
     const _hrs=attHours*taskShare*(byUnit?1:ovCut);
@@ -12233,6 +12291,11 @@ async function calcCosts(){
     return{...t,wage,nonTaskShare,oversightShare,overhead,total:wage+nonTaskShare+oversightShare+overhead,date:d,taskRatio,unitCounted,byUnit};
   });
 
+  // ⇄ עלות חלוקת העבודה נספרת בסך השכר, אך אינה יושבת על אף משימה —
+  //    היא נזקפת למוצר. סך העלות אינו משתנה: מה שירד מ-ovCut חוזר כאן.
+  totalWages+=totalScanCost;
+  S._costScanByProd=scanCostByProd;S._costScanByDay=scanCostByDay;
+  S._costScanN=scanNByProd;S._costScanTotal=totalScanCost;
   const grandTotal=totalWages+totalOverhead;
 
   document.getElementById('cost-total').textContent='₪'+Math.round(grandTotal).toLocaleString();
@@ -12274,6 +12337,16 @@ function renderCostTab(){
       if((t.qty||0)===0)map[k].hasOpenQty=true;
       if(t.byUnit)map[k].hasUnitCalc=true;
     });
+    // ⇄ עלות חלוקת העבודה — שורה ברמת המוצר, לא על העובד. המפתח הוא cust_prod,
+    //    והקיבוץ כאן לפי prod בלבד, ולכן מסכמים את כל הלקוחות של אותו מוצר.
+    const _scP=S._costScanByProd||{}, _scN=S._costScanN||{};
+    Object.keys(_scP).forEach(pk=>{
+      const p=pk.slice(pk.indexOf('_')+1)||'—';
+      if(!map[p])map[p]={prod:p,tasks:0,wage:0,overhead:0,total:0,qty:0,custs:new Set(),hasOpenQty:false,hasUnitCalc:false};
+      map[p].scan=(map[p].scan||0)+_scP[pk];
+      map[p].scanN=(map[p].scanN||0)+(_scN[pk]||0);
+      map[p].total+=_scP[pk];
+    });
     const rows=Object.values(map).sort((a,b)=>b.total-a.total);
     el.innerHTML=`<div style="overflow-x:auto"><table style="width:100%;border-collapse:collapse;font-size:13px">
       <thead><tr style="border-bottom:1.5px solid var(--b);text-align:right">
@@ -12281,6 +12354,7 @@ function renderCostTab(){
         <th style="padding:8px 6px">יחידות</th>
         <th style="padding:8px 6px">משימות</th>
         <th style="padding:8px 6px">שכר</th>
+        <th style="padding:8px 6px" title="עלות זמן חלוקת העבודה — הסריקות שאחראי ביצע עבור העובדים על המוצר הזה. נזקפת למוצר ולא לעובד.">⇄ חלוקה</th>
         <th style="padding:8px 6px">הוצאות</th>
         <th style="padding:8px 6px;color:var(--blue-txt)">סה"כ עלות</th>
         <th style="padding:8px 6px;color:var(--green-txt)">לפי יחידה</th>
@@ -12290,6 +12364,7 @@ function renderCostTab(){
         <td style="padding:7px 6px;color:var(--txt2)">${r.qty||'—'}</td>
         <td style="padding:7px 6px;color:var(--txt2)">${r.tasks}</td>
         <td style="padding:7px 6px">₪${Math.round(r.wage).toLocaleString()}</td>
+        <td style="padding:7px 6px;color:var(--txt2)"${r.scanN?` title="${esc(r.scanN+' סריקות חלוקת עבודה × '+scanMinPer()+" דק'")}"`:''}>${r.scan?'₪'+Math.round(r.scan).toLocaleString():'—'}</td>
         <td style="padding:7px 6px">₪${Math.round(r.overhead).toLocaleString()}</td>
         <td style="padding:7px 6px;font-weight:600;color:var(--blue-txt)">₪${Math.round(r.total).toLocaleString()}</td>
         <td style="padding:7px 6px;font-weight:600;color:var(--green-txt)">${r.qty?'₪'+Math.round(r.total/r.qty).toLocaleString():'—'}</td>
@@ -12302,6 +12377,12 @@ function renderCostTab(){
       const k=t.cust||'—';
       if(!map[k])map[k]={cust:k,tasks:0,wage:0,overhead:0,total:0,qty:0,prods:new Set()};
       map[k].tasks++;map[k].wage+=t.wage;map[k].overhead+=t.overhead;map[k].total+=t.total;map[k].qty+=t.unitCounted?(t.qty||0):0;map[k].prods.add(t.prod);
+    });
+    // ⇄ עלות חלוקת העבודה נספרת גם כאן, אחרת סך הלקוחות קטן מסך העלות
+    Object.keys(S._costScanByProd||{}).forEach(pk=>{
+      const c=pk.slice(0,pk.indexOf('_'))||'—';
+      if(!map[c])map[c]={cust:c,tasks:0,wage:0,overhead:0,total:0,qty:0,prods:new Set()};
+      map[c].total+=S._costScanByProd[pk];
     });
     const rows=Object.values(map).sort((a,b)=>b.total-a.total);
     el.innerHTML=`<div style="overflow-x:auto"><table style="width:100%;border-collapse:collapse;font-size:13px">
@@ -12329,6 +12410,11 @@ function renderCostTab(){
       const k=t.date;
       if(!map[k])map[k]={date:k,tasks:0,wage:0,overhead:0,total:0,workers:new Set()};
       map[k].tasks++;map[k].wage+=t.wage;map[k].overhead+=t.overhead;map[k].total+=t.total;map[k].workers.add(t.workerId);
+    });
+    // ⇄ עלות חלוקת העבודה — לפי היום שבו בוצעו הסריקות
+    Object.keys(S._costScanByDay||{}).forEach(d=>{
+      if(!map[d])map[d]={date:d,tasks:0,wage:0,overhead:0,total:0,workers:new Set()};
+      map[d].total+=S._costScanByDay[d];
     });
     const rows=Object.keys(map).sort((a,b)=>b.localeCompare(a)).map(k=>map[k]);
     el.innerHTML=`<div style="overflow-x:auto"><table style="width:100%;border-collapse:collapse;font-size:13px">
