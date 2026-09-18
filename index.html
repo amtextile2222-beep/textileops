@@ -12127,6 +12127,56 @@ async function calcCosts(){
   const _ohOf=wid=>_mgr[wid]?0:_oh;
   let fullLoaded=0, fullOh=0;
 
+  // ─── ⇄ עלות חלוקת עבודה — לפי **מספר הסריקות בפועל**, לא לפי אחוז ──────────
+  // החלטת המשתמש 18/09/2026: הכמות נקבעת ממספר הסריקות שהעובד ביצע עבור אחרים
+  // כפול `scanMinPerTask` — **לא** תקרת אחוז שרירותית. הגבול היחיד הוא שעות
+  // הנוכחות שלו באותו יום; אי אפשר להעביר יותר ממה שהשתכר.
+  // 🔑 **העלות נזקפת למוצר, לא לעובד** — היא אינה נכנסת ל-wage של אף משימה ואינה
+  //    מופיעה בלשונית "לפי עובד". רק במוצר, בלקוח וביום.
+  // 🔑 מפתח החלוקה = **מספר הסריקות פר מוצר**, כי מעשה החלוקה עולה אותו דבר בין
+  //    אם המשימה שנסרקה ארוכה או קצרה. זו הסיבה שלא משתמשים ב-taskRatio.
+  // ⚠️ דורש `scannedBy` על המשימה ⇒ פועל רק מ-12/09/2026. לתאריכים קודמים
+  //    אין נתוני סריקה והמנגנון הישן (oversightPct) ממשיך לטפל ביום כרגיל.
+  // 🔑 **עובד בלי משימות משלו באותו יום** — הסריקות עדיין נזקפות למוצרים שנסרקו;
+  //    ההפרש בלבד הולך ל-`nonTaskWageByDay` ומתפזר על הכל. בלי הפיצול הזה כל יומו
+  //    היה נמרח על כל המוצרים לפי משך, ודווקא המוצרים שהוא חילק בהם לא היו מסומנים.
+  //    🛑 שתי הדרכים לא יכולות לרוץ על אותן שעות — משם הגריעה ב-`_scanHrs`.
+  const scanFrac={}, _scanHrs={};               // workerId_date → החלק / השעות שהועברו
+  const scanCostByProd={}, scanCostByDay={}, scanNByProd={};
+  let totalScanCost=0;
+  if(scanMinPer()>0){
+    const byWD={};                              // workerId_date → המשימות שהוא סרק לאחרים
+    tasks.forEach(t=>{
+      const by=t.scannedBy;
+      if(!by||by===t.workerId)return;
+      const d=(t.startTime instanceof Date?t.startTime:new Date(t.startTime)).toISOString().slice(0,10);
+      if(d<from||d>to)return;
+      (byWD[by+'_'+d]=byWD[by+'_'+d]||[]).push(t);
+    });
+    Object.keys(byWD).forEach(k=>{
+      const _i=k.lastIndexOf('_'), wid=k.slice(0,_i), d=k.slice(_i+1);
+      const dailyRate=S.costs.workerRates[wid]||0;if(!dailyRate)return;
+      if((S.costs.workerUnitRates||{})[wid]>0)return;   // תשלום ליחידה — אין שעות להפחית
+      const attH=(attByWorkerDay[k]||0)/3600000;if(attH<=0)return;
+      const list=byWD[k];
+      const hrs=Math.min(list.length*scanMinPer()/60,attH);
+      if(hrs<=0)return;
+      _scanHrs[k]=hrs;
+      // יש לו משימות משלו ⇒ הגריעה דרך ovCut. אין ⇒ הגריעה מ-nonTaskWageByDay.
+      if(taskSecByWorkerDay[k]>0)scanFrac[k]=hrs/attH;
+      const wage=(dailyRate/8)*hrs;
+      totalScanCost+=wage;
+      scanCostByDay[d]=(scanCostByDay[d]||0)+wage;
+      list.forEach(t=>{
+        const pk=(t.cust||'—')+'_'+(t.prod||'—');
+        scanCostByProd[pk]=(scanCostByProd[pk]||0)+wage/list.length;
+        scanNByProd[pk]=(scanNByProd[pk]||0)+1;
+      });
+      fullLoaded+=hrs*loadedHourlyRate(wid);fullOh+=hrs*_ohOf(wid);
+    });
+  }
+
+
   // שכר עוזרים/מנהלים/אחראים ללא משימות — יתחלק על המוצרים
   const nonTaskWageByDay={};
   _costAtt.forEach(rec=>{
@@ -12136,7 +12186,8 @@ async function calcCosts(){
     if(taskWorkersByDay[d]?.has(rec.workerId))return;
     const dailyRate=S.costs.workerRates[rec.workerId]||0;
     if(!dailyRate)return;
-    const hoursWorked=(rec.netMs||0)/3600000;
+    // ⇄ שעות שכבר נזקפו למוצרים שנסרקו לא נמרחות שוב על כל המפעל
+    const hoursWorked=Math.max(0,(rec.netMs||0)/3600000-(_scanHrs[rec.workerId+'_'+d]||0));
     const wage=(dailyRate/8)*hoursWorked;
     nonTaskWageByDay[d]=(nonTaskWageByDay[d]||0)+wage;
     // 💎 רק ביום עם משימות — ביום בלי משימות גם הגולמי לא מתחלק לשום מקום
@@ -12151,23 +12202,14 @@ async function calcCosts(){
   //    הופכים אותם לחריגים ורק מזיזים את הבעיה.
   // ⚠️ אם אין לאן לחלק (אף משימה מתאימה באותו יום) — לא מפחיתים ממנו כלום,
   //    אחרת השכר היה נעלם.
-  // ⇄ ימים שבהם יש נתוני סריקה אמיתיים מטופלים במסלול החדש (לפי מספר סריקות)
-  //    ולא במסלול הישן — אחרת אותו עובד היה מעביר פעמיים באותו יום.
-  const _scanDays=new Set();
-  if(scanMinPer()>0)tasks.forEach(t=>{
-    const by=t.scannedBy;if(!by||by===t.workerId)return;
-    const d=(t.startTime instanceof Date?t.startTime:new Date(t.startTime)).toISOString().slice(0,10);
-    if(d<from||d>to)return;
-    // רק אם יש לו משימות משלו באותו יום — אחרת אין ממה לגרוע, וכל יומו
-    // כבר מטופל ב-nonTaskWageByDay ונוספה כאן עלות ללא גריעה.
-    if(taskSecByWorkerDay[by+'_'+d]>0)_scanDays.add(by+'_'+d);
-  });
+  // ⇄ יום שכבר טופל במסלול הסריקות לא עובר גם במסלול האחוז הישן —
+  //    אחרת אותו עובד היה מעביר פעמיים באותו יום.
   const ovFrac={};                              // workerId_date → החלק שהועבר
   const ovByIdx=new Array(tasks.length).fill(0);
   Object.keys(attByWorkerDay).forEach(k=>{
     const _i=k.lastIndexOf('_');
     const wid=k.slice(0,_i), d=k.slice(_i+1);
-    if(_scanDays.has(k))return;                 // ⇄ מטופל במסלול הסריקות
+    if(_scanHrs[k]>0)return;                    // ⇄ מטופל במסלול הסריקות
     if(!_isOv(wid))return;
     const dailyRate=S.costs.workerRates[wid]||0;if(!dailyRate)return;
     const attSec=(attByWorkerDay[k]||0)/1000;if(attSec<=0)return;
@@ -12191,50 +12233,6 @@ async function calcCosts(){
     const _ovH=(attSec/3600)*frac;
     fullLoaded+=_ovH*loadedHourlyRate(wid);fullOh+=_ovH*_ohOf(wid);
   });
-
-  // ─── ⇄ עלות חלוקת עבודה — לפי **מספר הסריקות בפועל**, לא לפי אחוז ──────────
-  // החלטת המשתמש 18/09/2026: הכמות נקבעת ממספר הסריקות שהעובד ביצע עבור אחרים
-  // כפול `scanMinPerTask` — **לא** תקרת אחוז שרירותית. הגבול היחיד הוא שעות
-  // הנוכחות שלו באותו יום; אי אפשר להעביר יותר ממה שהשתכר.
-  // 🔑 **העלות נזקפת למוצר, לא לעובד** — היא אינה נכנסת ל-wage של אף משימה ואינה
-  //    מופיעה בלשונית "לפי עובד". רק במוצר, בלקוח וביום.
-  // 🔑 מפתח החלוקה = **מספר הסריקות פר מוצר**, כי מעשה החלוקה עולה אותו דבר בין
-  //    אם המשימה שנסרקה ארוכה או קצרה. זו הסיבה שלא משתמשים ב-taskRatio.
-  // ⚠️ דורש `scannedBy` על המשימה ⇒ פועל רק מ-12/09/2026. לתאריכים קודמים
-  //    אין נתוני סריקה והמנגנון הישן (oversightPct) ממשיך לטפל ביום כרגיל.
-  const scanFrac={};                            // workerId_date → החלק שהועבר
-  const scanCostByProd={}, scanCostByDay={}, scanNByProd={};
-  let totalScanCost=0;
-  if(scanMinPer()>0){
-    const byWD={};                              // workerId_date → המשימות שהוא סרק לאחרים
-    tasks.forEach(t=>{
-      const by=t.scannedBy;
-      if(!by||by===t.workerId)return;
-      const d=(t.startTime instanceof Date?t.startTime:new Date(t.startTime)).toISOString().slice(0,10);
-      if(d<from||d>to)return;
-      (byWD[by+'_'+d]=byWD[by+'_'+d]||[]).push(t);
-    });
-    Object.keys(byWD).forEach(k=>{
-      const _i=k.lastIndexOf('_'), wid=k.slice(0,_i), d=k.slice(_i+1);
-      if(!_scanDays.has(k))return;                     // 🛑 בלי משימות משלו אין ממה לגרוע
-      const dailyRate=S.costs.workerRates[wid]||0;if(!dailyRate)return;
-      if((S.costs.workerUnitRates||{})[wid]>0)return;   // תשלום ליחידה — אין שעות להפחית
-      const attH=(attByWorkerDay[k]||0)/3600000;if(attH<=0)return;
-      const list=byWD[k];
-      const hrs=Math.min(list.length*scanMinPer()/60,attH);
-      if(hrs<=0)return;
-      scanFrac[k]=hrs/attH;
-      const wage=(dailyRate/8)*hrs;
-      totalScanCost+=wage;
-      scanCostByDay[d]=(scanCostByDay[d]||0)+wage;
-      list.forEach(t=>{
-        const pk=(t.cust||'—')+'_'+(t.prod||'—');
-        scanCostByProd[pk]=(scanCostByProd[pk]||0)+wage/list.length;
-        scanNByProd[pk]=(scanNByProd[pk]||0)+1;
-      });
-      fullLoaded+=hrs*loadedHourlyRate(wid);fullOh+=hrs*_ohOf(wid);
-    });
-  }
 
   // חישוב עלות לכל משימה
   let totalWages=0, totalOverhead=0, totalNonTaskWage=0;
