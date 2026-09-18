@@ -6260,21 +6260,107 @@ function _histPrevHtml(tasks){
   const ses=prev.length;
   return ses>0?`<div style="font-size:11px;color:var(--blue-txt)">📊 מצטבר קודם: <b>${fmtM(tot)}</b> (${ses} ${ses===1?'משימה':'משימות'})</div>`:'';
 }
+// ─── ⏱️ זמן חלוקת עבודה — סריקות שעובד ביצע *עבור אחרים* בתוך חלון משימתו ───
+// נמדד 18/09/2026 על 6 ימים (500 משימות עם `scannedBy`): محمد סורק 81% מהמשימות,
+// ו-**96% מהסריקות שלו עבור אחרות קורות בתוך חלון של משימה שלו עצמו**. התוצאה:
+// 95% ממשימותיו מסומנות ⚠ חריגה — מול 70% אצל שאר העובדות.
+// 🔑 **הכיול נמדד ברמת הצביר ולא ברמת המשימה** — בצביר כל השורות חולקות חלון שעון
+//    אחד, ולכן רגרסיה פר-משימה סופרת את אותה סריקה פעמיים ומחלקת את המקדם בחצי.
+//    ברמת הצביר (42 קבוצות, R²=0.68): **4.34 ± 0.93 דק' לסריקה**, וחציון חסין y/k = 4.14
+//    ⇒ ברירת המחדל 4.2. התוצאה: חריגה 39/42 → 22/42, חציון ×1.89 → ×1.09.
+//    ⚠️ 5 קבוצות בלי אף סריקה חורגות בחציון 10.7 דק' ⇒ יש גם בעיית תקן, לא רק חלוקה.
+// 🛑 מנכים מה**בפועל** ולא מוסיפים ל-`expectedMin` — הצפי נצרב בסריקה ואסור לכתוב עליו.
+// 🛑 בספר ה**זמן** הדקות פשוט יוצאות ואינן נזקפות לאף מוצר, כי 53% מהן שייכות למוצר
+//    אחר מזה שהעובד עמד עליו. רק בספר ה**כסף** הן הולכות למוצר שנסרק.
+// 🛑 גנרי לכל עובד, לא רק ל-role=supervisor — מי שלא סורק עבור אחרים מקבל 0.
+//    scanMinPerTask=0 מכבה את המנגנון לגמרי.
+const SCAN_MIN_DEFAULT=4.2;
+function scanMinPer(){const v=S.costs?.scanMinPerTask;return (v===0||v==='0')?0:((+v>0)?+v:SCAN_MIN_DEFAULT);}
+let _scanIdx=null,_scanIdxKey='';
+// מפתח: workerId → חותמות הזמן של הסריקות שביצע עבור אחרים, ממוינות
+function _scanIndex(){
+  const key=(S.histTasks?.length||0)+'_'+(S.activeTasks?.length||0);
+  if(_scanIdx&&_scanIdxKey===key)return _scanIdx;
+  const m={};
+  const add=t=>{const by=t.scannedBy;
+    if(!by||by===t.workerId)return;                 // סריקה לעצמו אינה חלוקת עבודה
+    const ms=+new Date(t.startTime);if(!ms)return;
+    (m[by]=m[by]||[]).push(ms);};
+  (S.histTasks||[]).forEach(add);(S.activeTasks||[]).forEach(add);
+  Object.keys(m).forEach(k=>m[k].sort((a,b)=>a-b));
+  _scanIdx=m;_scanIdxKey=key;return m;
+}
+// מס' הסריקות שבעל המשימה ביצע עבור אחרים בתוך חלון המשימה
+function scanCountIn(t,fromMs,toMs){
+  if(!t||!t.workerId||!scanMinPer())return 0;
+  const a=_scanIndex()[t.workerId];if(!a||!a.length)return 0;
+  const s=fromMs!=null?fromMs:+new Date(t.startTime);if(!s)return 0;
+  const e=toMs!=null?toMs:(t.endTime?+new Date(t.endTime):Date.now());
+  if(!(e>=s))return 0;
+  let n=0;for(let i=0;i<a.length;i++){if(a[i]<s)continue;if(a[i]>e)break;n++;}
+  return n;
+}
+// השניות שיש לנכות מהבפועל לפני השוואה לצפי. בלי צפי — אין מה להשוות ואין ניכוי.
+// לעולם לא יותר מאורך המשימה עצמה, אחרת הבפועל היה יוצא שלילי.
+function scanDeductSec(t,durSec){
+  if(!t||!(+t.expectedMin>0))return 0;
+  const n=scanCountIn(t);if(!n)return 0;
+  const dur=durSec!=null?durSec:(t.endTime?(t.duration||0):(t.elapsed||0));
+  return Math.min(n*scanMinPer()*60,Math.max(0,+dur||0));
+}
+// צביר: החלון הוא איחוד כל השורות, אחרת אותה סריקה נספרת פעם לכל שלב בקבוצה
+function scanDeductSecGroup(tasks,durSec){
+  if(!tasks||!tasks.length)return 0;
+  if(!tasks.some(t=>+t.expectedMin>0))return 0;
+  const st=Math.min(...tasks.map(t=>+new Date(t.startTime)||Infinity));
+  const ends=tasks.map(t=>t.endTime?+new Date(t.endTime):0).filter(Boolean);
+  const en=ends.length?Math.max(...ends):Date.now();
+  const n=scanCountIn(tasks[0],st,en);if(!n)return 0;
+  return Math.min(n*scanMinPer()*60,Math.max(0,+durSec||0));
+}
 // תג ההפרש מול הצפי — נקודה משותפת יחידה להיסטוריה ולדוח הפירוט.
 // עד 10/08 הוצג רק המשך בפועל, וצבע אדום/כחול אמר *אם* הייתה חריגה אבל לא *בכמה*;
 // ההפרש היה קבור ב-title, שלא נגיש בנייד. ▲/▼ בעקבות אותה מוסכמה בדוח הרווח.
 // expSec=0 (בלי תמחור / "כמות פתוחה") ⇒ מחזיר מחרוזת ריקה, בדיוק כמו קודם.
-function _expDeltaBadge(durSec,expSec,small){
+// מפת ניכוי פר-משימה על פני רשימה. 🛑 מקבץ לפי `batchId` — בלי זה אותה סריקה
+// הייתה מנוכה פעם לכל שלב בצביר, כי כל השלבים חולקים את אותו חלון זמן.
+// החלון = איחוד הצביר, והניכוי מתחלק **רק בין השורות שיש להן צפי**, לפי משך.
+function scanDeductMap(list){
+  const out={};
+  if(!scanMinPer())return out;
+  const g={};
+  (list||[]).forEach(t=>{const k=t.batchId?('b:'+t.batchId):('t:'+t.id);(g[k]=g[k]||[]).push(t);});
+  const durOf=t=>t.endTime?(t.duration||0):(t.elapsed||0);
+  Object.keys(g).forEach(k=>{
+    const arr=g[k];
+    const ded=scanDeductSecGroup(arr,arr.reduce((s,t)=>s+durOf(t),0));
+    if(ded<=0)return;
+    const withExp=arr.filter(t=>+t.expectedMin>0);
+    const tot=withExp.reduce((s,t)=>s+durOf(t),0);
+    if(!withExp.length)return;
+    withExp.forEach(t=>{out[t.id]=tot>0?ded*(durOf(t)/tot):ded/withExp.length;});
+  });
+  return out;
+}
+// ⏱️ `deductSec` — דקות חלוקת העבודה שיוצאות מהבפועל לפני ההשוואה (ראה scanDeductSec).
+//    השעון עצמו נשאר אמיתי בתצוגה; רק ההשוואה מתוקנת, והניכוי מוצג במפורש.
+function _expOver(durSec,expSec,deductSec){
+  return (+expSec>0)&&(Math.max(0,(+durSec||0)-Math.max(0,+deductSec||0))>(+expSec));
+}
+function _expDeltaBadge(durSec,expSec,small,deductSec){
   if(!(+expSec>0))return'';
-  const diff=(+durSec||0)-(+expSec);
+  const ded=Math.max(0,+deductSec||0);
+  const net=Math.max(0,(+durSec||0)-ded);
+  const diff=net-(+expSec);
   const dm=Math.round(Math.abs(diff)/60);
   const stl=`font-size:${small?9:10}px;font-weight:700`;
-  const base=`צפי ${fmtM(expSec)} · בפועל ${fmtM(durSec)}`;
+  const base=`צפי ${fmtM(expSec)} · בפועל ${fmtM(durSec)}`+(ded?` · פחות ${fmtM(ded)} חלוקת עבודה ⇒ ${fmtM(net)} נטו`:'');
+  const chip=ded?`<span class="badge gray" style="${stl}" title="${esc(base)}">⇄ ${fmtM(net)} נטו</span>`:'';
   // פחות מחצי דקה לכל כיוון — "▲ 0" היה רעש; מציגים שהיא בול על הצפי.
-  if(dm===0)return`<span class="badge gray" style="${stl}" title="${base}">≈ צפי</span>`;
+  if(dm===0)return chip+`<span class="badge gray" style="${stl}" title="${esc(base)}">≈ צפי</span>`;
   const over=diff>0;
   const pct=Math.round(Math.abs(diff)/(+expSec)*100);
-  return`<span class="badge ${over?'red':'green'}" style="${stl}" title="${base} · ${over?'חריגה':'חיסכון'} ${dm} ${"דק'"} (${pct}%)">${over?'▲':'▼'} ${dm}</span>`;
+  return chip+`<span class="badge ${over?'red':'green'}" style="${stl}" title="${esc(base)} · ${over?'חריגה':'חיסכון'} ${dm} ${"דק'"} (${pct}%)">${over?'▲':'▼'} ${dm}</span>`;
 }
 function _histCardHtml(tasks){
   const lead=tasks[0],multi=tasks.length>1;
@@ -6290,7 +6376,8 @@ function _histCardHtml(tasks){
   // לפי כמות, ולכן הסכום הוא חלון העבודה האמיתי ולא כפל שלו.
   const totDur=tasks.reduce((s,t)=>s+(t.duration||0),0);
   const totExp=tasks.reduce((s,t)=>s+((+t.expectedMin>0)?(+t.expectedMin)*60:0),0);
-  const over=totExp>0&&totDur>totExp;
+  const totDed=scanDeductSecGroup(tasks,totDur);
+  const over=_expOver(totDur,totExp,totDed);
   // משימה שחודשה מיום קודם: startTime הוא שעת החידוש, לכן מציגים גם את ההתחלה האמיתית
   const _osT=tasks.find(t=>t.origStart&&!isNaN(new Date(t.origStart).getTime()));
   const _os=_osT?new Date(_osT.origStart):null;
@@ -6299,7 +6386,7 @@ function _histCardHtml(tasks){
   const qtyHtml=q=>q===0?'<span style="color:#d97706;font-weight:700">⏳ כמות פתוחה</span>':q+" יח'";
   const meta=`${dateStr} | לקוח ${esc(lead.cust)} | ${esc(lead.prod)}${taskOrderLbl(lead)?' <b style="color:var(--green-txt,#16a34a)">'+taskOrderLbl(lead)+'</b>':''}${lead.size?' | מידה '+esc(lead.size):''} | ${qtyHtml(lead.qty)}${lead.isTotal?' | <span style="color:#059669;font-weight:700">📦 כל הכמות</span>':' | '+esc(COLORS[lead.col]||lead.col)}`;
   const times=`<div style="font-size:11px;color:var(--txt3)">▶ ${stStr} → ◀ ${etStr}${_multiDay?` <span style="color:#d97706;font-weight:600" title="המשימה נמשכה מיום קודם — הזמן שנצבר כלול במשך">📅 התחילה ${pad2(_os.getDate())}/${pad2(_os.getMonth()+1)} ${pad2(_os.getHours())}:${pad2(_os.getMinutes())}</span>`:''}</div>`;
-  const durBadge=`<span class="badge ${over?'red':'blue'}">${over?'⚠ ':''}${fmtM(totDur)}</span>${_expDeltaBadge(totDur,totExp)}`;
+  const durBadge=`<span class="badge ${over?'red':'blue'}">${over?'⚠ ':''}${fmtM(totDur)}</span>${_expDeltaBadge(totDur,totExp,false,totDed)}`;
   if(!multi){
     // משימה בודדת — בדיוק הפריסה הישנה, בלי רגרסיה
     return`<div class="row">
@@ -6324,12 +6411,13 @@ function _histCardHtml(tasks){
     <div class="task-group-stages">
       ${tasks.map(t=>{
         const tExp=(+t.expectedMin>0)?(+t.expectedMin)*60:0;
-        const tOver=tExp>0&&(t.duration||0)>tExp;
+        const tDed=totDur>0?totDed*((t.duration||0)/totDur):0;
+        const tOver=_expOver(t.duration||0,tExp,tDed);
         return`<div class="task-stage-row">
         <span class="badge gray">📋 ${esc(t.taskType||'—')}</span>
         <span style="font-size:11px;color:var(--txt3)">${qtyHtml(t.qty)}${t.prod!==lead.prod?' · '+esc(t.prod):''}</span>
         ${t.size&&t.size!==lead.size?`<span class="bc-seg bc-s">מידה ${esc(t.size)}</span>`:''}${t.col!==lead.col?`<span class="bc-seg bc-col">${esc(COLORS[t.col]||t.col)}</span>`:''}${t.station&&t.station!==lead.station?`<span style="font-size:11px;color:var(--green-txt)">📍 ${esc(t.station)}</span>`:''}
-        <span class="badge ${tOver?'red':'blue'}" style="font-size:10px">${tOver?'⚠ ':''}${fmtM(t.duration||0)}</span>${_expDeltaBadge(t.duration||0,tExp,true)}
+        <span class="badge ${tOver?'red':'blue'}" style="font-size:10px">${tOver?'⚠ ':''}${fmtM(t.duration||0)}</span>${_expDeltaBadge(t.duration||0,tExp,true,tDed)}
         <div style="margin-inline-start:auto;display:flex;gap:6px">${acts(t)}</div>
       </div>`;}).join('')}
     </div>
@@ -6822,13 +6910,15 @@ async function buildRep(){
   document.getElementById('rp-units').textContent=sumUnitsDedup(fl);
   const done=fl.filter(t=>t.done).length;
   document.getElementById('rp-eff').textContent=fl.length?Math.round(done/fl.length*100)+'%':'—';
+  const _rpDed=scanDeductMap(fl);
   document.getElementById('rp-body').innerHTML=fl.map(t=>{
     const st=new Date(t.startTime);
     const stStr=pad2(st.getHours())+':'+pad2(st.getMinutes());
     const et=t.endTime?new Date(t.endTime):null;
     const etStr=et?pad2(et.getHours())+':'+pad2(et.getMinutes()):'—';
     const expSec=(+t.expectedMin>0)?(+t.expectedMin)*60:0;
-    const over=expSec>0&&(t.done?(t.duration||0):(t.elapsed||0))>expSec;
+    const _ded=_rpDed[t.id]||0;
+    const over=_expOver(t.done?(t.duration||0):(t.elapsed||0),expSec,_ded);
     return`<tr><td>${esc(t.workerName)}</td><td>${esc(t.dept)}</td>
     <td>${esc(t.taskType||'—')}</td>
     <td><span class="bc-seg bc-c">${t.cust}</span></td>
@@ -6836,7 +6926,7 @@ async function buildRep(){
     <td>${t.size?`<span class="bc-seg bc-s">${t.size}</span>`:'—'}</td>
     <td>${t.qty}</td><td>${COLORS[t.col]||t.col}</td>
     <td>${stStr}</td><td>${etStr}</td>
-    <td>${t.done?`<span class="badge ${over?'red':'blue'}">${over?'⚠ ':''}${fmtM(t.duration||0)}</span>${_expDeltaBadge(t.duration||0,expSec,true)}`:`<span class="badge ${over?'red':'amber'}"${over?` title="חריגה מהצפי (${fmtM(expSec)})"`:''}>${over?'⚠ ':''}${fmtS(t.elapsed||0)}</span>`}</td>
+    <td>${t.done?`<span class="badge ${over?'red':'blue'}">${over?'⚠ ':''}${fmtM(t.duration||0)}</span>${_expDeltaBadge(t.duration||0,expSec,true,_ded)}`:`<span class="badge ${over?'red':'amber'}"${over?` title="חריגה מהצפי (${fmtM(expSec)})"`:''}>${over?'⚠ ':''}${fmtS(t.elapsed||0)}</span>`}</td>
     <td><span class="badge ${t.done?'green':'blue'}">${t.done?T.completed:T.active}</span></td></tr>`;
   }).join('');
   // update filters
@@ -6921,23 +7011,32 @@ function buildExpectedByProduct(fl){
   if(!done.length){el.innerHTML='<div style="color:var(--txt3);font-size:12px;padding:.5rem 0">אין משימות שהושלמו בטווח</div>';return;}
   // פעם אחת על כל הקבוצה, לא פר-מוצר: כך סכום השורות שווה בדיוק ל"זמן כולל" שלמעלה
   const nd=normalizeBatchDurations(done);
+  // ⏱️ דקות חלוקת העבודה יוצאות מהבפועל לפני ההשוואה לצפי.
+  // 🛑 הן **אינן נזקפות למוצר אחר** — נמדד 18/09: 53% מהסריקות שבתוך משימה שייכות
+  //    למוצר אחר מזה שהעובד עמד עליו. בספר הזמן הן דלי נפרד; רק בספר הכסף
+  //    (calcCosts) הן נוחתות על המוצר שנסרק.
+  const _epDed=scanDeductMap(done);
   const g={};
   done.forEach(t=>{
     const k=t.cust+'|'+t.prod;
-    const r=g[k]||(g[k]={cust:t.cust,prod:t.prod,tasks:[],act:0,exp:0,over:0,under:0,noExp:0,noExpSec:0,susp:0,suspSec:0,suspList:[]});
+    const r=g[k]||(g[k]={cust:t.cust,prod:t.prod,tasks:[],act:0,exp:0,over:0,under:0,noExp:0,noExpSec:0,susp:0,suspSec:0,suspList:[],scan:0,scanN:0});
     const s=nd[t.id]||0;
     r.tasks.push(t);r.act+=s;
     const e=(+t.expectedMin>0)?(+t.expectedMin)*60:0;
     if(!e){r.noExp++;r.noExpSec+=s;return;}
+    // הניכוי לעולם לא גדול מהמשך המנורמל — nd עשוי להיות קטן מ-duration הגולמי
+    const ded=Math.min(_epDed[t.id]||0,s);
+    const sNet=s-ded;
+    if(ded>0){r.scan+=ded;r.scanN++;}
     r.exp+=e;
-    const d=s-e;if(d>0)r.over+=d;else r.under+=-d;
-    if(_expSuspect(s,e)){r.susp++;r.suspSec+=(e-s);
-      if(r.suspList.length<8)r.suspList.push((t.taskType||'—')+' — צפי '+fmtM(e)+' מול '+fmtM(s)+' בפועל');}
+    const d=sNet-e;if(d>0)r.over+=d;else r.under+=-d;
+    if(_expSuspect(sNet,e)){r.susp++;r.suspSec+=(e-sNet);
+      if(r.suspList.length<8)r.suspList.push((t.taskType||'—')+' — צפי '+fmtM(e)+' מול '+fmtM(sNet)+' בפועל');}
   });
   const H=s=>(s/3600).toFixed(1)+" שע'";
   const rows=Object.values(g).map(r=>{
     r.units=sumUnitsDedup(r.tasks);
-    r.actExp=r.act-r.noExpSec;              // הזמן שיש מולו צפי — רק הוא מושווה
+    r.actExp=r.act-r.noExpSec-r.scan;       // הזמן שיש מולו צפי, פחות זמן חלוקת עבודה
     r.gap=r.over-r.under;                   // = actExp − exp, ולכן תמיד סוגר עם שתי העמודות
     r.eff=r.actExp>0?Math.round(r.exp/r.actExp*100):null;
     // ⚠️ הקיבוץ כאן הוא **לפי מוצר** (החלטת המשתמש), אבל `findProd` מחזיר תמיד את רשומת
@@ -6948,9 +7047,9 @@ function buildExpectedByProduct(fl){
     return r;
   }).sort((a,b)=>b.act-a.act);
   _expProdRows=rows;
-  const T2={act:0,exp:0,over:0,under:0,units:0,n:0,noExp:0,noExpSec:0,susp:0,suspSec:0,actExp:0};
+  const T2={act:0,exp:0,over:0,under:0,units:0,n:0,noExp:0,noExpSec:0,susp:0,suspSec:0,actExp:0,scan:0,scanN:0};
   rows.forEach(r=>{T2.act+=r.act;T2.exp+=r.exp;T2.over+=r.over;T2.under+=r.under;T2.units+=r.units;
-    T2.n+=r.tasks.length;T2.noExp+=r.noExp;T2.noExpSec+=r.noExpSec;T2.susp+=r.susp;T2.suspSec+=r.suspSec;T2.actExp+=r.actExp;});
+    T2.n+=r.tasks.length;T2.noExp+=r.noExp;T2.noExpSec+=r.noExpSec;T2.susp+=r.susp;T2.suspSec+=r.suspSec;T2.actExp+=r.actExp;T2.scan+=r.scan;T2.scanN+=r.scanN;});
   const totGap=T2.over-T2.under,totEff=T2.actExp>0?Math.round(T2.exp/T2.actExp*100):null;
   const cell=(v,cls,ttl)=>`<td style="padding:7px 8px">${v?`<span class="badge ${cls}"${ttl?` title="${esc(ttl)}"`:''}>${v}</span>`:'<span style="color:var(--txt3)">—</span>'}</td>`;
   el.innerHTML=`
@@ -6966,6 +7065,7 @@ function buildExpectedByProduct(fl){
       <th style="text-align:right;padding:6px 8px">משימות</th>
       <th style="text-align:right;padding:6px 8px">יחידות</th>
       <th style="text-align:right;padding:6px 8px">בפועל</th>
+      <th style="text-align:right;padding:6px 8px" title="זמן שבעל המשימה הקדיש לסריקה עבור עובדים אחרים — הוצא מההשוואה לצפי">⇄ חלוקה</th>
       <th style="text-align:right;padding:6px 8px">צפי</th>
       <th style="text-align:right;padding:6px 8px">פער</th>
       <th style="text-align:right;padding:6px 8px">▲ מעל</th>
@@ -6982,6 +7082,7 @@ function buildExpectedByProduct(fl){
       <td style="padding:7px 8px">${r.tasks.length}${r.noExp?`<span class="badge gray" style="font-size:9px;margin-inline-start:4px" title="${esc(r.noExp+' משימות בלי צפי כלל ('+H(r.noExpSec)+') — לא נכנסו להשוואה')}">${r.noExp} בלי צפי</span>`:''}</td>
       <td style="padding:7px 8px">${r.units}</td>
       <td style="padding:7px 8px"><span class="badge blue">${H(r.act)}</span></td>
+      ${cell(r.scan?H(r.scan):'','gray',r.scanN+' משימות שבהן בעל המשימה סרק עבור אחרים — הזמן הזה הוצא מההשוואה לצפי ואינו נזקף למוצר אחר')}
       ${cell(r.exp?H(r.exp):'','gray')}
       ${cell(r.exp?((r.gap>0?'+':'')+H(r.gap)):'',r.gap>0?'red':'green','פער = מעל פחות מתחת, על המשימות שיש להן צפי')}
       ${cell(r.over?H(r.over):'','red')}
@@ -6994,6 +7095,7 @@ function buildExpectedByProduct(fl){
       <td style="padding:8px 8px">${T2.n}</td>
       <td style="padding:8px 8px">${T2.units}</td>
       <td style="padding:8px 8px"><span class="badge blue">${H(T2.act)}</span></td>
+      <td style="padding:8px 8px">${T2.scan?`<span class="badge gray">${H(T2.scan)}</span>`:'<span style="color:var(--txt3)">—</span>'}</td>
       <td style="padding:8px 8px"><span class="badge gray">${H(T2.exp)}</span></td>
       <td style="padding:8px 8px"><span class="badge ${totGap>0?'red':'green'}">${totGap>0?'+':''}${H(totGap)}</span></td>
       <td style="padding:8px 8px"><span class="badge red">${H(T2.over)}</span></td>
@@ -7006,6 +7108,7 @@ function buildExpectedByProduct(fl){
     ההשוואה רצה רק על משימות שיש להן צפי.
     ${openCnt?`<br>${openCnt} משימות פעילות שטרם נסגרו אינן נספרות כאן.`:''}
     ${T2.noExp?`<br>${T2.noExp} משימות (${H(T2.noExpSec)}) בלי צפי כלל — נספרות ב"בפועל" ולא בהשוואה.`:''}
+    ${T2.scan?`<br>⇄ <b>${H(T2.scan)}</b> ב-${T2.scanN} משימות הוקדשו לסריקה עבור עובדים אחרים (${scanMinPer()} דק' לסריקה) — הוצאו מההשוואה לצפי. הזמן הזה אינו נזקף כזמן ייצור לאף מוצר; העלות שלו נזקפת למוצר שנסרק.`:''}
     ${T2.susp?`<br><b style="color:var(--amber,#b45309)">⚠ ${T2.susp} רשומות עם צפי חשוד</b> מזרימות ${H(T2.suspSec)} של "חיסכון" מדומה. הצפי נצרב בסריקה ולא תוקן — השורות מסומנות בצהוב.`:''}
   </div>`;
 }
@@ -7722,15 +7825,15 @@ async function exportCSV(){
     const h1=s=>(s/3600).toFixed(1);
     rows.push([]);
     rows.push(['🎯 בפועל מול צפי — לפי מוצר']);
-    rows.push(['לקוח','מוצר','שם','משימות','יחידות','בפועל (שעות)','צפי (שעות)','פער (שעות)','מעל הצפי (שעות)','מתחת לצפי (שעות)','יעילות %','בלי צפי','צפי חשוד']);
-    const G={act:0,exp:0,over:0,under:0,units:0,n:0,noExp:0,susp:0,actExp:0};
+    rows.push(['לקוח','מוצר','שם','משימות','יחידות','בפועל (שעות)','חלוקת עבודה (שעות)','צפי (שעות)','פער (שעות)','מעל הצפי (שעות)','מתחת לצפי (שעות)','יעילות %','בלי צפי','צפי חשוד']);
+    const G={act:0,exp:0,over:0,under:0,units:0,n:0,noExp:0,susp:0,actExp:0,scan:0};
     _expProdRows.forEach(r=>{
       G.act+=r.act;G.exp+=r.exp;G.over+=r.over;G.under+=r.under;G.units+=r.units;
-      G.n+=r.tasks.length;G.noExp+=r.noExp;G.susp+=r.susp;G.actExp+=r.actExp;
-      rows.push([r.cust,r.prod,String(r.name||'').replace(/,/g,' '),r.tasks.length,r.units,h1(r.act),r.exp?h1(r.exp):'',r.exp?h1(r.gap):'',
+      G.n+=r.tasks.length;G.noExp+=r.noExp;G.susp+=r.susp;G.actExp+=r.actExp;G.scan+=(r.scan||0);
+      rows.push([r.cust,r.prod,String(r.name||'').replace(/,/g,' '),r.tasks.length,r.units,h1(r.act),r.scan?h1(r.scan):'',r.exp?h1(r.exp):'',r.exp?h1(r.gap):'',
         h1(r.over),h1(r.under),r.eff!=null?r.eff:'',r.noExp||'',r.susp||'']);
     });
-    rows.push(['סה"כ','','',G.n,G.units,h1(G.act),h1(G.exp),h1(G.over-G.under),h1(G.over),h1(G.under),
+    rows.push(['סה"כ','','',G.n,G.units,h1(G.act),G.scan?h1(G.scan):'',h1(G.exp),h1(G.over-G.under),h1(G.over),h1(G.under),
       G.actExp>0?Math.round(G.exp/G.actExp*100):'',G.noExp||'',G.susp||'']);
   }
   const csv='﻿'+'sep=,\n'+rows.map(r=>r.join(',')).join('\n');
@@ -11255,10 +11358,28 @@ function _ovDeptToggle(wid){
   S.costs.oversightDepts[wid]=Array.from(
     document.querySelectorAll('input[data-ovw="'+wid+'"]:checked')).map(x=>x.value);
 }
+// ⏱️ שינוי מיידי — משפיע גם על דוח היעילות וגם על העלות, ולכן נשמר ומרענן על המקום.
+function setScanMinPerTask(v){
+  S.costs.scanMinPerTask=(v===''||v==null)?null:(parseFloat(v)||0);
+  saveLS();
+  if(S.fbConnected)fbSet('adminSettings','costs',S.costs);
+  try{calcCosts();}catch(e){}
+}
 function renderWorkerRates(){
   const el=document.getElementById('cost-worker-rates');
   if(!el)return;
-  el.innerHTML=`<div style="display:grid;grid-template-columns:1fr 1fr;gap:8px">
+  // ⏱️ הגדרה גלובלית אחת — כמה דקות עולה סריקה אחת עבור עובד אחר.
+  // המקור: רגרסיה על 58 משימות של האחראי (18/09/2026) — 2.4 דק' לסריקה.
+  // 0 = המנגנון כבוי לגמרי (גם הניכוי בזמן וגם העלות שנזקפת למוצר).
+  el.innerHTML=`<div style="display:flex;align-items:center;gap:8px;padding:8px;margin-bottom:8px;background:var(--bg2);border-radius:var(--r);flex-wrap:wrap">
+    <span style="font-size:12px;font-weight:600;color:var(--txt)">⇄ עלות סריקה עבור עובד אחר</span>
+    <input type="number" min="0" step="0.1" placeholder="4.2" value="${S.costs.scanMinPerTask!=null?esc(String(S.costs.scanMinPerTask)):''}"
+      style="width:80px;font-size:13px;text-align:left;padding:5px 8px"
+      title="כמה דקות נזקפות לכל סריקה שעובד מבצע עבור עובד אחר. הזמן מנוכה מהבפועל שלו בהשוואה לצפי, והעלות נזקפת למוצר שנסרק. ריק = 4.2 (ברירת מחדל שנמדדה). 0 = כבוי."
+      onchange="setScanMinPerTask(this.value)"/>
+    <span style="font-size:11px;color:var(--txt3)">דק' לסריקה · ריק = 4.2 · 0 = כבוי</span>
+  </div>
+  <div style="display:grid;grid-template-columns:1fr 1fr;gap:8px">
     ${S.workers.map(w=>`
       <div style="display:flex;align-items:center;gap:8px;padding:8px;background:var(--bg2);border-radius:var(--r)">
         <div class="av" style="width:30px;height:30px;font-size:11px;flex-shrink:0">${esc(w.name.split(' ').map(n=>n[0]).join(''))}</div>
