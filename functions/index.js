@@ -39,10 +39,25 @@ function storedDescriptors(src) {
   return raw.filter(Boolean).map(d => Object.values(d).map(Number));
 }
 
+// ─── קריאת תצורה שלא יכולה להפיל את הכניסה ───────────────────────────────
+// functions.config() זורק כשה-Runtime Config אינו זמין למופע. הקריאה הזו יושבת
+// בשורה הראשונה של login (הגדרות טלגרם), ולכן כשל שלה הפיל את *כל* הכניסות
+// למערכת עם INTERNAL — והלקוח הציג "שגיאת חיבור לשרת" כאילו אין אינטרנט.
+// הגדרות טלגרם/AI הן נלוות לאימות ואסור להן לחסום אותו: כשל = {} וממשיכים.
+function cfgSection(name) {
+  try { return functions.config()[name] || {}; } catch (e) { console.error('functions.config() unavailable:', e && e.message); return {}; }
+}
+// ערך יחיד, עם נפילה למשתנה סביבה (הסוד עצמו לעולם לא בקוד)
+function cfgVal(section, key, envName) {
+  const v = cfgSection(section)[key];
+  if (v) return String(v);
+  const e = envName ? process.env[envName] : '';
+  return e ? String(e) : '';
+}
+
 // הגדרות טלגרם — מ-functions:config:set telegram.token/chatid (לא ב-Firestore, לא בקוד לקוח)
 function tgCfg() {
-  const c = functions.config().telegram || {};
-  return { token: c.token || '', chatId: c.chatid || '' };
+  return { token: cfgVal('telegram', 'token', 'TELEGRAM_TOKEN'), chatId: cfgVal('telegram', 'chatid', 'TELEGRAM_CHATID') };
 }
 
 // שולח הודעה לטלגרם
@@ -104,7 +119,11 @@ function ipBypassMsLeft(s) {
   if (!startMs) return 0;
   return Math.max(0, startMs + mins * 60000 - Date.now());
 }
-exports.login = functions.https.onCall(async (data, context) => {
+// ─── כניסה ───────────────────────────────────────────────────────────────────
+// העטיפה למטה (exports.login) הופכת כל תקלה לא-צפויה להודעה שאפשר לקרוא. בלי
+// זה כל חריגה שאינה HttpsError חוזרת ללקוח כ-INTERNAL עירום, והלקוח — שמזהה
+// רק את מילות הקוד של השערים — הציג "שגיאת חיבור לשרת" גם כשהשרת ענה מצוין.
+const loginImpl = async (data, context) => {
   const d = data || {};
   // ── ping לחימום הפונקציה (keepLoginWarm) — חוזר מיד, לפני כל לוגיקת אימות/נעילה/Firestore ──
   if (d.ping) return { pong: true };
@@ -126,7 +145,7 @@ exports.login = functions.https.onCall(async (data, context) => {
 
   // ── כניסת חירום ──
   if (d.emergencyCode !== undefined) {
-    const cfgHash = (functions.config().app || {}).emergencyhash || '';
+    const cfgHash = cfgVal('app', 'emergencyhash', 'APP_EMERGENCYHASH');
     const emRef = db.collection('credentials').doc('_emergency');
     const emSnap = await emRef.get();
     const em = emSnap.exists ? emSnap.data() : {};
@@ -301,6 +320,16 @@ exports.login = functions.https.onCall(async (data, context) => {
   const role = w.role || 'worker';
   const token = await admin.auth().createCustomToken(w.id, { role, sat: Date.now() });
   return { token, worker: sanitizeWorker(w), needFaceRegister };
+};
+exports.login = functions.https.onCall(async (data, context) => {
+  try {
+    return await loginImpl(data, context);
+  } catch (e) {
+    if (e instanceof functions.https.HttpsError) throw e;
+    console.error('login failed:', e);
+    // 'srv:' מסמן ללקוח שזו תקלת שרת אמיתית (לא רשת) — ושאפשר להציג את הסיבה
+    throw new functions.https.HttpsError('internal', 'srv:' + ((e && e.message) || String(e)).slice(0, 300));
+  }
 });
 
 // ─── שחזור session אחרי טעינה מחדש ───────────────────────────────────────────
@@ -689,7 +718,7 @@ exports.aiChat = functions.https.onCall(async (data, context) => {
   const message = String(data && data.message || '').slice(0, 8000);
   if (!message) throw new functions.https.HttpsError('invalid-argument', 'הודעה ריקה');
   try {
-    const cfg = functions.config().anythingllm || {};
+    const cfg = cfgSection('anythingllm');
     const aiUrl = cfg.url || '';
     const aiKey = cfg.key || '';
     const aiSlug = cfg.slug || '';
@@ -1233,7 +1262,7 @@ exports.attendanceCloser = functions.pubsub.schedule('30 23 * * *').timeZone('As
 });
 // טריגר ידני מוגן במפתח (לתיקון מיידי של רשומות קיימות; אותה הגנה כמו migratePhase2)
 exports.attendanceCloserNow = functions.https.onRequest(async (req, res) => {
-  const key = (functions.config().app || {}).migratekey || '';
+  const key = cfgVal('app', 'migratekey', 'APP_MIGRATEKEY');
   if (!key || String(req.query.key || '') !== key) { res.status(403).send('forbidden'); return; }
   try {
     res.json(await runAttendanceCloser());

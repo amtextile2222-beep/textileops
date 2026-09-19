@@ -4030,6 +4030,48 @@ function _loginErrMsg(code){
     'barcode-needs-setup':'הכניסה הראשונה במכשיר הזה חייבת להיות עם סיסמה — הזן סיסמה פעם אחת, ומהפעם הבאה תיכנס בסריקה'
   }[code]||'שגיאת חיבור לשרת — נסה שוב';
 }
+// ─── מה *באמת* נכשל בכניסה ─────────────────────────────────────────────────
+// כל שגיאה שאינה אחת ממילות הקוד של השערים התגלגלה ל'network' והוצגה כ"שגיאת
+// חיבור לשרת". כך תקלת שרת, טוקן פסול או קריסה אחרי האימות נראו כולן כאינטרנט
+// תקול — והמנהל נשאר מול מסך כניסה בלי שום רמז מה לתקן. כאן אומרים את האמת.
+function _loginErrTech(e){
+  const raw=String((e&&e.message)||'').trim();
+  const msg=raw.startsWith('srv:')?raw.slice(4):raw;  // 'srv:' = תקלה שהשרת עצמו דיווח
+  const code=(e&&e.code)?String(e.code):'';
+  if(code&&msg&&msg!==code)return code+' — '+msg;
+  return code||msg||(e&&e.name)||'שגיאה לא ידועה';
+}
+// stage: איפה נפלנו — call (הקריאה לשרת), token (כניסה עם הטוקן), finish (בניית המסך)
+function _loginFailMsg(e,stage){
+  const c=_loginErrCode(e);
+  if(c!=='network')return _loginErrMsg(c);
+  if(typeof navigator!=='undefined'&&navigator.onLine===false)return '⛔ אין חיבור לאינטרנט — התחבר לרשת ונסה שוב';
+  const srv=String((e&&e.message)||'').trim().startsWith('srv:');
+  const head=srv?'⛔ תקלה בשרת הכניסה':({
+    call:'⛔ השרת לא השלים את הכניסה',
+    token:'⛔ הזיהוי אושר אך פתיחת החיבור נכשלה',
+    finish:'⛔ הכניסה אושרה אך טעינת המסך נכשלה'
+  }[stage]||'⛔ שגיאת כניסה');
+  return head+' — '+_loginErrTech(e);
+}
+function _loginShowErr(e,stage){
+  console.error('login ['+stage+']:',e);
+  const el=document.getElementById('l-err');
+  if(el)el.textContent=_loginFailMsg(e,stage);
+}
+// מונה הסיסמאות השגויות — משותף לכניסה רגילה ולכל מסלול אחר
+function _loginWrongPass(){
+  loginAttempts++;
+  if(loginAttempts>=5){
+    loginLocked=true;
+    document.getElementById('l-err').textContent='יותר מדי ניסיונות — חשבון נעול ל-30 שניות';
+    document.getElementById('l-user').disabled=true;
+    document.getElementById('l-pass').disabled=true;
+    loginLockTimer=setTimeout(()=>{loginLocked=false;loginAttempts=0;document.getElementById('l-user').disabled=false;document.getElementById('l-pass').disabled=false;document.getElementById('l-err').textContent='';},30000);
+  } else {
+    document.getElementById('l-err').textContent='שם משתמש או סיסמה שגויים ('+loginAttempts+'/5)';
+  }
+}
 // ─── שחזור session אחרי טעינה מחדש ──────────────────────────────────────
 // S.user חי בזיכרון בלבד (saveLS לא שומר אותו), ולכן כל הריגה של הטאב ע"י
 // הדפדפן/iOS החזירה את העובדת למסך כניסה — נמדד: עד 5 פתיחות ביום לאותו עובד.
@@ -4179,7 +4221,7 @@ async function emergencyLogin(){
       goPage('admin');
       return;
     }
-    document.getElementById('l-err').textContent=_loginErrMsg(c);
+    _loginShowErr(e,'call');
   }
 }
 // כשיר לכניסה בסריקת ברקוד: אין לו זיהוי פנים, יש נעילת מכשיר, והמכשיר כבר נרשם.
@@ -4306,7 +4348,7 @@ async function startBcLogin(){
         document.getElementById('l-pass-wrap').style.display='';
         document.getElementById('l-bc-hint').style.display='none';
       }
-      document.getElementById('l-err').textContent=_loginErrMsg(c);
+      _loginShowErr(e,'call');
     }
   },200);
 }
@@ -4339,41 +4381,40 @@ async function doLogin(){
   if(!S.fbConnected||!window._fbFunctions){document.getElementById('l-err').textContent='⛔ אין חיבור לשרת — בדוק אינטרנט ונסה שוב';return;}
   document.getElementById('l-err').textContent='מאמת...';
   const devId=await getDeviceId();
+  // שלושה שלבים נפרדים בכוונה: עד היום כל השלושה חלקו catch אחד, ולכן קריסה
+  // *אחרי* שהשרת כבר אישר את הסיסמה הוצגה כ"שגיאת חיבור לשרת".
+  let res;
   try{
     // האימות כולו בצד השרת: סיסמה, השעיה, WiFi מפעל, נעילת מכשיר, נעילת ניסיונות
-    const res=await loginCall({user:u,pass:p||undefined,deviceId:devId||undefined});
-    if(res.needFace){
-      // לעובד הזה נדרש זיהוי פנים — השרת יאמת את הפנים ויחזיר טוקן
-      S._pendingUser={user:u,name:res.name,faceUpdateAllowed:!!res.faceUpdateAllowed};
-      startFaceAuth();
-      return;
-    }
-    loginAttempts=0;
+    res=await loginCall({user:u,pass:p||undefined,deviceId:devId||undefined});
+  }catch(e){
+    if(_loginErrCode(e)==='wrong'){_loginWrongPass();return;}
+    _loginShowErr(e,'call');
+    return;
+  }
+  if(res.needFace){
+    // לעובד הזה נדרש זיהוי פנים — השרת יאמת את הפנים ויחזיר טוקן
+    S._pendingUser={user:u,name:res.name,faceUpdateAllowed:!!res.faceUpdateAllowed};
+    startFaceAuth();
+    return;
+  }
+  loginAttempts=0;
+  try{
     await fbSignInWithToken(res.token);
-    if(res.needFaceRegister){
-      // סיסמה אומתה אך פנים טרם נרשמו — רישום ראשוני ואז כניסה
-      S._pendingUser={...res.worker,_authed:true};
-      _startFaceFirstRegister();
-      return;
-    }
+  }catch(e){
+    _loginShowErr(e,'token');
+    return;
+  }
+  if(res.needFaceRegister){
+    // סיסמה אומתה אך פנים טרם נרשמו — רישום ראשוני ואז כניסה
+    S._pendingUser={...res.worker,_authed:true};
+    try{_startFaceFirstRegister();}catch(e){_loginShowErr(e,'finish');}
+    return;
+  }
+  try{
     finishLogin(res.worker,false);
   }catch(e){
-    const c=_loginErrCode(e);
-    if(c==='wrong'){
-      loginAttempts++;
-      if(loginAttempts>=5){
-        loginLocked=true;
-        document.getElementById('l-err').textContent='יותר מדי ניסיונות — חשבון נעול ל-30 שניות';
-        document.getElementById('l-user').disabled=true;
-        document.getElementById('l-pass').disabled=true;
-        loginLockTimer=setTimeout(()=>{loginLocked=false;loginAttempts=0;document.getElementById('l-user').disabled=false;document.getElementById('l-pass').disabled=false;document.getElementById('l-err').textContent='';},30000);
-      } else {
-        document.getElementById('l-err').textContent='שם משתמש או סיסמה שגויים ('+loginAttempts+'/5)';
-      }
-      return;
-    }
-    console.error('login error:',e);
-    document.getElementById('l-err').textContent=_loginErrMsg(c);
+    _loginShowErr(e,'finish');
   }
 }
 // ─── AI CHAT ────────────────────────────────────────────────
@@ -14674,7 +14715,7 @@ async function _runFaceAuthLoop(){
           _stopFaceAuthUI();
           S._pendingUser=null;
           document.getElementById('login-screen').classList.remove('hidden');
-          document.getElementById('l-err').textContent=_loginErrMsg(c);
+          _loginShowErr(e,'call');
         }
       }
     }finally{busy=false;}
