@@ -834,7 +834,7 @@ code{background:var(--bg2);border:0.5px solid var(--b);border-radius:4px;padding
             <div style="flex:1;min-width:88px"><label style="font-size:11px;color:var(--txt3)">🧷 ניילון</label><input type="number" id="pp-nylon" min="0" step="0.01" style="width:100%;font-size:13px;margin-top:3px"/></div>
             <div style="flex:1;min-width:88px"><label style="font-size:11px;color:var(--txt3)">📦 ניילון צלופן</label><input type="number" id="pp-cello" min="0" step="0.01" style="width:100%;font-size:13px;margin-top:3px"/></div>
           </div>
-          <div style="font-size:11px;color:var(--txt3);margin-top:5px">🧷 תלייה = קולב + ניילון · 📦 קיפול = ניילון צלופן</div>
+          <div style="font-size:11px;color:var(--txt3);margin-top:5px">🧷 תלייה = קולב + ניילון · 📦 קיפול = ניילון צלופן<br>הקולבים בדרך כלל של הלקוח — הכמות שלהם נשארת ריקה באישור המשלוח, והמחיר כאן משמש רק כשהם שלנו.</div>
         </div>
         <button class="btn primary" onclick="saveCompanyInfo()" style="width:100%;margin-top:8px;font-size:13px">💾 שמור פרטי עסק</button>
       </div>
@@ -10900,17 +10900,19 @@ function shipModeChanged(){
   if(hint)hint.style.display=mode?'none':'';
   const q=_shipQtySum();
   const inp='flex:1;min-width:0;font-size:13px;padding:6px;border-radius:6px;border:1px solid var(--brd);background:var(--bg);color:var(--txt)';
-  // הכמות מתמלאת מראש בכמות שיוצאת — זה המקרה הרגיל (קולב לכל בגד) — אבל נשארת
-  // שדה פתוח, כי לא תמיד יוצא בדיוק פריט אחד לכל יחידה.
+  // הכמות מתמלאת מראש בכמות שיוצאת (ניילון לכל בגד) ונשארת שדה פתוח, כי לא תמיד
+  // יוצא בדיוק פריט אחד לכל יחידה. חומר ש`custSupplied` **נשאר ריק** — ראה PACK_MATS.
   w.innerHTML=packMatsFor(mode).map(m=>{
     const pr=packPrice(m.k);
     return `<div class="mat-row" data-k="${m.k}" style="display:flex;align-items:center;gap:6px;margin-bottom:5px">
       <span style="font-size:12px;font-weight:600;min-width:72px">${esc(m.name)}</span>
-      <input class="mat-n" type="number" inputmode="numeric" min="0" value="${q||''}" placeholder="כמות" oninput="shipMatTotal()" style="${inp}"/>
+      <input class="mat-n" type="number" inputmode="numeric" min="0" value="${m.custSupplied?'':(q||'')}" placeholder="${m.custSupplied?'של הלקוח':'כמות'}" oninput="shipMatTotal()" style="${inp}"/>
       <span style="font-size:11px;white-space:nowrap;color:${pr?'var(--txt3)':'var(--amber-txt)'}">× ${pr?dnMoney(pr):'אין מחיר'}</span>
       <span class="mat-eq" style="font-size:12px;font-weight:800;min-width:58px;text-align:left;color:var(--txt3)">—</span>
     </div>`;
   }).join('');
+  if(packMatsFor(mode).some(m=>m.custSupplied))
+    w.insertAdjacentHTML('beforeend','<div style="font-size:11px;color:var(--txt3);margin:-1px 0 4px">🧷 הקולבים בדרך כלל של הלקוח — מלא כמות רק כשהם שלנו.</div>');
   shipMatTotal();
 }
 function _shipMatsCollect(){
@@ -13368,8 +13370,11 @@ function dnClearFilter(){
 // הסחורה יוצאת ללקוח **בתלייה או בקיפול**, ולכל מצב חומרים משלו. החומר מחויב
 // ללקוח ⇒ הוא שורה בהתחשבנות, לא עלות של המפעל. "ניילון צלופן" הוא פריט אחד.
 const PACK_MODES={hang:'🧷 תלייה',fold:'📦 קיפול'};
+// 🔑 `custSupplied` = **ברוב המקרים הלקוח מספק את החומר** ⇒ הכמות לא מתמלאת מראש.
+// הקולב כן מחויב כשהוא שלנו, אבל מילוי אוטומטי היה מחייב אותו כברירת מחדל —
+// ובדיוק ההפך נכון במפעל, ולכן טעות שקטה לטובת החיוב בכל משלוח בתלייה.
 const PACK_MATS=[
-  {k:'hanger',name:'קולב',      mode:'hang'},
+  {k:'hanger',name:'קולב',      mode:'hang',custSupplied:true},
   {k:'nylon' ,name:'ניילון',    mode:'hang'},
   {k:'cello' ,name:'ניילון צלופן',mode:'fold'}
 ];
