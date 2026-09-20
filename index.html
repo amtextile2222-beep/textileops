@@ -10890,29 +10890,28 @@ function shipPackTotal(){
   el.textContent=packsCount(packs)+' חבילות · '+u+" יח'"+(u!==q?' ⚠ במשלוח '+q:'');
   el.style.color=(u!==q)?'var(--amber-txt)':'var(--green-txt,#16a34a)';
 }
-// 📦 מצב האריזה נבחר **פר תעודה** ולא פר דגם: אותו דגם יוצא פעם בתלייה ופעם
-// בקיפול לפי מה שהלקוח ביקש באותו משלוח.
-function shipModeChanged(){
-  const mode=document.querySelector('input[name="ship-packmode"]:checked')?.value||'';
-  const w=document.getElementById('ship-mat-rows');
-  if(!w)return;
-  const hint=document.getElementById('ship-mat-hint');
-  if(hint)hint.style.display=mode?'none':'';
-  const q=_shipQtySum();
+// 📦 שלושת החומרים מוצגים תמיד — המצב נגזר ממה שמולא, ולא נבחר מראש.
+function shipMatRowsHtml(){
   const inp='flex:1;min-width:0;font-size:13px;padding:6px;border-radius:6px;border:1px solid var(--brd);background:var(--bg);color:var(--txt)';
-  // הכמות מתמלאת מראש בכמות שיוצאת (ניילון לכל בגד) ונשארת שדה פתוח, כי לא תמיד
-  // יוצא בדיוק פריט אחד לכל יחידה. חומר ש`custSupplied` **נשאר ריק** — ראה PACK_MATS.
-  w.innerHTML=packMatsFor(mode).map(m=>{
+  return PACK_MATS.map(m=>{
     const pr=packPrice(m.k);
-    return `<div class="mat-row" data-k="${m.k}" style="display:flex;align-items:center;gap:6px;margin-bottom:5px">
-      <span style="font-size:12px;font-weight:600;min-width:72px">${esc(m.name)}</span>
-      <input class="mat-n" type="number" inputmode="numeric" min="0" value="${m.custSupplied?'':(q||'')}" placeholder="${m.custSupplied?'של הלקוח':'כמות'}" oninput="shipMatTotal()" style="${inp}"/>
-      <span style="font-size:11px;white-space:nowrap;color:${pr?'var(--txt3)':'var(--amber-txt)'}">× ${pr?dnMoney(pr):'אין מחיר'}</span>
-      <span class="mat-eq" style="font-size:12px;font-weight:800;min-width:58px;text-align:left;color:var(--txt3)">—</span>
+    return `<div class="mat-row" data-k="${m.k}" style="margin-bottom:7px">
+      <div style="display:flex;align-items:center;gap:6px">
+        <span style="font-size:12px;font-weight:600;min-width:76px">${esc(m.name)}</span>
+        <input class="mat-n" type="number" inputmode="numeric" min="0" value="" data-auto="${m.autoQty?'1':'0'}"
+          placeholder="${m.autoQty?'לפי הכמות':'ידני'}" oninput="this.dataset.auto='0';shipMatTotal()" style="${inp}"/>
+        <span style="font-size:11px;white-space:nowrap;color:${pr?'var(--txt3)':'var(--amber-txt)'}">× ${pr?dnMoney(pr):'אין מחיר'}</span>
+        <span class="mat-eq" style="font-size:12px;font-weight:800;min-width:58px;text-align:left;color:var(--txt3)">—</span>
+      </div>
+      <div style="font-size:10px;color:var(--txt3);margin-right:82px;margin-top:1px">${esc(m.hint)}</div>
     </div>`;
   }).join('');
-  if(packMatsFor(mode).some(m=>m.custSupplied))
-    w.insertAdjacentHTML('beforeend','<div style="font-size:11px;color:var(--txt3);margin:-1px 0 4px">🧷 הקולבים בדרך כלל של הלקוח — מלא כמות רק כשהם שלנו.</div>');
+}
+// כמות הצלופן עוקבת אחרי הכמות שיוצאת — בקיפול כל פריט נארז בשק — **עד שנגעו בה**.
+// `data-auto` מתאפס ב-oninput, ולכן תיקון ידני לא נדרס בעדכון הבא של הכמויות.
+function shipMatSyncAuto(){
+  const q=_shipQtySum();
+  document.querySelectorAll('.mat-row .mat-n').forEach(i=>{if(i.dataset.auto==='1')i.value=q||'';});
   shipMatTotal();
 }
 function _shipMatsCollect(){
@@ -10930,15 +10929,15 @@ function shipMatTotal(){
   });
   const el=document.getElementById('mat-sum');
   if(!el)return;
-  const mode=document.querySelector('input[name="ship-packmode"]:checked')?.value||'';
-  if(!mode){el.textContent='לא נבחר';el.style.color='var(--txt3)';return;}
   const mats=_shipMatsCollect();
+  const mode=packModeOf(mats);
+  if(!mode){el.textContent='לא הוזנה כמות';el.style.color='var(--txt3)';return;}
   // חומר בלי מחיר במחירון **לא חוסם** — הכמות עדיין נרשמת ונצרבת, והדוח יסמן
   // אותה. חסימה כאן הייתה עוצרת משלוח אמיתי בגלל שדה שכחו למלא בניהול.
   const no=mats.filter(m=>!m.price).map(m=>packMatName(m.k));
-  el.textContent=PACK_MODES[mode]+(mats.length?' · '+dnMoney(mats.reduce((t,m)=>t+m.n*m.price,0)):' · לא הוזנה כמות')
+  el.textContent=PACK_MODES[mode]+' · '+dnMoney(mats.reduce((t,m)=>t+m.n*m.price,0))
     +(no.length?' ⚠ אין מחיר: '+no.join(', '):'');
-  el.style.color=no.length?'var(--amber-txt)':(mats.length?'var(--green-txt,#16a34a)':'var(--txt3)');
+  el.style.color=no.length?'var(--amber-txt)':'var(--green-txt,#16a34a)';
 }
 function shipRowsTotal(){
   const t=_shipQtySum(),el=document.getElementById('ship-total');
@@ -10964,6 +10963,7 @@ function shipRowsTotal(){
     }
   }
   try{shipPackTotal();}catch(e){}
+  try{shipMatSyncAuto();}catch(e){}
   return t;
 }
 // ─── מספר הזמנה פר-דגם ────────────────────────────────────────
@@ -11057,13 +11057,9 @@ function openShipModal(cust,prod,orderNo){
       <button class="btn" style="width:100%;font-size:12px;padding:5px;margin-top:4px" onclick="addPackRow()">➕ עוד גודל חבילה</button>
     </details>
     <div style="margin-top:10px;border:1px solid var(--brd);border-radius:8px;padding:7px 9px">
-      <div style="font-size:12px;font-weight:700;margin-bottom:6px">📦 חומר אריזה — <span id="mat-sum" style="font-weight:600;color:var(--txt3)">לא נבחר</span></div>
-      <div style="display:flex;gap:6px;margin-bottom:6px">
-        ${Object.entries(PACK_MODES).map(([k,lbl])=>`<label style="flex:1;display:flex;align-items:center;justify-content:center;gap:5px;font-size:12px;font-weight:600;cursor:pointer;border:1px solid var(--brd);border-radius:8px;padding:6px 4px">
-          <input type="radio" name="ship-packmode" value="${k}" onchange="shipModeChanged()" style="width:15px;height:15px"/> ${lbl}</label>`).join('')}
-      </div>
-      <div id="ship-mat-rows"></div>
-      <div id="ship-mat-hint" style="font-size:11px;color:var(--txt3)">בחר איך הסחורה יצאה. החומר מחויב ללקוח ונכנס לדוח ההתחשבנות.</div>
+      <div style="font-size:12px;font-weight:700;margin-bottom:2px">📦 חומר אריזה — <span id="mat-sum" style="font-weight:600;color:var(--txt3)">לא הוזנה כמות</span></div>
+      <div style="font-size:11px;color:var(--txt3);margin-bottom:7px">רשום מה נארז בפועל. מצב המשלוח נקבע לפי זה, והחומר מחויב ללקוח בדוח ההתחשבנות.</div>
+      <div id="ship-mat-rows">${shipMatRowsHtml()}</div>
     </div>
     <div style="margin-top:9px">
       <label style="font-size:12px;font-weight:600">📝 הערה לתעודה</label>
@@ -11127,8 +11123,8 @@ async function confirmShip(){
   const rows=_shipRowsCollect();
   const qty=_shipQtySum();
   const packs=_shipPacksCollect();
-  const packMode=document.querySelector('input[name="ship-packmode"]:checked')?.value||'';
-  const mats=packMode?_shipMatsCollect():[];
+  const mats=_shipMatsCollect();
+  const packMode=packModeOf(mats);
   const dnote=(document.getElementById('ship-note')?.value||'').trim();
   const autoPrint=!!document.getElementById('ship-autoprint')?.checked;
   if(!Array.isArray(p.stageLog))p.stageLog=[];
@@ -11143,9 +11139,9 @@ async function confirmShip(){
   if(packs.length&&packsUnits(packs)!==qty){
     if(!await showConfirm('אריזה לא תואמת','באריזה '+packsUnits(packs)+" יח' ובמשלוח "+qty+" יח'. לרשום בכל זאת?",'רשום','חזור'))return;
   }
-  // 📦 חומר האריזה מחויב ללקוח ⇒ משלוח בלי מצב אריזה מגיע לדוח בלי החיוב הזה.
+  // 📦 חומר האריזה מחויב ללקוח ⇒ משלוח בלי חומר מגיע לדוח בלי החיוב הזה.
   // לא חוסם — יש משלוחים בלי אריזה — אבל שואל, כי לשכוח את זה עולה כסף אמיתי.
-  if(!packMode&&!await showConfirm('בלי חומר אריזה','לא נבחר תלייה/קיפול, ולכן לא ייכנס חיוב על חומר אריזה. לאשר בכל זאת?','אשר','חזור'))return;
+  if(!packMode&&!await showConfirm('בלי חומר אריזה','לא הוזנה כמות לאף חומר אריזה, ולכן לא ייכנס חיוב עליו. לאשר בכל זאת?','אשר','חזור'))return;
   const matNoPrice=mats.filter(m=>!m.price).map(m=>packMatName(m.k));
   if(matNoPrice.length&&!await showConfirm('חומר בלי מחיר','אין מחיר במחירון ל: '+matNoPrice.join(', ')+'. הכמות תירשם אבל תסומן בדוח כחסרת מחיר. להמשיך?','המשך','חזור'))return;
   // 🚚 **כל אישור יוצר משלוח חדש עם תעודה משלו** — לא דורס את הקודם.
@@ -13369,18 +13365,28 @@ function dnClearFilter(){
 // ─── 📦 חומר אריזה ────────────────────────────────────────────
 // הסחורה יוצאת ללקוח **בתלייה או בקיפול**, ולכל מצב חומרים משלו. החומר מחויב
 // ללקוח ⇒ הוא שורה בהתחשבנות, לא עלות של המפעל. "ניילון צלופן" הוא פריט אחד.
-const PACK_MODES={hang:'🧷 תלייה',fold:'📦 קיפול'};
-// 🔑 `custSupplied` = **ברוב המקרים הלקוח מספק את החומר** ⇒ הכמות לא מתמלאת מראש.
-// הקולב כן מחויב כשהוא שלנו, אבל מילוי אוטומטי היה מחייב אותו כברירת מחדל —
-// ובדיוק ההפך נכון במפעל, ולכן טעות שקטה לטובת החיוב בכל משלוח בתלייה.
+const PACK_MODES={hang:'🧷 תלייה',fold:'📦 קיפול',mixed:'🧷📦 תלייה וקיפול'};
+// 🔑 **מצב האריזה לא נבחר — הוא נגזר ממה שמולא.** שלושת החומרים מוצגים תמיד יחד,
+// כי זה מה שקורה בפועל ליד הסורק: מסתכלים על הסחורה ורושמים מה נארז בה.
+// `autoQty` = כל פריט נארז בו ⇒ הכמות עוקבת אחרי הכמות שיוצאת. רק לצלופן:
+// בקיפול כל פריט נכנס לשק, אבל בתלייה לא כל פריט מקבל ניילון, והקולבים לרוב
+// של הלקוח — ולכן שתי הכמויות האלה ידניות, ומילוי אוטומטי שלהן היה מחייב את
+// הלקוח בשקט על מה שלא סיפקנו.
 const PACK_MATS=[
-  {k:'hanger',name:'קולב',      mode:'hang',custSupplied:true},
-  {k:'nylon' ,name:'ניילון',    mode:'hang'},
-  {k:'cello' ,name:'ניילון צלופן',mode:'fold'}
+  {k:'hanger',name:'קולב',      mode:'hang',hint:'רק כשהקולבים שלנו — הלקוח מספק ברוב המקרים'},
+  {k:'nylon' ,name:'ניילון',    mode:'hang',hint:'תלייה — לא כל פריט נארז בניילון, כמות ידנית'},
+  {k:'cello' ,name:'ניילון צלופן',mode:'fold',autoQty:true,hint:'קיפול — כל פריט בשק, עוקב אחרי הכמות שיוצאת'}
 ];
+const PACK_GROUP=k=>PACK_MATS.find(m=>m.k===k)?.mode||'';
+// מצב האריזה נגזר מהחומרים שנרשמו בפועל. שני הצדדים יחד = משלוח מעורב, וזה קורה:
+// חלק מהסחורה יוצא בתלייה וחלק מקופל. עדיף להגיד את זה מאשר לבחור צד שרירותית.
+function packModeOf(mats){
+  const has=g=>(mats||[]).some(m=>(+m.n||0)>0&&PACK_GROUP(m.k)===g);
+  const h=has('hang'),f=has('fold');
+  return h&&f?'mixed':h?'hang':f?'fold':'';
+}
 // שם נקי בלי אמוג'י — לנייר המודפס, שבו האמוג'י רק מלכלך שורת פרטים
-function packModeName(k){return ({hang:'תלייה',fold:'קיפול'})[k]||'';}
-function packMatsFor(mode){return PACK_MATS.filter(m=>m.mode===mode);}
+function packModeName(k){return ({hang:'תלייה',fold:'קיפול',mixed:'תלייה וקיפול'})[k]||'';}
 function packMatName(k){return PACK_MATS.find(m=>m.k===k)?.name||k;}
 function packPrice(k){return +((S.settings?.packPrices||{})[k])||0;}
 // 🔑 הכמות **והמחיר** נצרבים על רשומת המשלוח באישור. זה בכוונה **הפוך** ממחיר
