@@ -1319,9 +1319,11 @@ code{background:var(--bg2);border:0.5px solid var(--b);border-radius:4px;padding
     </div>
     <div style="display:flex;gap:8px;margin-bottom:12px;flex-wrap:wrap">
       <input id="dn-search" type="text" placeholder="🔍 מספר תעודה / לקוח / דגם / מספר מוצר" style="flex:1;min-width:170px;padding:7px 10px;border-radius:8px;border:1px solid var(--brd);background:var(--card);color:var(--txt);font-size:13px" oninput="renderDNotes()">
+      <select id="dn-cust" onchange="renderDNotes()" style="padding:7px 10px;border-radius:8px;border:1px solid var(--brd);background:var(--card);color:var(--txt);font-size:13px"><option value="">כל הלקוחות</option></select>
       <input id="dn-from" type="date" onchange="renderDNotes()" style="padding:7px 10px;border-radius:8px;border:1px solid var(--brd);background:var(--card);color:var(--txt);font-size:13px">
       <input id="dn-to" type="date" onchange="renderDNotes()" style="padding:7px 10px;border-radius:8px;border:1px solid var(--brd);background:var(--card);color:var(--txt);font-size:13px">
       <button class="btn" style="font-size:12px" onclick="dnClearFilter()">נקה</button>
+      <button class="btn primary" style="font-size:12px" onclick="printSettlement()">🧾 הדפס התחשבנות</button>
     </div>
     <div id="dnotes-list"></div>
   </div>
@@ -13270,17 +13272,38 @@ function allDeliveryNotes(){
   return out.sort((a,b)=>((+b.s.no||0)-(+a.s.no||0))||String(b.s.date||'').localeCompare(String(a.s.date||'')));
 }
 function dnClearFilter(){
-  ['dn-search','dn-from','dn-to'].forEach(id=>{const el=document.getElementById(id);if(el)el.value='';});
+  ['dn-search','dn-cust','dn-from','dn-to'].forEach(id=>{const el=document.getElementById(id);if(el)el.value='';});
   renderDNotes();
 }
-function renderDNotes(){
-  const box=document.getElementById('dnotes-list');
-  if(!box)return;
+// ─── 🧾 התחשבנות עם לקוח ──────────────────────────────────────
+// מחיר העבודה ליחידה כפי שהוא רשום בכרטיס המוצר **היום**. ⚠ המחיר לא נצרב על
+// רשומת המשלוח (`p.shipments[]` מחזיק no/date/rows/total בלבד) ⇒ עדכון מחיר לדגם
+// משנה גם את ההתחשבנות של תעודות ישנות שלו. הוחלט להשאיר כך (20/09) — מי שמעדכן
+// מחיר באמצע הזמנה צריך לדעת שזה רטרואקטיבי.
+function dnUnitPrice(p){
+  let sew=+p?.unitPrice||0;
+  // 👕 דגם ראשון: הסימון בכרטיס ממלא SAMPLE_UNIT_PRICE, אבל דגם שסומן לפני שהפיצ'ר
+  // נבנה (או שהמחיר נמחק ממנו) נשאר עם 0 — בלי הנפילה הזו הוא נספר כאפס בשקט.
+  if(!sew&&p?.isSample)sew=SAMPLE_UNIT_PRICE;
+  const cut=+p?.cutPrice||0;
+  // ✂ הגזירה מתומחרת בנפרד מהתפירה ([[feature_cut_price]]) — הלקוח משלם את שתיהן,
+  // ולכן שתי עמודות + סכום, ולא מספר אחד מאוחד שמסתיר ממה הוא מורכב.
+  return {sew,cut,unit:sew+cut,missing:!sew};
+}
+function dnMoney(v){return '₪'+(+v||0).toLocaleString('he-IL',{minimumFractionDigits:2,maximumFractionDigits:2});}
+// הלקוחות שיש להם בפועל תעודות — בורר שמציע לקוח בלי אף משלוח רק מבלבל.
+function dnCustomers(rows){
+  const codes=[...new Set(rows.map(r=>r.p.cust).filter(Boolean))].sort();
+  return codes.map(c=>({code:c,name:S.customerNames?.[c]||('לקוח '+c)}));
+}
+// שורות הדוח אחרי סינון — משותף לטבלה ולהדפסה, כדי שהנייר יהיה **בדיוק** מה שבמסך.
+function dnFiltered(){
   const g=id=>(document.getElementById(id)?.value||'').trim();
-  const q=g('dn-search').toLowerCase(),from=g('dn-from'),to=g('dn-to');
+  const q=g('dn-search').toLowerCase(),cust=g('dn-cust'),from=g('dn-from'),to=g('dn-to');
   // משלוח בלי תאריך לא נופל מהסינון — עדיף להראות אותו מאשר להעלים תעודה שקיימת
   const rows=allDeliveryNotes().filter(r=>{
     const d=r.s.date||'';
+    if(cust&&r.p.cust!==cust)return false;
     if(from&&d&&d<from)return false;
     if(to&&d&&d>to)return false;
     if(!q)return true;
@@ -13288,10 +13311,36 @@ function renderDNotes(){
       r.p.prod||'',r.p.name||'',String(parseInt(r.p.orderNo,10)||'')].join(' ').toLowerCase();
     return hay.includes(q);
   });
-  const units=rows.reduce((t,r)=>t+(+r.s.total||0),0);
+  let units=0,amount=0,missing=0;
+  rows.forEach(r=>{
+    r.pr=dnUnitPrice(r.p);
+    r.qty=+r.s.total||0;
+    r.amount=r.pr.missing?0:r.pr.unit*r.qty;
+    units+=r.qty;amount+=r.amount;
+    if(r.pr.missing)missing++;
+  });
+  return {rows,units,amount,missing,cust,from,to};
+}
+function renderDNotes(){
+  const box=document.getElementById('dnotes-list');
+  if(!box)return;
+  // בורר הלקוח נבנה מחדש בכל רינדור (נוספו תעודות ⇒ אולי נוסף לקוח), אבל **שומר
+  // את הבחירה** — אחרת כל onSnapshot היה מאפס את הסינון תחת היד של המשתמש.
+  const sel=document.getElementById('dn-cust');
+  if(sel){
+    const keep=sel.value;
+    const opts=dnCustomers(allDeliveryNotes());
+    const html='<option value="">כל הלקוחות</option>'+opts.map(c=>`<option value="${esc(c.code)}">${esc(c.name)}</option>`).join('');
+    if(sel.innerHTML!==html)sel.innerHTML=html;
+    sel.value=opts.some(c=>c.code===keep)?keep:'';
+  }
+  const f=dnFiltered(),rows=f.rows;
   const packs=rows.reduce((t,r)=>t+packsCount(r.s.packs),0);
   const sum=document.getElementById('dn-sum');
-  if(sum)sum.textContent=(rows.length===1?'תעודה אחת':rows.length+' תעודות')+' · '+units+" יח'"+(packs?' · '+packs+' חבילות':'');
+  if(sum)sum.innerHTML=(rows.length===1?'תעודה אחת':rows.length+' תעודות')+' · '+f.units+" יח'"
+    +(packs?' · '+packs+' חבילות':'')
+    +' · <b style="color:var(--txt)">'+dnMoney(f.amount)+'</b>'
+    +(f.missing?` · <b style="color:var(--red-txt)">⚠ ${f.missing} בלי מחיר</b>`:'');
   const heDate=d=>d?String(d).slice(8,10)+'/'+String(d).slice(5,7)+'/'+String(d).slice(0,4):'—';
   if(!rows.length){
     box.innerHTML=`<div class="card" style="text-align:center;color:var(--txt3);font-size:13px;padding:18px">אין תעודות תואמות</div>`;
@@ -13300,17 +13349,27 @@ function renderDNotes(){
   box.innerHTML=`<div class="card" style="padding:0"><div class="tbl-wrap"><table>
     <thead><tr>
       <th>תעודה</th><th>תאריך</th><th>לקוח</th><th>דגם</th><th>הזמנה</th>
-      <th style="text-align:center">יח'</th><th style="text-align:center">חבילות</th><th></th>
+      <th style="text-align:center">יח'</th>
+      <th style="text-align:center">תפירה</th><th style="text-align:center">✂ גזירה</th><th style="text-align:center">סכום</th>
+      <th style="text-align:center">חבילות</th><th></th>
     </tr></thead>
     <tbody>${rows.map(r=>{
       const pk=packsCount(r.s.packs);
+      // 🔴 מוצר בלי מחיר לא מוצג כ-₪0: דוח התחשבנות שמקטין את עצמו בשקט גרוע
+      // מדוח שצועק. הסכום שלו גם לא נכנס לסה"כ.
+      const money=r.pr.missing
+        ? `<td colspan="3" style="text-align:center;color:var(--red-txt);font-weight:700">⚠ חסר מחיר בכרטיס המוצר</td>`
+        : `<td style="text-align:center;white-space:nowrap">${dnMoney(r.pr.sew)}${r.p.isSample&&!(+r.p.unitPrice)?'<span title="👕 דגם ראשון — מחיר קבוע" style="font-size:10px;color:var(--txt3)"> 👕</span>':''}</td>
+           <td style="text-align:center;white-space:nowrap;color:var(--txt3)">${r.pr.cut?dnMoney(r.pr.cut):'—'}</td>
+           <td style="text-align:center;white-space:nowrap;font-weight:700">${dnMoney(r.amount)}</td>`;
       return `<tr>
         <td><span class="bc-seg" style="background:var(--green-bg,#dcfce7);color:var(--green-txt,#16a34a);font-weight:700">${r.s.no?String(r.s.no).padStart(4,'0'):'—'}</span>${r.count>1?`<span style="font-size:10px;color:var(--txt3)"> ${r.i+1}/${r.count}</span>`:''}</td>
         <td style="white-space:nowrap">${heDate(r.s.date)}</td>
         <td>${esc(S.customerNames?.[r.p.cust]||('לקוח '+(r.p.cust||'')))}</td>
         <td>${esc(r.p.name||r.p.prod||'')}${r.s.note?`<span title="${esc(r.s.note)}"> 📝</span>`:''}</td>
         <td style="color:var(--txt3)">${(parseInt(r.p.orderNo,10)||0)?'#'+String(r.p.orderNo).padStart(3,'0'):'—'}</td>
-        <td style="text-align:center;font-weight:700">${+r.s.total||0}</td>
+        <td style="text-align:center;font-weight:700">${r.qty}</td>
+        ${money}
         <td style="text-align:center">${pk||''}</td>
         <td style="white-space:nowrap;text-align:left">
           <button class="btn" style="font-size:11px;padding:4px 9px" onclick="printDeliveryNote('${escj(r.p.id)}',${r.i})">📄 הדפס</button>
@@ -13318,7 +13377,116 @@ function renderDNotes(){
         </td>
       </tr>`;
     }).join('')}</tbody>
+    <tfoot><tr style="background:var(--bg2,var(--card));font-weight:800">
+      <td colspan="5" style="text-align:left">סה"כ</td>
+      <td style="text-align:center">${f.units}</td>
+      <td colspan="2"></td>
+      <td style="text-align:center;white-space:nowrap">${dnMoney(f.amount)}</td>
+      <td colspan="2">${f.missing?`<span style="color:var(--red-txt);font-size:11px">⚠ ${f.missing} תעודות ללא מחיר — לא נכללו</span>`:''}</td>
+    </tr></tfoot>
   </table></div></div>`;
+}
+// 🧾 הדפסת ההתחשבנות. הנייר מורכב מ-`dnFiltered()` בדיוק כמו המסך — אם המסך מסנן
+// לקוח וטווח, זה מה שיודפס, ואין מסלול חישוב שני שיכול להיפרד ממנו.
+function printSettlement(){
+  const f=dnFiltered();
+  if(!f.rows.length){showToast('⚠ אין תעודות בסינון הנוכחי','var(--red-txt)');return;}
+  const co=S.settings?.company||{};
+  const custs=dnCustomers(f.rows);
+  // לקוח אחד ⇒ כותרת אישית + פרטי הלקוח. כמה לקוחות ⇒ עמודת לקוח נשארת בטבלה,
+  // כי דף בלי הבחנה בין לקוחות אי אפשר למסור לאף אחד מהם.
+  const one=custs.length===1?custs[0]:null;
+  const ci=one?((S.customerInfo||{})[one.code]||{}):{};
+  const heDate=d=>d?String(d).slice(8,10)+'/'+String(d).slice(5,7)+'/'+String(d).slice(0,4):'—';
+  const period=(f.from||f.to)?`${f.from?heDate(f.from):'תחילת הרישום'} — ${f.to?heDate(f.to):'היום'}`:'כל התקופה';
+  const line=(lbl,val)=>val?`<div><span class="l">${esc(lbl)}</span> ${esc(val)}</div>`:'';
+  const body=f.rows.slice().sort((a,b)=>String(a.s.date||'').localeCompare(String(b.s.date||''))||((+a.s.no||0)-(+b.s.no||0))).map(r=>`<tr>
+    <td class="c">${r.s.no?String(r.s.no).padStart(4,'0'):'—'}</td>
+    <td class="c">${heDate(r.s.date)}</td>
+    ${one?'':`<td>${esc(S.customerNames?.[r.p.cust]||('לקוח '+(r.p.cust||'')))}</td>`}
+    <td>${esc(r.p.name||r.p.prod||'')}${(parseInt(r.p.orderNo,10)||0)?` <span class="ord">#${String(r.p.orderNo).padStart(3,'0')}</span>`:''}</td>
+    <td class="n">${r.qty}</td>
+    ${r.pr.missing
+      ? `<td class="c miss" colspan="3">⚠ חסר מחיר</td>`
+      : `<td class="c">${dnMoney(r.pr.sew)}</td><td class="c">${r.pr.cut?dnMoney(r.pr.cut):'—'}</td><td class="n">${dnMoney(r.amount)}</td>`}
+  </tr>`).join('');
+  const cols=one?7:8;
+  printViaIframe(`<!DOCTYPE html><html dir="rtl" lang="he"><head><meta charset="UTF-8"/><title>התחשבנות ${esc(one?one.name:'')}</title><style>
+*{box-sizing:border-box;margin:0;padding:0}
+body{font-family:Arial,Helvetica,sans-serif;color:#000;background:#fff;font-size:13px;padding:16mm 14mm;-webkit-print-color-adjust:exact;print-color-adjust:exact}
+.top{display:flex;justify-content:space-between;align-items:flex-start;border-bottom:3px solid #185FA5;padding-bottom:10px;margin-bottom:14px}
+.co{font-size:19px;font-weight:800;color:#185FA5;margin-bottom:3px}
+.co-d{font-size:11px;color:#444;line-height:1.6}
+.doc{text-align:left;flex-shrink:0;margin-right:16px}
+.doc h1{font-size:20px;font-weight:800;margin-bottom:6px}
+.doc .dt{font-size:12px;color:#444;margin-top:3px}
+.box{border:1px solid #bbb;border-radius:6px;padding:9px 11px;line-height:1.7;margin-bottom:14px}
+.box h2{font-size:12px;font-weight:800;color:#185FA5;margin-bottom:5px;border-bottom:1px solid #e2e2e2;padding-bottom:3px}
+.box .l{color:#666;font-size:11px;display:inline-block;min-width:62px}
+table{width:100%;border-collapse:collapse;font-size:12.5px}
+thead th{background:#eef2ff;padding:7px 6px;text-align:right;font-weight:700;border:1px solid #bbb;font-size:12px}
+td{padding:6px;border:1px solid #ddd}
+td.c,th.c{text-align:center}
+td.n,th.n{text-align:center;font-weight:800;background:#fafafa;white-space:nowrap}
+td.miss{color:#b91c1c;font-weight:700;background:#fef2f2}
+.ord{color:#888;font-size:10px}
+tfoot td{background:#eef2ff;font-weight:800;font-size:14px;border:1px solid #bbb;padding:9px 6px}
+tr{page-break-inside:avoid}
+thead{display:table-header-group}
+.warn{background:#fef3c7;color:#92400e;border:1px solid #fcd34d;border-radius:6px;padding:7px 9px;font-size:11px;font-weight:700;margin:10px 0}
+.sign{display:flex;gap:14px;margin-top:26px}
+.sign div{flex:1;border-top:1px solid #666;padding-top:5px;font-size:11px;color:#444}
+.sign b{display:block;font-size:12px;color:#000;margin-bottom:16px}
+.foot{margin-top:20px;padding-top:8px;border-top:1px solid #e2e2e2;font-size:10px;color:#888;text-align:center}
+@media print{body{padding:10mm}}
+</style></head><body>
+<div class="top">
+  <div>
+    <div class="co">${esc(co.name||'— שם העסק לא הוגדר —')}</div>
+    <div class="co-d">
+      ${co.addr?esc(co.addr)+(co.city?', '+esc(co.city):''):''}
+      ${co.phone?'<br>טלפון: '+esc(co.phone):''}
+      ${co.taxId?'<br>ח.פ./ע.מ.: '+esc(co.taxId):''}
+      ${co.email?'<br>'+esc(co.email):''}
+    </div>
+  </div>
+  <div class="doc">
+    <h1>דוח התחשבנות</h1>
+    <div class="dt">תקופה: ${esc(period)}</div>
+    <div class="dt">הופק: ${heDate(new Date().toISOString().slice(0,10))}</div>
+  </div>
+</div>
+<div class="box">
+  <h2>${one?'לכבוד':'לקוחות בדוח'}</h2>
+  ${one?`<div style="font-weight:800;font-size:14px;margin-bottom:3px">${esc(one.name)}</div>
+    ${line('קוד לקוח:',one.code)}
+    ${line('כתובת:',[ci.addr,ci.city].filter(Boolean).join(', '))}
+    ${line('איש קשר:',ci.contact)}
+    ${line('טלפון:',ci.phone)}
+    ${line('ח.פ./ע.מ.:',ci.taxId)}`
+   :`<div style="font-weight:700">${esc(custs.map(c=>c.name).join(' · '))}</div>
+     <div style="font-size:11px;color:#666;margin-top:4px">הדוח כולל כמה לקוחות — לסינון ללקוח אחד בחר אותו בבורר הלקוחות.</div>`}
+</div>
+${f.missing?`<div class="warn">⚠ ${f.missing} תעודות בדוח שייכות לדגם שאין לו מחיר בכרטיס המוצר. הן מסומנות בטבלה ו<u>לא נכללו בסה"כ</u> — יש להזין את המחיר ולהפיק מחדש.</div>`:''}
+<table>
+  <thead><tr>
+    <th class="c">תעודה</th><th class="c">תאריך</th>${one?'':'<th>לקוח</th>'}<th>דגם</th>
+    <th class="c">כמות</th><th class="c">תפירה ליח'</th><th class="c">גזירה ליח'</th><th class="c">סכום</th>
+  </tr></thead>
+  <tbody>${body}</tbody>
+  <tfoot><tr>
+    <td colspan="${cols-4}" style="text-align:left">סה"כ ${f.rows.length} תעודות</td>
+    <td class="c">${f.units}</td>
+    <td colspan="2"></td>
+    <td class="n" style="font-size:15px">${dnMoney(f.amount)}</td>
+  </tr></tfoot>
+</table>
+<div class="sign">
+  <div><b>חתימת המפעל</b>_______________________</div>
+  <div><b>אישור הלקוח</b>_______________________</div>
+</div>
+<div class="foot">הופק ממערכת TextileOps · ${esc(co.name||'')}</div>
+</body></html>`);
 }
 // בניית ה-HTML מופרדת מההדפסה כדי שאפשר יהיה לרנדר ולבדוק אותה בלי לפתוח גיליון הדפסה
 function deliveryNoteHtml(p,sh,idx,count){
