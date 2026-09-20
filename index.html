@@ -2351,6 +2351,11 @@ const SUPERVISOR_EXTRA_PAGES=[
 const OPTIN_PAGES=['dnotes'];
 const defaultPerms=avail=>avail.filter(p=>!OPTIN_PAGES.includes(p));
 const ALL_WORKER_PAGE_IDS=WORKER_PAGES.map(p=>p.id);
+// הפסקת ברירת מחדל לעובד חדש. 19/09/2026: הייתה 13:00–13:45 בזמן שכל 10 העובדות
+// בפועל יוצאות להפסקה 10:30–11:00 ⇒ עובדת חדשה (ام يوسف) קיבלה 45 ד' במקום 30 ד',
+// והרשומה של היום הראשון שלה נצרבה עם המספר השגוי (7:45 נטו במקום 8:00).
+const DEF_BREAK_START='10:30';
+const DEF_BREAK_END='11:00';
 const ALL_SUPERVISOR_PAGE_IDS=[...ALL_WORKER_PAGE_IDS,...SUPERVISOR_EXTRA_PAGES.map(p=>p.id)];
 const pad2=n=>String(n).padStart(2,'0');
 const fmtS=s=>pad2(Math.floor(s/3600))+':'+pad2(Math.floor(s/60)%60)+':'+pad2(s%60);
@@ -5794,8 +5799,8 @@ function migrateToSessions(){
 function migrateBreaks(){
   let changed=false;
   S.workers.forEach(w=>{
-    if(!w.breakStart){w.breakStart='13:00';changed=true;}
-    if(!w.breakEnd){w.breakEnd='13:45';changed=true;}
+    if(!w.breakStart){w.breakStart=DEF_BREAK_START;changed=true;}
+    if(!w.breakEnd){w.breakEnd=DEF_BREAK_END;changed=true;}
     if(w.breakActive===undefined||w.breakActive===null){w.breakActive=true;changed=true;}
   });
   if(changed&&S.fbConnected){
@@ -8416,9 +8421,9 @@ function renderMgrTasks(){
       <div class="row" style="flex-wrap:wrap;gap:6px">
         <div style="min-width:120px"><div style="font-size:13px;font-weight:500">${esc(w.name)}</div><div style="font-size:11px;color:var(--txt3)">${esc(w.dept)}</div></div>
         <label style="font-size:11px;color:var(--txt2)">מ-</label>
-        <input type="time" value="${w.breakStart||'13:00'}" style="width:95px;font-size:12px" onchange="mgrUpdateBreak('${w.id}','breakStart',this.value)"/>
+        <input type="time" value="${w.breakStart||DEF_BREAK_START}" style="width:95px;font-size:12px" onchange="mgrUpdateBreak('${w.id}','breakStart',this.value)"/>
         <label style="font-size:11px;color:var(--txt2)">עד-</label>
-        <input type="time" value="${w.breakEnd||'13:45'}" style="width:95px;font-size:12px" onchange="mgrUpdateBreak('${w.id}','breakEnd',this.value)"/>
+        <input type="time" value="${w.breakEnd||DEF_BREAK_END}" style="width:95px;font-size:12px" onchange="mgrUpdateBreak('${w.id}','breakEnd',this.value)"/>
         <button class="btn ${w.breakActive?'warn':''}  " style="font-size:11px;padding:4px 10px" onclick="mgrToggleBreak('${w.id}')">${w.breakActive?'☕ פעיל':'○ כבוי'}</button>
       </div>`).join('');
   }
@@ -10462,7 +10467,7 @@ async function confirmModal(){
   if(S.modalAction==='add-worker'){
     if(!pass){alert('סיסמה חובה לעובד חדש');return;}
     if(!S.fbConnected){alert('אין חיבור לשרת — לא ניתן להוסיף עובד');return;}
-    const nw={id:'w'+Date.now(),name,dept,role,user,status:'out',checkin:null,permissions:perms,faceAuth:false,breakStart:'13:00',breakEnd:'13:45',breakActive:true,skills:skills||{},
+    const nw={id:'w'+Date.now(),name,dept,role,user,status:'out',checkin:null,permissions:perms,faceAuth:false,breakStart:DEF_BREAK_START,breakEnd:DEF_BREAK_END,breakActive:true,skills:skills||{},
       stationGateMode:document.getElementById('mf-gate-station')?.value||'',
       stepOrderGateMode:document.getElementById('mf-gate-order')?.value||''};
     S.workers.push(nw);
