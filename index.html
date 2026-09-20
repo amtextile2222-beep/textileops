@@ -1405,6 +1405,16 @@ code{background:var(--bg2);border:0.5px solid var(--b);border-radius:4px;padding
         <div id="stn-lock-state" style="font-size:12px;font-weight:700;margin-top:6px"></div>
       </div>
       <div style="padding:10px;border:1px solid var(--brd);border-radius:8px;margin-bottom:10px">
+        <div style="font-size:13px;font-weight:600;margin-bottom:5px">🔧 מחלקות שבהן תחנה = מכונה (עובד אחד)</div>
+        <div style="font-size:11px;color:var(--txt3);margin-bottom:7px;line-height:1.5">
+          במחלקות המסומנות תחנה היא מכונה פיזית ועליה עובד אחד בלבד. עובד שסורק מכונה תפוסה —
+          <b>הסריקה האחרונה מנצחת</b>: הקודם משוחרר מהתחנה והמשימות הרצות שלו נסגרות (מסירת המכונה = סיום).
+          אחראי/מנהל שסורק לעצמו מכונה תפוסה נשאל קודם אם הוא עובד עליה או רק מחלק עבודה.
+          מחלקות שאינן מסומנות (קבלה, גימור, אריזה) נשארות פתוחות לכמה עובדים יחד.
+        </div>
+        <div id="stn-excl"></div>
+      </div>
+      <div style="padding:10px;border:1px solid var(--brd);border-radius:8px;margin-bottom:10px">
         <label style="display:flex;align-items:center;gap:8px;cursor:pointer;font-size:13px;font-weight:600">
           <input type="checkbox" id="so-lock" style="width:17px;height:17px" onchange="setStepOrderLock(this.checked)">
           🔗 אכיפת סדר: שלב מאחד רק אחרי שקודמיו הסתיימו
@@ -1558,6 +1568,11 @@ const LANGS={
     st_all_steps:'📋 כל השלבים',
     st_of:'מתוך',
     st_need_scan:'📍 חובה לסרוק ברקוד תחנה לפני התחלת משימה',
+    st_busy_title:'המכונה תפוסה',st_busy_by:'תפוסה ע"י',st_since:'מאז',
+    st_busy_ask:'אתה עובד על המכונה הזו עכשיו?',
+    st_busy_take:'🔧 אני עובד עליה',st_busy_visit:'📋 רק חלוקת עבודה',
+    st_busy_kept:'השיוך לא שונה',st_released:'שוחרר/ה מ־',
+    st_tasks_closed:'משימות נסגרו',st_push_released:'📍 שוחררת מהתחנה',
     st_locked:'🔒 לא בתחנה הנכונה',
     st_no_station:'אין תחנה משויכת',
     st_no_steps_here:'אין שלבים לתחנה הזו במוצר — סרוק את התחנה הנכונה',
@@ -1829,6 +1844,11 @@ const LANGS={
     st_all_steps:'📋 كل المراحل',
     st_of:'من أصل',
     st_need_scan:'📍 يجب مسح باركود المحطة قبل بدء المهمة',
+    st_busy_title:'المكنة مشغولة',st_busy_by:'مشغولة من قبل',st_since:'منذ',
+    st_busy_ask:'هل تعمل على هذه المكنة الآن؟',
+    st_busy_take:'🔧 أنا أعمل عليها',st_busy_visit:'📋 فقط توزيع شغل',
+    st_busy_kept:'لم يتغيّر الربط',st_released:'تم تحريره/ا من',
+    st_tasks_closed:'مهام أُغلقت',st_push_released:'📍 تم تحريرك من المحطة',
     st_locked:'🔒 لست في المحطة الصحيحة',
     st_no_station:'لا توجد محطة مرتبطة',
     st_no_steps_here:'لا توجد مراحل لهذه المحطة في هذا المنتج — امسح المحطة الصحيحة',
@@ -2100,6 +2120,11 @@ const LANGS={
     st_all_steps:'📋 All steps',
     st_of:'of',
     st_need_scan:'📍 You must scan a station barcode before starting a task',
+    st_busy_title:'Machine is occupied',st_busy_by:'occupied by',st_since:'since',
+    st_busy_ask:'Are you working on this machine now?',
+    st_busy_take:'🔧 I am working on it',st_busy_visit:'📋 Just handing out work',
+    st_busy_kept:'Assignment unchanged',st_released:'was released from ',
+    st_tasks_closed:'tasks closed',st_push_released:'📍 You were released from the station',
     st_locked:'🔒 Wrong station',
     st_no_station:'no station assigned',
     st_no_steps_here:'No steps for this station in this product — scan the correct station',
@@ -2598,6 +2623,11 @@ function stepDoneMap(tasks){
   }
   return map;
 }
+// ─── 🔧 מחלקות שבהן תחנה = מכונה פיזית (אדם אחד עליה) ─────────────
+// תחנה במחלקות התפירה היא מכונת תפירה, ועליה יושב אדם אחד בלבד. שאר התחנות
+// (קבלה, גימור, אריזה) הן אזורי עבודה שכמה אנשים חולקים בלגיטימיות — ולכן
+// הבלעדיות היא **פר-מחלקה** ולא גורפת. ניתן לעריכה בלשונית הניהול.
+const DEFAULT_EXCLUSIVE_DEPTS=['قسم الخياطة 1','قسم الخياطة 2'];
 // ─── STATE ──────────────────────────────────────────────────
 let S={
   user:null,
@@ -2609,7 +2639,7 @@ let S={
   activeTasks:[],
   histTasks:[],
   alerts:[],
-  settings:{thresh:60,absent:5,waEnabled:false,waInterval:60,waFrom:'07:00',waTo:'18:00',waLong:true,waAbsent:true,factoryIP:'188.225.231.120',shiftStart:'06:30',shiftEnd:'15:00',roundMinutes:5,endOfDayTime:'15:05',ipBypassMin:0,ipBypassStartMs:0,stationLock:false,stepOrderLock:false,stepOrderStrict:false,stepOrderStrictFrom:0,
+  settings:{thresh:60,absent:5,waEnabled:false,waInterval:60,waFrom:'07:00',waTo:'18:00',waLong:true,waAbsent:true,factoryIP:'188.225.231.120',shiftStart:'06:30',shiftEnd:'15:00',roundMinutes:5,endOfDayTime:'15:05',ipBypassMin:0,ipBypassStartMs:0,stationLock:false,stepOrderLock:false,stepOrderStrict:false,stepOrderStrictFrom:0,exclusiveDepts:DEFAULT_EXCLUSIVE_DEPTS.slice(),
     // 📄 פרטי העסק לתעודת משלוח — ניתנים לעריכה בלשונית ניהול; אלה ברירות המחדל
     company:{name:'א.מ טקסטיל',addr:'באקה אלגרבייה',city:'',phone:'052-3381376',taxId:'066055450',email:''},
     // המספר הראשון שיונפק — ממשיך את הפנקס הידני
@@ -2957,6 +2987,31 @@ async function passMergeGate(cust,prod,bc,stepNames,workerId){
     T.st_override_ok||'התחל בכל זאת',T.cancel||'ביטול');
   logGateEvent('order',ok?'override':'cancel',info);
   return ok;
+}
+// ─── בדיקה חוזרת של כל הסל ברגע ההתחלה ────────────────────────────
+// משותף לשלושת הסורקים. הבדיקה בזמן **ההוספה** לסל אינה מספיקה: בין ההוספה
+// לבין הלחיצה על "התחל" התחנה יכולה להתחלף, העובד הנבחר יכול להתחלף, והסל עצמו
+// שורד רענון דרך localStorage. פעם אחת על כל הסל, ולא פר פריט — אחרת סל של 5
+// פריטים מאותו מוצר היה מבקש 5 אישורים על אותה חריגה.
+// 👕 דגם ראשון (isSample) מדולג בכוונה — פתוח לכל התחנות ובלי שלבים.
+async function passBatchGates(w,batch){
+  const items=(batch||[]).filter(b=>b&&!b.isSample);
+  if(!items.length)return true;
+  const byProd={};
+  for(const b of items){const k=b.cust+'|'+b.prod;(byProd[k]=byProd[k]||[]).push(b.taskType||'');}
+  for(const k of Object.keys(byProd)){
+    const i=k.indexOf('|');
+    if(!await passStationGate(w,k.slice(0,i),k.slice(i+1),byProd[k]))return false;
+  }
+  // 🔗 שער סדר השלבים — פר **ברקוד** ולא פר מוצר: הכיסוי נמדד למידה/צבע הספציפיים.
+  // כל שלבי אותו ברקוד נשלחים יחד ולכן נחשבים "אותה סריקה" ואינם חוסמים זה את זה.
+  const byBc={};
+  for(const b of items)(byBc[b.raw]=byBc[b.raw]||{cust:b.cust,prod:b.prod,steps:[]}).steps.push(b.taskType||'');
+  for(const raw of Object.keys(byBc)){
+    const o=byBc[raw];
+    if(!await passMergeGate(o.cust,o.prod,raw,o.steps,w.id))return false;
+  }
+  return true;
 }
 
 // ─── מנוע המלצת שיבוץ — תמחור שלב ב' ────────────────────────
@@ -3527,6 +3582,8 @@ function listenFb(){
         // 🔒 מתג האכיפה של נעילת התחנה — מסונכרן לכל המכשירים דרך אותו מסמך הגדרות,
         // כדי שכיבוי חירום מהניהול ישחרר את כל רצפת הייצור מיד ולא מכשיר-מכשיר.
         if(data.stationLock!==undefined)S.settings.stationLock=!!data.stationLock;
+        // 🔧 רשימת המחלקות הבלעדיות — שמות מחלקה, ולכן renameDept מעדכן גם אותה.
+        if(Array.isArray(data.exclusiveDepts))S.settings.exclusiveDepts=data.exclusiveDepts.slice();
         if(data.stepOrderLock!==undefined)S.settings.stepOrderLock=!!data.stepOrderLock;
         if(data.stepOrderStrict!==undefined)S.settings.stepOrderStrict=!!data.stepOrderStrict;
         if(data.stepOrderStrictFrom!==undefined)S.settings.stepOrderStrictFrom=+data.stepOrderStrictFrom||0;
@@ -5276,22 +5333,9 @@ async function bcStartBatch(){
   const wu=S.workers.find(x=>x.id===u.id);
   if(!wu||wu.status!=='in'){alert('לא ניתן להתחיל משימה — יש להירשם כנוכח תחילה (כניסה לעבודה בלשונית נוכחות)');return;}
   const items=_bcBatch.slice();
-  // 🔒 בדיקה חוזרת ברגע ההתחלה — התחנה יכולה להתחלף בין ההוספה לסל לבין הלחיצה על "התחל".
-  // מקובצת לפי לקוח+מוצר כדי שלא יישאלו 5 אישורים על אותה חריגה.
-  const _bcGate={};
-  for(const b of items){if(b.isSample)continue;const k=b.cust+'|'+b.prod;(_bcGate[k]=_bcGate[k]||[]).push(b.taskType||'');} // 👕 דגם — פתוח לכל התחנות
-  for(const k of Object.keys(_bcGate)){
-    const i=k.indexOf('|');
-    if(!await passStationGate(wu,k.slice(0,i),k.slice(i+1),_bcGate[k]))return;
-  }
-  // 🔗 שער סדר השלבים — פר **ברקוד** ולא פר מוצר: הכיסוי נמדד למידה/צבע הספציפיים.
-  // כל השלבים של אותו ברקוד בסל נשלחים יחד, ולכן הם נחשבים "אותה סריקה" ולא חוסמים זה את זה.
-  const _bcOrd={};
-  for(const b of items){if(b.isSample)continue;(_bcOrd[b.raw]=_bcOrd[b.raw]||{cust:b.cust,prod:b.prod,steps:[]}).steps.push(b.taskType||'');}
-  for(const raw of Object.keys(_bcOrd)){
-    const o=_bcOrd[raw];
-    if(!await passMergeGate(o.cust,o.prod,raw,o.steps,u.id))return;
-  }
+  // 🔒 בדיקה חוזרת ברגע ההתחלה — אותה פונקציה בדיוק כמו בסורקי האחראי/המנהל,
+  // כדי ששלושת המסלולים לא יוכלו להיפרד שוב. ראה two_scanners_gotcha.
+  if(!await passBatchGates(wu,items))return;
   try{
     const bcBatchId=items.length>1?genBatchId():null; // כמה משימות יחד = קבוצה אחת (טיימר משותף + מסגרת אחת)
     const bcStart=srvNow();
@@ -8701,6 +8745,19 @@ function workerBcDownloadPDF(){
 function stationById(id){return (S.workStations||[]).find(s=>s.id===id);}
 // המחלקה האפקטיבית: תחנה סרוקה גוברת זמנית על מחלקת הבית (עד סריקה אחרת/יציאה)
 function effDept(w){return w?.currentStation?.dept||w?.dept||'';}
+// ─── 🔧 בלעדיות מכונה ──────────────────────────────────────────────
+// נמדד ב-stationLog לפני המימוש: ב-18/08 محمد ו-ابوزكي החזיקו את `حبكي 4` במקביל
+// 58 דקות, וב-19/08 هنيه נכנסה אליה שלוש פעמים בזמן ש-ندوه החזיקה אותה עד סגירת
+// היום. שתי רשומות כאלה לא יכולות להיות נכונות יחד — אחת מהן היא זמן שנרשם על
+// מכונה שאיש לא ישב עליה. הבלעדיות פותרת את זה בבנייה.
+function exclusiveDepts(){const a=S.settings?.exclusiveDepts;return Array.isArray(a)?a:DEFAULT_EXCLUSIVE_DEPTS;}
+function stationExclusive(st){return exclusiveDepts().includes(String(st?.dept||'').trim());}
+// ⚠️ תמיד מ-S.workers — S.user הוא עותק קפוא ו-currentStation שלו לא מתעדכן.
+// status==='in' בכוונה: עובד שחתם יציאה כבר שוחרר ע"י closeWorkerStation.
+function stationOccupant(stationId,exceptId){
+  return (S.workers||[]).find(x=>x.id!==exceptId&&x.status==='in'&&x.currentStation?.id===stationId);
+}
+function _hhmm(iso){try{return new Date(iso).toLocaleTimeString('he-IL',{hour:'2-digit',minute:'2-digit'});}catch(e){return '';}}
 async function assignWorkerStation(workerId,stationId){
   const T=LANGS[currentLang];
   const st=stationById(stationId);
@@ -8709,6 +8766,39 @@ async function assignWorkerStation(workerId,stationId){
   if(!w){showToast(T.st_sel_worker||'⚠ בחר עובד לפני סריקת תחנה','var(--red-txt)');return false;}
   const now=new Date().toISOString();
   if(w.currentStation?.id===st.id){showToast((T.st_scanned||'📍 תחנה נקלטה: ')+st.name);return true;}
+  // 🔧 מכונת תפירה = אדם אחד. **"הסריקה האחרונה מנצחת"** ולא חסימה: הברקוד מודבק על
+  // המכונה עצמה, ולכן מי שסרק אחרון באמת עומד שם. חסימה נפסלה כי היא יוצרת תיקו —
+  // שתי עובדות שמחליפות מכונה חוסמות זו את זו ואף אחת לא יכולה לזוז ראשונה.
+  // השחרור האוטומטי גם משאיר את הקודם **בלי תחנה**, ולכן המשימה הבאה שלו נחסמת
+  // ע"י stationGate עד שיסרוק — וזה בדיוק הנכון, הוא כבר לא על המכונה.
+  if(stationExclusive(st)){
+    const occ=stationOccupant(st.id,w.id);
+    if(occ){
+      // האחראי מסתובב בין מכונות של עובדות כדי לחלק עבודה (محمد: עשרות מעברים ביום
+      // ב-stationLog). סריקה שלו **לעצמו** על מכונה תפוסה היא לרוב חלוקת עבודה ולא
+      // תפיסת המכונה — ולכן שואלים אותו במקום לזרוק את העובדת בשקט.
+      if(workerId===S.user?.id&&canOverrideStationGate()){
+        // showConfirm מחזיר false גם בלחיצה על הרקע — ולכן false ממופה לענף **הלא-הרסני**
+        // ("רק חלוקת עבודה", אף שיוך לא משתנה). ראה gotcha_showconfirm_dismiss.
+        const take=await showConfirm(T.st_busy_title||'התחנה תפוסה',
+          esc(st.name+' — '+(T.st_busy_by||'תפוסה ע"י')+' '+occ.name+' '+(T.st_since||'מאז')+' '+_hhmm(occ.currentStation?.since))+
+          '\n\n'+esc(T.st_busy_ask||'אתה עובד על המכונה הזו עכשיו?'),
+          T.st_busy_take||'🔧 אני עובד עליה',T.st_busy_visit||'📋 רק חלוקת עבודה');
+        logGateEvent('station_busy',take?'override':'cancel',{blocked:[{step:st.name,need:[occ.name]}]});
+        if(!take){showToast('📋 '+(T.st_busy_kept||'השיוך לא שונה')+' — '+occ.name+' @ '+st.name,'var(--amber-txt)',4500);return false;}
+      }else{
+        logGateEvent('station_busy','release',{blocked:[{step:st.name,need:[occ.name]}]});
+      }
+      // 🏁 מסירת המכונה = **סיום המשימה** של מי שישבה עליה (החלטת המשתמש):
+      // אי אפשר למסור מכונה באמצע תפירה, ולכן עובדת אחרת שנכנסת אליה מעידה שהקודמת
+      // סיימה. נסגר דרך closeRunningTasks — אותה נוסחה (accumulatedSec + הצביר
+      // היחסי) כמו כל נקודת סגירה אחרת, ולא חישוב מקומי משלנו.
+      const closed=await closeRunningTasks(occ.id,new Date(now));
+      await closeWorkerStation(occ,new Date(now));
+      showToast('🔄 '+occ.name+' '+(T.st_released||'שוחרר/ה מ־')+st.name+(closed?' · 🏁 '+closed+' '+(T.st_tasks_closed||'משימות נסגרו'):''),'var(--amber-txt)',6000);
+      try{sendPushToWorker(occ.id,T.st_push_released||'📍 שוחררת מהתחנה',st.name+' — '+w.name+(closed?' · '+(T.st_tasks_closed||'משימות נסגרו')+': '+closed:'')).catch(()=>{});}catch(e){}
+    }
+  }
   try{
     // סריקת תחנה חדשה סוגרת את השיוך הקודם
     if(w.stationLogId&&S.fbConnected){try{await fbSet('stationLog',w.stationLogId,{to:now});}catch(e){}}
@@ -8742,6 +8832,7 @@ async function closeWorkerStation(w,when){
 function renderStationsAdmin(){
   renderStationLockState(); // לפני ה-return המוקדם — המתג מוצג גם כשעדיין אין תחנות
   renderStepOrderLockState();
+  renderStationExclusive();
   const el=document.getElementById('stn-list');if(!el)return;
   if(!(S.workStations||[]).length){el.innerHTML='<div style="color:var(--txt3);font-size:12px">אין תחנות מוגדרות — לחץ "🔄 סנכרן תחנות מלשונית הניהול"</div>';return;}
   el.innerHTML=S.workStations.map(s=>`<div class="row" style="gap:8px">
@@ -8790,6 +8881,37 @@ function renderStationLockState(){
   const on=!!S.settings?.stationLock;
   el.textContent=on?'🔒 האכיפה פעילה':'🔓 האכיפה כבויה — הכל עובד כרגיל';
   el.style.color=on?'var(--amber-txt)':'var(--txt3)';
+}
+// ─── 🔧 בחירת המחלקות הבלעדיות ────────────────────────────────────
+// רשימת המחלקות נלקחת מ**התחנות עצמן** ולא מ-S.depts: מחלקה בלי אף תחנה אינה
+// רלוונטית לבלעדיות, ומחלקה שיש לה תחנות תופיע גם אם נמחקה מרשימת המחלקות.
+function renderStationExclusive(){
+  const el=document.getElementById('stn-excl');if(!el)return;
+  const sel=exclusiveDepts();
+  const depts=[...new Set((S.workStations||[]).map(s=>String(s.dept||'').trim()).filter(Boolean))].sort();
+  if(!depts.length){el.innerHTML='<div style="color:var(--txt3);font-size:12px">אין תחנות מוגדרות</div>';return;}
+  el.innerHTML=depts.map(d=>{
+    const n=(S.workStations||[]).filter(s=>String(s.dept||'').trim()===d).length;
+    return `<label style="display:flex;align-items:center;gap:8px;cursor:pointer;font-size:12px;padding:3px 0">
+      <input type="checkbox" ${sel.includes(d)?'checked':''} style="width:16px;height:16px" onchange="toggleExclusiveDept('${escj(d)}',this.checked)">
+      <span style="font-weight:600">${esc(d)}</span><span style="color:var(--txt3)">· ${n} תחנות</span>
+    </label>`;
+  }).join('');
+}
+async function toggleExclusiveDept(dept,on){
+  const prev=exclusiveDepts().slice();
+  const cur=prev.filter(x=>x!==dept);
+  if(on)cur.push(dept);
+  // ⚠️ מערך ולא מפה: fbSet שולח את המערך המלא ולכן הוא נדרס כולו, וזה הרצוי כאן.
+  S.settings.exclusiveDepts=cur;
+  try{
+    if(S.fbConnected)await fbSet('appSettings','telegramSettings',{exclusiveDepts:cur});
+    showToast(on?('🔧 '+dept+' — עובד אחד לתחנה'):('🔓 '+dept+' — כמה עובדים לתחנה'),'var(--green-txt)');
+  }catch(e){
+    S.settings.exclusiveDepts=prev; // הכתיבה נכשלה — חוזרים למצב שהיה, אחרת המסך משקר
+    showToast('❌ '+e.message,'var(--red-txt)');
+  }
+  renderStationExclusive();
 }
 // ─── מתג האכיפה 🔗 (סדר שלבים) ───────────────────────────────────
 async function setStepOrderLock(on){
@@ -9341,6 +9463,12 @@ async function tsStartTask(){
     if(_sk.length){showToast(T.scan_not_added+' '+_sk.join(' · '),'var(--red-txt)',7000);if(!_tsBatch.length)return;}
   }
   if(!_tsBatch.length){showToast(T.err_scan_one||'⚠ סרוק לפחות ברקוד אחד','var(--red-txt)');return;}
+  // 🔒 בדיקה חוזרת על **כל הסל** ברגע ההתחלה — כמו ב-bcStartBatch. בלעדיה השערים רצו
+  // רק בענף שמוסיף ברקוד לסל, ולחיצה שנייה על "התחל" עם שדה ריק יצרה את כל המשימות
+  // בלי שום בדיקה. שני מסלולים אמיתיים נפתחו כך: (1) החלפת העובד ב-ts-emp-sel אחרי
+  // מילוי הסל — השער עבר על עובד א' והמשימות נפתחו לעובד ב'; (2) _tsBatch נשמר ב-
+  // localStorage ולכן סל מאתמול נפתח היום בלי תחנה סרוקה.
+  if(!await passBatchGates(w,_tsBatch))return;
   // בדיקת משימות מושהות — עם השלב, כדי להפריד בין כמה מושהות על אותו ברקוד
   const newBcs=_tsBatch.map(b=>({raw:b.raw,taskType:b.taskType||''}));
   const canProceed=await handlePausedTasks(w.id,newBcs);
@@ -9678,6 +9806,8 @@ async function mgrStartTask(){
     if(_sk.length){showToast(T.scan_not_added+' '+_sk.join(' · '),'var(--red-txt)',7000);if(!_mgrBatch.length)return;}
   }
   if(!_mgrBatch.length){showToast(T.err_scan_one||'⚠ סרוק לפחות ברקוד אחד','var(--red-txt)');return;}
+  // 🔒 בדיקה חוזרת על כל הסל — ראה ההסבר המלא ב-tsStartTask
+  if(!await passBatchGates(w,_mgrBatch))return;
   // עם השלב, כדי להפריד בין כמה מושהות על אותו ברקוד
   const newBcs=_mgrBatch.map(b=>({raw:b.raw,taskType:b.taskType||''}));
   const canProceed=await handlePausedTasks(w.id,newBcs);
@@ -11013,6 +11143,14 @@ async function renameDept(oldD){
     if(st.dept===oldD){st.dept=newD;sch=true;}
     if(typeof st.key==='string'&&st.key.startsWith(pre)){st.key=newD+'::'+st.key.slice(pre.length);sch=true;}
     if(sch&&S.fbConnected)await fbSet('stations',st.id,{dept:st.dept,key:st.key||''});
+  }
+  // 🔧 רשימת המחלקות הבלעדיות מחזיקה **שמות** — בלי העדכון הזה שינוי שם מחלקה
+  // היה מכבה את הבלעדיות בשקט, בלי שאיש יראה שמשהו השתנה.
+  const _ex=exclusiveDepts();
+  if(_ex.includes(oldD)){
+    const nx=_ex.map(x=>x===oldD?newD:x);
+    S.settings.exclusiveDepts=nx;
+    if(S.fbConnected)await fbSet('appSettings','telegramSettings',{exclusiveDepts:nx});
   }
   saveDepts();try{fillDeptSelects();}catch(e){}
   renderAdmin();
