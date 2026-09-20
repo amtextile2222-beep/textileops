@@ -826,6 +826,16 @@ code{background:var(--bg2);border:0.5px solid var(--b);border-radius:4px;padding
           <input type="number" id="co-dnstart" min="1" style="width:100%;font-size:13px;margin-top:4px"/>
           <div id="co-dnlast" style="font-size:11px;color:var(--txt3);margin-top:3px"></div>
         </div>
+        <div style="margin-top:12px;padding-top:10px;border-top:1px solid var(--brd)">
+          <div style="font-size:12px;font-weight:700">📦 מחירון חומר אריזה — ₪ ליחידה</div>
+          <div style="font-size:11px;color:var(--txt3);margin:3px 0 7px">המחיר נצרב על התעודה בעת אישור המשלוח — שינוי כאן <b>לא</b> משנה תעודות שכבר יצאו.</div>
+          <div style="display:flex;gap:6px;flex-wrap:wrap">
+            <div style="flex:1;min-width:88px"><label style="font-size:11px;color:var(--txt3)">🧷 קולב</label><input type="number" id="pp-hanger" min="0" step="0.01" style="width:100%;font-size:13px;margin-top:3px"/></div>
+            <div style="flex:1;min-width:88px"><label style="font-size:11px;color:var(--txt3)">🧷 ניילון</label><input type="number" id="pp-nylon" min="0" step="0.01" style="width:100%;font-size:13px;margin-top:3px"/></div>
+            <div style="flex:1;min-width:88px"><label style="font-size:11px;color:var(--txt3)">📦 ניילון צלופן</label><input type="number" id="pp-cello" min="0" step="0.01" style="width:100%;font-size:13px;margin-top:3px"/></div>
+          </div>
+          <div style="font-size:11px;color:var(--txt3);margin-top:5px">🧷 תלייה = קולב + ניילון · 📦 קיפול = ניילון צלופן</div>
+        </div>
         <button class="btn primary" onclick="saveCompanyInfo()" style="width:100%;margin-top:8px;font-size:13px">💾 שמור פרטי עסק</button>
       </div>
       <!-- ניהול צבעים -->
@@ -2645,7 +2655,10 @@ let S={
     // 📄 פרטי העסק לתעודת משלוח — ניתנים לעריכה בלשונית ניהול; אלה ברירות המחדל
     company:{name:'א.מ טקסטיל',addr:'באקה אלגרבייה',city:'',phone:'052-3381376',taxId:'066055450',email:''},
     // המספר הראשון שיונפק — ממשיך את הפנקס הידני
-    dnStart:645},
+    dnStart:645,
+    // 📦 מחירון חומר האריזה ₪ ליחידה — נערך בלשונית ניהול. ברירת מחדל 0 ולא מספר
+    // מומצא: מחיר שגוי שנצרב על תעודה גרוע ממחיר חסר, שהמערכת צועקת עליו.
+    packPrices:{hanger:0,nylon:0,cello:0}},
   waLastSent:0,
   wifiAlertSent:{},
   tgSentAlerts:{},
@@ -3565,6 +3578,7 @@ function listenFb(){
       if(d.id==='customerNames'){S.customerNames=data;saveLS();}
       if(d.id==='customerInfo'){S.customerInfo=data;saveLS();}
       if(d.id==='company'){S.settings.company={...(S.settings.company||{}),...data};saveLS();}
+      if(d.id==='packPrices'){S.settings.packPrices={...(S.settings.packPrices||{}),...data};saveLS();}
       if(d.id==='customColors'){S.customColors=data;Object.assign(COLORS,data);saveLS();}
       if(d.id==='depts'&&data.list&&data.list.length){S.depts=data.list;S.deptStations=data.stations||S.deptStations||{};S.deptStageMap=data.stageMap||S.deptStageMap||{};saveLS();fillDeptSelects();}
       if(d.id==='telegramSettings'){
@@ -10876,6 +10890,54 @@ function shipPackTotal(){
   el.textContent=packsCount(packs)+' חבילות · '+u+" יח'"+(u!==q?' ⚠ במשלוח '+q:'');
   el.style.color=(u!==q)?'var(--amber-txt)':'var(--green-txt,#16a34a)';
 }
+// 📦 מצב האריזה נבחר **פר תעודה** ולא פר דגם: אותו דגם יוצא פעם בתלייה ופעם
+// בקיפול לפי מה שהלקוח ביקש באותו משלוח.
+function shipModeChanged(){
+  const mode=document.querySelector('input[name="ship-packmode"]:checked')?.value||'';
+  const w=document.getElementById('ship-mat-rows');
+  if(!w)return;
+  const hint=document.getElementById('ship-mat-hint');
+  if(hint)hint.style.display=mode?'none':'';
+  const q=_shipQtySum();
+  const inp='flex:1;min-width:0;font-size:13px;padding:6px;border-radius:6px;border:1px solid var(--brd);background:var(--bg);color:var(--txt)';
+  // הכמות מתמלאת מראש בכמות שיוצאת — זה המקרה הרגיל (קולב לכל בגד) — אבל נשארת
+  // שדה פתוח, כי לא תמיד יוצא בדיוק פריט אחד לכל יחידה.
+  w.innerHTML=packMatsFor(mode).map(m=>{
+    const pr=packPrice(m.k);
+    return `<div class="mat-row" data-k="${m.k}" style="display:flex;align-items:center;gap:6px;margin-bottom:5px">
+      <span style="font-size:12px;font-weight:600;min-width:72px">${esc(m.name)}</span>
+      <input class="mat-n" type="number" inputmode="numeric" min="0" value="${q||''}" placeholder="כמות" oninput="shipMatTotal()" style="${inp}"/>
+      <span style="font-size:11px;white-space:nowrap;color:${pr?'var(--txt3)':'var(--amber-txt)'}">× ${pr?dnMoney(pr):'אין מחיר'}</span>
+      <span class="mat-eq" style="font-size:12px;font-weight:800;min-width:58px;text-align:left;color:var(--txt3)">—</span>
+    </div>`;
+  }).join('');
+  shipMatTotal();
+}
+function _shipMatsCollect(){
+  return [...document.querySelectorAll('.mat-row')].map(r=>({
+    k:r.dataset.k,
+    n:Math.max(0,parseInt(r.querySelector('.mat-n')?.value)||0),
+    price:packPrice(r.dataset.k)
+  })).filter(x=>x.n>0);
+}
+function shipMatTotal(){
+  document.querySelectorAll('.mat-row').forEach(r=>{
+    const n=Math.max(0,parseInt(r.querySelector('.mat-n')?.value)||0),pr=packPrice(r.dataset.k);
+    const eq=r.querySelector('.mat-eq');
+    if(eq){eq.textContent=n?dnMoney(n*pr):'—';eq.style.color=n?'var(--txt)':'var(--txt3)';}
+  });
+  const el=document.getElementById('mat-sum');
+  if(!el)return;
+  const mode=document.querySelector('input[name="ship-packmode"]:checked')?.value||'';
+  if(!mode){el.textContent='לא נבחר';el.style.color='var(--txt3)';return;}
+  const mats=_shipMatsCollect();
+  // חומר בלי מחיר במחירון **לא חוסם** — הכמות עדיין נרשמת ונצרבת, והדוח יסמן
+  // אותה. חסימה כאן הייתה עוצרת משלוח אמיתי בגלל שדה שכחו למלא בניהול.
+  const no=mats.filter(m=>!m.price).map(m=>packMatName(m.k));
+  el.textContent=PACK_MODES[mode]+(mats.length?' · '+dnMoney(mats.reduce((t,m)=>t+m.n*m.price,0)):' · לא הוזנה כמות')
+    +(no.length?' ⚠ אין מחיר: '+no.join(', '):'');
+  el.style.color=no.length?'var(--amber-txt)':(mats.length?'var(--green-txt,#16a34a)':'var(--txt3)');
+}
 function shipRowsTotal(){
   const t=_shipQtySum(),el=document.getElementById('ship-total');
   if(el){
@@ -10992,6 +11054,15 @@ function openShipModal(cust,prod,orderNo){
       <div id="pack-rows">${shipPackRowsHtml([])}</div>
       <button class="btn" style="width:100%;font-size:12px;padding:5px;margin-top:4px" onclick="addPackRow()">➕ עוד גודל חבילה</button>
     </details>
+    <div style="margin-top:10px;border:1px solid var(--brd);border-radius:8px;padding:7px 9px">
+      <div style="font-size:12px;font-weight:700;margin-bottom:6px">📦 חומר אריזה — <span id="mat-sum" style="font-weight:600;color:var(--txt3)">לא נבחר</span></div>
+      <div style="display:flex;gap:6px;margin-bottom:6px">
+        ${Object.entries(PACK_MODES).map(([k,lbl])=>`<label style="flex:1;display:flex;align-items:center;justify-content:center;gap:5px;font-size:12px;font-weight:600;cursor:pointer;border:1px solid var(--brd);border-radius:8px;padding:6px 4px">
+          <input type="radio" name="ship-packmode" value="${k}" onchange="shipModeChanged()" style="width:15px;height:15px"/> ${lbl}</label>`).join('')}
+      </div>
+      <div id="ship-mat-rows"></div>
+      <div id="ship-mat-hint" style="font-size:11px;color:var(--txt3)">בחר איך הסחורה יצאה. החומר מחויב ללקוח ונכנס לדוח ההתחשבנות.</div>
+    </div>
     <div style="margin-top:9px">
       <label style="font-size:12px;font-weight:600">📝 הערה לתעודה</label>
       <input id="ship-note" type="text" maxlength="140" placeholder="לא חובה — תודפס בתעודה" style="width:100%;margin-top:4px;font-size:13px;padding:7px;border-radius:8px;border:1px solid var(--brd);background:var(--bg);color:var(--txt)"/>
@@ -11054,6 +11125,8 @@ async function confirmShip(){
   const rows=_shipRowsCollect();
   const qty=_shipQtySum();
   const packs=_shipPacksCollect();
+  const packMode=document.querySelector('input[name="ship-packmode"]:checked')?.value||'';
+  const mats=packMode?_shipMatsCollect():[];
   const dnote=(document.getElementById('ship-note')?.value||'').trim();
   const autoPrint=!!document.getElementById('ship-autoprint')?.checked;
   if(!Array.isArray(p.stageLog))p.stageLog=[];
@@ -11068,13 +11141,20 @@ async function confirmShip(){
   if(packs.length&&packsUnits(packs)!==qty){
     if(!await showConfirm('אריזה לא תואמת','באריזה '+packsUnits(packs)+" יח' ובמשלוח "+qty+" יח'. לרשום בכל זאת?",'רשום','חזור'))return;
   }
+  // 📦 חומר האריזה מחויב ללקוח ⇒ משלוח בלי מצב אריזה מגיע לדוח בלי החיוב הזה.
+  // לא חוסם — יש משלוחים בלי אריזה — אבל שואל, כי לשכוח את זה עולה כסף אמיתי.
+  if(!packMode&&!await showConfirm('בלי חומר אריזה','לא נבחר תלייה/קיפול, ולכן לא ייכנס חיוב על חומר אריזה. לאשר בכל זאת?','אשר','חזור'))return;
+  const matNoPrice=mats.filter(m=>!m.price).map(m=>packMatName(m.k));
+  if(matNoPrice.length&&!await showConfirm('חומר בלי מחיר','אין מחיר במחירון ל: '+matNoPrice.join(', ')+'. הכמות תירשם אבל תסומן בדוח כחסרת מחיר. להמשיך?','המשך','חזור'))return;
   // 🚚 **כל אישור יוצר משלוח חדש עם תעודה משלו** — לא דורס את הקודם.
   // ההזמנה יוצאת בפעימות, ולכל פעימה נמסר ללקוח נייר נפרד עם מספר נפרד.
   // packs ו-note נגררים מהמשלוחים הקיימים — בלעדיהם בנייה מחדש של הרשימה הייתה
   // מוחקת בשקט את האריזה וההערה של כל תעודה שכבר נמסרה ללקוח
-  const list=prodShipments(p).map(s=>({no:+s.no||0,date:s.date||'',at:s.at||'',rows:s.rows||[],total:+s.total||0,packs:Array.isArray(s.packs)?s.packs:[],note:s.note||''}));
+  // 📦 packMode ו-mats נגררים כאן מאותה סיבה כמו packs ו-note: בנייה מחדש של
+  // הרשימה בלעדיהם הייתה מוחקת בשקט את חיוב האריזה של כל תעודה קודמת.
+  const list=prodShipments(p).map(s=>({no:+s.no||0,date:s.date||'',at:s.at||'',rows:s.rows||[],total:+s.total||0,packs:Array.isArray(s.packs)?s.packs:[],note:s.note||'',packMode:s.packMode||'',mats:Array.isArray(s.mats)?s.mats:[]}));
   const no=await nextDeliveryNoteNo();
-  list.push({no:no||0,date,at:now.toISOString(),rows,total:qty,packs,note:dnote});
+  list.push({no:no||0,date,at:now.toISOString(),rows,total:qty,packs,note:dnote,packMode,mats});
   p.shipments=list;
   // הסך המצטבר נשמר בשדות הוותיקים כדי שדוח הרווח וכל שאר הקוראים לא ישתנו
   p.shippedQty=list.reduce((t,s)=>t+(+s.total||0),0);
@@ -11359,8 +11439,13 @@ function saveCompanyInfo(){
     return;
   }
   if(dn>0)S.settings.dnStart=dn;
+  // 📦 מחירון האריזה נשמר במסמך משלו — הוא נקרא בכל אישור משלוח, ולכן עדיף לו
+  // מסמך קטן שלא נוגע בפרטי העסק ולא בהגדרות הטלגרם
+  const num=id=>Math.max(0,parseFloat(document.getElementById(id)?.value)||0);
+  const pp={hanger:num('pp-hanger'),nylon:num('pp-nylon'),cello:num('pp-cello')};
+  S.settings.packPrices=pp;
   saveLS();
-  if(S.fbConnected){fbSet('appSettings','company',co);fbSet('appSettings','telegramSettings',{dnStart:S.settings.dnStart});}
+  if(S.fbConnected){fbSet('appSettings','company',co);fbSet('appSettings','telegramSettings',{dnStart:S.settings.dnStart});fbSet('appSettings','packPrices',pp);}
   showToast('✅ פרטי העסק נשמרו');
   renderAdmin();
 }
@@ -11368,6 +11453,10 @@ function fillCompanyInfo(){
   const co=S.settings?.company||{};
   const s=(id,v)=>{const el=document.getElementById(id);if(el&&document.activeElement!==el)el.value=v||'';};
   s('co-name',co.name);s('co-addr',co.addr);s('co-city',co.city);s('co-phone',co.phone);s('co-taxid',co.taxId);s('co-email',co.email);
+  const pp=S.settings?.packPrices||{};
+  // 0 מוצג כשדה ריק ולא כ-"0" — "אין מחיר" ו-"מחיר אפס" נראים אז אותו דבר, וזה
+  // בדיוק המצב שהדוח מסמן באזהרה
+  s('pp-hanger',+pp.hanger||'');s('pp-nylon',+pp.nylon||'');s('pp-cello',+pp.cello||'');
   const issued=(S.products||[]).reduce((m,x)=>Math.max(m,parseInt(x.dnNo,10)||0),0);
   s('co-dnstart',Math.max(parseInt(S.settings?.dnStart,10)||1,issued+1));
   const el=document.getElementById('co-dnlast');
@@ -13275,6 +13364,23 @@ function dnClearFilter(){
   ['dn-search','dn-cust','dn-from','dn-to'].forEach(id=>{const el=document.getElementById(id);if(el)el.value='';});
   renderDNotes();
 }
+// ─── 📦 חומר אריזה ────────────────────────────────────────────
+// הסחורה יוצאת ללקוח **בתלייה או בקיפול**, ולכל מצב חומרים משלו. החומר מחויב
+// ללקוח ⇒ הוא שורה בהתחשבנות, לא עלות של המפעל. "ניילון צלופן" הוא פריט אחד.
+const PACK_MODES={hang:'🧷 תלייה',fold:'📦 קיפול'};
+const PACK_MATS=[
+  {k:'hanger',name:'קולב',      mode:'hang'},
+  {k:'nylon' ,name:'ניילון',    mode:'hang'},
+  {k:'cello' ,name:'ניילון צלופן',mode:'fold'}
+];
+function packMatsFor(mode){return PACK_MATS.filter(m=>m.mode===mode);}
+function packMatName(k){return PACK_MATS.find(m=>m.k===k)?.name||k;}
+function packPrice(k){return +((S.settings?.packPrices||{})[k])||0;}
+// 🔑 הכמות **והמחיר** נצרבים על רשומת המשלוח באישור. זה בכוונה **הפוך** ממחיר
+// העבודה (`dnUnitPrice`), שנקרא מכרטיס המוצר כפי שהוא היום: כאן הכמות מוזנת
+// ידנית בכל משלוח ממילא, ועדכון מחירון לא אמור לשכתב תעודה שכבר נמסרה ללקוח.
+function shipMats(s){return (Array.isArray(s?.mats)?s.mats:[]).filter(m=>m&&(+m.n||0)>0);}
+function shipPackCost(s){return shipMats(s).reduce((t,m)=>t+(+m.n||0)*(+m.price||0),0);}
 // ─── 🧾 התחשבנות עם לקוח ──────────────────────────────────────
 // מחיר העבודה ליחידה כפי שהוא רשום בכרטיס המוצר **היום**. ⚠ המחיר לא נצרב על
 // רשומת המשלוח (`p.shipments[]` מחזיק no/date/rows/total בלבד) ⇒ עדכון מחיר לדגם
@@ -13311,15 +13417,31 @@ function dnFiltered(){
       r.p.prod||'',r.p.name||'',String(parseInt(r.p.orderNo,10)||'')].join(' ').toLowerCase();
     return hay.includes(q);
   });
-  let units=0,amount=0,missing=0;
+  let units=0,work=0,pack=0,missing=0,noPrice=0;
+  // 📦 פירוט החומרים מצטבר על פני כל התעודות בסינון — זה מה שהלקוח רוצה לאמת
+  // ("כמה קולבים בכלל יצאו החודש"), ולא סכום אחד בלי ממה הוא מורכב.
+  const mats=new Map();
   rows.forEach(r=>{
     r.pr=dnUnitPrice(r.p);
     r.qty=+r.s.total||0;
-    r.amount=r.pr.missing?0:r.pr.unit*r.qty;
-    units+=r.qty;amount+=r.amount;
+    // מחיר עבודה חסר ⇒ 0 ומסומן. חומר האריזה **כן** נספר גם אז — הכמות והמחיר
+    // שלו נצרבו על התעודה ולכן הם ידועים בוודאות, בלי קשר לכרטיס המוצר.
+    r.work=r.pr.missing?0:r.pr.unit*r.qty;
+    r.mats=shipMats(r.s);
+    r.pack=shipPackCost(r.s);
+    r.amount=r.work+r.pack;
+    r.mats.forEach(m=>{
+      const e=mats.get(m.k)||{k:m.k,n:0,amount:0};
+      e.n+=+m.n||0;e.amount+=(+m.n||0)*(+m.price||0);
+      if(!(+m.price))e.noPrice=true;
+      mats.set(m.k,e);
+    });
+    if(r.mats.some(m=>!(+m.price)))noPrice++;
+    units+=r.qty;work+=r.work;pack+=r.pack;
     if(r.pr.missing)missing++;
   });
-  return {rows,units,amount,missing,cust,from,to};
+  const matList=PACK_MATS.map(d=>mats.get(d.k)).filter(Boolean);
+  return {rows,units,work,pack,amount:work+pack,missing,noPrice,matList,cust,from,to};
 }
 function renderDNotes(){
   const box=document.getElementById('dnotes-list');
@@ -13340,6 +13462,7 @@ function renderDNotes(){
   if(sum)sum.innerHTML=(rows.length===1?'תעודה אחת':rows.length+' תעודות')+' · '+f.units+" יח'"
     +(packs?' · '+packs+' חבילות':'')
     +' · <b style="color:var(--txt)">'+dnMoney(f.amount)+'</b>'
+    +(f.pack?` <span style="color:var(--txt3)">(📦 ${dnMoney(f.pack)})</span>`:'')
     +(f.missing?` · <b style="color:var(--red-txt)">⚠ ${f.missing} בלי מחיר</b>`:'');
   const heDate=d=>d?String(d).slice(8,10)+'/'+String(d).slice(5,7)+'/'+String(d).slice(0,4):'—';
   if(!rows.length){
@@ -13350,18 +13473,24 @@ function renderDNotes(){
     <thead><tr>
       <th>תעודה</th><th>תאריך</th><th>לקוח</th><th>דגם</th><th>הזמנה</th>
       <th style="text-align:center">יח'</th>
-      <th style="text-align:center">תפירה</th><th style="text-align:center">✂ גזירה</th><th style="text-align:center">סכום</th>
+      <th style="text-align:center">תפירה</th><th style="text-align:center">✂ גזירה</th>
+      <th style="text-align:center">📦 אריזה</th><th style="text-align:center">סכום</th>
       <th style="text-align:center">חבילות</th><th></th>
     </tr></thead>
     <tbody>${rows.map(r=>{
       const pk=packsCount(r.s.packs);
       // 🔴 מוצר בלי מחיר לא מוצג כ-₪0: דוח התחשבנות שמקטין את עצמו בשקט גרוע
       // מדוח שצועק. הסכום שלו גם לא נכנס לסה"כ.
-      const money=r.pr.missing
-        ? `<td colspan="3" style="text-align:center;color:var(--red-txt);font-weight:700">⚠ חסר מחיר בכרטיס המוצר</td>`
+      const work=r.pr.missing
+        ? `<td colspan="2" style="text-align:center;color:var(--red-txt);font-weight:700">⚠ חסר מחיר בכרטיס המוצר</td>`
         : `<td style="text-align:center;white-space:nowrap">${dnMoney(r.pr.sew)}${r.p.isSample&&!(+r.p.unitPrice)?'<span title="👕 דגם ראשון — מחיר קבוע" style="font-size:10px;color:var(--txt3)"> 👕</span>':''}</td>
-           <td style="text-align:center;white-space:nowrap;color:var(--txt3)">${r.pr.cut?dnMoney(r.pr.cut):'—'}</td>
-           <td style="text-align:center;white-space:nowrap;font-weight:700">${dnMoney(r.amount)}</td>`;
+           <td style="text-align:center;white-space:nowrap;color:var(--txt3)">${r.pr.cut?dnMoney(r.pr.cut):'—'}</td>`;
+      // מצב האריזה + החומרים בטולטיפ — הטבלה צרה מכדי לפרט קולב/ניילון בעמודה,
+      // אבל בלי הפירוט אי אפשר לבדוק סכום שנראה מוזר בלי לפתוח את התעודה
+      const matTip=r.mats.map(m=>packMatName(m.k)+' '+(+m.n||0)+'×'+dnMoney(m.price)).join(' · ');
+      const money=`${work}
+        <td style="text-align:center;white-space:nowrap;color:var(--txt3)"${matTip?` title="${esc((PACK_MODES[r.s.packMode]||'')+(matTip?' — '+matTip:''))}"`:''}>${r.pack?dnMoney(r.pack)+(r.mats.some(m=>!(+m.price))?' <span style="color:var(--amber-txt)">⚠</span>':''):'—'}</td>
+        <td style="text-align:center;white-space:nowrap;font-weight:700">${dnMoney(r.amount)}</td>`;
       return `<tr>
         <td><span class="bc-seg" style="background:var(--green-bg,#dcfce7);color:var(--green-txt,#16a34a);font-weight:700">${r.s.no?String(r.s.no).padStart(4,'0'):'—'}</span>${r.count>1?`<span style="font-size:10px;color:var(--txt3)"> ${r.i+1}/${r.count}</span>`:''}</td>
         <td style="white-space:nowrap">${heDate(r.s.date)}</td>
@@ -13380,11 +13509,16 @@ function renderDNotes(){
     <tfoot><tr style="background:var(--bg2,var(--card));font-weight:800">
       <td colspan="5" style="text-align:left">סה"כ</td>
       <td style="text-align:center">${f.units}</td>
-      <td colspan="2"></td>
+      <td colspan="2" style="text-align:center;font-weight:600;color:var(--txt3);font-size:11px">עבודה ${dnMoney(f.work)}</td>
+      <td style="text-align:center;white-space:nowrap">${f.pack?dnMoney(f.pack):'—'}</td>
       <td style="text-align:center;white-space:nowrap">${dnMoney(f.amount)}</td>
-      <td colspan="2">${f.missing?`<span style="color:var(--red-txt);font-size:11px">⚠ ${f.missing} תעודות ללא מחיר — לא נכללו</span>`:''}</td>
+      <td colspan="2">${f.missing?`<span style="color:var(--red-txt);font-size:11px">⚠ ${f.missing} תעודות ללא מחיר עבודה</span>`:''}</td>
     </tr></tfoot>
-  </table></div></div>`;
+  </table></div>
+  ${f.matList.length?`<div style="padding:9px 12px;border-top:1px solid var(--brd);font-size:12px;display:flex;flex-wrap:wrap;gap:4px 14px;align-items:center">
+    <span style="font-weight:700">📦 חומר אריזה:</span>
+    ${f.matList.map(m=>`<span>${esc(packMatName(m.k))} <b>${m.n}</b> × ${m.n?dnMoney(m.amount/m.n):'—'} = <b>${dnMoney(m.amount)}</b>${m.noPrice?' <span style="color:var(--amber-txt)">⚠ בלי מחיר</span>':''}</span>`).join('')}
+  </div>`:''}</div>`;
 }
 // 🧾 הדפסת ההתחשבנות. הנייר מורכב מ-`dnFiltered()` בדיוק כמו המסך — אם המסך מסנן
 // לקוח וטווח, זה מה שיודפס, ואין מסלול חישוב שני שיכול להיפרד ממנו.
@@ -13407,10 +13541,12 @@ function printSettlement(){
     <td>${esc(r.p.name||r.p.prod||'')}${(parseInt(r.p.orderNo,10)||0)?` <span class="ord">#${String(r.p.orderNo).padStart(3,'0')}</span>`:''}</td>
     <td class="n">${r.qty}</td>
     ${r.pr.missing
-      ? `<td class="c miss" colspan="3">⚠ חסר מחיר</td>`
-      : `<td class="c">${dnMoney(r.pr.sew)}</td><td class="c">${r.pr.cut?dnMoney(r.pr.cut):'—'}</td><td class="n">${dnMoney(r.amount)}</td>`}
+      ? `<td class="c miss" colspan="2">⚠ חסר מחיר</td>`
+      : `<td class="c">${dnMoney(r.pr.sew)}</td><td class="c">${r.pr.cut?dnMoney(r.pr.cut):'—'}</td>`}
+    <td class="c">${r.pack?dnMoney(r.pack):'—'}${r.s.packMode?`<div class="pm">${esc((PACK_MODES[r.s.packMode]||'').replace(/^\S+\s/,''))}</div>`:''}</td>
+    <td class="n">${dnMoney(r.amount)}</td>
   </tr>`).join('');
-  const cols=one?7:8;
+  const cols=one?8:9;
   printViaIframe(`<!DOCTYPE html><html dir="rtl" lang="he"><head><meta charset="UTF-8"/><title>התחשבנות ${esc(one?one.name:'')}</title><style>
 *{box-sizing:border-box;margin:0;padding:0}
 body{font-family:Arial,Helvetica,sans-serif;color:#000;background:#fff;font-size:13px;padding:16mm 14mm;-webkit-print-color-adjust:exact;print-color-adjust:exact}
@@ -13428,8 +13564,12 @@ thead th{background:#eef2ff;padding:7px 6px;text-align:right;font-weight:700;bor
 td{padding:6px;border:1px solid #ddd}
 td.c,th.c{text-align:center}
 td.n,th.n{text-align:center;font-weight:800;background:#fafafa;white-space:nowrap}
-td.miss{color:#b91c1c;font-weight:700;background:#fef2f2}
+td.miss,.miss{color:#b91c1c;font-weight:700}
+td.miss{background:#fef2f2}
 .ord{color:#888;font-size:10px}
+.pm{font-size:9px;color:#888;font-weight:400}
+table.mat{width:auto;min-width:52%;margin-top:16px}
+table.mat th[colspan]{background:#eef2ff;text-align:center;font-size:12px}
 tfoot td{background:#eef2ff;font-weight:800;font-size:14px;border:1px solid #bbb;padding:9px 6px}
 tr{page-break-inside:avoid}
 thead{display:table-header-group}
@@ -13471,16 +13611,25 @@ ${f.missing?`<div class="warn">⚠ ${f.missing} תעודות בדוח שייכו
 <table>
   <thead><tr>
     <th class="c">תעודה</th><th class="c">תאריך</th>${one?'':'<th>לקוח</th>'}<th>דגם</th>
-    <th class="c">כמות</th><th class="c">תפירה ליח'</th><th class="c">גזירה ליח'</th><th class="c">סכום</th>
+    <th class="c">כמות</th><th class="c">תפירה ליח'</th><th class="c">גזירה ליח'</th><th class="c">📦 אריזה</th><th class="c">סכום</th>
   </tr></thead>
   <tbody>${body}</tbody>
   <tfoot><tr>
-    <td colspan="${cols-4}" style="text-align:left">סה"כ ${f.rows.length} תעודות</td>
+    <td colspan="${cols-5}" style="text-align:left">סה"כ ${f.rows.length} תעודות</td>
     <td class="c">${f.units}</td>
-    <td colspan="2"></td>
+    <td colspan="2" class="c" style="font-weight:600;font-size:11px">עבודה ${dnMoney(f.work)}</td>
+    <td class="c">${f.pack?dnMoney(f.pack):'—'}</td>
     <td class="n" style="font-size:15px">${dnMoney(f.amount)}</td>
   </tr></tfoot>
 </table>
+${f.matList.length?`<table class="mat"><thead><tr><th colspan="4">📦 פירוט חומר אריזה</th></tr>
+  <tr><th>חומר</th><th class="c">כמות</th><th class="c">מחיר ליח'</th><th class="c">סכום</th></tr></thead>
+  <tbody>${f.matList.map(m=>`<tr>
+    <td>${esc(packMatName(m.k))}</td><td class="c">${m.n}</td>
+    <td class="c">${m.n?dnMoney(m.amount/m.n):'—'}${m.noPrice?' <span class="miss">⚠ בלי מחיר</span>':''}</td>
+    <td class="n">${dnMoney(m.amount)}</td></tr>`).join('')}</tbody>
+  <tfoot><tr><td colspan="3" style="text-align:left">סה"כ חומר אריזה</td><td class="n">${dnMoney(f.pack)}</td></tr></tfoot>
+</table>`:''}
 <div class="sign">
   <div><b>חתימת המפעל</b>_______________________</div>
   <div><b>אישור הלקוח</b>_______________________</div>
