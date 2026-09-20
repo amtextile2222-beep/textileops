@@ -13373,6 +13373,8 @@ const PACK_MATS=[
   {k:'nylon' ,name:'ניילון',    mode:'hang'},
   {k:'cello' ,name:'ניילון צלופן',mode:'fold'}
 ];
+// שם נקי בלי אמוג'י — לנייר המודפס, שבו האמוג'י רק מלכלך שורת פרטים
+function packModeName(k){return ({hang:'תלייה',fold:'קיפול'})[k]||'';}
 function packMatsFor(mode){return PACK_MATS.filter(m=>m.mode===mode);}
 function packMatName(k){return PACK_MATS.find(m=>m.k===k)?.name||k;}
 function packPrice(k){return +((S.settings?.packPrices||{})[k])||0;}
@@ -13543,7 +13545,7 @@ function printSettlement(){
     ${r.pr.missing
       ? `<td class="c miss" colspan="2">⚠ חסר מחיר</td>`
       : `<td class="c">${dnMoney(r.pr.sew)}</td><td class="c">${r.pr.cut?dnMoney(r.pr.cut):'—'}</td>`}
-    <td class="c">${r.pack?dnMoney(r.pack):'—'}${r.s.packMode?`<div class="pm">${esc((PACK_MODES[r.s.packMode]||'').replace(/^\S+\s/,''))}</div>`:''}</td>
+    <td class="c">${r.pack?dnMoney(r.pack):'—'}${r.s.packMode?`<div class="pm">${esc(packModeName(r.s.packMode))}</div>`:''}</td>
     <td class="n">${dnMoney(r.amount)}</td>
   </tr>`).join('');
   const cols=one?8:9;
@@ -13742,6 +13744,7 @@ table.pk th.ttl{background:#eef2ff;font-size:12px;text-align:center}
     ${ordered?line('כמות בהזמנה:',ordered+" יח'"):''}
     ${ordered?(surplus?line('עודף מעל ההזמנה:',surplus+" יח'"):line('יתרה להשלמה:',balance+" יח'")):''}
     ${packCount?line('חבילות:',packCount):''}
+    ${line('סוג אריזה:',packModeName(sh&&sh.packMode))}
   </div>
 </div>
 ${detailed?'':'<div class="warn">⚠ אין פירוט יציאה פר מידה למשלוח הזה — הטבלה מציגה את פירוט ההזמנה. סמן שוב "יצא ללקוח" כדי לרשום את הפירוט בפועל.</div>'}
