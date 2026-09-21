@@ -2734,8 +2734,35 @@ function stationFamily(name){
 function stationNameOfKey(key){const i=String(key||'').indexOf('::');return i<0?String(key||''):String(key).slice(i+2);}
 function stepFamily(s){const st=stepStation(s);return st?stationFamily(stationNameOfKey(st)):'';}
 function workerFamily(w){return stationFamily(w?.currentStation?.name||'');}
-// האם השלב פתוח לעובד לפי התחנה שסרק
-function stepAtWorkerStation(s,w){const sf=stepFamily(s);return!!sf&&sf===workerFamily(w);}
+// ─── תחנות משניות לשלב (🔀 altStations) ───────────────────────────
+// שלב שמתבצע על יותר מסוג מכונה אחד — `4335` נעשה גם ב-درزه וגם ב-مخبلت.
+// 🔑 **שדה נפרד ולא הפיכת `station` למערך**: `stepStation` נקרא ב-14 מקומות
+// (תמחור, מיומנויות, דוח שיבוץ, הגנת מחיקה, אודיטים) וכולם מצפים למחרוזת.
+// הפיכתו למערך = שינוי חוזה שמתאפס בשקט אצל כל צרכן שלא עודכן —
+// ראה [[gotcha_shared_map_key_change]]. כך רק שלושה קוראים צריכים להכיר את זה.
+// ה-`station` הראשי נשאר מקור האמת לכל השאר, ולכן שלב **חייב** תחנה ראשית גם עכשיו.
+function stepAltStations(s){
+  const a=(s&&typeof s==='object')?s.altStations:null;
+  return Array.isArray(a)?a.filter(x=>typeof x==='string'&&x.trim()):[];
+}
+// כל מפתחות התחנה המורשים לשלב — הראשי ואחריו המשניות, בלי כפילויות
+function stepStationKeys(s){
+  const out=[],seen=new Set();
+  for(const k of [stepStation(s),...stepAltStations(s)]){
+    const t=String(k||'').trim();if(!t||seen.has(t))continue;seen.add(t);out.push(t);
+  }
+  return out;
+}
+// כל המשפחות המורשות. ריק = לשלב אין תחנה כלל (וזה מה שהשער חוסם).
+function stepFamilies(s){
+  const out=[],seen=new Set();
+  for(const k of stepStationKeys(s)){
+    const f=stationFamily(stationNameOfKey(k));if(!f||seen.has(f))continue;seen.add(f);out.push(f);
+  }
+  return out;
+}
+// האם השלב פתוח לעובד לפי התחנה שסרק — **כל אחת** מהמשפחות המורשות מספיקה
+function stepAtWorkerStation(s,w){const wf=workerFamily(w);return!!wf&&stepFamilies(s).includes(wf);}
 
 // ─── לוח מצב הזמנות (צנרת ייצור) ─────────────────────────────────
 // שמונה רשימות שמשקפות את זרימת העבודה במפעל כפי שהמשתמש תיאר אותה (30/08):
@@ -2839,13 +2866,17 @@ function stationGate(w,cust,prod,stepNames){
     if(!nm)continue;
     const s=steps.find(x=>stepName(x)===nm);
     if(!s)continue; // שלב שאינו מהמוצר — לא בסמכות השער הזה
-    if(!stepFamily(s))blocked.push({step:nm,need:''});
-    else if(!stepAtWorkerStation(s,w))blocked.push({step:nm,need:stationNameOfKey(stepStation(s))});
+    // ⚠️ `need` הוא **מערך** ולא מחרוזת — `logGateEvent` עושה עליו `.join(' / ')`.
+    // עד 21/09 נדחפה כאן מחרוזת, ולכן כל חסימה מסוג "תחנה לא נכונה" הפילה את
+    // הרישום ב-TypeError שנבלע ב-try/catch של logGateEvent, והאירוע נעלם בשקט.
+    // `mergeGate` תמיד דחף מערך — ולכן ב-gateOverrides היו רק אירועי `order`.
+    if(!stepFamilies(s).length)blocked.push({step:nm,need:[]});
+    else if(!stepAtWorkerStation(s,w))blocked.push({step:nm,need:stepStationKeys(s).map(stationNameOfKey)});
   }
   if(!blocked.length)return{ok:true};
   const noStn=T.st_no_station||'אין תחנה משויכת';
   // טקסט גולמי בלבד — showToast כותב ב-textContent. ההברחה נעשית רק במסלול showConfirm (innerHTML).
-  return{ok:false,blocked,msg:(T.st_locked||'🔒 לא בתחנה הנכונה')+' ('+w.currentStation.name+'): '+blocked.map(b=>b.step+' → '+(b.need||noStn)).join(' · ')};
+  return{ok:false,blocked,msg:(T.st_locked||'🔒 לא בתחנה הנכונה')+' ('+w.currentStation.name+'): '+blocked.map(b=>b.step+' → '+(b.need?.length?b.need.join(' / '):noStn)).join(' · ')};
 }
 // ─── מי כפוף לשערים ומי מקבל אישור עקיפה ──────────────────────────
 // ברירת המחדל היא לפי תפקיד: מנהל/אחראי מאשרים עקיפה, עובד/עוזר נחסמים מוחלט.
@@ -3039,7 +3070,9 @@ function recommendWorkers(prodObj,checkedStepNames){
   for(const w of S.workers){
     if(w.disabled||w.role==='manager')continue;
     const sk=w.skills||{};let ok=true,slack=0;
-    for(const s of steps){const lvl=sk[stepStation(s)]||0;if(lvl<stepLevel(s)){ok=false;break;}slack+=lvl-stepLevel(s);}
+    // 🔀 הרמה הגבוהה מבין התחנות המורשות לשלב — עקבי עם _pricingStepRate,
+    // שאחרת היה מתמחר לפי מאגר עובדים רחב יותר מזה שההמלצה מציגה
+    for(const s of steps){const lvl=Math.max(0,...stepStationKeys(s).map(k=>sk[k]||0));if(lvl<stepLevel(s)){ok=false;break;}slack+=lvl-stepLevel(s);}
     if(!ok)continue;
     const load=S.activeTasks.filter(t=>t.workerId===w.id&&!t.paused).length;
     recs.push({w,slack,load,present:w.status==='in'});
@@ -3075,10 +3108,11 @@ function renderStepChecks(prefix,cust,prod,steps,bc,keepMode){
   // כשהמתג כבוי — התנהגות הסינון הרכה הישנה (כולם רואים הכל, בלי חסימה)
   const lock=stationLockOn();
   const mayAll=!lock||gateMode('station')==='override'; // "כל השלבים" הוא עקיפה — לפי מדיניות העובד
-  const atStn=fam?steps.filter(s=>stepFamily(s)===fam):[];
+  // 🔀 שלב עם altStations נפתח בכל אחת מהמשפחות המורשות שלו
+  const atStn=fam?steps.filter(s=>stepFamilies(s).includes(fam)):[];
   const showAll=mayAll&&(listEl.dataset.showAll==='1'||(!lock&&!atStn.length));
   // שלב שכבר סומן נשאר גלוי גם בתצוגה המסוננת — אחרת הסימון היה נעלם בשקט
-  const shown=showAll?steps:steps.filter(s=>stepFamily(s)===fam||keep.has(stepName(s)));
+  const shown=showAll?steps:steps.filter(s=>stepFamilies(s).includes(fam)||keep.has(stepName(s)));
   listEl.dataset.cust=cust;listEl.dataset.prod=prod;
   const onch=prefix==='bc'?'bcStepToggle(this)':(prefix==='ts'?'tsStepToggle(this)':"renderStepRecs('mgr')");
   // בלי תחנה סרוקה / בלי שלבים לתחנה — הודעה במקום רשימה שאי אפשר להתחיל ממנה בכל מקרה.
@@ -3098,7 +3132,7 @@ function renderStepChecks(prefix,cust,prod,steps,bc,keepMode){
     const nm=stepName(s);
     // שלב מחוץ לתחנה מסומן ויזואלית — מוצג רק למנהל/אחראי (עקיפה) או כשכבר היה מסומן
     const off=!!fam&&stepFamily(s)!==fam;
-    return`<label style="display:flex;align-items:center;gap:8px;padding:6px 8px;margin-bottom:4px;background:var(--bg2);border-radius:8px;cursor:pointer;font-size:13px${off?';opacity:.62':''}"><input type="checkbox" data-step="${esc(nm)}"${keep.has(nm)?' checked':''} style="width:16px;height:16px" onchange="${onch}"> ${esc(stepDisplay(s))}${stepBadge(s)}${off?` <span style="font-size:11px;padding:1px 7px;border-radius:8px;background:var(--amber-bg);color:var(--amber-txt);border:1px solid var(--brd)">🔒 ${esc(stationNameOfKey(stepStation(s))||(T.st_no_station||'אין תחנה'))}</span>`:''}</label>`;
+    return`<label style="display:flex;align-items:center;gap:8px;padding:6px 8px;margin-bottom:4px;background:var(--bg2);border-radius:8px;cursor:pointer;font-size:13px${off?';opacity:.62':''}"><input type="checkbox" data-step="${esc(nm)}"${keep.has(nm)?' checked':''} style="width:16px;height:16px" onchange="${onch}"> ${esc(stepDisplay(s))}${stepBadge(s)}${off?` <span style="font-size:11px;padding:1px 7px;border-radius:8px;background:var(--amber-bg);color:var(--amber-txt);border:1px solid var(--brd)">🔒 ${esc(stepStationKeys(s).map(stationNameOfKey).join(' / ')||(T.st_no_station||'אין תחנה'))}</span>`:''}</label>`;
   }).join('');
 }
 function toggleStepStationFilter(prefix){
@@ -7448,7 +7482,7 @@ function _prodBudget(p,ctx){
   const budgetUnit=price*(1-(+p.targetProfitPct||0)/100)-(+p.directMaterialsCost||0);
   // רק שלבים אוטומטיים (קושי בלי override ידני) מתחלקים את התקציב לפי משקל
   const totW=lvl.filter(s=>stepLevel(s)&&!(stepManualMin(s)>0)).reduce((s,x)=>s+(+ctx.weights[stepLevel(x)]||1),0);
-  const rates=lvl.map(s=>_pricingStepRate(stepStation(s),stepLevel(s),ctx.avgAll)+ctx.oh);
+  const rates=lvl.map(s=>_pricingStepRate(stepStationKeys(s),stepLevel(s),ctx.avgAll)+ctx.oh);
   const mins=lvl.map(s=>stepManualMin(s));
   const allManual=mins.length>0&&mins.every(m=>m>0);
   const manualCost=lvl.reduce((t,s,i)=>stepManualMin(s)>0?t+stepManualMin(s)/60*rates[i]:t,0);
@@ -7467,7 +7501,7 @@ function _prodBudget(p,ctx){
   const cutPct=cutProfitPctOf(p);
   const cutNames=(p.workSteps||[]).filter(s=>stepIsCut(s)).map(s=>stepName(s)).filter(Boolean);
   const cutBudgetUnit=cutPrice>0?cutPrice*(1-cutPct/100):0;
-  const cutRates=cutLvl.map(s=>_pricingStepRate(stepStation(s),stepLevel(s),ctx.avgAll)+ctx.oh);
+  const cutRates=cutLvl.map(s=>_pricingStepRate(stepStationKeys(s),stepLevel(s),ctx.avgAll)+ctx.oh);
   const cutStepBud=splitStepBudget(cutLvl.map(s=>stepManualMin(s)),cutLvl.map(s=>stepLevel(s)),cutRates,cutBudgetUnit,ctx.weights);
   const cutMinUnit=cutStepBud.reduce((t,b)=>t+b.min,0);
   const cutCostUnit=cutStepBud.reduce((t,b)=>t+b.ils,0);
@@ -11188,7 +11222,7 @@ function addStation(d,btn){
 function delStation(d,st){
   const key=d+'::'+st;
   if(S.workers.some(w=>w.skills&&w.skills[key])){alert('לא ניתן למחוק — יש עובדים עם מיומנות בתחנה זו');return;}
-  if(S.products.some(p=>(p.workSteps||[]).some(s=>stepStation(s)===key))){alert('לא ניתן למחוק — יש שלבי מוצר משויכים לתחנה זו');return;}
+  if(S.products.some(p=>(p.workSteps||[]).some(s=>stepStationKeys(s).includes(key)))){alert('לא ניתן למחוק — יש שלבי מוצר משויכים לתחנה זו (ראשית או נוספת)');return;}
   S.deptStations[d]=(S.deptStations[d]||[]).filter(x=>x!==st);
   saveDepts();renderAdmin();
 }
@@ -11215,7 +11249,13 @@ async function renameDept(oldD){
   }
   for(const p of (S.products||[])){
     let ch=false;
-    (p.workSteps||[]).forEach(s=>{if(s&&typeof s==='object'&&typeof s.station==='string'&&s.station.startsWith(pre)){s.station=newD+'::'+s.station.slice(pre.length);ch=true;}});
+    (p.workSteps||[]).forEach(s=>{
+      if(s&&typeof s==='object'&&typeof s.station==='string'&&s.station.startsWith(pre)){s.station=newD+'::'+s.station.slice(pre.length);ch=true;}
+      // 🔀 אותו טיפול לתחנות המשניות של השלב
+      if(s&&typeof s==='object'&&Array.isArray(s.altStations)&&s.altStations.some(k=>typeof k==='string'&&k.startsWith(pre))){
+        s.altStations=s.altStations.map(k=>(typeof k==='string'&&k.startsWith(pre))?newD+'::'+k.slice(pre.length):k);ch=true;
+      }
+    });
     if(ch&&S.fbConnected)await fbSet('products',p.id,{...p});
   }
   for(const st of (S.workStations||[])){
@@ -11251,7 +11291,14 @@ async function renameStation(d,oldSt){
   }
   for(const p of (S.products||[])){
     let ch=false;
-    (p.workSteps||[]).forEach(s=>{if(s&&typeof s==='object'&&s.station===oldKey){s.station=newKey;ch=true;}});
+    (p.workSteps||[]).forEach(s=>{
+      if(s&&typeof s==='object'&&s.station===oldKey){s.station=newKey;ch=true;}
+      // 🔀 גם התחנות המשניות נושאות את אותו מפתח — בלי זה שינוי שם תחנה
+      // היה מנתק בשקט את ההרשאה הנוספת והשלב היה נסגר למכונה השנייה
+      if(s&&typeof s==='object'&&Array.isArray(s.altStations)&&s.altStations.includes(oldKey)){
+        s.altStations=s.altStations.map(k=>k===oldKey?newKey:k);ch=true;
+      }
+    });
     if(ch&&S.fbConnected)await fbSet('products',p.id,{...p});
   }
   for(const st of (S.workStations||[])){
@@ -14390,6 +14437,17 @@ function addQtyBulk(){
 function _stationOpts(sel){
   return`<option value="">— תחנה —</option>`+Object.entries(S.deptStations||{}).filter(([,a])=>a&&a.length).map(([d,sts])=>`<optgroup label="${esc(d)}">${sts.map(st=>{const k=d+'::'+st;return`<option value="${esc(k)}" ${sel===k?'selected':''}>${esc(st)}</option>`;}).join('')}</optgroup>`).join('');
 }
+// 🔀 תחנות נוספות לשלב — בחירה מרובה. בלי `— תחנה —` ריק: ריק כאן = פשוט לא נבחר כלום.
+function _stationOptsMulti(sel){
+  const set=new Set(Array.isArray(sel)?sel:[]);
+  return Object.entries(S.deptStations||{}).filter(([,a])=>a&&a.length).map(([d,sts])=>`<optgroup label="${esc(d)}">${sts.map(st=>{const k=d+'::'+st;return`<option value="${esc(k)}" ${set.has(k)?'selected':''}>${esc(st)}</option>`;}).join('')}</optgroup>`).join('');
+}
+// קריאת הבחירה המרובה משורת שלב — משותפת למסלול השמירה ולתצוגת התמחור,
+// כדי ששניהם לא יוכלו להיפרד (ראה gotcha_client_server_formula_drift)
+function _rowAltStations(r){
+  const el=r.querySelector('[data-f="altStations"]');
+  return el?[...el.selectedOptions].map(o=>o.value).filter(Boolean):[];
+}
 // ─── הזמנה חוזרת: העתקת שלבי העבודה והתמחור מההזמנה הקודמת ─────
 // אותו דגם = אותם שלבים ואותו תמחור. להקליד הכל מחדש זה עבודה מיותרת וגם מקור
 // לטעויות — שלב שנשכח נופל בשקט מדוח "מוקצב מול בפועל" (ראה gotcha_orphan_tasktype).
@@ -14450,7 +14508,7 @@ function pmCopyFromPrev(pid){
   showToast('✅ הועתקו '+((p.workSteps||[]).length)+' שלבי עבודה והתמחור — הכמות מוזנת אחרי הספירה','var(--green-txt,#16a34a)',6000);
 }
 function _stepRowHtml(s){
-  const name=stepName(s),nameAr=(s&&typeof s==='object'?s.nameAr:'')||'',lvl=stepLevel(s),stn=stepStation(s),mMin=stepManualMin(s);
+  const name=stepName(s),nameAr=(s&&typeof s==='object'?s.nameAr:'')||'',lvl=stepLevel(s),stn=stepStation(s),mMin=stepManualMin(s),alt=stepAltStations(s);
   return`<div class="ts-row" style="border:1px solid var(--brd);border-radius:8px;padding:6px;margin-bottom:6px;display:flex;flex-direction:column;gap:4px">
     <div style="display:flex;gap:6px;align-items:center">
       <input type="text" data-f="name" value="${esc(name)}" placeholder="שם השלב (עברית)" style="flex:1;min-width:0;font-size:12px;padding:4px 8px;border-radius:6px;border:1px solid var(--brd);background:var(--card);color:var(--txt)">
@@ -14470,6 +14528,14 @@ function _stepRowHtml(s){
       <label style="display:flex;align-items:center;gap:3px;flex:none;font-size:12px;color:var(--txt3);cursor:pointer;white-space:nowrap" title="שלב מאחד — ייחסם עד שכל שלבי ה-🔗 שמעליו יסתיימו על אותו ברקוד. שלב רגיל אינו חוסם."><input type="checkbox" data-f="merge" ${s&&typeof s==='object'&&s.merge?'checked':''} style="width:15px;height:15px">🔗 מאחד</label>
       <label style="display:flex;align-items:center;gap:3px;flex:none;font-size:12px;color:var(--txt3);cursor:pointer;white-space:nowrap" title="שלב גזירה — נמדד מול 'עלות גזירה' ולא מול מחיר המכירה. סימון ידני; התחנה אינה קובעת."><input type="checkbox" data-f="cut" ${s&&typeof s==='object'&&s.cut?'checked':''} style="width:15px;height:15px" onchange="renderProductPricing()">✂ גזירה</label>
     </div>
+    <details ${alt.length?'open':''}>
+      <summary style="font-size:11px;color:var(--txt3);cursor:pointer">🔀 תחנות נוספות${alt.length?` (${alt.length})`:''}</summary>
+      <div style="font-size:10px;color:var(--txt3);margin:3px 0 4px;line-height:1.45">
+        השלב יתאפשר גם בתחנות האלה. בחירה מרובה — Ctrl/⌘ או גרירה.
+        התחנה הראשית נשארת זו שקובעת את התמחור והדוחות; כאן רק נפתחת הגישה.
+      </div>
+      <select multiple size="3" data-f="altStations" onchange="renderProductPricing()" style="width:100%;font-size:12px">${_stationOptsMulti(alt)}</select>
+    </details>
   </div>`;
 }
 function addTaskStepRow(){
@@ -14495,10 +14561,14 @@ function renumberStepRows(){
 // ─── תמחור שלב ד' — תקצוב זמן לשלב לפי מחיר, רווח יעד וחומרים ───
 // תקציב עבודה+תקורה ליחידה = מחיר×(1−רווח%) − חומרים.
 // חלוקה בין השלבים עם רמת קושי לפי difficultyWeights; דקות לשלב = תקציב_שלב ÷ (שעה עמוסה של הכשירים + תקורה) × 60.
+// ממוצע שעה עמוסה של העובדים הכשירים לשלב (בלי סינון נוכחות); fallback: ממוצע כל העובדים עם שכר.
+// 🔀 מקבל תחנה אחת או **רשימת תחנות מורשות** (altStations) ולוקח את **איחוד** הכשירים:
+// אם השלב באמת מתבצע גם ב-درزه וגם ב-مخبلت, העובדות בשתיהן באמת כשירות לו והאומדן
+// צריך לשקף את זה. ⚠️ זה אומדן עלות בלבד — מיומנות אינה חוסמת אף עובד מאף שלב.
 function _pricingStepRate(station,level,avgAll){
-  // ממוצע שעה עמוסה של העובדים הכשירים לשלב (בלי סינון נוכחות); fallback: ממוצע כל העובדים עם שכר
-  if(station){
-    const q=_costWorkers().filter(w=>((w.skills||{})[station]||0)>=level&&S.costs.workerRates[w.id]);
+  const keys=(Array.isArray(station)?station:[station]).filter(Boolean);
+  if(keys.length){
+    const q=_costWorkers().filter(w=>S.costs.workerRates[w.id]&&keys.some(k=>((w.skills||{})[k]||0)>=level));
     if(q.length)return q.reduce((s,w)=>s+loadedHourlyRate(w.id),0)/q.length;
   }
   return avgAll;
@@ -14534,6 +14604,7 @@ function renderProductPricing(){
     name:r.querySelector('[data-f="name"]')?.value.trim()||'',
     level:parseInt(r.querySelector('[data-f="level"]')?.value)||0,
     station:r.querySelector('[data-f="station"]')?.value||'',
+    altStations:_rowAltStations(r),
     manualMin:parseFloat(r.querySelector('[data-f="manualMin"]')?.value)||0,
     cut:!!r.querySelector('[data-f="cut"]')?.checked
   })).filter(s=>s.name);
@@ -14896,6 +14967,7 @@ async function saveProduct(){
     nameAr:r.querySelector('[data-f="nameAr"]')?.value.trim()||'',
     level:parseInt(r.querySelector('[data-f="level"]')?.value)||0,
     station:r.querySelector('[data-f="station"]')?.value||'',
+    altStations:_rowAltStations(r),
     manualMin:parseFloat(r.querySelector('[data-f="manualMin"]')?.value)||0,
     quick:!!r.querySelector('[data-f="quick"]')?.checked,
     merge:!!r.querySelector('[data-f="merge"]')?.checked,
