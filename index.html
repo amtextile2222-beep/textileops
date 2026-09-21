@@ -2885,13 +2885,15 @@ function pipeShipDate(p){
 // **שלב בלי תחנה משויכת = חסום** עד שמשייכים לו תחנה בכרטיס המוצר.
 // מנהל/אחראי יכולים לעקוף (אישור מפורש) — עובד לא.
 function stationLockOn(){return !!S.settings?.stationLock;}
-function stationGate(w,cust,prod,stepNames){
+function stationGate(w,cust,prod,stepNames,bc){
   const T=LANGS[currentLang];
   if(!stationLockOn())return{ok:true}; // 🔌 מתג כיבוי מהניהול — ברירת מחדל כבוי
   if(!(S.workStations||[]).length)return{ok:true}; // אין תחנות מוגדרות כלל — אין מה לאכוף
   // 📅 תחנה של אתמול אינה שיוך — curStation מחזיר null והעובד נחסם עד שיסרוק
   if(!curStation(w))return{ok:false,noStation:true,msg:T.st_need_scan||'📍 חובה לסרוק ברקוד תחנה לפני התחלת משימה'};
-  const p=findProd(cust,prod);
+  // 🔢 רשומת **ההזמנה שבברקוד**. בלי זה השער בודק את שם השלב ברשומה העדכנית,
+  // שיכולה לשאת לאותו שלב תחנה אחרת לגמרי ⇒ חסימה על סמך נתון של הזמנה אחרת.
+  const p=bcOrderProd(bc||'')||findProd(cust,prod);
   const steps=p?.workSteps||[];
   if(!steps.length)return{ok:true}; // מוצר בלי שלבים מוגדרים (שלב חופשי) — אין על מה לנעול
   const blocked=[];
@@ -2986,13 +2988,13 @@ async function resolveStationOverlap(w){
   try{renderAll();}catch(e){}
   return true;
 }
-async function passStationGate(w,cust,prod,stepNames){
+async function passStationGate(w,cust,prod,stepNames,bc){
   // 🔧 קודם האילוץ הפיזי — אין טעם לבדוק שלבים אם שני אנשים רשומים על אותה מכונה
   if(!await resolveStationOverlap(w))return false;
-  const g=stationGate(w,cust,prod,stepNames);
+  const g=stationGate(w,cust,prod,stepNames,bc);
   if(g.ok)return true;
   const T=LANGS[currentLang];
-  const info={cust,prod,steps:stepNames,blocked:g.blocked};
+  const info={cust,prod,bc,steps:stepNames,blocked:g.blocked};
   if(gateMode('station')!=='override'){logGateEvent('station','blocked',info);showToast(g.msg,'var(--red-txt)',8000);return false;} // textContent — בלי esc
   // showConfirm מזריק ב-innerHTML (וממיר \n ל-<br>) — כאן חובה esc, ושמות תחנה/שלב מגיעים מקלט משתמש
   const ok=await showConfirm(T.st_override_title||'עקיפת נעילת תחנה',esc(g.msg+'\n\n'+(T.st_override_msg||'להתחיל בכל זאת?')),T.st_override_ok||'התחל בכל זאת',T.cancel||'ביטול');
@@ -3119,11 +3121,16 @@ async function passMergeGate(cust,prod,bc,stepNames,workerId){
 async function passBatchGates(w,batch){
   const items=(batch||[]).filter(b=>b&&!b.isSample);
   if(!items.length)return true;
+  // 🔢 קיבוץ לפי **רשומת ההזמנה** ולא לפי לקוח+מוצר: לשתי הזמנות של אותו מוצר
+  // יכולים להיות שלבים ותחנות שונים לגמרי, ואיחודן היה בודק אותן מול רשומה אחת.
+  // עדיין אישור אחד לכל רשומה, ולא חמישה על אותה חריגה.
   const byProd={};
-  for(const b of items){const k=b.cust+'|'+b.prod;(byProd[k]=byProd[k]||[]).push(b.taskType||'');}
-  for(const k of Object.keys(byProd)){
-    const i=k.indexOf('|');
-    if(!await passStationGate(w,k.slice(0,i),k.slice(i+1),byProd[k]))return false;
+  for(const b of items){
+    const k=b.cust+'|'+b.prod+'|'+orderNoOf(b.raw||'');
+    (byProd[k]=byProd[k]||{cust:b.cust,prod:b.prod,raw:b.raw,steps:[]}).steps.push(b.taskType||'');
+  }
+  for(const g of Object.values(byProd)){
+    if(!await passStationGate(w,g.cust,g.prod,g.steps,g.raw))return false;
   }
   // 🔗 שער סדר השלבים — פר **ברקוד** ולא פר מוצר: הכיסוי נמדד למידה/צבע הספציפיים.
   // כל שלבי אותו ברקוד נשלחים יחד ולכן נחשבים "אותה סריקה" ואינם חוסמים זה את זה.
@@ -3214,14 +3221,15 @@ function renderStepChecks(prefix,cust,prod,steps,bc,keepMode){
 function toggleStepStationFilter(prefix){
   const listEl=document.getElementById(prefix+'-steps-list');if(!listEl)return;
   listEl.dataset.showAll=listEl.dataset.showAll==='1'?'':'1';
-  const p=findProd(listEl.dataset.cust,listEl.dataset.prod);
+  // אותה רשומה שממנה נבנתה הרשימה — לפי הברקוד ששמור ב-dataset
+  const p=bcOrderProd(listEl.dataset.bc||'')||findProd(listEl.dataset.cust,listEl.dataset.prod);
   renderStepChecks(prefix,listEl.dataset.cust,listEl.dataset.prod,p?.workSteps||[],listEl.dataset.bc,true);
   renderStepRecs(prefix);
 }
 // החלפת העובד הנבחר בסורק האחראי/המנהל — הרשימה מסוננת מחדש לפי התחנה שלו
 function onScanEmpChange(prefix){
   const listEl=document.getElementById(prefix+'-steps-list');
-  const p=listEl?.dataset.cust?findProd(listEl.dataset.cust,listEl.dataset.prod):null;
+  const p=listEl?.dataset.cust?(bcOrderProd(listEl.dataset.bc||'')||findProd(listEl.dataset.cust,listEl.dataset.prod)):null;
   if(p&&(p.workSteps||[]).length)renderStepChecks(prefix,listEl.dataset.cust,listEl.dataset.prod,p.workSteps,listEl.dataset.bc);
   renderStepRecs(prefix);
 }
@@ -6061,7 +6069,9 @@ function parseBc(v){
         <span class="bc-seg bc-col">צבע: ${COLORS[col]||col||'__'}</span>
       </div>`;
   if(isBcLen(v.length)){
-    const prod=findProd(c,p);
+    // 🔢 לפי **ההזמנה שבברקוד** ולא לפי הרשומה העדכנית: למוצר יכולות להיות כמה
+    // הזמנות עם שלבים שונים, ו-findProd היה מחזיר תמיד את האחרונה (ראה gotcha_duplicate_prod_records).
+    const prod=bcOrderProd(v);
     const steps=prod?.workSteps||[];
     if(steps.length){
       bcShowTaskTypeField(false);
@@ -6115,7 +6125,7 @@ async function submitBc(){
   if(bcUseSteps&&!bcCheckedSteps.length){showToast(T.err_sel_step||'⚠ בחר לפחות שלב עבודה אחד','var(--red-txt)');return;}
   // 🔒 שער התחנה — חובת סריקת תחנה + שלב נעול למשפחת התחנה שלו. הסורק האישי מופעל
   // ע"י העובד עצמו ולכן זו חסימה מוחלטת (העקיפה שמורה למנהל/אחראי בסורקי המשימות).
-  if(!await passStationGate(wu,cust,prod,bcUseSteps?bcCheckedSteps:[]))return;
+  if(!await passStationGate(wu,cust,prod,bcUseSteps?bcCheckedSteps:[],raw))return;
   // 🔗 שער סדר השלבים — כל השלבים שסומנו בסריקה הזו נחשבים "אותה סריקה"
   if(!await passMergeGate(cust,prod,raw,bcUseSteps?bcCheckedSteps:[taskType],u.id))return;
   // ברקוד שכבר בעבודה אצל עובד אחר באותו שלב — אישור הצטרפות
@@ -8614,7 +8624,9 @@ function parseMgrBc(v){
         <span class="bc-seg" style="background:var(--amber-bg);color:var(--amber-txt)">מידה: ${sz||'_'}</span>
         <span class="bc-seg bc-q">כמות: ${q.padEnd(3,'_')}</span><span class="bc-seg bc-col">צבע: ${COLORS[col]||col||'__'}</span></div>`;
   if(isBcLen(v.length)){
-    const prod=findProd(c,p);
+    // 🔢 לפי **ההזמנה שבברקוד** ולא לפי הרשומה העדכנית: למוצר יכולות להיות כמה
+    // הזמנות עם שלבים שונים, ו-findProd היה מחזיר תמיד את האחרונה (ראה gotcha_duplicate_prod_records).
+    const prod=bcOrderProd(v);
     const steps=prod?.workSteps||[];
     if(steps.length){
       mgrShowTaskTypeField(false);
@@ -9449,7 +9461,9 @@ function tsParseBc(v){
         <span class="bc-seg bc-q">כמות: ${q.padEnd(3,'_')}</span><span class="bc-seg bc-col">צבע: ${COLORS[col]||col||'__'}</span></div>`;
   // אם המוצר מוגדר עם שלבי עבודה — הצג checkboxes
   if(isBcLen(v.length)){
-    const prod=findProd(c,p);
+    // 🔢 לפי **ההזמנה שבברקוד** ולא לפי הרשומה העדכנית: למוצר יכולות להיות כמה
+    // הזמנות עם שלבים שונים, ו-findProd היה מחזיר תמיד את האחרונה (ראה gotcha_duplicate_prod_records).
+    const prod=bcOrderProd(v);
     const steps=prod?.workSteps||[];
     if(steps.length){
       tsShowTaskTypeField(false);
@@ -9615,7 +9629,7 @@ async function tsStartTask(){
     const checkedSteps=useSteps?[...document.querySelectorAll('#ts-steps-list input[type="checkbox"]:checked')].map(cb=>cb.dataset.step):[];
     if(useSteps&&!checkedSteps.length){showToast(T.err_sel_step||'⚠ בחר לפחות שלב עבודה אחד','var(--red-txt)');return;}
     // 🔒 שער התחנה (w = העובד שהמשימה נפתחת עבורו; העקיפה נקבעת לפי מי שמפעיל את הסורק)
-    if(!await passStationGate(w,cust,prod,useSteps?checkedSteps:[]))return;
+    if(!await passStationGate(w,cust,prod,useSteps?checkedSteps:[],raw))return;
     // 🔗 שער סדר השלבים — נבדק על הברקוד שנסרק, לפני ההוספה לסל
     if(!await passMergeGate(cust,prod,raw,useSteps?checkedSteps:[(document.getElementById('ts-tasktype').value||'').trim()],w.id))return;
     const taskType=useSteps?'':((document.getElementById('ts-tasktype').value||'').trim());
@@ -9959,7 +9973,7 @@ async function mgrStartTask(){
     const mgrCheckedSteps=mgrUseSteps?[...document.querySelectorAll('#mgr-steps-list input[type="checkbox"]:checked')].map(cb=>cb.dataset.step):[];
     if(mgrUseSteps&&!mgrCheckedSteps.length){showToast(T.err_sel_step||'⚠ בחר לפחות שלב עבודה אחד','var(--red-txt)');return;}
     // 🔒 שער התחנה (w = העובד שהמשימה נפתחת עבורו; העקיפה נקבעת לפי מי שמפעיל את הסורק)
-    if(!await passStationGate(w,cust,prod,mgrUseSteps?mgrCheckedSteps:[]))return;
+    if(!await passStationGate(w,cust,prod,mgrUseSteps?mgrCheckedSteps:[],raw))return;
     // 🔗 שער סדר השלבים — נבדק על הברקוד שנסרק, לפני ההוספה לסל
     if(!await passMergeGate(cust,prod,raw,mgrUseSteps?mgrCheckedSteps:[(document.getElementById('mgr-tasktype').value||'').trim()],w.id))return;
     const taskType=mgrUseSteps?'':((document.getElementById('mgr-tasktype').value||'').trim());
