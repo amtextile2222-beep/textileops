@@ -1425,6 +1425,11 @@ code{background:var(--bg2);border:0.5px solid var(--b);border-radius:4px;padding
           מחלקות שאינן מסומנות (קבלה, גימור, אריזה) נשארות פתוחות לכמה עובדים יחד.
         </div>
         <div id="stn-excl"></div>
+        <button class="btn" style="font-size:12px;margin-top:8px" onclick="auditStationOverlaps()">🔧 בדוק חפיפות עכשיו</button>
+        <div style="font-size:10px;color:var(--txt3);margin-top:4px;line-height:1.45">
+          מוצא עובדים שרשומים כרגע על אותה מכונה ומשחרר את הישנים לפי זמן הסריקה.
+          נחוץ לצמד ששויך לפני שהאכיפה עלתה — סריקה רגילה מתקנת רק מרגע הסריקה והלאה.
+        </div>
       </div>
       <div style="padding:10px;border:1px solid var(--brd);border-radius:8px;margin-bottom:10px">
         <label style="display:flex;align-items:center;gap:8px;cursor:pointer;font-size:13px;font-weight:600">
@@ -1583,7 +1588,7 @@ const LANGS={
     st_busy_title:'המכונה תפוסה',st_busy_by:'תפוסה ע"י',st_since:'מאז',
     st_busy_ask:'אתה עובד על המכונה הזו עכשיו?',
     st_busy_take:'🔧 אני עובד עליה',st_busy_visit:'📋 רק חלוקת עבודה',
-    st_busy_kept:'השיוך לא שונה',st_released:'שוחרר/ה מ־',
+    st_busy_kept:'השיוך לא שונה',st_released:'שוחרר/ה מ־',st_rescan:'סרוק את ברקוד המכונה שאתה עליה',
     st_tasks_closed:'משימות נסגרו',st_push_released:'📍 שוחררת מהתחנה',
     st_locked:'🔒 לא בתחנה הנכונה',
     st_no_station:'אין תחנה משויכת',
@@ -1859,7 +1864,7 @@ const LANGS={
     st_busy_title:'المكنة مشغولة',st_busy_by:'مشغولة من قبل',st_since:'منذ',
     st_busy_ask:'هل تعمل على هذه المكنة الآن؟',
     st_busy_take:'🔧 أنا أعمل عليها',st_busy_visit:'📋 فقط توزيع شغل',
-    st_busy_kept:'لم يتغيّر الربط',st_released:'تم تحريره/ا من',
+    st_busy_kept:'لم يتغيّر الربط',st_released:'تم تحريره/ا من',st_rescan:'امسح باركود المكنة التي تعمل عليها',
     st_tasks_closed:'مهام أُغلقت',st_push_released:'📍 تم تحريرك من المحطة',
     st_locked:'🔒 لست في المحطة الصحيحة',
     st_no_station:'لا توجد محطة مرتبطة',
@@ -2135,7 +2140,7 @@ const LANGS={
     st_busy_title:'Machine is occupied',st_busy_by:'occupied by',st_since:'since',
     st_busy_ask:'Are you working on this machine now?',
     st_busy_take:'🔧 I am working on it',st_busy_visit:'📋 Just handing out work',
-    st_busy_kept:'Assignment unchanged',st_released:'was released from ',
+    st_busy_kept:'Assignment unchanged',st_released:'was released from ',st_rescan:'scan the barcode of the machine you are at',
     st_tasks_closed:'tasks closed',st_push_released:'📍 You were released from the station',
     st_locked:'🔒 Wrong station',
     st_no_station:'no station assigned',
@@ -2912,7 +2917,50 @@ function logGateEvent(kind,result,info){
     }).catch(e=>console.warn('logGateEvent:',e));
   }catch(e){console.warn('logGateEvent:',e);}
 }
+// ─── 🔧 אכיפת "עובד אחד למכונה" גם מחוץ לרגע הסריקה ───────────────
+// מכונת תפירה היא אילוץ פיזי: שני אנשים לא יכולים לעבוד עליה, נקודה. לכן לא מספיק
+// לבדוק בסריקה — צמד ששויך לאותה מכונה לפני שהאכיפה עלתה לאוויר (או בשתי סריקות
+// כמעט-בו-זמנית) היה נשאר חופף לנצח, כי שום דבר לא תיקן חפיפה **קיימת**.
+// 🔑 ההכרעה לפי **זמן הסריקה** (`currentStation.since`) ולא לפי מי פעל עכשיו —
+// כך כל מכשיר שמבחין בחפיפה מגיע לאותה תוצאה, ואין תלות במי לחץ ראשון.
+// מי שסרק אחרון מחזיק במכונה; כל השאר משוחררים והמשימות הרצות שלהם נסגרות,
+// באותו היגיון של מסירת מכונה = סיום ([[feature_station_exclusive]]).
+async function resolveStationOverlap(w){
+  const cs=w?.currentStation;
+  const st=cs?.id?stationById(cs.id):null;
+  if(!st||!stationExclusive(st))return true;
+  const others=(S.workers||[]).filter(x=>x.id!==w.id&&x.status==='in'&&x.currentStation?.id===cs.id);
+  if(!others.length)return true;
+  const T=LANGS[currentLang];
+  const mine=Date.parse(cs.since||'')||0;
+  const since=o=>Date.parse(o.currentStation?.since||'')||0;
+  const newer=others.filter(o=>since(o)>mine);
+  if(newer.length){
+    // מישהו סרק את המכונה **אחרי** העובד הזה ⇒ הוא כבר לא עליה, והרישום שלו ישן.
+    // משחררים אותו וחוסמים — שיסרוק את המכונה שהוא באמת יושב עליה.
+    const closed=await closeRunningTasks(w.id,srvNow());
+    await closeWorkerStation(w,srvNow());
+    logGateEvent('station_busy','stale',{blocked:[{step:st.name,need:newer.map(o=>o.name)}]});
+    showToast('📍 '+st.name+' — '+(T.st_busy_by||'תפוסה ע"י')+' '+newer.map(o=>o.name).join(' / ')+
+      (closed?' · 🏁 '+closed+' '+(T.st_tasks_closed||'משימות נסגרו'):'')+
+      ' — '+(T.st_rescan||'סרוק את ברקוד המכונה שאתה עליה'),'var(--red-txt)',9000);
+    try{renderAll();}catch(e){}
+    return false;
+  }
+  // העובד הזה סרק אחרון ⇒ המכונה שלו. כל השאר ישנים יותר ומשוחררים.
+  for(const o of others){
+    const closed=await closeRunningTasks(o.id,srvNow());
+    await closeWorkerStation(o,srvNow());
+    logGateEvent('station_busy','release',{blocked:[{step:st.name,need:[o.name]}]});
+    showToast('🔄 '+o.name+' '+(T.st_released||'שוחרר/ה מ־')+st.name+(closed?' · 🏁 '+closed+' '+(T.st_tasks_closed||'משימות נסגרו'):''),'var(--amber-txt)',6000);
+    try{sendPushToWorker(o.id,T.st_push_released||'📍 שוחררת מהתחנה',st.name+' — '+w.name).catch(()=>{});}catch(e){}
+  }
+  try{renderAll();}catch(e){}
+  return true;
+}
 async function passStationGate(w,cust,prod,stepNames){
+  // 🔧 קודם האילוץ הפיזי — אין טעם לבדוק שלבים אם שני אנשים רשומים על אותה מכונה
+  if(!await resolveStationOverlap(w))return false;
   const g=stationGate(w,cust,prod,stepNames);
   if(g.ok)return true;
   const T=LANGS[currentLang];
@@ -8947,6 +8995,43 @@ function renderStationExclusive(){
       <span style="font-weight:600">${esc(d)}</span><span style="color:var(--txt3)">· ${n} תחנות</span>
     </label>`;
   }).join('');
+}
+// ─── 🔧 סריקת כל החפיפות הקיימות ופתרונן בבת אחת ──────────────────
+// `resolveStationOverlap` רץ רק כשעובד מתחיל משימה. צמד ששויך לאותה מכונה לפני
+// שהאכיפה עלתה יכול לשבת ככה כל היום בלי שאיש יתחיל משימה — וזה בדיוק מה שקרה
+// ב-21/09 עם ابوزكي ו-رائده על `درزه 1`. הכפתור הזה סוגר את הפער ידנית.
+// אותה הכרעה בדיוק: מי שסרק אחרון מחזיק, השאר משוחררים והמשימות שלהם נסגרות.
+async function auditStationOverlaps(){
+  const byStation={};
+  for(const w of (S.workers||[])){
+    const id=w.status==='in'?w.currentStation?.id:null;if(!id)continue;
+    const st=stationById(id);if(!st||!stationExclusive(st))continue;
+    (byStation[id]=byStation[id]||{st,ws:[]}).ws.push(w);
+  }
+  const over=Object.values(byStation).filter(x=>x.ws.length>1);
+  if(!over.length){showToast('✅ אין חפיפות — עובד אחד לכל מכונה','var(--green-txt)',5000);return;}
+  const since=w=>Date.parse(w.currentStation?.since||'')||0;
+  const lines=over.map(({st,ws})=>{
+    const sorted=[...ws].sort((a,b)=>since(b)-since(a));
+    return st.name+': '+sorted.map((w,i)=>w.name+(i?'':' ✅')).join(' · ');
+  });
+  if(!await showConfirm('חפיפות תחנה',
+    esc(over.length+' מכונות עם יותר מעובד אחד:\n\n'+lines.join('\n')+
+      '\n\n✅ = סרק אחרון ונשאר. השאר ישוחררו והמשימות הרצות שלהם ייסגרו.'),
+    'שחרר','ביטול'))return;
+  let rel=0,closed=0;
+  for(const {st,ws} of over){
+    const sorted=[...ws].sort((a,b)=>since(b)-since(a));
+    for(const o of sorted.slice(1)){
+      closed+=await closeRunningTasks(o.id,srvNow());
+      await closeWorkerStation(o,srvNow());
+      rel++;
+      logGateEvent('station_busy','audit',{blocked:[{step:st.name,need:[o.name]}]});
+      try{sendPushToWorker(o.id,LANGS[currentLang].st_push_released||'📍 שוחררת מהתחנה',st.name).catch(()=>{});}catch(e){}
+    }
+  }
+  saveLS();try{renderAll();}catch(e){}
+  showToast('🔧 '+rel+' עובדים שוחררו'+(closed?' · 🏁 '+closed+' משימות נסגרו':''),'var(--amber-txt)',7000);
 }
 async function toggleExclusiveDept(dept,on){
   const prev=exclusiveDepts().slice();
