@@ -1077,15 +1077,35 @@ async function runAttendanceCloser() {
   }
 
   // 2.5) רישומי תחנה (stationLog) שנשארו פתוחים — סגירה בשעת סוף המשמרת של יום ההתחלה
+  // 🔑 **וגם ניקוי `workers.currentStation`** — סגירת הרישום לבדה לא מספיקה. עד 21/09
+  // השיוך על מסמך העובד נשאר, ולכן הוא נכנס למחרת עם התחנה של אתמול: `stationGate`
+  // מאשר לו להתחיל משימה בלי שסרק כלום, והמשימה נחתמת במכונה שלא ישב עליה.
+  // נמדד אצל ابوزكي — אפס רשומות stationLog ב-21/09, ומשימה מ-06:30 עם station:"درزه 1".
+  let stationsCleared = 0;
   try {
+    const clearWorkerStation = async (workerId, logId) => {
+      if (!workerId) return;
+      // ⚠️ מנקים **רק** אם זה עדיין הרישום הפעיל של העובד. בלי הבדיקה, סגירת רישום
+      // ישן הייתה מוחקת שיוך חדש ותקף שנסרק אחריו.
+      const wRef = db.collection('workers').doc(workerId);
+      const wSnap = await wRef.get();
+      if (!wSnap.exists || wSnap.data().stationLogId !== logId) return;
+      await wRef.set({ currentStation: null, stationLogId: null }, { merge: true });
+      stationsCleared++;
+    };
     const openLogs = await db.collection('stationLog').where('to', '==', null).get();
     for (const doc of openLogs.docs) {
       const r = doc.data();
-      if (!r.from) { await doc.ref.set({ to: new Date().toISOString() }, { merge: true }); continue; }
+      if (!r.from) {
+        await doc.ref.set({ to: new Date().toISOString() }, { merge: true });
+        await clearWorkerStation(r.workerId, doc.id).catch(() => {});
+        continue;
+      }
       const day = ilDateOf(r.from);
       const cutISO = ilDateTime(day, shiftEnd).toISOString();
       if (Date.now() < new Date(cutISO).getTime()) continue; // המשמרת עוד לא נגמרה
       await doc.ref.set({ to: cutISO, autoClosed: true }, { merge: true });
+      await clearWorkerStation(r.workerId, doc.id).catch(() => {});
     }
   } catch (e) { console.error('attendanceCloser stationLog:', e); }
 
@@ -1216,10 +1236,11 @@ async function runAttendanceCloser() {
       if (pausedNames.length) msg += '\n⏸ משימות הושהו (' + pausedNames.length + '): ' + pausedNames.join(', ');
       if (fixedDur) msg += '\n⏱ תוקן משך מנופח ב-' + fixedDur + ' משימות בהיסטוריה';
       if (fixedBatch) msg += '\n🧮 תוקן זמן batch מנופח ב-' + fixedBatch + ' משימות';
+      if (stationsCleared) msg += '\n📍 נוקו ' + stationsCleared + ' שיוכי תחנה שנשארו פתוחים';
       await sendTelegram(token, chatId, msg).catch(() => {});
     }
   }
-  return { closed: closed.length, repaired, paused: pausedNames.length, fixedDur, fixedBatch };
+  return { closed: closed.length, repaired, paused: pausedNames.length, fixedDur, fixedBatch, stationsCleared };
 }
 
 exports.attendanceCloser = functions.pubsub.schedule('30 23 * * *').timeZone('Asia/Jerusalem').onRun(async () => {
