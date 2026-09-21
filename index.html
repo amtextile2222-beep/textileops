@@ -2661,6 +2661,9 @@ let S={
     company:{name:'א.מ טקסטיל',addr:'באקה אלגרבייה',city:'',phone:'052-3381376',taxId:'066055450',email:''},
     // המספר הראשון שיונפק — ממשיך את הפנקס הידני
     dnStart:645,
+    // 🕳 יומן תעודות שבוטלו — ראה dnVoidAdd. נשמר כדי שחור ברצף המספור
+    // לא ייראה כתעודה שנעלמה מהמערכת.
+    dnVoids:[],
     // 📦 מחירון חומר האריזה ₪ ליחידה — נערך בלשונית ניהול. ברירת מחדל 0 ולא מספר
     // מומצא: מחיר שגוי שנצרב על תעודה גרוע ממחיר חסר, שהמערכת צועקת עליו.
     packPrices:{hanger:0,nylon:0,cello:0}},
@@ -3697,6 +3700,10 @@ function listenFb(){
       if(d.id==='customerInfo'){S.customerInfo=data;saveLS();}
       if(d.id==='company'){S.settings.company={...(S.settings.company||{}),...data};saveLS();}
       if(d.id==='packPrices'){S.settings.packPrices={...(S.settings.packPrices||{}),...data};saveLS();}
+      // 🕳 יומן הביטולים משותף לכל המכשירים — מי שמחק תעודה בנייד, והמנהל
+      // שמסתכל במסך הגדול, חייבים לראות את אותו חור עם אותו הסבר.
+      if(d.id==='deliveryVoids'){S.settings.dnVoids=Array.isArray(data.list)?data.list:[];saveLS();
+        if(document.querySelector('.page.active')?.id==='page-dnotes')try{renderDNotes();}catch(e){}}
       if(d.id==='customColors'){S.customColors=data;Object.assign(COLORS,data);saveLS();}
       if(d.id==='depts'&&data.list&&data.list.length){S.depts=data.list;S.deptStations=data.stations||S.deptStations||{};S.deptStageMap=data.stageMap||S.deptStageMap||{};saveLS();fillDeptSelects();}
       if(d.id==='telegramSettings'){
@@ -13481,7 +13488,12 @@ async function delShipment(pid,idx){
   const list=prodShipments(p);
   const s=list[idx];
   if(!s)return;
-  if(!await showConfirm('מחיקת משלוח','למחוק את תעודה '+String(s.no||0).padStart(4,'0')+' ('+s.total+" יח')?\nהמספר לא יוחזר לשימוש.",'מחק','ביטול'))return;
+  if(!await showConfirm('מחיקת משלוח','למחוק את תעודה '+String(s.no||0).padStart(4,'0')+' ('+s.total+" יח')?\nהמספר לא יוחזר לשימוש, והתעודה תסומן כבוטלה ברשימת התעודות.",'מחק','ביטול'))return;
+  // 🕳 הביטול נרשם **לפני** ההסרה מהמערך — אחרי שהמשלוח יורד אין מאיפה לקחת
+  // את הלקוח, הדגם והכמות, והחור ברצף היה נשאר בלי שם.
+  dnVoidAdd({no:+s.no||0,date:s.date||'',at:new Date().toISOString(),cust:p.cust||'',
+    prod:p.prod||'',name:p.name||'',orderNo:parseInt(p.orderNo,10)||0,total:+s.total||0,
+    by:S.user?.id||'',byName:S.user?.name||S.user?.user||''});
   const left=list.filter((_,k)=>k!==idx);
   p.shipments=left;
   p.shippedQty=left.reduce((t,x)=>t+(+x.total||0),0);
@@ -13493,6 +13505,7 @@ async function delShipment(pid,idx){
   showToast('🗑 המשלוח נמחק');
   try{buildStageReport();}catch(e){}
   try{renderProducts();}catch(e){}
+  try{renderDNotes();}catch(e){}
 }
 // ─── ✏️ עריכת חומר האריזה של תעודה קיימת ──────────────────────
 // חומר האריזה נוסף למערכת אחרי שכבר הונפקו תעודות, ולכן לכל המשלוחים הישנים אין
@@ -13624,6 +13637,85 @@ function allDeliveryNotes(){
   // נשאר ברשימה ונופל למטה — הוא מקבל מספר רק בהדפסה הראשונה שלו.
   return out.sort((a,b)=>((+b.s.no||0)-(+a.s.no||0))||String(b.s.date||'').localeCompare(String(a.s.date||'')));
 }
+// ─── 🕳 תעודות שבוטלו ─────────────────────────────────────────
+// מספר תעודה **נשרף במחיקה** ולא חוזר לשימוש — הנייר כבר עלול להיות אצל הלקוח,
+// ושתי תעודות באותו מספר גרועות בהרבה מחור ברצף. בלי סימון, החור נראה כמו תעודה
+// שנעלמה, ובבדיקה חשבונאית אי אפשר להבחין בין "בוטלה" לבין "אבדה". שתי שכבות:
+//   1. **יומן ביטולים** — כל מחיקה מהיום והלאה נרשמת עם לקוח, דגם, כמות ומי מחק.
+//   2. **גזירה מהרצף** — כל מספר חסר בין הנמוך לגבוה מסומן גם בלי רישום, וכך
+//      תעודות שנמחקו לפני הפיצ'ר (0663/0664 מהלחיצה הכפולה, 0673) עדיין מופיעות.
+// שכבה 2 היא רשת הביטחון: היומן עלול לפספס מחיקה אופליין, החור ברצף לא.
+function dnVoidLog(){return Array.isArray(S.settings?.dnVoids)?S.settings.dnVoids:[];}
+async function dnVoidAdd(rec){
+  if(!rec||!(+rec.no))return;
+  const mk=l=>l.filter(v=>(+v.no||0)!==(+rec.no||0)).concat([rec]).sort((a,b)=>(+b.no||0)-(+a.no||0)).slice(0,500);
+  // תקרה רכה — היומן גדל לאט (בודדים בשנה), אבל הוא יושב ב-localStorage יחד עם
+  // כל השאר ואסור לו לדחוף החוצה את המוצרים.
+  S.settings.dnVoids=mk(dnVoidLog());
+  saveLS();
+  if(!db||!S.fbConnected)return;
+  // טרנזקציה ולא כתיבה מלאה: שני מנהלים שמוחקים תעודות שונות באותו רגע היו
+  // דורסים זה את הרישום של זה, והחור שנשאר היה חוזר להיות אנונימי.
+  try{
+    const{doc,runTransaction}=window._fb;
+    await runTransaction(db,async tx=>{
+      const ref=doc(db,'appSettings','deliveryVoids');
+      const s=await tx.get(ref);
+      const cur=Array.isArray(s.data()?.list)?s.data().list:[];
+      tx.set(ref,{list:mk(cur)},{merge:true});
+    });
+  }catch(e){console.warn('dnVoid:',e.message);}
+}
+// שורות הרפאים לטבלה — יומן + חורים ברצף, אחרי אותו סינון של הטבלה עצמה.
+function dnVoidRows(f){
+  const used=new Set();
+  let min=Infinity,max=0;
+  allDeliveryNotes().forEach(r=>{const k=+r.s.no||0;if(k>0){used.add(k);if(k<min)min=k;if(k>max)max=k;}});
+  const logged=new Map();
+  // מספר שחזר לשימוש (תעודה שנמחקה והוקלדה מחדש) כבר אינו חור — הרשומה החיה
+  // מנצחת את היומן, אחרת הייתה מוצגת שורת רפאים על תעודה שקיימת בפועל.
+  dnVoidLog().forEach(v=>{const k=+v.no||0;if(k>0&&!used.has(k))logged.set(k,{...v,known:true});});
+  const out=[...logged.values()];
+  // 🔒 תקרה על הסריקה — פנקס עם קפיצה חריגה לא ייצר אלפי שורות רפאים
+  if(max&&min<=max&&max-min<=3000){
+    for(let k=min;k<=max;k++)if(!used.has(k)&&!logged.has(k))out.push({no:k,known:false});
+  }
+  const q=(f?.q||'').trim(),cust=f?.cust||'',from=f?.from||'',to=f?.to||'';
+  return out.filter(v=>{
+    // חור בלי רישום הוא מספר ותו לא — אין לו לקוח ואין לו תאריך, ולכן סינון לפי
+    // לקוח או טווח תאריכים **מסתיר אותו** במקום לנחש שהוא מתאים לסינון.
+    if(!v.known&&(cust||from||to))return false;
+    if(cust&&v.cust!==cust)return false;
+    const d=v.date||'';
+    if(from&&d&&d<from)return false;
+    if(to&&d&&d>to)return false;
+    if(!q)return true;
+    return [String(v.no),String(v.no).padStart(4,'0'),v.cust||'',S.customerNames?.[v.cust]||'',v.prod||'',v.name||''].join(' ').toLowerCase().includes(q);
+  }).sort((a,b)=>(+b.no||0)-(+a.no||0));
+}
+function dnVoidTr(v){
+  const hd=d=>d?String(d).slice(8,10)+'/'+String(d).slice(5,7)+'/'+String(d).slice(0,4):'—';
+  const who=v.byName?' · נמחקה ע"י '+esc(v.byName):'';
+  // שתי נוסחאות: מה שנרשם ביומן מספר מה היה בתעודה שבוטלה, ומה שנגזר מהרצף
+  // אומר רק שהמספר לא בשימוש — **בלי להמציא** שמישהו ביטל אותו, כי ייתכן שהוא
+  // נשרף בהנפקה שנכשלה באמצע ולא במחיקה.
+  const lbl=v.known?'בוטלה':'מספר לא בשימוש';
+  const what=v.known
+    ? esc(S.customerNames?.[v.cust]||('לקוח '+(v.cust||'')))+' · '+esc(v.name||v.prod||'')+(+v.total?' · '+(+v.total)+" יח'":'')+who
+    : 'אין תעודה במספר הזה — בוטלה, או שההנפקה לא הושלמה';
+  return `<tr style="opacity:.62">
+    <td><span class="bc-seg" style="background:var(--bg2,#f1f5f9);color:var(--txt3);font-weight:700;text-decoration:line-through">${String(v.no).padStart(4,'0')}</span></td>
+    <td style="white-space:nowrap;color:var(--txt3)">${hd(v.date)}</td>
+    <td colspan="10" style="color:var(--txt3);font-size:12px">🕳 <b>${lbl}</b> — ${what} <span style="opacity:.8">· המספר לא חוזר לשימוש</span></td>
+  </tr>`;
+}
+// מיזוג לפי מספר יורד — שורת הרפאים יושבת **במקומה ברצף** ולא בסוף הטבלה,
+// אחרת אי אפשר לראות בעין שהחור הוא בדיוק בין 0672 ל-0674.
+function dnRowsWithVoids(rows,voids,fn){
+  return rows.map(r=>({n:+r.s.no||0,html:fn(r)}))
+    .concat(voids.map(v=>({n:+v.no||0,html:dnVoidTr(v)})))
+    .sort((x,y)=>y.n-x.n).map(x=>x.html).join('');
+}
 function dnClearFilter(){
   ['dn-search','dn-cust','dn-from','dn-to'].forEach(id=>{const el=document.getElementById(id);if(el)el.value='';});
   renderDNotes();
@@ -13720,7 +13812,7 @@ function dnFiltered(){
     if(r.pr.missing)missing++;
   });
   const matList=PACK_MATS.map(d=>mats.get(d.k)).filter(Boolean);
-  return {rows,units,work,pack,amount:work+pack,missing,noPrice,matList,cust,from,to};
+  return {rows,units,work,pack,amount:work+pack,missing,noPrice,matList,q,cust,from,to};
 }
 function renderDNotes(){
   const box=document.getElementById('dnotes-list');
@@ -13735,16 +13827,17 @@ function renderDNotes(){
     if(sel.innerHTML!==html)sel.innerHTML=html;
     sel.value=opts.some(c=>c.code===keep)?keep:'';
   }
-  const f=dnFiltered(),rows=f.rows;
+  const f=dnFiltered(),rows=f.rows,voids=dnVoidRows(f);
   const packs=rows.reduce((t,r)=>t+packsCount(r.s.packs),0);
   const sum=document.getElementById('dn-sum');
   if(sum)sum.innerHTML=(rows.length===1?'תעודה אחת':rows.length+' תעודות')+' · '+f.units+" יח'"
     +(packs?' · '+packs+' חבילות':'')
     +' · <b style="color:var(--txt)">'+dnMoney(f.amount)+'</b>'
     +(f.pack?` <span style="color:var(--txt3)">(📦 ${dnMoney(f.pack)})</span>`:'')
-    +(f.missing?` · <b style="color:var(--red-txt)">⚠ ${f.missing} בלי מחיר</b>`:'');
+    +(f.missing?` · <b style="color:var(--red-txt)">⚠ ${f.missing} בלי מחיר</b>`:'')
+    +(voids.length?` · <span style="color:var(--txt3)">🕳 ${voids.length===1?'תעודה אחת בוטלה':voids.length+' תעודות בוטלו'}</span>`:'');
   const heDate=d=>d?String(d).slice(8,10)+'/'+String(d).slice(5,7)+'/'+String(d).slice(0,4):'—';
-  if(!rows.length){
+  if(!rows.length&&!voids.length){
     box.innerHTML=`<div class="card" style="text-align:center;color:var(--txt3);font-size:13px;padding:18px">אין תעודות תואמות</div>`;
     return;
   }
@@ -13756,7 +13849,7 @@ function renderDNotes(){
       <th style="text-align:center">📦 אריזה</th><th style="text-align:center">סכום</th>
       <th style="text-align:center">חבילות</th><th></th>
     </tr></thead>
-    <tbody>${rows.map(r=>{
+    <tbody>${dnRowsWithVoids(rows,voids,r=>{
       const pk=packsCount(r.s.packs);
       // 🔴 מוצר בלי מחיר לא מוצג כ-₪0: דוח התחשבנות שמקטין את עצמו בשקט גרוע
       // מדוח שצועק. הסכום שלו גם לא נכנס לסה"כ.
@@ -13785,7 +13878,7 @@ function renderDNotes(){
           <button class="btn" style="font-size:11px;padding:4px 9px" onclick="showShipments('${escj(r.p.id)}')">🚚 משלוחים</button>
         </td>
       </tr>`;
-    }).join('')}</tbody>
+    })}</tbody>
     <tfoot><tr style="background:var(--bg2,var(--card));font-weight:800">
       <td colspan="5" style="text-align:left">סה"כ</td>
       <td style="text-align:center">${f.units}</td>
