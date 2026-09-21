@@ -14444,6 +14444,22 @@ function _stationOptsMulti(sel){
 }
 // קריאת הבחירה המרובה משורת שלב — משותפת למסלול השמירה ולתצוגת התמחור,
 // כדי ששניהם לא יוכלו להיפרד (ראה gotcha_client_server_formula_drift)
+// 🔀 תקציר הבחירה על ה-summary. בלעדיו אי אפשר לקפל את התיבה בלי לאבד את המידע,
+// ולכן היא נשארה פתוחה בכל שורה ותפסה את כל הטופס. עם התקציר — מקופל ועדיין ברור.
+// ⚠️ מוצגות **משפחות** ולא שמות: סימון `مخبلت 2` פותח גם את 1 ו-3, והצגת השם המלא
+// הייתה מטעה לחשוב שצריך לסמן כל אחת בנפרד.
+function _altSumText(keys){
+  const fams=[];
+  for(const k of (keys||[])){const f=stationNameOfKey(k).replace(/[\s٠-٩۰-۹\d]+$/,'').trim()||stationNameOfKey(k);if(f&&!fams.includes(f))fams.push(f);}
+  return fams.length?': '+fams.join(' · '):'';
+}
+function _altStationsChanged(el){
+  try{
+    const sum=el.closest('.ts-row')?.querySelector('.alt-sum');
+    if(sum)sum.textContent=_altSumText([...el.selectedOptions].map(o=>o.value));
+  }catch(e){}
+  renderProductPricing();
+}
 function _rowAltStations(r){
   const el=r.querySelector('[data-f="altStations"]');
   return el?[...el.selectedOptions].map(o=>o.value).filter(Boolean):[];
@@ -14528,13 +14544,14 @@ function _stepRowHtml(s){
       <label style="display:flex;align-items:center;gap:3px;flex:none;font-size:12px;color:var(--txt3);cursor:pointer;white-space:nowrap" title="שלב מאחד — ייחסם עד שכל שלבי ה-🔗 שמעליו יסתיימו על אותו ברקוד. שלב רגיל אינו חוסם."><input type="checkbox" data-f="merge" ${s&&typeof s==='object'&&s.merge?'checked':''} style="width:15px;height:15px">🔗 מאחד</label>
       <label style="display:flex;align-items:center;gap:3px;flex:none;font-size:12px;color:var(--txt3);cursor:pointer;white-space:nowrap" title="שלב גזירה — נמדד מול 'עלות גזירה' ולא מול מחיר המכירה. סימון ידני; התחנה אינה קובעת."><input type="checkbox" data-f="cut" ${s&&typeof s==='object'&&s.cut?'checked':''} style="width:15px;height:15px" onchange="renderProductPricing()">✂ גזירה</label>
     </div>
-    <details ${alt.length?'open':''}>
-      <summary style="font-size:11px;color:var(--txt3);cursor:pointer">🔀 תחנות נוספות${alt.length?` (${alt.length})`:''}</summary>
+    <details>
+      <summary style="font-size:11px;color:var(--txt3);cursor:pointer">🔀 תחנות נוספות<span class="alt-sum" style="color:var(--blue-txt);font-weight:600">${_altSumText(alt)}</span></summary>
       <div style="font-size:10px;color:var(--txt3);margin:3px 0 4px;line-height:1.45">
         השלב יתאפשר גם בתחנות האלה. בחירה מרובה — Ctrl/⌘ או גרירה.
+        <b>מספיק תחנה אחת מכל משפחה</b> — סימון مخبلت 2 פותח גם את مخبلت 1 ו-3.
         התחנה הראשית נשארת זו שקובעת את התמחור והדוחות; כאן רק נפתחת הגישה.
       </div>
-      <select multiple size="3" data-f="altStations" onchange="renderProductPricing()" style="width:100%;font-size:12px">${_stationOptsMulti(alt)}</select>
+      <select multiple size="8" data-f="altStations" onchange="_altStationsChanged(this)" style="width:100%;font-size:12px">${_stationOptsMulti(alt)}</select>
     </details>
   </div>`;
 }
