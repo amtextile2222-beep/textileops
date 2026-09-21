@@ -2738,7 +2738,34 @@ function stationFamily(name){
 // שם התחנה מתוך מפתח השלב "מחלקה::תחנה" (שלב ישן עשוי לשאת שם חשוף בלי מחלקה)
 function stationNameOfKey(key){const i=String(key||'').indexOf('::');return i<0?String(key||''):String(key).slice(i+2);}
 function stepFamily(s){const st=stepStation(s);return st?stationFamily(stationNameOfKey(st)):'';}
-function workerFamily(w){return stationFamily(w?.currentStation?.name||'');}
+// ─── 📅 תחנה של אתמול אינה שיוך — היא שריד ────────────────────────
+// `functions/index.js` סוגר נוכחות ומשימות בסוף היום אבל **לא נוגע ב-currentStation**
+// (השדה מופיע שם פעם אחת, לקריאה בלבד, עבור התראת הטלגרם). לכן עובד שיומו נסגר
+// בשרת נכנס למחרת עם התחנה של אתמול, `stationGate` מאשר לו להתחיל משימה בלי
+// שסרק כלום, והמשימה נחתמת בתחנה שהוא לא ישב עליה.
+// נמדד 21/09: ל-ابوزكي אפס רשומות `stationLog` היום, ובכל זאת המשימה שלו מ-06:30
+// נושאת `station:"درزه 1"` — החותמת של אתמול.
+// 🔑 בלי `since` נחשב מיושן: הוא נכתב בכל שיוך מאז יולי, ולכן היעדרו = רשומה פגומה,
+// ומחיר הטעות הוא סריקה אחת מול שיוך שלם שמבוסס על כלום.
+// ⚠️ `since` נשמר ב-ISO (**UTC**) ו-`todayStr()` הוא **מקומי** — השוואת `slice(0,10)`
+// ביניהם שגויה בשעות שבהן התאריכים נפרדים (בישראל: מחצות עד 03:00 התאריך ב-UTC
+// עדיין אתמול). לכן ממירים ליום מקומי ורק אז משווים.
+function _dayKeyLocal(v){
+  const t=Date.parse(v);if(!t)return '';
+  const d=new Date(t);
+  return d.getFullYear()+'-'+pad2(d.getMonth()+1)+'-'+pad2(d.getDate());
+}
+function stationStale(cs){
+  if(!cs)return false;
+  if(!cs.since)return true;
+  const k=_dayKeyLocal(cs.since);
+  return !k||k!==todayStr();
+}
+// התחנה **התקפה** של העובד. כל קורא שמסיק ממנה משהו צריך לעבור דרך כאן.
+// ⚠️ `stationOccupant` מכוון **לא** עובר דרך כאן — שריד שתופס מכונה צריך להימצא
+// ולהשתחרר כשמישהו סורק אותה, אחרת הוא היה נשאר רשום עליה לנצח.
+function curStation(w){const cs=w?.currentStation;return stationStale(cs)?null:cs||null;}
+function workerFamily(w){return stationFamily(curStation(w)?.name||'');}
 // ─── תחנות משניות לשלב (🔀 altStations) ───────────────────────────
 // שלב שמתבצע על יותר מסוג מכונה אחד — `4335` נעשה גם ב-درزه וגם ב-مخبلت.
 // 🔑 **שדה נפרד ולא הפיכת `station` למערך**: `stepStation` נקרא ב-14 מקומות
@@ -2862,7 +2889,8 @@ function stationGate(w,cust,prod,stepNames){
   const T=LANGS[currentLang];
   if(!stationLockOn())return{ok:true}; // 🔌 מתג כיבוי מהניהול — ברירת מחדל כבוי
   if(!(S.workStations||[]).length)return{ok:true}; // אין תחנות מוגדרות כלל — אין מה לאכוף
-  if(!w?.currentStation)return{ok:false,noStation:true,msg:T.st_need_scan||'📍 חובה לסרוק ברקוד תחנה לפני התחלת משימה'};
+  // 📅 תחנה של אתמול אינה שיוך — curStation מחזיר null והעובד נחסם עד שיסרוק
+  if(!curStation(w))return{ok:false,noStation:true,msg:T.st_need_scan||'📍 חובה לסרוק ברקוד תחנה לפני התחלת משימה'};
   const p=findProd(cust,prod);
   const steps=p?.workSteps||[];
   if(!steps.length)return{ok:true}; // מוצר בלי שלבים מוגדרים (שלב חופשי) — אין על מה לנעול
@@ -2881,7 +2909,7 @@ function stationGate(w,cust,prod,stepNames){
   if(!blocked.length)return{ok:true};
   const noStn=T.st_no_station||'אין תחנה משויכת';
   // טקסט גולמי בלבד — showToast כותב ב-textContent. ההברחה נעשית רק במסלול showConfirm (innerHTML).
-  return{ok:false,blocked,msg:(T.st_locked||'🔒 לא בתחנה הנכונה')+' ('+w.currentStation.name+'): '+blocked.map(b=>b.step+' → '+(b.need?.length?b.need.join(' / '):noStn)).join(' · ')};
+  return{ok:false,blocked,msg:(T.st_locked||'🔒 לא בתחנה הנכונה')+' ('+(curStation(w)?.name||'')+'): '+blocked.map(b=>b.step+' → '+(b.need?.length?b.need.join(' / '):noStn)).join(' · ')};
 }
 // ─── מי כפוף לשערים ומי מקבל אישור עקיפה ──────────────────────────
 // ברירת המחדל היא לפי תפקיד: מנהל/אחראי מאשרים עקיפה, עובד/עוזר נחסמים מוחלט.
@@ -2910,7 +2938,7 @@ function logGateEvent(kind,result,info){
     const id=Date.now()+'_'+Math.random().toString(36).slice(2,7);
     fbSet('gateOverrides',id,{id,ts:new Date().toISOString(),kind,result,
       workerId:w.id||'',workerName:w.name||'',role:w.role||'',
-      station:w.currentStation?.name||'',
+      station:curStation(w)?.name||'',
       cust:info.cust||'',prod:info.prod||'',bc:info.bc||'',
       steps:(info.steps||[]).filter(Boolean).join(', '),
       need:(info.blocked||[]).map(b=>b.step+' ← '+(b.need||[]).join(' / ')).join(' · ')
@@ -3166,13 +3194,13 @@ function renderStepChecks(prefix,cust,prod,steps,bc,keepMode){
   // בלי תחנה סרוקה / בלי שלבים לתחנה — הודעה במקום רשימה שאי אפשר להתחיל ממנה בכל מקרה.
   // למנהל/אחראי הרשימה המלאה עדיין מוצגת (הם היחידים שיכולים לעקוף).
   const note=!lock||!(S.workStations||[]).length?''
-    :!w?.currentStation?(T.st_need_scan||'📍 חובה לסרוק ברקוד תחנה לפני התחלת משימה')
+    :!curStation(w)?(T.st_need_scan||'📍 חובה לסרוק ברקוד תחנה לפני התחלת משימה')
     :!atStn.length?(T.st_no_steps_here||'אין שלבים לתחנה הזו במוצר — סרוק את התחנה הנכונה'):'';
   const noteHtml=note?`<div style="margin-bottom:6px;padding:7px 9px;border-radius:8px;font-size:12px;background:var(--amber-bg);color:var(--amber-txt);border:1px solid var(--brd)">${esc(note)}</div>`:'';
   const rows=note?(mayAll?steps:[]):shown;
-  const bar=w?.currentStation&&atStn.length
+  const bar=curStation(w)&&atStn.length
     ?`<div style="display:flex;align-items:center;gap:8px;flex-wrap:wrap;margin-bottom:6px;font-size:12px">
-        <span style="color:var(--green-txt);font-weight:700">📍 ${esc(w.currentStation.name)}</span>
+        <span style="color:var(--green-txt);font-weight:700">📍 ${esc(curStation(w)?.name||'')}</span>
         <span style="color:var(--txt3)">${atStn.length} ${esc(T.st_of||'מתוך')} ${steps.length}</span>
         ${mayAll&&atStn.length<steps.length?`<button type="button" class="btn" style="font-size:11px;padding:3px 10px" onclick="toggleStepStationFilter('${escj(prefix)}')">${esc(showAll?(T.st_only||'📍 רק שלבי התחנה'):(T.st_all_steps||'📋 כל השלבים'))}</button>`:''}
       </div>`:'';
@@ -5445,7 +5473,7 @@ async function bcStartBatch(){
       if(S.activeTasks.some(x=>x.workerId===u.id&&taskBc(x)===b.raw&&(x.taskType||'')===(b.taskType||'')&&!x.paused)){dupSkip.push((b.taskType||b.prod)+' — '+(T.scan_dup_active||'פעיל כעת'));continue;}
       if(findDupIn(srvActive,b.raw,b.taskType)){dupSkip.push((b.taskType||b.prod)+' — '+(T.scan_dup_active||'פעיל כעת'));continue;}
       // wu ולא u: S.user הוא עותק מרגע ההתחברות — currentStation שלו לא מתעדכן בסריקת תחנה
-      const newTask={id:String(Date.now())+Math.random().toString(36).slice(2,6),workerId:u.id,workerName:u.name,scannedBy:S.user?.id||'',scannedByName:S.user?.name||'',dept:b.taskDept||effDept(wu),station:wu.currentStation?.name||'',cust:b.cust,prod:b.prod,size:b.size,qty:b.qty,col:b.col,taskType:b.taskType,bc:b.raw,isTotal:b.isTotal||false,startTime:bcStart,elapsed:0,prodStamp:b.prodStamp};
+      const newTask={id:String(Date.now())+Math.random().toString(36).slice(2,6),workerId:u.id,workerName:u.name,scannedBy:S.user?.id||'',scannedByName:S.user?.name||'',dept:b.taskDept||effDept(wu),station:curStation(wu)?.name||'',cust:b.cust,prod:b.prod,size:b.size,qty:b.qty,col:b.col,taskType:b.taskType,bc:b.raw,isTotal:b.isTotal||false,startTime:bcStart,elapsed:0,prodStamp:b.prodStamp};
       if(bcBatchId)newTask.batchId=bcBatchId;
       if(b.expMin!=null)newTask.expectedMin=b.expMin;
       if(b.isSample)newTask.isSample=true;
@@ -5478,7 +5506,7 @@ async function bcStartBatch(){
     if(dupSkip.length)showToast((T.scan_not_added||'לא נוסף')+' '+dupSkip.join(' · '),'var(--red-txt)',7000);
     if(created>0)showToast('✅ '+(created>1?created+' משימות הותחלו':'משימה הותחלה'));
     // מדיניות רכה: התחלת משימה בלי שיוך תחנה — תזכורת בלבד, לא חסימה
-    if(!wu.currentStation&&(S.workStations||[]).length)setTimeout(()=>showToast(T.st_reminder||'📍 תזכורת: סרוק ברקוד תחנה כדי לשייך אותך לעמדה','var(--amber-txt)',5000),1800);
+    if(!curStation(wu)&&(S.workStations||[]).length)setTimeout(()=>showToast(T.st_reminder||'📍 תזכורת: סרוק ברקוד תחנה כדי לשייך אותך לעמדה','var(--amber-txt)',5000),1800);
   }catch(e){showToast('❌ שגיאה בפתיחת משימה: '+e.message,'var(--red-txt)',8000);}
 }
 
@@ -8519,7 +8547,7 @@ function renderMgrTasks(){
         <div class="av" style="width:30px;height:30px;font-size:10px;flex-shrink:0">${esc(w.name.split(' ').map(n=>n[0]).join(''))}</div>
         <div style="flex:1;min-width:100px">
           <div style="font-size:13px;font-weight:500">${esc(w.name)}</div>
-          <div style="font-size:11px;color:var(--txt3)">${esc(w.dept)} · ▶${ciStr} ◀${coStr} · <span style="color:var(--blue-txt)">${netMs?fmtNetH(netMs):''}</span>${isIn&&w.currentStation?.name?` · <span style="color:var(--green-txt)">📍 ${esc(w.currentStation.name)}</span>`:''}</div>
+          <div style="font-size:11px;color:var(--txt3)">${esc(w.dept)} · ▶${ciStr} ◀${coStr} · <span style="color:var(--blue-txt)">${netMs?fmtNetH(netMs):''}</span>${isIn&&curStation(w)?.name?` · <span style="color:var(--green-txt)">📍 ${esc(curStation(w).name)}</span>`:''}</div>
         </div>
         ${!bulk?`<span class="badge ${isIn?'green':'red'}" style="align-self:center">${isIn?'<span class="pulse"></span> בעבודה':'יצא/ה'}</span>`:''}
         ${!bulk&&!isIn?`<button class="btn success" style="font-size:11px;padding:5px 12px" onclick="mgrPunchIn('${w.id}')">✅ כניסה</button>`:''}
@@ -8842,7 +8870,7 @@ function workerBcDownloadPDF(){
 // ─── תחנות עבודה פיזיות (QR STN:{id}) — שיוך עובד↔תחנה למצלמות DVR ─────
 function stationById(id){return (S.workStations||[]).find(s=>s.id===id);}
 // המחלקה האפקטיבית: תחנה סרוקה גוברת זמנית על מחלקת הבית (עד סריקה אחרת/יציאה)
-function effDept(w){return w?.currentStation?.dept||w?.dept||'';}
+function effDept(w){return curStation(w)?.dept||w?.dept||'';}
 // ─── 🔧 בלעדיות מכונה ──────────────────────────────────────────────
 // נמדד ב-stationLog לפני המימוש: ב-18/08 محمد ו-ابوزكي החזיקו את `حبكي 4` במקביל
 // 58 דקות, וב-19/08 هنيه נכנסה אליה שלוש פעמים בזמן ש-ندوه החזיקה אותה עד סגירת
@@ -9631,7 +9659,7 @@ async function tsStartTask(){
       // האחראי محمد פותח משימות עבור עובדות אחרות, ולכן startTime הוא רגע חלוקת העבודה ולא
       // רגע ההתחלה בפועל. בלי השדה הזה אי אפשר להפריד קצב עבודה מזמן חלוקה. נוסף 10/09/2026
       // בכל ארבע נקודות היצירה (5197 עצמי · כאן · 9268 מנהל · 9322 פיצול); רשומות ישנות בלעדיו.
-      const task={id:String(Date.now())+Math.random().toString(36).slice(2,6),workerId:w.id,workerName:w.name,scannedBy:S.user?.id||'',scannedByName:S.user?.name||'',dept:b.taskDept||effDept(w),station:w.currentStation?.name||'',cust:b.cust,prod:b.prod,size:b.size,qty:b.qty,col:b.col,taskType:b.taskType,bc:b.raw,isTotal:b.isTotal||false,startTime,elapsed:0,accumulatedSec:0,prodStamp:b.prodStamp};
+      const task={id:String(Date.now())+Math.random().toString(36).slice(2,6),workerId:w.id,workerName:w.name,scannedBy:S.user?.id||'',scannedByName:S.user?.name||'',dept:b.taskDept||effDept(w),station:curStation(w)?.name||'',cust:b.cust,prod:b.prod,size:b.size,qty:b.qty,col:b.col,taskType:b.taskType,bc:b.raw,isTotal:b.isTotal||false,startTime,elapsed:0,accumulatedSec:0,prodStamp:b.prodStamp};
       const exp=b.isSample?null:await fetchExpected(b.cust,b.prod,w.id,b.qty); // 👕 דגם — אין צפי
       if(exp?.ok&&exp.perStep?.[b.taskType]!=null)task.expectedMin=exp.perStep[b.taskType];
       if(b.isSample)task.isSample=true;
@@ -9960,7 +9988,7 @@ async function mgrStartTask(){
     // המסלול הזה סוגר קודם את המשימות הפעילות שב-cache המקומי — אבל משימה שנפתחה
     // ממכשיר אחר לא נמצאת שם כלל, ולכן לא נסגרה ולא נחסמה. כאן היא נתפסת.
     if(findDupIn(mgrSrvActive,b.raw,b.taskType)){mgrDupSkip.push((b.taskType||b.prod)+' — '+(T.scan_dup_active||'פעיל כעת'));continue;}
-    const newTask={id:String(Date.now())+Math.random().toString(36).slice(2,6),workerId:empId,workerName:w.name,scannedBy:S.user?.id||'',scannedByName:S.user?.name||'',dept:b.taskDept||effDept(w),station:w.currentStation?.name||'',cust:b.cust,prod:b.prod,size:b.size,qty:b.qty,col:b.col,taskType:b.taskType,bc:b.raw,isTotal:b.isTotal||false,startTime,elapsed:0,accumulatedSec:0,prodStamp:b.prodStamp};
+    const newTask={id:String(Date.now())+Math.random().toString(36).slice(2,6),workerId:empId,workerName:w.name,scannedBy:S.user?.id||'',scannedByName:S.user?.name||'',dept:b.taskDept||effDept(w),station:curStation(w)?.name||'',cust:b.cust,prod:b.prod,size:b.size,qty:b.qty,col:b.col,taskType:b.taskType,bc:b.raw,isTotal:b.isTotal||false,startTime,elapsed:0,accumulatedSec:0,prodStamp:b.prodStamp};
     const expM=b.isSample?null:await fetchExpected(b.cust,b.prod,empId,b.qty); // 👕 דגם — אין צפי
     if(expM?.ok&&expM.perStep?.[b.taskType]!=null)newTask.expectedMin=expM.perStep[b.taskType];
     if(b.isSample)newTask.isSample=true;
@@ -10016,7 +10044,7 @@ async function transferTask(taskId){
     const splitId='sp'+Date.now().toString(36)+Math.random().toString(36).slice(2,5);
     // dept/station נלקחים מהעובד המקבל — בלי זה ה-spread משאיר את התחנה של העובד
     // הקודם על המשימה, והלוח מראה אותה יושבת במקום הלא נכון
-    const newTask={...t,id:String(Date.now())+Math.random().toString(36).slice(2,6),workerId:newWorker.id,workerName:newWorker.name,scannedBy:S.user?.id||'',scannedByName:S.user?.name||'',dept:effDept(newWorker),station:newWorker.currentStation?.name||'',qty:partQty,startTime:srvNow(),elapsed:0,accumulatedSec:0,splitId};
+    const newTask={...t,id:String(Date.now())+Math.random().toString(36).slice(2,6),workerId:newWorker.id,workerName:newWorker.name,scannedBy:S.user?.id||'',scannedByName:S.user?.name||'',dept:effDept(newWorker),station:curStation(newWorker)?.name||'',qty:partQty,startTime:srvNow(),elapsed:0,accumulatedSec:0,splitId};
     delete newTask.batchId;
     // לעובד היעד כבר יש משימה חיה על אותו ברקוד+שלב ⇒ הפיצול ייצור כפילות
     if(!(await claimTaskGuard(newTask)).ok){showToast((tt||t.prod)+' — '+(T.scan_dup_active||'פעיל כעת'),'var(--red-txt)');return;}
@@ -10042,7 +10070,7 @@ async function transferTask(taskId){
   t.workerId=newWorker.id;
   t.workerName=newWorker.name;
   t.dept=effDept(newWorker);
-  t.station=newWorker.currentStation?.name||'';
+  t.station=curStation(newWorker)?.name||'';
   // חשב מחדש צפי לעובד החדש (שכר שונה); בכשל שרת — משאירים את הצפי הקיים כדי לא למחוק צפי תקין
   const expF=await fetchExpected(t.cust,t.prod,newWorker.id,t.qty);
   if(expF?.ok&&expF.perStep?.[tt]!=null)t.expectedMin=expF.perStep[tt];
