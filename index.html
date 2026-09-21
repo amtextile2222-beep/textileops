@@ -5334,6 +5334,8 @@ _guardReentrant('bcStartBatch','bcStartBatch');
 // 🚚 נצפה חי 16/09: שלוש תעודות (0662-0664) לאותה הזמנה, 176 יח' כל אחת — החלון נשאר
 // פתוח בזמן מונה המספור והשמירה, וכל לחיצה נוספת על "אשר יציאה" הוסיפה משלוח ומספר חדש
 _guardReentrant('confirmShip','confirmShip');
+// ✏️ אותו סיפור בשמירת תיקון — לחיצה כפולה הייתה רושמת שתי שורות תיקון
+_guardReentrant('saveShipEdit','saveShipEdit');
 // ─── התנגשות "כל הכמות" מול מידה בודדת, לאותו שלב ────────────
 // ברקוד "כל הכמות" (size='9', col='00') מייצג את *כל* יחידות ההזמנה לשלב. סריקת מידה בודדת
 // לאותו שלב סופרת שוב יחידות שכבר נכללות בו — וגם ההפך. chk: stepAlreadyTaken חוסם רק ברקוד
@@ -10893,12 +10895,14 @@ function prodShipments(p){
 }
 function shipmentsTotal(p){return prodShipments(p).reduce((t,s)=>t+(+s.total||0),0);}
 // כמה כבר יצא לכל מידה+צבע (שני הסוגים יחד) — הבסיס לחישוב היתרה בסריקה הבאה
-function shippedCellMap(p){
+// exclude = משלוח שלא נספר. נדרש בעריכת תעודה: "כבר יצא" חייב להיות **בלי**
+// התעודה שעורכים, אחרת הכמות שלה הייתה נספרת גם כיתרה שנותרה וגם כיתרה שיצאה.
+function shippedCellMap(p,exclude){
   const m=new Map();
-  prodShipments(p).forEach(s=>(s.rows||[]).forEach(r=>{
+  prodShipments(p).forEach(s=>{if(exclude&&s===exclude)return;(s.rows||[]).forEach(r=>{
     const k=String(r.size??'')+'|'+String(r.color??'');
     m.set(k,(m.get(k)||0)+(parseInt(r.qty)||0));
-  }));
+  });});
   return m;
 }
 // איחוד שורות כל המשלוחים — נשמר ב-shippedRows כדי שקורא שמסתכל על המוצר
@@ -10915,12 +10919,21 @@ function mergeShipRows(list){
 // עד כאן היציאה נשמרה כמספר בודד (shippedQty) ⇒ במשלוח חלקי לא היה ידוע **אילו**
 // מידות יצאו, ותעודת משלוח מפורטת הייתה בלתי אפשרית. shippedRows מוסיף את הפירוט;
 // shippedQty נשאר הסכום כדי שכל הקוראים הקיימים שלו ימשיכו לעבוד ללא שינוי.
-function shipRowsHtml(p){
-  const rows=(p.quantities||[]).filter(q=>parseInt(q.qty)>0);
+// editSh = רשומת משלוח קיימת שעורכים. בלעדיו הטבלה מציעה את **היתרה** למשלוח
+// חדש; איתו היא מציגה את הכמויות של אותה תעודה בלבד.
+function shipRowsHtml(p,editSh){
+  let rows=(p.quantities||[]).filter(q=>parseInt(q.qty)>0);
+  // 🛑 מידה/צבע שיש בתעודה אבל כבר לא ברשימת הכמויות של המוצר (הכמויות עודכנו
+  // מאז) **חייבים להופיע** — אחרת השמירה הייתה מוחקת אותם מהתעודה בשקט.
+  if(editSh){
+    const have=new Set(rows.map(q=>String(q.size)+'|'+String(q.color)));
+    (editSh.rows||[]).forEach(r=>{const k=String(r.size??'')+'|'+String(r.color??'');
+      if(!have.has(k)){have.add(k);rows=rows.concat([{size:r.size,color:r.color,qty:0,_extra:true}]);}});
+  }
   // מוצר בלי כמויות ידועות תקין לגמרי — ההזמנה מגיעה בלי כמות ונספרת בדיעבד
   // (ראה gotcha_qty_read_from_newest). במקרה כזה נשארים בשדה סכום בודד.
   if(!rows.length){
-    const cur=p.shippedQty!=null?p.shippedQty:(_prodQty(p)||getTotalQty(p.cust,p.prod)||0);
+    const cur=editSh?(+editSh.total||0):(p.shippedQty!=null?p.shippedQty:(_prodQty(p)||getTotalQty(p.cust,p.prod)||0));
     return `<div style="font-size:11px;color:var(--amber-txt);background:var(--amber-bg);padding:6px 8px;border-radius:8px;margin-bottom:6px">⚠ אין פירוט מידות במוצר — נרשם סכום בלבד</div>
       <input id="ship-qty-inp" type="number" inputmode="numeric" min="0" value="${cur}" oninput="shipRowsTotal()" style="width:100%;font-size:16px;padding:8px;border-radius:8px;border:1px solid var(--brd);background:var(--bg);color:var(--txt)"/>`;
   }
@@ -10932,9 +10945,13 @@ function shipRowsHtml(p){
   // 🚚 המסך הזה רושם **את המשלוח הנוכחי בלבד**, לא את הסך המצטבר. לכן סוג א
   // מתמלא ב**יתרה** (בהזמנה פחות מה שכבר יצא) ולא בכמות המלאה — אחרת סריקה שנייה
   // הייתה מציעה לשלוח שוב את מה שכבר נמסר.
-  const done=shippedCellMap(p);
+  const done=shippedCellMap(p,editSh);
   const already=q=>done.get(String(q.size)+'|'+String(q.color))||0;
-  const val=(q,g)=>g===GRADE_A?Math.max(0,(parseInt(q.qty)||0)-already(q)):0;
+  const mine=new Map();
+  (editSh?.rows||[]).forEach(r=>{const k=String(r.size??'')+'|'+String(r.color??'')+'|'+(r.grade||GRADE_A);
+    mine.set(k,(mine.get(k)||0)+(parseInt(r.qty)||0));});
+  const val=(q,g)=>editSh?(mine.get(String(q.size)+'|'+String(q.color)+'|'+g)||0)
+    :(g===GRADE_A?Math.max(0,(parseInt(q.qty)||0)-already(q)):0);
   const anyPrev=done.size>0;
   // הסכום ההתחלתי מחושב כאן ולא מושאר 0 עד ש-shipRowsTotal יורה ב-setTimeout —
   // אחרת נראה רגע של "סה"כ יוצא 0" בזמן שהשדות כבר מלאים
@@ -10942,7 +10959,10 @@ function shipRowsHtml(p){
   // data-max = **היתרה** ולא הכמות בהזמנה: אחרי משלוח של 12 מתוך 20, שליחת 10
   // נוספות היא חריגה אמיתית (22 מתוך 20) וצריכה להסתמן ככזו
   const cell=(q,g)=>`<input class="ship-row-inp${g===GRADE_B?' ship-b':' ship-a'}" data-size="${esc(q.size)}" data-color="${esc(q.color)}" data-grade="${esc(g)}" data-max="${Math.max(0,(parseInt(q.qty)||0)-already(q))}" type="number" inputmode="numeric" min="0" value="${val(q,g)}" oninput="${g===GRADE_B?'shipGradeBEdit(this)':'shipGradeAEdit(this)'}" style="width:100%;font-size:14px;padding:5px;border-radius:6px;border:1px solid var(--brd);background:var(--bg);color:var(--txt)"/>`;
-  return `${anyPrev?`<div style="font-size:11px;color:var(--blue-txt,#1e40af);background:var(--blue-bg,#dbeafe);padding:6px 8px;border-radius:8px;margin-bottom:6px">🚚 יצאו כבר ${shipmentsTotal(p)} יח' ב-${prodShipments(p).length} משלוחים. הטבלה מציגה את <b>היתרה</b> — זהו משלוח חדש עם תעודה נפרדת.</div>`:''}
+  const banner=editSh
+    ?`<div style="font-size:11px;color:var(--blue-txt,#1e40af);background:var(--blue-bg,#dbeafe);padding:6px 8px;border-radius:8px;margin-bottom:6px">✏️ הכמויות שלמטה הן של <b>התעודה הזו בלבד</b>. עמודת "כבר יצא" סופרת את שאר המשלוחים, בלי התעודה שנערכת.</div>`
+    :(anyPrev?`<div style="font-size:11px;color:var(--blue-txt,#1e40af);background:var(--blue-bg,#dbeafe);padding:6px 8px;border-radius:8px;margin-bottom:6px">🚚 יצאו כבר ${shipmentsTotal(p)} יח' ב-${prodShipments(p).length} משלוחים. הטבלה מציגה את <b>היתרה</b> — זהו משלוח חדש עם תעודה נפרדת.</div>`:'');
+  return `${banner}
   <table style="width:100%;border-collapse:collapse;font-size:12px">
     <tr style="color:var(--txt3)">
       <th style="text-align:right;padding:2px 4px">מידה</th>
@@ -10955,7 +10975,7 @@ function shipRowsHtml(p){
     ${rows.map(q=>`<tr data-rowtotal="${val(q,GRADE_A)+val(q,GRADE_B)}">
         <td style="padding:2px 4px">${esc(q.size)}</td>
         <td style="padding:2px 4px">${esc(COLORS[q.color]||q.color)}</td>
-        <td style="padding:2px 4px;text-align:left;color:var(--txt3)">${parseInt(q.qty)||0}</td>
+        <td style="padding:2px 4px;text-align:left;color:var(--txt3)">${q._extra?'<span title="המידה/צבע כבר לא ברשימת הכמויות של המוצר">—</span>':(parseInt(q.qty)||0)}</td>
         ${anyPrev?`<td style="padding:2px 4px;text-align:left;color:var(--blue-txt,#1e40af);font-weight:600">${already(q)||''}</td>`:''}
         <td style="padding:2px 4px">${cell(q,GRADE_A)}</td>
         <td style="padding:2px 4px">${cell(q,GRADE_B)}</td>
@@ -13513,6 +13533,114 @@ async function delShipment(pid,idx){
 // המספר, התאריך והכמויות לא ניתנים לשינוי מכאן, כי הנייר כבר אצל הלקוח.
 // 🔑 גם המחיר נערך, ולא רק הכמות: המחיר נצרב על המשלוח, ובתעודה ישנה הוא או חסר
 // או נצרב לפי מחירון שהשתנה מאז — בלי שדה מחיר אי אפשר היה לתקן אותו בכלל.
+// ─── ✏️ עריכת תעודת משלוח שכבר הונפקה ────────────────────────
+// עד כאן תעודה עם טעות הייתה חייבת להימחק ולהיות מונפקת מחדש — והמספר נשרף
+// (ראה dnVoidAdd). זה יצר חור ברצף על כל טעות הקלדה. כאן מתקנים במקום:
+// **המספר והתאריך לא משתנים**, כי הנייר אצל הלקוח נושא אותם; משתנים רק
+// הכמויות, האריזה וההערה. חומר האריזה נערך בחלון הנפרד שלו (editShipMats).
+// 🛑 המאזן המודפס ("יתרה להשלמה") מחושב מסכום כל המשלוחים **עד לתעודה הזו
+// כולל**, ולכן עריכת תעודה שאינה האחרונה מזיזה את היתרה בכל התעודות שאחריה.
+// זה לא נחסם — אבל נאמר במפורש לפני השמירה.
+function editShipment(pid,idx){
+  const p=(S.products||[]).find(x=>x.id===pid);
+  const list=p?prodShipments(p):[];
+  const s=list[idx];
+  if(!p||!s)return;
+  document.getElementById('shl-wrap')?.remove();
+  document.getElementById('esh-wrap')?.remove();
+  const hd=d=>d?String(d).slice(8,10)+'/'+String(d).slice(5,7)+'/'+String(d).slice(0,4):'—';
+  const after=list.length-1-idx;
+  const wrap=document.createElement('div');
+  wrap.id='esh-wrap';
+  wrap.style.cssText='position:fixed;inset:0;background:rgba(0,0,0,.5);display:flex;align-items:flex-start;justify-content:center;z-index:10000;padding:16px;overflow-y:auto;overscroll-behavior:contain;-webkit-overflow-scrolling:touch';
+  wrap.onclick=e=>{if(e.target===wrap)wrap.remove();};
+  wrap.innerHTML=`<div style="background:var(--card);border-radius:14px;padding:20px;max-width:420px;width:100%;box-shadow:0 10px 40px rgba(0,0,0,.3);margin:auto">
+    <div style="font-size:16px;font-weight:800;margin-bottom:2px">✏️ עריכת תעודת משלוח</div>
+    <div style="font-size:12px;color:var(--txt3);margin-bottom:9px">תעודה <b style="color:var(--txt)">${s.no?String(s.no).padStart(4,'0'):'—'}</b> · ${hd(s.date)} · ${esc(p.name||p.prod||'')}</div>
+    <div style="font-size:11px;color:var(--blue-txt,#1e40af);background:var(--blue-bg,#dbeafe);padding:6px 8px;border-radius:8px;margin-bottom:8px">🔒 <b>המספר והתאריך לא משתנים</b> — הנייר שכבר נמסר ללקוח נושא אותם. מתקנים רק כמויות, אריזה והערה.</div>
+    ${after?`<div style="font-size:11px;font-weight:700;color:var(--amber-txt);background:var(--amber-bg);padding:6px 8px;border-radius:8px;margin-bottom:8px">⚠ זו אינה התעודה האחרונה — יש ${after} תעודות אחריה. שינוי הכמות כאן מזיז את שורת "יתרה להשלמה" בכולן.</div>`:''}
+    <label style="font-size:13px;font-weight:600">כמות בתעודה הזו — פר מידה וצבע</label>
+    <div id="ship-rows-wrap" style="margin-top:6px">${shipRowsHtml(p,s)}</div>
+    <details id="ship-pack-det" style="margin-top:10px;border:1px solid var(--brd);border-radius:8px;padding:7px 9px"${packsCount(s.packs)?' open':''}>
+      <summary style="font-size:12px;font-weight:700;cursor:pointer">📦 אריזה — <span id="pack-sum" style="font-weight:600;color:var(--txt3)">לא הוזנה</span></summary>
+      <div style="font-size:11px;color:var(--txt3);margin:7px 0">כל גודל חבילה בשורה: 35 חבילות × 5 יח'. שורה נוספת לכל גודל אחר.</div>
+      <div id="pack-rows">${shipPackRowsHtml(s.packs)}</div>
+      <button class="btn" style="width:100%;font-size:12px;padding:5px;margin-top:4px" onclick="addPackRow()">➕ עוד גודל חבילה</button>
+    </details>
+    <div style="margin-top:9px">
+      <label style="font-size:12px;font-weight:600">📝 הערה לתעודה</label>
+      <input id="ship-note" type="text" maxlength="140" value="${esc(s.note||'')}" placeholder="לא חובה — תודפס בתעודה" style="width:100%;margin-top:4px;font-size:13px;padding:7px;border-radius:8px;border:1px solid var(--brd);background:var(--bg);color:var(--txt)"/>
+    </div>
+    <label style="display:flex;align-items:center;gap:7px;font-size:12px;font-weight:600;margin-top:10px;cursor:pointer">
+      <input type="checkbox" id="esh-print" checked style="width:16px;height:16px"/>
+      🖨 הדפס את התעודה המתוקנת אחרי השמירה
+    </label>
+    <div style="font-size:11px;color:var(--txt3);margin-top:6px">📦 חומר האריזה (קולב/ניילון/צלופן) נערך בכפתור 📦 הנפרד — המחיר שלו נצרב על התעודה.</div>
+    <div style="display:flex;gap:8px;margin-top:16px">
+      <button class="btn primary" style="flex:1;font-size:14px" onclick="saveShipEdit('${escj(pid)}',${idx})">שמור תיקון</button>
+      <button class="btn" style="flex:1;font-size:14px" onclick="document.getElementById('esh-wrap')?.remove()">ביטול</button>
+    </div>
+  </div>`;
+  document.body.appendChild(wrap);
+  setTimeout(()=>{try{shipRowsTotal();}catch(e){}},50);
+}
+async function saveShipEdit(pid,idx){
+  const p=(S.products||[]).find(x=>x.id===pid);
+  const cur=p?prodShipments(p):[];
+  const old=cur[idx];
+  if(!p||!old)return;
+  const rows=_shipRowsCollect();
+  const qty=_shipQtySum();
+  const packs=_shipPacksCollect();
+  const note=(document.getElementById('ship-note')?.value||'').trim();
+  const doPrint=!!document.getElementById('esh-print')?.checked;
+  const prev=+old.total||0;
+  if(!qty&&!await showConfirm('תעודה ריקה','לא נותרה שום כמות בתעודה. לשמור בכל זאת?','שמור','חזור'))return;
+  // 📦 אותה אזהרה כמו באישור המשלוח — פער בין האריזה לכמות **מסומן ולא נחסם**
+  if(packs.length&&packsUnits(packs)!==qty
+    &&!await showConfirm('אריזה לא תואמת','סכום החבילות '+packsUnits(packs)+" יח' אבל בתעודה "+qty+" יח'. לשמור בכל זאת?",'שמור','חזור'))return;
+  const after=cur.length-1-idx;
+  if(prev!==qty&&after
+    &&!await showConfirm('תעודה שאינה האחרונה','הכמות משתנה מ-'+prev+' ל-'+qty+" יח'.\nשורת \"יתרה להשלמה\" תשתנה גם ב-"+after+' התעודות שאחריה. להמשיך?','המשך','חזור'))return;
+  // 🛑 בנייה מחדש של הרשימה **חייבת לגרור** at/packMode/mats — בדיוק כמו ב-confirmShip.
+  // בלי זה תיקון של כמות היה מוחק בשקט את חיוב האריזה של אותה תעודה.
+  const list=cur.map((x,k)=>{
+    const base={no:+x.no||0,date:x.date||'',at:x.at||'',rows:x.rows||[],total:+x.total||0,
+      packs:Array.isArray(x.packs)?x.packs:[],note:x.note||'',packMode:x.packMode||'',
+      mats:Array.isArray(x.mats)?x.mats:[],edits:Array.isArray(x.edits)?x.edits:[]};
+    if(k!==idx)return base;
+    // 🔒 no/date/at לא נגזרים מחדש — הם מזהים את הנייר שאצל הלקוח
+    return {...base,rows,total:qty,packs,note,
+      edits:base.edits.concat([{at:new Date().toISOString(),by:S.user?.id||'',
+        byName:S.user?.name||S.user?.user||'',prevTotal:prev,newTotal:qty}]).slice(-20)};
+  });
+  p.shipments=list;
+  p.shippedQty=list.reduce((t,x)=>t+(+x.total||0),0);
+  p.shippedRows=mergeShipRows(list);
+  // שורת היומן בכרטיס המוצר מתארת את המשלוח האחרון ואת הסך — שניהם זזו
+  const lastSh=list[list.length-1]||{};
+  const ex=(p.stageLog||[]).find(x=>x.id==='shipped');
+  if(ex)ex.note='משלוח '+list.length+': '+(+lastSh.total||0)+" יח' · סה\"כ "+p.shippedQty+" יח'";
+  saveLS();
+  if(S.fbConnected)try{await fbReplaceFields('products',p.id,{shipments:list,shippedQty:p.shippedQty,shippedRows:p.shippedRows,stageLog:p.stageLog||[]});}catch(e){}
+  document.getElementById('esh-wrap')?.remove();
+  showToast('✅ תעודה '+String(old.no||0).padStart(4,'0')+' תוקנה · '+prev+' ← '+qty+" יח'",'var(--green-txt)',4000);
+  try{buildStageReport();}catch(e){}
+  try{renderProducts();}catch(e){}
+  try{renderDNotes();}catch(e){}
+  if(doPrint)setTimeout(()=>{try{printDeliveryNote(p.id,idx);}catch(e){}},400);
+}
+// ✏️ סימון "תוקנה" — **במסך בלבד ולא על הנייר** (הוחלט 21/09/2026): הלקוח מקבל
+// תעודה שנראית רגילה, והמפעל רואה בלשונית ובחלון המשלוחים שהיא עברה תיקון.
+function shipEditMark(s){
+  const e=Array.isArray(s?.edits)?s.edits:[];
+  if(!e.length)return '';
+  const l=e[e.length-1];
+  const hd=d=>d?String(d).slice(8,10)+'/'+String(d).slice(5,7):'';
+  const tip=(e.length===1?'התעודה תוקנה':'התעודה תוקנה '+e.length+' פעמים')+' · '+hd(String(l.at||'').slice(0,10))
+    +' · '+(+l.prevTotal||0)+' ← '+(+l.newTotal||0)+" יח'"+(l.byName?' · '+l.byName:'');
+  return `<span title="${esc(tip)}" style="font-size:11px;color:var(--amber-txt)"> ✏️</span>`;
+}
 function editShipMats(pid,idx){
   const p=(S.products||[]).find(x=>x.id===pid);
   const s=prodShipments(p)[idx];
@@ -13614,8 +13742,9 @@ function showShipments(pid){
     <div style="font-size:12px;color:var(--txt3);margin-bottom:10px">${esc(p.name||p.prod)} · סה"כ יצא ${shipmentsTotal(p)} מתוך ${_prodQty(p)||'?'} יח'</div>
     ${list.map((s,i)=>`<div class="row" style="align-items:center">
       <span class="bc-seg" style="background:var(--green-bg,#dcfce7);color:var(--green-txt,#16a34a);font-weight:700;flex-shrink:0">${s.no?String(s.no).padStart(4,'0'):'—'}</span>
-      <span style="flex:1;font-size:12px;margin-right:8px">${heDate(s.date)} · <b>${s.total}</b> יח'${packsCount(s.packs)?' · 📦 '+packsCount(s.packs):''}${s.note?' · 📝':''}${shipPackCost(s)?' · <span style="color:var(--green-txt,#16a34a);font-weight:700">'+dnMoney(shipPackCost(s))+'</span>':''}</span>
-      <button class="btn" style="font-size:11px;padding:4px 8px" title="עריכת חומר אריזה" onclick="editShipMats('${escj(pid)}',${i})">✏️</button>
+      <span style="flex:1;font-size:12px;margin-right:8px">${shipEditMark(s)}${heDate(s.date)} · <b>${s.total}</b> יח'${packsCount(s.packs)?' · 📦 '+packsCount(s.packs):''}${s.note?' · 📝':''}${shipPackCost(s)?' · <span style="color:var(--green-txt,#16a34a);font-weight:700">'+dnMoney(shipPackCost(s))+'</span>':''}</span>
+      <button class="btn" style="font-size:11px;padding:4px 8px" title="עריכת כמויות, אריזה והערה — המספר והתאריך לא משתנים" onclick="editShipment('${escj(pid)}',${i})">✏️</button>
+      <button class="btn" style="font-size:11px;padding:4px 8px" title="עריכת חומר אריזה (קולב/ניילון/צלופן)" onclick="editShipMats('${escj(pid)}',${i})">📦</button>
       <button class="btn" style="font-size:11px;padding:4px 9px" onclick="printDeliveryNote('${escj(pid)}',${i})">📄 הדפס</button>
       <button class="btn danger" style="font-size:11px;padding:4px 8px" onclick="document.getElementById('shl-wrap').remove();delShipment('${escj(pid)}',${i})">🗑</button>
     </div>`).join('')}
@@ -13864,7 +13993,7 @@ function renderDNotes(){
         <td style="text-align:center;white-space:nowrap;color:var(--txt3)"${matTip?` title="${esc((PACK_MODES[r.s.packMode]||'')+(matTip?' — '+matTip:''))}"`:''}>${r.pack?dnMoney(r.pack)+(r.mats.some(m=>!(+m.price))?' <span style="color:var(--amber-txt)">⚠</span>':''):'—'}</td>
         <td style="text-align:center;white-space:nowrap;font-weight:700">${dnMoney(r.amount)}</td>`;
       return `<tr>
-        <td><span class="bc-seg" style="background:var(--green-bg,#dcfce7);color:var(--green-txt,#16a34a);font-weight:700">${r.s.no?String(r.s.no).padStart(4,'0'):'—'}</span>${r.count>1?`<span style="font-size:10px;color:var(--txt3)"> ${r.i+1}/${r.count}</span>`:''}</td>
+        <td><span class="bc-seg" style="background:var(--green-bg,#dcfce7);color:var(--green-txt,#16a34a);font-weight:700">${r.s.no?String(r.s.no).padStart(4,'0'):'—'}</span>${shipEditMark(r.s)}${r.count>1?`<span style="font-size:10px;color:var(--txt3)"> ${r.i+1}/${r.count}</span>`:''}</td>
         <td style="white-space:nowrap">${heDate(r.s.date)}</td>
         <td>${esc(S.customerNames?.[r.p.cust]||('לקוח '+(r.p.cust||'')))}</td>
         <td>${esc(r.p.name||r.p.prod||'')}${r.s.note?`<span title="${esc(r.s.note)}"> 📝</span>`:''}</td>
@@ -13873,7 +14002,8 @@ function renderDNotes(){
         ${money}
         <td style="text-align:center">${pk||''}</td>
         <td style="white-space:nowrap;text-align:left">
-          <button class="btn" style="font-size:11px;padding:4px 8px" title="עריכת חומר אריזה" onclick="editShipMats('${escj(r.p.id)}',${r.i})">✏️</button>
+          <button class="btn" style="font-size:11px;padding:4px 8px" title="עריכת כמויות, אריזה והערה — המספר והתאריך לא משתנים" onclick="editShipment('${escj(r.p.id)}',${r.i})">✏️</button>
+          <button class="btn" style="font-size:11px;padding:4px 8px" title="עריכת חומר אריזה (קולב/ניילון/צלופן)" onclick="editShipMats('${escj(r.p.id)}',${r.i})">📦</button>
           <button class="btn" style="font-size:11px;padding:4px 9px" onclick="printDeliveryNote('${escj(r.p.id)}',${r.i})">📄 הדפס</button>
           <button class="btn" style="font-size:11px;padding:4px 9px" onclick="showShipments('${escj(r.p.id)}')">🚚 משלוחים</button>
         </td>
