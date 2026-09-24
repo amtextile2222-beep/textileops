@@ -8773,8 +8773,14 @@ function renderWorkerBarcodes(){
   const out=document.getElementById('worker-bc-output');if(!out)return;
   const workers=S.workers.filter(w=>w.role!=='manager');
   if(!workers.length){out.innerHTML='<div style="color:var(--txt3);font-size:13px">אין עובדים</div>';return;}
-  out.innerHTML=`<div style="display:grid;grid-template-columns:repeat(auto-fill,minmax(160px,1fr));gap:12px;margin-bottom:12px">
-    ${workers.map(w=>`<div style="background:var(--bg2);border:0.5px solid var(--b);border-radius:var(--rl);padding:12px;text-align:center;break-inside:avoid">
+  out.innerHTML=`<div style="display:flex;align-items:center;gap:8px;margin-bottom:8px;font-size:12px;color:var(--txt3)">
+    <span>☑️ סמן/הסר עובד בודד — למשל להדפיס מחדש רק ברקוד אחד שהתקלקל</span>
+    <button class="btn" style="font-size:11px;padding:3px 8px" onclick="_bcToggleSel('worker-bc-output','wbc-sel',true)">בחר הכל</button>
+    <button class="btn" style="font-size:11px;padding:3px 8px" onclick="_bcToggleSel('worker-bc-output','wbc-sel',false)">נקה הכל</button>
+  </div>
+  <div style="display:grid;grid-template-columns:repeat(auto-fill,minmax(160px,1fr));gap:12px;margin-bottom:12px">
+    ${workers.map(w=>`<div style="background:var(--bg2);border:0.5px solid var(--b);border-radius:var(--rl);padding:12px;text-align:center;break-inside:avoid;position:relative">
+      <input type="checkbox" class="wbc-sel" data-id="${esc(String(w.id))}" checked title="בחר להדפסה" style="position:absolute;top:6px;left:6px;width:18px;height:18px;cursor:pointer">
       <div id="worker-qr-${w.id}" style="display:flex;justify-content:center"></div>
       <div style="font-size:13px;font-weight:600;margin-top:6px">${esc(w.name)}</div>
       <div style="font-size:11px;color:var(--txt3)">${esc(w.dept||'')} · ${w.role==='supervisor'?'אחראי':w.role==='helper'?'עוזר':'עובד'}</div>
@@ -8782,7 +8788,7 @@ function renderWorkerBarcodes(){
     </div>`).join('')}
   </div>
   <div style="display:flex;gap:8px;flex-wrap:wrap">
-    <button class="btn" style="font-size:13px" onclick="printWorkerBarcodes()">🖨️ הדפס ברקודים</button>
+    <button class="btn" style="font-size:13px" onclick="printWorkerBarcodes()">🖨️ הדפס נבחרים</button>
     <button class="btn" style="font-size:13px;border-color:var(--amber-txt);color:var(--amber-txt)" title="רשת 105×56 מ&quot;מ (TW-2510), 10 מדבקות בדף A4 — אותן מדבקות של ברקודי המשימות" onclick="printWorkerBarcodes('labels')">🏷️ הדפס למדבקות</button>
     <button class="btn success" style="font-size:13px" title="קובץ PDF מדויק A4 (105×56 מ&quot;מ) — להדפסה מהנייד בגודל נכון" onclick="workerBcDownloadPDF()">📄 הורד PDF מדבקות</button>
   </div>`;
@@ -8796,10 +8802,18 @@ function _wbRole(w){return w.role==='supervisor'?'אחראי':w.role==='helper'?
 // mode==='labels' — רשת TW-2510 (105×56 מ"מ, 10 בדף A4), אותן מדבקות של ברקודי המשימות.
 // מבנה הכרטיס ומחלקות ה-CSS זהים ל-bcPrint('labels') בכוונה, כדי שהמדבקה תיפול
 // בדיוק באותו מקום פיזי שהמדפסת כבר מכוילת אליו.
+// ☑️ אילו checkbox-י בחירה מסומנים בלוח ברקודי העובדים כרגע (לפי id, כמחרוזת)
+// null = אין checkboxes ב-DOM כלל (למשל נקרא לפני רינדור) ⇒ לא לצמצם, כל העובדים
+function _wbcSelectedIds(){
+  const boxes=[...document.querySelectorAll('#worker-bc-output .wbc-sel')];
+  if(!boxes.length)return null;
+  return new Set(boxes.filter(cb=>cb.checked).map(cb=>cb.dataset.id));
+}
 function printWorkerBarcodes(mode){
   const labels=mode==='labels';
-  const workers=S.workers.filter(w=>w.role!=='manager');
-  if(!workers.length){alert('אין עובדים');return;}
+  const selIds=_wbcSelectedIds();
+  const workers=S.workers.filter(w=>w.role!=='manager'&&(!selIds||selIds.has(String(w.id))));
+  if(!workers.length){alert(selIds?'בחר לפחות עובד אחד להדפסה':'אין עובדים');return;}
   if(!window.QRCode){alert('ספריית QR לא נטענה');return;}
   // יצור QR לכל עובד בתוך ה-DOM הנוכחי, קרא canvas.toDataURL, ואז פתח חלון
   const tmpWrap=document.createElement('div');
@@ -8868,8 +8882,9 @@ function printWorkerBarcodes(mode){
 // ─── PDF מדבקות עובדים (A4 מדויק, 105×56 מ"מ) ───
 // אותו מנוע של מדבקות המשימות (_bcPdfCell) — להדפסה מהנייד, שם AirPrint מכווץ HTML
 function workerBcDownloadPDF(){
-  const workers=S.workers.filter(w=>w.role!=='manager');
-  if(!workers.length){alert('אין עובדים');return;}
+  const selIds=_wbcSelectedIds();
+  const workers=S.workers.filter(w=>w.role!=='manager'&&(!selIds||selIds.has(String(w.id))));
+  if(!workers.length){alert(selIds?'בחר לפחות עובד אחד להדפסה':'אין עובדים');return;}
   const J=window.jspdf&&window.jspdf.jsPDF;
   if(!J){alert('ספריית PDF עדיין נטענת — נסה שוב עוד רגע');return;}
   if(!window.QRCode){alert('ספריית QR לא נטענה');return;}
@@ -9336,8 +9351,14 @@ function renderStationBarcodes(){
   const out=document.getElementById('station-bc-output');if(!out)return;
   const sts=S.workStations||[];
   if(!sts.length){out.innerHTML='<div style="color:var(--txt3);font-size:13px">אין תחנות מוגדרות</div>';return;}
-  out.innerHTML=`<div style="display:grid;grid-template-columns:repeat(auto-fill,minmax(160px,1fr));gap:12px;margin-bottom:12px">
-    ${sts.map(s=>`<div style="background:var(--bg2);border:0.5px solid var(--b);border-radius:var(--rl);padding:12px;text-align:center;break-inside:avoid">
+  out.innerHTML=`<div style="display:flex;align-items:center;gap:8px;margin-bottom:8px;font-size:12px;color:var(--txt3)">
+    <span>☑️ סמן/הסר תחנה בודדת — למשל להדפיס מחדש רק ברקוד אחד שהתקלקל</span>
+    <button class="btn" style="font-size:11px;padding:3px 8px" onclick="_bcToggleSel('station-bc-output','stnbc-sel',true)">בחר הכל</button>
+    <button class="btn" style="font-size:11px;padding:3px 8px" onclick="_bcToggleSel('station-bc-output','stnbc-sel',false)">נקה הכל</button>
+  </div>
+  <div style="display:grid;grid-template-columns:repeat(auto-fill,minmax(160px,1fr));gap:12px;margin-bottom:12px">
+    ${sts.map(s=>`<div style="background:var(--bg2);border:0.5px solid var(--b);border-radius:var(--rl);padding:12px;text-align:center;break-inside:avoid;position:relative">
+      <input type="checkbox" class="stnbc-sel" data-id="${esc(String(s.id))}" checked title="בחר להדפסה" style="position:absolute;top:6px;left:6px;width:18px;height:18px;cursor:pointer">
       <div id="station-qr-${esc(s.id)}" style="display:flex;justify-content:center"></div>
       <div style="font-size:13px;font-weight:600;margin-top:6px">${esc(s.name)}</div>
       <div style="font-size:11px;color:var(--txt3)">${esc(s.dept||'')}${s.dvrChannel?' · 📹 ערוץ '+esc(String(s.dvrChannel)):''}</div>
@@ -9345,7 +9366,7 @@ function renderStationBarcodes(){
     </div>`).join('')}
   </div>
   <div style="display:flex;gap:8px;flex-wrap:wrap">
-    <button class="btn" style="font-size:13px" onclick="printStationBarcodes()">🖨️ הדפס ברקודים</button>
+    <button class="btn" style="font-size:13px" onclick="printStationBarcodes()">🖨️ הדפס נבחרים</button>
     <button class="btn" style="font-size:13px;border-color:var(--amber-txt);color:var(--amber-txt)" title="רשת 105×56 מ&quot;מ (TW-2510), 10 מדבקות בדף A4 — אותן מדבקות של ברקודי המשימות" onclick="printStationBarcodes('labels')">🏷️ הדפס למדבקות</button>
     <button class="btn success" style="font-size:13px" title="קובץ PDF מדויק A4 (105×56 מ&quot;מ) — להדפסה מהנייד בגודל נכון" onclick="stationBcDownloadPDF()">📄 הורד PDF מדבקות</button>
   </div>`;
@@ -9357,10 +9378,18 @@ function renderStationBarcodes(){
 // mode==='labels' — רשת TW-2510 (105×56 מ"מ, 10 בדף A4), אותן מדבקות של ברקודי המשימות.
 // מבנה הכרטיס ומחלקות ה-CSS זהים ל-bcPrint('labels') בכוונה, כדי שהמדבקה תיפול
 // בדיוק באותו מקום פיזי שהמדפסת כבר מכוילת אליו.
+// ☑️ אילו checkbox-י בחירה מסומנים בלוח ברקודי התחנות כרגע (לפי id, כמחרוזת)
+// null = אין checkboxes ב-DOM כלל (למשל נקרא לפני רינדור) ⇒ לא לצמצם, כל התחנות
+function _stnbcSelectedIds(){
+  const boxes=[...document.querySelectorAll('#station-bc-output .stnbc-sel')];
+  if(!boxes.length)return null;
+  return new Set(boxes.filter(cb=>cb.checked).map(cb=>cb.dataset.id));
+}
 function printStationBarcodes(mode){
   const labels=mode==='labels';
-  const sts=S.workStations||[];
-  if(!sts.length){alert('אין תחנות מוגדרות');return;}
+  const selIds=_stnbcSelectedIds();
+  const sts=(S.workStations||[]).filter(s=>!selIds||selIds.has(String(s.id)));
+  if(!sts.length){alert(selIds?'בחר לפחות תחנה אחת להדפסה':'אין תחנות מוגדרות');return;}
   if(!window.QRCode){alert('ספריית QR לא נטענה');return;}
   const tmpWrap=document.createElement('div');
   tmpWrap.style.cssText='position:fixed;top:-9999px;left:-9999px;visibility:hidden';
@@ -9426,8 +9455,9 @@ function printStationBarcodes(mode){
 // ─── PDF מדבקות תחנות (A4 מדויק, 105×56 מ"מ) ───
 // אותו מנוע של מדבקות המשימות (_bcPdfCell) — להדפסה מהנייד, שם AirPrint מכווץ HTML
 function stationBcDownloadPDF(){
-  const sts=S.workStations||[];
-  if(!sts.length){alert('אין תחנות מוגדרות');return;}
+  const selIds=_stnbcSelectedIds();
+  const sts=(S.workStations||[]).filter(s=>!selIds||selIds.has(String(s.id)));
+  if(!sts.length){alert(selIds?'בחר לפחות תחנה אחת להדפסה':'אין תחנות מוגדרות');return;}
   const J=window.jspdf&&window.jspdf.jsPDF;
   if(!J){alert('ספריית PDF עדיין נטענת — נסה שוב עוד רגע');return;}
   if(!window.QRCode){alert('ספריית QR לא נטענה');return;}
@@ -13318,14 +13348,19 @@ function bcGenerate(){
   const totalCode=cust+prod+'9'+'000'+'00'+sfx;
   // בניית HTML עם canvas לכל ברקוד
   out.innerHTML=`
-    <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:12px;flex-wrap:wrap;gap:8px">
+    <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:8px;flex-wrap:wrap;gap:8px">
       <div style="font-size:14px;font-weight:600">${items.length} קודים נוצרו — לקוח ${cust} · מוצר ${prod}</div>
       <div style="display:flex;gap:8px;flex-wrap:wrap">
         <button class="btn success" onclick="bcExportNiimbot()" style="font-size:13px">📥 ייצא ל-NIIMBOT</button>
-        <button class="btn" onclick="bcPrint()" style="font-size:13px">🖨️ הדפס הכל</button>
+        <button class="btn" onclick="bcPrint()" style="font-size:13px">🖨️ הדפס נבחרים</button>
         <button class="btn" onclick="bcPrint('labels')" style="font-size:13px" title="רשת 105×56 מ&quot;מ (TW-2510), 10 מדבקות בדף A4">🏷️ הדפס למדבקות</button>
         <button class="btn success" onclick="bcDownloadPDF()" style="font-size:13px" title="קובץ PDF מדויק A4 (105×56 מ&quot;מ) — להדפסה מהנייד בגודל נכון">📄 הורד PDF מדבקות</button>
       </div>
+    </div>
+    <div style="display:flex;align-items:center;gap:8px;margin-bottom:12px;font-size:12px;color:var(--txt3)">
+      <span>☑️ סמן/הסר ברקוד בודד — למשל להדפיס מחדש רק ברקוד אחד שהתקלקל</span>
+      <button class="btn" style="font-size:11px;padding:3px 8px" onclick="_bcToggleSel('bc-print-area','bc-sel',true)">בחר הכל</button>
+      <button class="btn" style="font-size:11px;padding:3px 8px" onclick="_bcToggleSel('bc-print-area','bc-sel',false)">נקה הכל</button>
     </div>
     <div id="bc-print-area" style="display:grid;grid-template-columns:repeat(auto-fill,minmax(300px,1fr));gap:12px">
     </div>`;
@@ -13336,7 +13371,8 @@ function bcGenerate(){
     const div=document.createElement('div');
     div.className='bc-card';
     div.dataset.col='total';
-    div.style.cssText='background:#fff;border:3px solid #059669;border-radius:6px;padding:10px;display:flex;align-items:center;gap:12px;break-inside:avoid;grid-column:1/-1';
+    div.dataset.idx='total';
+    div.style.cssText='background:#fff;border:3px solid #059669;border-radius:6px;padding:10px;display:flex;align-items:center;gap:12px;break-inside:avoid;grid-column:1/-1;position:relative';
     const qrWrap=document.createElement('div');
     qrWrap.style.cssText='flex-shrink:0;width:150px;height:150px;overflow:hidden';
     const infoDiv=document.createElement('div');
@@ -13350,17 +13386,19 @@ function bcGenerate(){
       <div style="font-size:11px;color:#555;margin-top:4px">${totalCode}</div>`;
     div.appendChild(qrWrap);
     div.appendChild(infoDiv);
+    div.appendChild(_bcSelCheckbox());
     printArea.appendChild(div);
     new QRCode(qrWrap,{text:totalCode,width:150,height:150,colorDark:'#000000',colorLight:'#ffffff',correctLevel:QRCode.CorrectLevel.M});
     setTimeout(()=>{const im=qrWrap.querySelector('img');if(im)im.style.display='none';},50);
   })();
-  items.forEach(it=>{
+  items.forEach((it,idx)=>{
     const code=cust+prod+it.size+it.qty+it.col+sfx;
     const colName=(COLORS_AR[it.col]||COLORS[it.col]||it.col);
     const div=document.createElement('div');
     div.className='bc-card';
     div.dataset.col=it.col;
-    div.style.cssText='background:#fff;border:2px solid #333;border-radius:6px;padding:10px;display:flex;align-items:center;gap:12px;break-inside:avoid';
+    div.dataset.idx=String(idx);
+    div.style.cssText='background:#fff;border:2px solid #333;border-radius:6px;padding:10px;display:flex;align-items:center;gap:12px;break-inside:avoid;position:relative';
     const qrWrap=document.createElement('div');
     qrWrap.style.cssText='flex-shrink:0;width:150px;height:150px;overflow:hidden';
     const infoDiv=document.createElement('div');
@@ -13375,6 +13413,7 @@ function bcGenerate(){
       <div style="font-size:11px;color:#555;margin-top:4px">${code}</div>`;
     div.appendChild(qrWrap);
     div.appendChild(infoDiv);
+    div.appendChild(_bcSelCheckbox());
     printArea.appendChild(div);
     new QRCode(qrWrap,{text:code,width:150,height:150,colorDark:'#000000',colorLight:'#ffffff',correctLevel:QRCode.CorrectLevel.M});
     setTimeout(()=>{const im=qrWrap.querySelector('img');if(im)im.style.display='none';},50);
@@ -13401,8 +13440,8 @@ function bcGenerateSample(cust,prod,t){
     </div>
     <div id="bc-print-area" style="display:grid;grid-template-columns:repeat(auto-fill,minmax(300px,1fr));gap:12px"></div>`;
   const div=document.createElement('div');
-  div.className='bc-card';div.dataset.col='sample';
-  div.style.cssText='background:#fff;border:3px solid #1d4ed8;border-radius:6px;padding:10px;display:flex;align-items:center;gap:12px;break-inside:avoid;grid-column:1/-1';
+  div.className='bc-card';div.dataset.col='sample';div.dataset.idx='sample';
+  div.style.cssText='background:#fff;border:3px solid #1d4ed8;border-radius:6px;padding:10px;display:flex;align-items:center;gap:12px;break-inside:avoid;grid-column:1/-1;position:relative';
   const qrWrap=document.createElement('div');
   qrWrap.style.cssText='flex-shrink:0;width:150px;height:150px;overflow:hidden';
   const info=document.createElement('div');
@@ -13414,7 +13453,7 @@ function bcGenerateSample(cust,prod,t){
     ${bcOrderLbl(code)}
     <div style="font-size:16px;font-weight:800;color:#1d4ed8">כמות: ${qty} יח׳</div>
     <div style="font-size:11px;color:#555;margin-top:4px">${code}</div>`;
-  div.appendChild(qrWrap);div.appendChild(info);
+  div.appendChild(qrWrap);div.appendChild(info);div.appendChild(_bcSelCheckbox());
   document.getElementById('bc-print-area').appendChild(div);
   new QRCode(qrWrap,{text:code,width:150,height:150,colorDark:'#000000',colorLight:'#ffffff',correctLevel:QRCode.CorrectLevel.M});
   setTimeout(()=>{const im=qrWrap.querySelector('img');if(im)im.style.display='none';},50);
@@ -14287,15 +14326,48 @@ ${dnote?`<div class="note"><b>הערות:</b> ${esc(dnote)}</div>`:''}
 <div class="foot">הופק ממערכת TextileOps · ${esc(heDate(new Date().toISOString().slice(0,10)))}</div>
 </body></html>`;
 }
+// ☑️ תיבת בחירה על כרטיס ברקוד — מאפשרת להדפיס/לייצא ברקוד בודד בלבד (למשל
+// כשמדבקה אחת התקלקלה) במקום לכפות הדפסת כל הסט. מסומן כברירת מחדל, כדי
+// ש"הדפס הכל" הישן ימשיך לעבוד בלי לגעת.
+function _bcSelCheckbox(){
+  const cb=document.createElement('input');
+  cb.type='checkbox';cb.className='bc-sel';cb.checked=true;
+  cb.title='בחר להדפסה/ייצוא';
+  cb.style.cssText='position:absolute;top:6px;left:6px;width:20px;height:20px;cursor:pointer;z-index:5';
+  return cb;
+}
+function _bcToggleSel(containerId,cls,check){
+  document.querySelectorAll('#'+containerId+' .'+cls).forEach(cb=>cb.checked=check);
+}
+// קורא את מצב הסימון הנוכחי מה-DOM (bc-print-area) — total/sample + אילו אינדקסים ב-items נבחרו
+function _bcSelSet(){
+  const area=document.getElementById('bc-print-area');
+  const sel={total:true,sample:true,items:new Set()};
+  if(!area)return sel;
+  const totalCb=area.querySelector('.bc-card[data-idx="total"] .bc-sel');
+  if(totalCb)sel.total=totalCb.checked;
+  const sampleCb=area.querySelector('.bc-card[data-idx="sample"] .bc-sel');
+  if(sampleCb)sel.sample=sampleCb.checked;
+  area.querySelectorAll('.bc-card[data-idx]').forEach(c=>{
+    const idx=c.dataset.idx;
+    if(idx==='total'||idx==='sample')return;
+    const cb=c.querySelector('.bc-sel');
+    if(!cb||cb.checked)sel.items.add(parseInt(idx));
+  });
+  return sel;
+}
 function bcPrint(mode){
   const labels=mode==='labels'; // מצב מדבקות: רשת 105×56 מ"מ קבועה (TW-2510), 10 בדף A4, בלי מרווח/כותרות
   const area=document.getElementById('bc-print-area');
   if(!area)return;
-  // קבץ לפי צבע (למצב רגיל) + רשימה רציפה של כל הכרטיסים (למצב מדבקות)
+  // קבץ לפי צבע (למצב רגיל) + רשימה רציפה של כל הכרטיסים (למצב מדבקות) — רק כרטיסים מסומנים
   const byColor=new Map();const allCards=[];
   [...area.querySelectorAll('.bc-card')].forEach(card=>{
+    const cb=card.querySelector('.bc-sel');
+    if(cb&&!cb.checked)return;
     const col=card.dataset.col||'00';
     const clone=card.cloneNode(true);
+    clone.querySelector('.bc-sel')?.remove();
     const origCanvas=card.querySelector('canvas');
     const cloneCanvas=clone.querySelector('canvas');
     if(origCanvas&&cloneCanvas){
@@ -14308,6 +14380,7 @@ function bcPrint(mode){
     byColor.get(col).push(clone.outerHTML);
     allCards.push(clone.outerHTML);
   });
+  if(!allCards.length){alert('בחר לפחות ברקוד אחד להדפסה');return;}
   // ברקוד "יצא ללקוח" — כרטיס בודד
   let shipCard='';
   const g=window._bcLastGen;
@@ -14430,22 +14503,29 @@ function bcDownloadPDF(){
   if(!J){alert('ספריית PDF עדיין נטענת — נסה שוב עוד רגע');return;}
   if(!window.QRCode){alert('ספריית QR לא נטענה');return;}
   const {cust,prod,items}=g,sfx=g.sfx||'';
+  const sel=_bcSelSet();
   const totalQty=items.reduce((s,it)=>s+(parseInt(it.qty)||0),0);
   const totalCode=cust+prod+'900000'+sfx;
-  const cards=g.sample?[{qr:g.sample.code,lines:[
-    {t:SAMPLE_STEP,mm:4,bold:true,color:'#1d4ed8'},
-    {t:'לקוח: '+cust,mm:3.6,bold:true,color:'#000'},
-    {t:'מוצר: '+prod,mm:3.6,bold:true,color:'#000'},
-    ...(sfx?[{t:'🔢 הזמנה #'+sfx,mm:3.6,bold:true,color:'#059669'}]:[]),
-    {t:'כמות: '+g.sample.qty+' יח׳',mm:4,bold:true,color:'#1d4ed8'},
-    {t:g.sample.code,mm:2.8,bold:false,color:'#555'}]}]:[{qr:totalCode,lines:[
-    {t:'📦 כל הכמות',mm:4,bold:true,color:'#059669'},
-    {t:'לקוח: '+cust,mm:3.6,bold:true,color:'#000'},
-    {t:'מוצר: '+prod,mm:3.6,bold:true,color:'#000'},
-    ...(sfx?[{t:'🔢 הזמנה #'+sfx,mm:3.6,bold:true,color:'#059669'}]:[]),
-    {t:'סה"כ: '+totalQty+' יח׳',mm:4,bold:true,color:'#059669'},
-    {t:totalCode,mm:2.8,bold:false,color:'#555'}]}];
-  items.forEach(it=>{
+  const cards=[];
+  if(g.sample){
+    if(sel.sample)cards.push({qr:g.sample.code,lines:[
+      {t:SAMPLE_STEP,mm:4,bold:true,color:'#1d4ed8'},
+      {t:'לקוח: '+cust,mm:3.6,bold:true,color:'#000'},
+      {t:'מוצר: '+prod,mm:3.6,bold:true,color:'#000'},
+      ...(sfx?[{t:'🔢 הזמנה #'+sfx,mm:3.6,bold:true,color:'#059669'}]:[]),
+      {t:'כמות: '+g.sample.qty+' יח׳',mm:4,bold:true,color:'#1d4ed8'},
+      {t:g.sample.code,mm:2.8,bold:false,color:'#555'}]});
+  } else if(sel.total){
+    cards.push({qr:totalCode,lines:[
+      {t:'📦 כל הכמות',mm:4,bold:true,color:'#059669'},
+      {t:'לקוח: '+cust,mm:3.6,bold:true,color:'#000'},
+      {t:'מוצר: '+prod,mm:3.6,bold:true,color:'#000'},
+      ...(sfx?[{t:'🔢 הזמנה #'+sfx,mm:3.6,bold:true,color:'#059669'}]:[]),
+      {t:'סה"כ: '+totalQty+' יח׳',mm:4,bold:true,color:'#059669'},
+      {t:totalCode,mm:2.8,bold:false,color:'#555'}]});
+  }
+  items.forEach((it,i)=>{
+    if(!sel.items.has(i))return;
     const code=cust+prod+it.size+it.qty+it.col+sfx;
     const colName=(COLORS_AR[it.col]||COLORS[it.col]||it.col);
     cards.push({qr:code,lines:[
@@ -14457,6 +14537,7 @@ function bcDownloadPDF(){
       {t:'צבע: '+it.col+' · '+colName,mm:3.6,bold:true,color:'#000'},
       {t:code,mm:2.8,bold:false,color:'#555'}]});
   });
+  if(!cards.length){alert('בחר לפחות ברקוד אחד להדפסה');return;}
   const doc=new J({unit:'mm',format:'a4',orientation:'portrait'});
   const CW=105,CH=56,TOP=(297-5*CH)/2; // 8.5 מ"מ שוליים עליון/תחתון, 0 בצדדים
   cards.forEach((card,i)=>{
@@ -14572,9 +14653,12 @@ function bcExportNiimbot(){
   const g=window._bcLastGen;
   if(!g){alert('צור ברקודים תחילה');return;}
   const {cust,prod,items}=g,sfx=g.sfx||'';
+  const sel=_bcSelSet();
+  const filtered=items.filter((_,i)=>sel.items.has(i));
+  if(!filtered.length){alert('בחר לפחות ברקוד אחד לייצוא');return;}
   const BOM='﻿';
   const header='ברקוד,לקוח,מוצר,מידה,כמות,קוד_צבע,שם_צבע\r\n';
-  const rows=items.map(it=>{
+  const rows=filtered.map(it=>{
     const code=cust+prod+it.size+it.qty+it.col+sfx;
     const colName=(COLORS[it.col]||it.col).replace(/,/g,' ');
     return `${code},${cust},${prod},${it.size},${parseInt(it.qty)},${it.col},${colName}`;
