@@ -13234,17 +13234,25 @@ function bcAddRow(){
     <button onclick="this.closest('.bc-row').remove()" style="background:none;border:none;cursor:pointer;color:var(--red-txt);font-size:20px;padding-bottom:2px">✕</button>`;
   container.appendChild(div);
 }
+// שם המוצר ותאריך הקמת הכרטיס — לשורה מתחת לברקוד בהדפסה (ספירה/גזירה + יצא ללקוח).
+// לוקח מהרשומה שהמחולל מפיק עבורה (bcGenTarget), לא מהחדשה ביותר, כמו כל שדה אחר על הברקוד.
+function _bcProdMeta(t){
+  return{name:t?.name||'',date:t?.createdAt?new Date(+t.createdAt).toLocaleDateString('he-IL'):''};
+}
+const _bcProdMetaLine=(name,date)=>(name||date)?`<div style="font-size:11px;color:#666;margin-top:2px">${name?'📦 '+esc(name):''}${name&&date?' · ':''}${date?'📅 '+esc(date):''}</div>`:'';
 function bcGenerateOpenQty(){
   const cust=(document.getElementById('bc-gen-cust')?.value||'').replace(/\D/g,'').padStart(2,'0').slice(0,2);
   const prod=(document.getElementById('bc-gen-prod')?.value||'').replace(/\D/g,'').padStart(5,'0').slice(0,5);
   if(cust==='00'||prod==='00000'){alert('הזן מספר לקוח ומספר מוצר');return;}
-  const sfx=bcSuffixFor(bcGenTarget()); // 3 ספרות מספר הזמנה, או '' להזמנה ותיקה
+  const _t=bcGenTarget();
+  const sfx=bcSuffixFor(_t); // 3 ספרות מספר הזמנה, או '' להזמנה ותיקה
   const code=cust+prod+'900000'+sfx;
+  const {name:pname,date:pdate}=_bcProdMeta(_t);
   const out=document.getElementById('bc-gen-output');
   if(!out)return;
   out.innerHTML=`
     <div style="display:flex;gap:8px;margin-bottom:10px">
-      <button class="btn" onclick="bcPrintOpenQty('${cust}','${prod}','${code}')" style="font-size:13px">🖨️ הדפס</button>
+      <button class="btn" onclick="bcPrintOpenQty('${cust}','${prod}','${code}','${escj(pname)}','${escj(pdate)}')" style="font-size:13px">🖨️ הדפס</button>
     </div>
     <div id="bc-openqty-card" style="background:#fff;border:3px solid var(--amber-txt);border-radius:8px;padding:14px;display:flex;align-items:center;gap:14px;max-width:400px">
       <div id="bc-openqty-qr" style="flex-shrink:0;width:150px;height:150px"></div>
@@ -13255,12 +13263,13 @@ function bcGenerateOpenQty(){
         ${bcOrderLbl(code)}
         <div style="font-size:12px;color:var(--txt3)">⏳ כמות פתוחה</div>
         <div style="font-size:11px;color:var(--txt3);margin-top:4px">${code}</div>
+        ${_bcProdMetaLine(pname,pdate)}
       </div>
     </div>`;
   new QRCode(document.getElementById('bc-openqty-qr'),{text:code,width:150,height:150,colorDark:'#000000',colorLight:'#ffffff',correctLevel:QRCode.CorrectLevel.M});
   setTimeout(()=>{const im=document.getElementById('bc-openqty-qr')?.querySelector('img');if(im)im.style.display='none';},50);
 }
-function bcPrintOpenQty(cust,prod,code){
+function bcPrintOpenQty(cust,prod,code,pname,pdate){
   const canvas=document.querySelector('#bc-openqty-qr canvas');
   const img=canvas?`<img src="${canvas.toDataURL('image/png')}" style="width:150px;height:150px"/>`:'';
   printViaIframe(`<html dir="rtl"><head><title>ברקוד ספירה/גזירה</title>
@@ -13276,6 +13285,7 @@ function bcPrintOpenQty(cust,prod,code){
         ${bcOrderLbl(code)}
         <div style="font-size:13px;color:#666">⏳ כמות פתוחה</div>
         <div style="font-size:11px;color:#999;margin-top:4px">${code}</div>
+        ${_bcProdMetaLine(pname,pdate)}
       </div>
     </div></body></html>`);
 }
@@ -13284,13 +13294,15 @@ function bcGenerateShip(){
   const cust=(document.getElementById('bc-gen-cust')?.value||'').replace(/\D/g,'').padStart(2,'0').slice(0,2);
   const prod=(document.getElementById('bc-gen-prod')?.value||'').replace(/\D/g,'').padStart(5,'0').slice(0,5);
   if(cust==='00'||prod==='00000'){alert('הזן מספר לקוח ומספר מוצר');return;}
-  const sfx=bcSuffixFor(bcGenTarget()); // מספר ההזמנה בברקוד היציאה = הבורר יידע לאיזו רשומה לעדכן את הכמות
+  const _t=bcGenTarget();
+  const sfx=bcSuffixFor(_t); // מספר ההזמנה בברקוד היציאה = הבורר יידע לאיזו רשומה לעדכן את הכמות
   const code=cust+prod+'900099'+sfx;
+  const {name:pname,date:pdate}=_bcProdMeta(_t);
   const out=document.getElementById('bc-gen-output');
   if(!out)return;
   out.innerHTML=`
     <div style="display:flex;gap:8px;margin-bottom:10px">
-      <button class="btn" onclick="bcPrintShip('${cust}','${prod}','${code}')" style="font-size:13px">🖨️ הדפס</button>
+      <button class="btn" onclick="bcPrintShip('${cust}','${prod}','${code}','${escj(pname)}','${escj(pdate)}')" style="font-size:13px">🖨️ הדפס</button>
     </div>
     <div id="bc-ship-card" style="background:#fff;border:3px solid var(--green-txt,#16a34a);border-radius:8px;padding:14px;display:flex;align-items:center;gap:14px;max-width:400px">
       <div id="bc-ship-qr" style="flex-shrink:0;width:150px;height:150px"></div>
@@ -13301,12 +13313,13 @@ function bcGenerateShip(){
         ${bcOrderLbl(code)}
         <div style="font-size:12px;color:#666">✅ סמן יציאה + עדכן כמות סופית</div>
         <div style="font-size:11px;color:#999;margin-top:4px">${code}</div>
+        ${_bcProdMetaLine(pname,pdate)}
       </div>
     </div>`;
   new QRCode(document.getElementById('bc-ship-qr'),{text:code,width:150,height:150,colorDark:'#000000',colorLight:'#ffffff',correctLevel:QRCode.CorrectLevel.M});
   setTimeout(()=>{const im=document.getElementById('bc-ship-qr')?.querySelector('img');if(im)im.style.display='none';},50);
 }
-function bcPrintShip(cust,prod,code){
+function bcPrintShip(cust,prod,code,pname,pdate){
   const canvas=document.querySelector('#bc-ship-qr canvas');
   const img=canvas?`<img src="${canvas.toDataURL('image/png')}" style="width:150px;height:150px"/>`:'';
   printViaIframe(`<html dir="rtl"><head><title>ברקוד יצא ללקוח</title>
@@ -13322,6 +13335,7 @@ function bcPrintShip(cust,prod,code){
         ${bcOrderLbl(code)}
         <div style="font-size:13px;color:#666">✅ סמן יציאה + עדכן כמות סופית</div>
         <div style="font-size:11px;color:#999;margin-top:4px">${code}</div>
+        ${_bcProdMetaLine(pname,pdate)}
       </div></div></body></html>`);
 }
 function bcGenerate(){
