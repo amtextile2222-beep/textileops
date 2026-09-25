@@ -908,8 +908,10 @@ exports.wifiMonitor = functions.pubsub.schedule('every 5 minutes').onRun(async (
 
 // ─── ארכוב היסטוריית משימות ישנה — חודשי (1 בחודש, 03:00) ───
 // שולף משימות מעל ARCHIVE_AFTER_DAYS יום, שולח CSV לטלגרם, ומוחק רק אחרי אישור שליחה.
-// חלון חי בלקוח = 14 יום; שמירה ב-Firestore עד 60 יום; מעבר לכך — בקבצי CSV אצל המנהל.
-const ARCHIVE_AFTER_DAYS = 60;
+// חלון חי בלקוח = 14 יום; שמירה ב-Firestore עד 365 יום; מעבר לכך — בקבצי CSV אצל המנהל.
+// ⚠️ היה 60 עד 25/09/2026: הארכוב של 01/10 היה מוחק את כל יולי (~2,400 משימות, ~1,960 שע')
+// ודוחות הרווח של הזמנות יולי-אוגוסט היו מאבדים את השעות = רווח מנופח בשקט.
+const ARCHIVE_AFTER_DAYS = 365;
 const ARCHIVE_MAX_DOCS = 8000;
 async function runArchive() {
   const { token, chatId } = tgCfg();
