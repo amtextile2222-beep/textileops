@@ -89,6 +89,12 @@ input,select,textarea{padding:9px 12px;border:0.5px solid var(--b2);border-radiu
 input:focus,select:focus{outline:none;border-color:var(--blue-txt)}
 .field{margin-bottom:.875rem}
 .field label{display:block;font-size:12px;color:var(--txt2);margin-bottom:5px}
+/* 📅 iOS: לשדה תאריך יש רוחב פנימי מינימלי שמתעלם מ-width:100%, ובתוך flex (min-width:auto)
+   הוא גלש ועלה על כפתור "הכל" שלידו (סינון תאריכים בהוצאות/קופה, 25/09/2026).
+   ה-appearance רק באייפון (@supports של touch-callout) — באנדרואיד/מחשב נשאר אייקון הלוח. */
+.field{min-width:0}
+input[type=date]{min-width:0;max-width:100%}
+@supports (-webkit-touch-callout:none){input[type=date]{-webkit-appearance:none;appearance:none;min-height:38px}}
 /* LOGIN */
 #login-screen{min-height:100vh;display:flex;align-items:center;justify-content:center;flex-direction:column;gap:1.5rem;padding:1rem}
 .login-box{background:var(--bg);border:0.5px solid var(--b);border-radius:var(--rl);padding:2rem;width:100%;max-width:360px}
@@ -3608,7 +3614,7 @@ function _liveBanner(){
   if(!b){b=document.createElement('div');b.id='live-banner';
     b.style.cssText='position:fixed;top:0;left:0;right:0;z-index:10000;background:var(--red-bg);color:var(--red-txt);padding:8px 12px;text-align:center;font-size:13px;font-weight:700;cursor:pointer';
     b.onclick=()=>location.reload();document.body.appendChild(b);}
-  b.textContent='⚠ חלק מהנתונים הפסיקו להתעדכן — לחץ כאן לרענון · بعض البيانات توقفت عن التحديث — اضغط هنا';
+  b.textContent=_syncT().banner;
 }
 // ── מצב סנכרון: 🟢 מחובר · 🟠 אין קשר לשרת · ⏳N כתיבות שטרם אושרו בשרת ──
 // setDoc/updateDoc מחזירים promise שמתממש רק כשהשרת אישר ⇒ מונה מדויק לכתיבות דרך העוטפים.
@@ -3626,15 +3632,32 @@ function _syncDot(){
   if(!d||!w)return;
   const st=_syncState();
   d.className=st;w.classList.toggle('pend',st==='pend');
-  w.title=st==='ok'?'מחובר ומסונכרן':st==='off'?'אין קשר לשרת':'ממתין לשליחה: '+_pwSet.size;
+  const t=_syncT();w.title=st==='ok'?t.ok:st==='off'?t.offShort:t.pendShort(_pwSet.size);
   // כל עוד יש כתיבות פתוחות — בדיקה חוזרת כדי שה-⏳ יופיע אחרי 2 שנ' גם בלי אירוע חדש
   clearTimeout(_syncTimer);if(_pwSet.size)_syncTimer=setTimeout(_syncDot,2100);
 }
+// טקסטי מצב החיבור בשפת הממשק. עד 25/09 הוצגו עברית+ערבית יחד, והערבית קוצרה ל"אין חיבור" —
+// בדיוק בלי החלק שמרגיע ("נשמר במכשיר ויישלח"), שהעובדות קוראות בערבית.
+const SYNC_TXT={
+  he:{ok:'מחובר ומסונכרן',off:'אין קשר לשרת — מה שנעשה נשמר במכשיר ויישלח כשהחיבור יחזור',
+      pend:n=>n+' פעולות ממתינות לשליחה — לא לרענן ולא לסגור את הדף',
+      pendShort:n=>'ממתין לשליחה: '+n,offShort:'אין קשר לשרת',
+      banner:'⚠ חלק מהנתונים הפסיקו להתעדכן — לחץ כאן לרענון'},
+  ar:{ok:'متصل ومتزامن',off:'لا يوجد اتصال بالخادم — ما تقوم به محفوظ في الجهاز وسيُرسل عند عودة الاتصال',
+      pend:n=>n+' عمليات بانتظار الإرسال — لا تُحدِّث الصفحة ولا تغلقها',
+      pendShort:n=>'بانتظار الإرسال: '+n,offShort:'لا يوجد اتصال بالخادم',
+      banner:'⚠ بعض البيانات توقفت عن التحديث — اضغط هنا للتحديث'},
+  en:{ok:'Connected and synced',off:'No connection to the server — your actions are saved on the device and will be sent when the connection returns',
+      pend:n=>n+' actions waiting to be sent — do not refresh or close the page',
+      pendShort:n=>'Waiting to send: '+n,offShort:'No connection to the server',
+      banner:'⚠ Some data stopped updating — tap here to refresh'}
+};
+function _syncT(){return SYNC_TXT[(typeof currentLang!=='undefined'&&SYNC_TXT[currentLang])?currentLang:'he'];}
 function _syncDotInfo(){
-  const st=_syncState();
-  if(st==='ok')showToast('🟢 מחובר ומסונכרן · متصل ومتزامن');
-  else if(st==='off')showToast('🟠 אין קשר לשרת — מה שנעשה נשמר במכשיר ויישלח כשהחיבור יחזור · لا يوجد اتصال','var(--amber-txt)',6000);
-  else showToast('⏳ '+_pwSet.size+' פעולות ממתינות לשליחה — לא לרענן ולא לסגור · لا تغلق الصفحة','var(--amber-txt)',6000);
+  const st=_syncState(),t=_syncT();
+  if(st==='ok')showToast('🟢 '+t.ok);
+  else if(st==='off')showToast('🟠 '+t.off,'var(--amber-txt)',6000);
+  else showToast('⏳ '+t.pend(_pwSet.size),'var(--amber-txt)',6000);
 }
 function _syncWatchStart(){
   if(_syncWatchOn||!db)return;_syncWatchOn=true;
