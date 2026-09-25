@@ -152,6 +152,10 @@ code{background:var(--bg2);border:0.5px solid var(--b);border-radius:4px;padding
 #fb-status.ok{background:var(--green-bg);color:var(--green-txt)}
 #fb-status.err{background:var(--red-bg);color:var(--red-txt)}
 #fb-status.loading{background:var(--amber-bg);color:var(--amber-txt)}
+#sync-dot{position:fixed;bottom:4px;left:4px;min-width:10px;height:10px;border-radius:999px;z-index:299;cursor:pointer;box-shadow:0 0 0 2px var(--bg);font-size:11px;font-weight:700;padding:0;line-height:18px;text-align:center}
+#sync-dot.ok{background:#2e9d5b}
+#sync-dot.off{background:#e8912d}
+#sync-dot.pend{background:var(--amber-bg);color:var(--amber-txt);height:18px;padding:0 8px;border:1px solid var(--amber-txt)}
 /* LANG SWITCHER */
 .lang-switcher{display:flex;gap:4px;align-items:center}
 .lang-btn{padding:3px 7px;border-radius:999px;border:1px solid var(--b2);background:var(--bg2);cursor:pointer;font-size:15px;line-height:1;transition:all .15s;opacity:.55}
@@ -3548,6 +3552,93 @@ async function initFb(){
   _watchAuthLoss();
 }
 
+// ─── 📡 חיבורים חיים עמידים + מצב סנכרון (25/09/2026) ─────────────────────────
+// onSnapshot בלי callback שגיאה: כשהשרת דוחה (הרשאה/טוקן), המאזין נסגר לתמיד ובשקט —
+// המסך ממשיך להציג נתונים קפואים עד רענון. בנוסף, יציאה (signOut) הורגת את כל המאזינים,
+// ו-_listenersStarted מנע את פתיחתם מחדש בכניסה הבאה באותו טאב ⇒ עובדת שנייה בטלפון
+// משותף ראתה נתונים קפואים. _live עוטף כל מאזין: פותח מחדש בהמתנה גדלה, מרענן טוקן
+// בשגיאת הרשאה, ומחייה מאזינים מתים בכניסה הבאה (_liveReviveAll ב-startDataListeners).
+// ⚠️ ניתוק WiFi רגיל *אינו* שגיאה — Firestore מתחבר מחדש לבד. זה רק לדחיית שרת.
+// הרישום לפי שם גם מונע כפילות: listenWorkerMessages/listenMgrInbox נקראות בכל כניסה.
+const _liveReg={};
+function _live(name,refFn,cb,opts){
+  const{onSnapshot}=window._fb;
+  const st=_liveReg[name]||(_liveReg[name]={fails:0,unsub:null,dead:false,timer:null});
+  st.refFn=refFn;st.cb=cb;st.opts=opts;st.dead=false;
+  clearTimeout(st.timer);
+  try{if(st.unsub)st.unsub();}catch(e){}
+  st.unsub=null;
+  const next=snap=>{if(st.fails){st.fails=0;_liveBanner();}cb(snap);};
+  const onErr=err=>{
+    st.unsub=null;
+    console.warn('📡 מאזין '+name+' נפל:',err&&err.code,err&&err.message);
+    // אחרי יציאה — לא מנסים עכשיו; הכניסה הבאה תחייה אותו
+    if(!S.user){st.dead=true;return;}
+    st.fails++;_liveBanner();
+    const delay=Math.min(60000,2000*Math.pow(2,st.fails-1));
+    st.timer=setTimeout(async()=>{
+      if(!S.user){st.dead=true;return;}
+      // שגיאת הרשאה = לרוב טוקן שפג/לא רוענן — מרעננים לפני ניסיון חוזר
+      if(err&&err.code==='permission-denied'){
+        try{const u=window._fb.getAuth(window._fbApp).currentUser;if(u)await u.getIdToken(true);}catch(e){}
+      }
+      _live(name,st.refFn,st.cb,st.opts);
+    },delay);
+  };
+  try{st.unsub=opts?onSnapshot(refFn(),opts,next,onErr):onSnapshot(refFn(),next,onErr);}
+  catch(e){console.warn('📡 פתיחת מאזין '+name+' נכשלה:',e.message);st.dead=true;}
+}
+function _liveReviveAll(){
+  Object.keys(_liveReg).forEach(n=>{const st=_liveReg[n];if(st.dead&&!st.unsub)_live(n,st.refFn,st.cb,st.opts);});
+}
+// פס אדום רק אחרי 3 כשלונות רצופים של מאזין כלשהו — נפילה בודדת נפתרת לבד ברוב המקרים
+function _liveBanner(){
+  const bad=Object.keys(_liveReg).filter(n=>_liveReg[n].fails>=3);
+  let b=document.getElementById('live-banner');
+  if(!bad.length){if(b)b.remove();return;}
+  if(!b){b=document.createElement('div');b.id='live-banner';
+    b.style.cssText='position:fixed;top:0;left:0;right:0;z-index:10000;background:var(--red-bg);color:var(--red-txt);padding:8px 12px;text-align:center;font-size:13px;font-weight:700;cursor:pointer';
+    b.onclick=()=>location.reload();document.body.appendChild(b);}
+  b.textContent='⚠ חלק מהנתונים הפסיקו להתעדכן — לחץ כאן לרענון · بعض البيانات توقفت عن التحديث — اضغط هنا';
+}
+// ── מצב סנכרון: 🟢 מחובר · 🟠 אין קשר לשרת · ⏳N כתיבות שטרם אושרו בשרת ──
+// setDoc/updateDoc מחזירים promise שמתממש רק כשהשרת אישר ⇒ מונה מדויק לכתיבות דרך העוטפים.
+// ⏳ מוצג רק לכתיבה שממתינה מעל 2 שנ' (או כשאין קשר) — אחרת כל סריקה הייתה מהבהבת.
+const _pwSet=new Set();let _syncOnline=true,_syncTimer=null,_syncWatchOn=false;
+function _pw(p){const t={ts:Date.now()};_pwSet.add(t);_syncDot();return Promise.resolve(p).finally(()=>{_pwSet.delete(t);_syncDot();});}
+function _syncState(){
+  const slow=[..._pwSet].some(t=>Date.now()-t.ts>2000);
+  if(_pwSet.size&&(slow||!_syncOnline))return 'pend';
+  return _syncOnline?'ok':'off';
+}
+function _syncDot(){
+  if(!document.body)return;
+  let d=document.getElementById('sync-dot');
+  if(!d){d=document.createElement('div');d.id='sync-dot';d.onclick=_syncDotInfo;document.body.appendChild(d);}
+  if(!S.user){d.style.display='none';return;}
+  d.style.display='';
+  const st=_syncState();
+  d.className=st;d.textContent=st==='pend'?'⏳ '+_pwSet.size:'';
+  d.title=st==='ok'?'מחובר ומסונכרן':st==='off'?'אין קשר לשרת':'ממתין לשליחה: '+_pwSet.size;
+  // כל עוד יש כתיבות פתוחות — בדיקה חוזרת כדי שה-⏳ יופיע אחרי 2 שנ' גם בלי אירוע חדש
+  clearTimeout(_syncTimer);if(_pwSet.size)_syncTimer=setTimeout(_syncDot,2100);
+}
+function _syncDotInfo(){
+  const st=_syncState();
+  if(st==='ok')showToast('🟢 מחובר ומסונכרן · متصل ومتزامن');
+  else if(st==='off')showToast('🟠 אין קשר לשרת — מה שנעשה נשמר במכשיר ויישלח כשהחיבור יחזור · لا يوجد اتصال','var(--amber-txt)',6000);
+  else showToast('⏳ '+_pwSet.size+' פעולות ממתינות לשליחה — לא לרענן ולא לסגור · لا تغلق الصفحة','var(--amber-txt)',6000);
+}
+function _syncWatchStart(){
+  if(_syncWatchOn||!db)return;_syncWatchOn=true;
+  // מסמך קטן אחד עם includeMetadataChanges: fromCache=true ⇔ אין קשר חי לשרת
+  _live('syncWatch',()=>window._fb.doc(db,'appSettings','customColors'),snap=>{_syncOnline=!snap.metadata.fromCache;_syncDot();},{includeMetadataChanges:true});
+  window.addEventListener('offline',()=>{_syncOnline=false;_syncDot();});
+  window.addEventListener('online',()=>_syncDot());
+  // רענון/סגירה עם כתיבות שטרם הגיעו לשרת = איבוד שלהן ⇒ הדפדפן מבקש אישור (לא בלוח הקיר)
+  window.addEventListener('beforeunload',e=>{if(_pwSet.size&&!(typeof _kioskOpen!=='undefined'&&_kioskOpen)){e.preventDefault();e.returnValue='';}});
+}
+
 // listeners של נתונים — רק אחרי כניסה מאומתת (יש טוקן עם role)
 let _listenersStarted=false;
 let _adminListenerStarted=false;
@@ -3559,17 +3650,18 @@ function startDataListeners(){
   if(!_listenersStarted){
     _listenersStarted=true;
     listenFb();
-  }
+  }else _liveReviveAll();
+  _syncWatchStart();_syncDot();
   // הגדרות רגישות (עלויות) — קריאה מותרת רק למנהל ב-Rules
   if(!_adminListenerStarted&&S.user?.role==='manager'&&db){
     _adminListenerStarted=true;
     const{collection,onSnapshot}=window._fb;
-    onSnapshot(collection(db,'adminSettings'),snap=>{
+    _live('adminSettings',()=>collection(db,'adminSettings'),snap=>{
       snap.docs.forEach(d=>{
         if(d.id==='costs'){S.costs={...S.costs,...d.data()};saveLS();}
       });
       renderAll();
-    },err=>{console.warn('adminSettings listener:',err.message);});
+    });
   }
 }
 
@@ -3577,7 +3669,7 @@ function listenFb(){
   if(!db)return;
   const{collection,onSnapshot,query,orderBy,where}=window._fb;
   // workers
-  onSnapshot(collection(db,'workers'),snap=>{
+  _live('workers',()=>collection(db,'workers'),snap=>{
     if(snap.empty)return;
     S.workers=snap.docs.map(d=>({id:d.id,...d.data()}));
     migrateBreaks();
@@ -3627,7 +3719,7 @@ function listenFb(){
   });
   // active tasks
   // active tasks
-  onSnapshot(collection(db,'activeTasks'),snap=>{
+  _live('activeTasks',()=>collection(db,'activeTasks'),snap=>{
     S.activeTasks=snap.docs.map(d=>{const dd=d.data();return{...dd,id:d.id,startTime:dd.startTime?.toDate?dd.startTime.toDate():new Date(dd.startTime),elapsed:0};});
     // סגור משימות שנשארו פתוחות מימים קודמים — רק מנתוני שרת, לא cache
     if(!snap.metadata.fromCache){
@@ -3670,7 +3762,7 @@ function listenFb(){
   // hist tasks — חלון חי של HIST_WINDOW_DAYS ימים אחרונים בלבד (זמן אמת נשמר לחלון הזה).
   // היסטוריה ישנה יותר נשלפת לפי דרישה בדוחות (loadHistRange) — מוזיל דרמטית קריאות Firestore.
   const _histCutoff=new Date(Date.now()-HIST_WINDOW_DAYS*86400000).toISOString();
-  onSnapshot(query(collection(db,'histTasks'),where('endTime','>=',_histCutoff),orderBy('endTime','desc')),snap=>{
+  _live('histTasks',()=>query(collection(db,'histTasks'),where('endTime','>=',_histCutoff),orderBy('endTime','desc')),snap=>{
     S.histTasks=snap.docs.map(d=>{const dd=d.data();return{...dd,id:d.id,startTime:dd.startTime?.toDate?dd.startTime.toDate():new Date(dd.startTime),endTime:dd.endTime?.toDate?dd.endTime.toDate():new Date(dd.endTime)};});
     renderAll();
   });
@@ -3678,12 +3770,12 @@ function listenFb(){
   // קודם לכן נקרא כל האוסף בכל טעינה. ישן יותר נשלף לפי דרישה (loadAttRange).
   // date הוא מחרוזת YYYY-MM-DD ⇒ השוואה לקסיקוגרפית; אומת ש-950/950 הרשומות נושאות אותו.
   const _attCutoff=new Date(Date.now()-ATT_WINDOW_DAYS*86400000).toISOString().slice(0,10);
-  onSnapshot(query(collection(db,'attHistory'),where('date','>=',_attCutoff),orderBy('date','desc')),snap=>{
+  _live('attHistory',()=>query(collection(db,'attHistory'),where('date','>=',_attCutoff),orderBy('date','desc')),snap=>{
     S.attHistory=snap.docs.map(d=>({...d.data()}));
     renderAll();
   });
   // products
-  onSnapshot(collection(db,'products'),snap=>{
+  _live('products',()=>collection(db,'products'),snap=>{
     S.products=snap.docs.map(d=>({id:d.id,...d.data()}));
     saveLS();renderProducts();
     // 📄 תעודת משלוח נשמרת **בתוך** מסמך המוצר (p.shipments), ולשונית התעודות בונה
@@ -3693,7 +3785,7 @@ function listenFb(){
     if(document.querySelector('.page.active')?.id==='page-dnotes')renderDNotes();
   });
   // app settings (customerNames, customColors) — עלויות עברו ל-adminSettings (מנהל בלבד)
-  onSnapshot(collection(db,'appSettings'),snap=>{
+  _live('appSettings',()=>collection(db,'appSettings'),snap=>{
     snap.docs.forEach(d=>{
       const data=d.data();
       if(d.id==='customerNames'){S.customerNames=data;saveLS();}
@@ -3752,18 +3844,18 @@ function listenFb(){
     renderAll();
   });
   // תחנות עבודה פיזיות (מצלמות/DVR)
-  onSnapshot(collection(db,'stations'),snap=>{
+  _live('stations',()=>collection(db,'stations'),snap=>{
     S.workStations=snap.docs.map(d=>({id:d.id,...d.data()}));
     saveLS();
     try{renderStationsAdmin();}catch(e){}
   });
-  onSnapshot(collection(db,'workerExpenses'),snap=>{
+  _live('workerExpenses',()=>collection(db,'workerExpenses'),snap=>{
     S.workerExpenses=[];
     snap.forEach(d=>{if(d.data().id)S.workerExpenses.push(d.data());});
     S.workerExpenses.sort((a,b)=>b.ts-a.ts);
     renderExpenses();
   });
-  onSnapshot(collection(db,'cashbox'),snap=>{
+  _live('cashbox',()=>collection(db,'cashbox'),snap=>{
     S.cashbox=[];
     snap.forEach(d=>{if(d.data().id)S.cashbox.push(d.data());});
     S.cashbox.sort((a,b)=>b.ts-a.ts);
@@ -3774,12 +3866,12 @@ function listenFb(){
 async function fbSet(col,id,data){
   if(!db)return;
   const{doc,setDoc}=window._fb;
-  await setDoc(doc(db,col,id),data,{merge:true});
+  await _pw(setDoc(doc(db,col,id),data,{merge:true}));
 }
 async function fbDel(col,id){
   if(!db)return;
   const{doc,deleteDoc}=window._fb;
-  await deleteDoc(doc(db,col,id));
+  await _pw(deleteDoc(doc(db,col,id)));
 }
 // ─── שומר נגד "משימות רפאים" ────────────────────────────────
 // fbSet הוא setDoc(merge) — הוא *יוצר* מסמך שלא קיים. חידוש/השהיה פועלים מעצם
@@ -3789,7 +3881,7 @@ async function fbDel(col,id){
 async function fbUpdateOnly(col,id,data){
   if(!db)return false;
   const{doc,updateDoc}=window._fb;
-  try{await updateDoc(doc(db,col,id),data);return true;}
+  try{await _pw(updateDoc(doc(db,col,id),data));return true;}
   catch(e){return false;} // not-found ⇒ המשימה כבר נסגרה/נמחקה במקום אחר
 }
 // משימה שכבר נסגרה (קיימת בהיסטוריה המקומית) לא תיכתב חזרה לפעילות
@@ -8292,7 +8384,7 @@ async function sendPush(title,body,alertType){
 async function fbSetMerge(col,docId,data){
   if(!db)return;
   const{doc,setDoc}=window._fb;
-  await setDoc(doc(db,col,docId),data,{merge:true});
+  await _pw(setDoc(doc(db,col,docId),data,{merge:true}));
 }
 async function fbGet(col,docId){
   if(!db)return null;
@@ -9806,7 +9898,8 @@ function markWorkerMsgRead(){
 function listenWorkerMessages(){
   if(!S.fbConnected||!db||!S.user||S.user.role==='manager')return;
   const{doc,onSnapshot}=window._fb;
-  onSnapshot(doc(db,'workerMessages',S.user.id),snap=>{
+  // המזהה נקרא בכל פתיחה — אחרי החייאה בכניסה של עובד אחר, מאזינים להודעות *שלו*
+  _live('workerMessages',()=>doc(db,'workerMessages',S.user.id),snap=>{
     if(!snap.exists())return;
     const data=snap.data();
     if(!data.ts||data.ts<=_workerMsgLastTs||data.read)return;
@@ -9845,8 +9938,7 @@ function listenMgrInbox(){
   if(!S.fbConnected||!db||!S.user)return;
   if(S.user.role!=='manager'&&S.user.role!=='supervisor')return;
   const{collection,query,where,onSnapshot,orderBy,limit}=window._fb;
-  const q=query(collection(db,'mgrInbox'),where('read','==',false));
-  onSnapshot(q,snap=>{
+  _live('mgrInbox',()=>query(collection(db,'mgrInbox'),where('read','==',false)),snap=>{
     snap.docChanges().forEach(change=>{
       if(change.type!=='added')return;
       const d=change.doc.data();
@@ -10862,7 +10954,7 @@ function saveDepts(){
 async function fbReplaceFields(col,id,fields){
   if(!db)return;
   const{doc,updateDoc}=window._fb;
-  await updateDoc(doc(db,col,id),fields);
+  await _pw(updateDoc(doc(db,col,id),fields));
 }
 function addDept(){
   const v=document.getElementById('new-dept').value.trim();
