@@ -169,7 +169,11 @@ code{background:var(--bg2);border:0.5px solid var(--b);border-radius:4px;padding
   .nb{padding:5px 7px}
   .logo{font-size:13px}
   #top-name,#top-role{display:none}
+  /* סרגל צפוף בנייד: לוגו = ✂️ בלבד, יציאה = ↩ בלבד — כדי שכל כפתורי העמודים ייכנסו בלי החלקה */
+  .logo-txt,.lo-txt{display:none}
+  .btn .lo-ico{display:inline}
 }
+.lo-ico{display:none}
 </style>
 </head>
 <body>
@@ -307,7 +311,7 @@ code{background:var(--bg2);border:0.5px solid var(--b);border-radius:4px;padding
 
 <div id="app-screen" class="hidden">
   <div class="topbar">
-    <div class="logo">✂️ TextileOps</div>
+    <div class="logo">✂️ <span class="logo-txt">TextileOps</span></div>
     <div class="nav">
       <button class="nb active" onclick="goPage('dash')" id="nb-dash">📊 <span data-i18n="nav_dash">בקרה</span></button>
       <button class="nb" onclick="goPage('att')" id="nb-att">🕐 <span data-i18n="nav_att">נוכחות</span></button>
@@ -340,7 +344,7 @@ code{background:var(--bg2);border:0.5px solid var(--b);border-radius:4px;padding
       <div id="av-wrap" onclick="_syncDotInfo()"><div class="av" style="width:32px;height:32px;font-size:11px" id="top-av"></div><span id="sync-dot"></span></div>
       <button class="btn hidden" id="ai-chat-btn" style="padding:5px 9px;font-size:12px;background:var(--blue-bg);color:var(--blue-txt)" onclick="openAIChat()" title="עוזר AI">🤖</button>
       <button class="btn hidden" id="enable-notif-btn" style="padding:5px 9px;font-size:12px;background:var(--amber-bg);color:var(--amber-txt)" onclick="enableMyNotifications()" title="הפעל התראות">🔔</button>
-      <button class="btn" style="padding:5px 9px;font-size:12px" onclick="doLogout()" data-i18n="logout" title="יציאה">↩</button>
+      <button class="btn" style="padding:5px 9px;font-size:12px" onclick="doLogout()" title="יציאה · خروج"><span class="lo-ico">↩</span><span class="lo-txt" data-i18n="logout">יציאה</span></button>
     </div>
   </div>
 
