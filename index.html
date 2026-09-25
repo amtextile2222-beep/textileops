@@ -1812,6 +1812,7 @@ const LANGS={
     exp_submit:'📤 שלח הוצאה',
     exp_my_list:'📋 ההוצאות שלי',
     exp_all_list:'📋 כל ההוצאות',
+    exp_my_list:'📋 ההוצאות שלי',
     exp_empty:'אין הוצאות',
     exp_err_amount:'⚠️ הכנס סכום',
     exp_err_desc:'⚠️ הכנס פירוט',
@@ -2088,6 +2089,7 @@ const LANGS={
     exp_submit:'📤 إرسال المصروف',
     exp_my_list:'📋 مصروفاتي',
     exp_all_list:'📋 جميع المصروفات',
+    exp_my_list:'📋 مصروفاتي',
     exp_empty:'لا توجد مصروفات',
     exp_err_amount:'⚠️ أدخل المبلغ',
     exp_err_desc:'⚠️ أدخل التفاصيل',
@@ -2310,6 +2312,7 @@ const LANGS={
     exp_submit:'📤 Submit Expense',
     exp_my_list:'📋 My Expenses',
     exp_all_list:'📋 All Expenses',
+    exp_my_list:'📋 My Expenses',
     exp_empty:'No expenses',
     exp_err_amount:'⚠️ Enter amount',
     exp_err_desc:'⚠️ Enter description',
@@ -3853,7 +3856,10 @@ function listenFb(){
     saveLS();
     try{renderStationsAdmin();}catch(e){}
   });
-  _live('workerExpenses',()=>collection(db,'workerExpenses'),snap=>{
+  // 💸 עובד/עוזר: רק ההוצאות שלו. ה-Rules דוחים האזנה של עובד לכל האוסף (Rules אינם מסננים),
+  // ולכן השאילתה חייבת לשאת את אותו תנאי. refFn נקרא בכל פתיחה ⇒ אחרי יציאה וכניסה של
+  // משתמש בתפקיד אחר, ההחייאה בונה את השאילתה המתאימה לו.
+  _live('workerExpenses',()=>_expSeeAll()?collection(db,'workerExpenses'):query(collection(db,'workerExpenses'),where('workerId','==',S.user?S.user.id:'-')),snap=>{
     S.workerExpenses=[];
     snap.forEach(d=>{if(d.data().id)S.workerExpenses.push(d.data());});
     S.workerExpenses.sort((a,b)=>b.ts-a.ts);
@@ -12101,6 +12107,8 @@ function clearExpFilter(){
   renderExpenses();
 }
 
+// אחראי ומנהל רואים את כל ההוצאות; עובד/עוזר — רק את שלו (נאכף גם ב-firestore.rules)
+function _expSeeAll(){return !!S.user&&(S.user.role==='manager'||S.user.role==='supervisor');}
 function renderExpenses(){
   const listEl=document.getElementById('exp-list');
   if(!listEl)return;
@@ -12109,10 +12117,12 @@ function renderExpenses(){
   const fromVal=document.getElementById('exp-from')?.value||'';
   const toVal=document.getElementById('exp-to')?.value||'';
   let exps=[...S.workerExpenses];
+  // גם בזיכרון — הגנה מפני שאריות ממשתמש קודם באותו טאב עד שהשאילתה החדשה חוזרת
+  if(!_expSeeAll())exps=exps.filter(e=>S.user&&e.workerId===S.user.id);
   if(fromVal)exps=exps.filter(e=>(e.date||'')>=fromVal);
   if(toVal)exps=exps.filter(e=>(e.date||'')<=toVal);
   const titleEl=document.getElementById('exp-list-title');
-  if(titleEl)titleEl.textContent=T.exp_all_list+' ('+exps.length+')';
+  if(titleEl)titleEl.textContent=(_expSeeAll()?T.exp_all_list:(T.exp_my_list||T.exp_all_list))+' ('+exps.length+')';
   const total=exps.reduce((s,e)=>s+Number(e.amount||0),0);
   const badge=document.getElementById('exp-total-badge');
   if(badge)badge.textContent=exps.length?T.exp_total+': ₪'+total.toFixed(2):'';
