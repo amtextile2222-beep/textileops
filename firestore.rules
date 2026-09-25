@@ -56,7 +56,9 @@ service cloud.firestore {
     // שפונקציות login/wifiMonitor/attendanceCloser מסתמכות עליהם
     match /appSettings/{docId} {
       allow read: if hasRole();
-      allow write: if isMgr() || (hasRole() && docId != 'telegramSettings');
+      allow create, update: if isMgr() || (hasRole() && docId != 'telegramSettings');
+      // מחיקת מסמך הגדרות (לקוחות/מחלקות/צבעים) משבשת את כולם — האפליקציה לא מוחקת אף אחד
+      allow delete: if isMgr();
     }
 
     // תחנות עבודה (מצלמות/DVR): עובד קורא (לזיהוי סריקת STN), מנהל מגדיר
@@ -77,6 +79,23 @@ service cloud.firestore {
         && request.resource.data.amount is number
         && request.resource.data.amount > 0);
       allow update, delete: if isMgr();
+    }
+
+    // 🗑 הגנה ממחיקה (25/09/2026): קריאה/יצירה/עדכון נשארים לכל מחובר — האפליקציה עצמה
+    // כותבת רשומות של אחרים מכל מכשיר (סגירת נוכחות בבוקר, איפוס חצות, משימות משותפות).
+    // מחיקה — רק מי שיש לו אותה במסך: נוכחות אינה נמחקת מהאפליקציה בכלל (מנהל בלבד);
+    // היסטוריית משימות ומוצרים נמחקים ממסכי מנהל/אחראי (deleteHistTask/restoreHistTask/deleteProduct).
+    match /attHistory/{id} {
+      allow read, create, update: if hasRole();
+      allow delete: if isMgr();
+    }
+    match /histTasks/{id} {
+      allow read, create, update: if hasRole();
+      allow delete: if isMgr() || isSup();
+    }
+    match /products/{id} {
+      allow read, create, update: if hasRole();
+      allow delete: if isMgr() || isSup();
     }
 
     // 💸 הוצאות עובדים (25/09/2026): עובד/עוזר רואה ורושם **רק את שלו**; אחראי ומנהל רואים הכל.
@@ -106,6 +125,9 @@ service cloud.firestore {
         && collection != 'appSettings'
         && collection != 'stations'
         && collection != 'workerExpenses'
+        && collection != 'attHistory'
+        && collection != 'histTasks'
+        && collection != 'products'
         // עד 25/09/2026 חסר כאן — וחוק הקופה הייעודי (לקיחה בלבד, על שמך) לא נאכף בפועל
         && collection != 'cashbox';
     }
