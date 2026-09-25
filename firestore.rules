@@ -13,6 +13,11 @@ service cloud.firestore {
         && ('role' in request.auth.token)
         && request.auth.token.role == 'manager';
     }
+    function isSup() {
+      return request.auth != null
+        && ('role' in request.auth.token)
+        && request.auth.token.role == 'supervisor';
+    }
 
     // סודות כניסה (hash סיסמה, תבניות פנים, מזהה מכשיר) — אין גישת לקוח בכלל,
     // רק Cloud Functions דרך Admin SDK
@@ -74,15 +79,35 @@ service cloud.firestore {
       allow update, delete: if isMgr();
     }
 
+    // 💸 הוצאות עובדים (25/09/2026): עובד/עוזר רואה ורושם **רק את שלו**; אחראי ומנהל רואים הכל.
+    // עריכה ומחיקה — מנהל בלבד. עד כה האוסף נפל ל-catch-all: כל מחובר קרא, ערך ומחק
+    // הוצאות של כולם (כולל תמונות קבלה), וההסתרה במסך לא הייתה אכיפה.
+    // ⚠️ Rules אינם מסננים: הלקוח של עובד חייב להאזין עם where('workerId','==',uid),
+    // אחרת כל ההאזנה נדחית. uid בטוקן = מזהה העובד (createCustomToken(w.id)).
+    match /workerExpenses/{id} {
+      allow read: if isMgr() || isSup()
+        || (hasRole() && resource.data.workerId == request.auth.uid);
+      allow create: if isMgr() || (hasRole()
+        && request.resource.data.workerId == request.auth.uid
+        && request.resource.data.amount is number
+        && request.resource.data.amount > 0);
+      allow update, delete: if isMgr();
+    }
+
     // שאר האוספים — כל משתמש מחובר עם role
     // (stationLog נשאר כאן בכוונה — עובדים כותבים רשומות שיוך לתחנה)
+    // ⚠️ כל אוסף שמקבל חוקים משלו חייב להופיע כאן ברשימת ההחרגה — Rules מאשרים
+    // אם **איזשהו** match מאשר, ולכן בלי ההחרגה ה-catch-all היה עוקף את החוק הייעודי.
     match /{collection}/{docId} {
       allow read, write: if hasRole()
         && collection != 'credentials'
         && collection != 'adminSettings'
         && collection != 'workers'
         && collection != 'appSettings'
-        && collection != 'stations';
+        && collection != 'stations'
+        && collection != 'workerExpenses'
+        // עד 25/09/2026 חסר כאן — וחוק הקופה הייעודי (לקיחה בלבד, על שמך) לא נאכף בפועל
+        && collection != 'cashbox';
     }
   }
 }
