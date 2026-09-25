@@ -152,10 +152,12 @@ code{background:var(--bg2);border:0.5px solid var(--b);border-radius:4px;padding
 #fb-status.ok{background:var(--green-bg);color:var(--green-txt)}
 #fb-status.err{background:var(--red-bg);color:var(--red-txt)}
 #fb-status.loading{background:var(--amber-bg);color:var(--amber-txt)}
-#sync-dot{position:fixed;bottom:4px;left:4px;min-width:10px;height:10px;border-radius:999px;z-index:299;cursor:pointer;box-shadow:0 0 0 2px var(--bg);font-size:11px;font-weight:700;padding:0;line-height:18px;text-align:center}
-#sync-dot.ok{background:#2e9d5b}
+#av-wrap{position:relative;cursor:pointer;flex-shrink:0}
+#sync-dot{position:absolute;bottom:-1px;left:-1px;width:11px;height:11px;border-radius:50%;box-shadow:0 0 0 2px var(--bg);pointer-events:none;background:#2e9d5b}
 #sync-dot.off{background:#e8912d}
-#sync-dot.pend{background:var(--amber-bg);color:var(--amber-txt);height:18px;padding:0 8px;border:1px solid var(--amber-txt)}
+#sync-dot.pend{background:#e8912d;animation:syncPulse 1s ease-in-out infinite}
+#av-wrap.pend .av{box-shadow:0 0 0 2px #e8912d}
+@keyframes syncPulse{50%{opacity:.25}}
 /* LANG SWITCHER */
 .lang-switcher{display:flex;gap:4px;align-items:center}
 .lang-btn{padding:3px 7px;border-radius:999px;border:1px solid var(--b2);background:var(--bg2);cursor:pointer;font-size:15px;line-height:1;transition:all .15s;opacity:.55}
@@ -328,14 +330,14 @@ code{background:var(--bg2);border:0.5px solid var(--b);border-radius:4px;padding
     </div>
     <div style="display:flex;align-items:center;gap:8px">
       <div class="lang-switcher">
-        <button onclick="setLang('he')" class="lang-btn" id="lb-he">🇮🇱</button>
-        <button onclick="setLang('ar')" class="lang-btn" id="lb-ar">🇸🇦</button>
+        <!-- כפתור אחד במקום שני דגלים — הסרגל צפוף אצל עובדים בנייד. מציג את השפה שאליה עוברים -->
+        <button onclick="toggleLang()" class="lang-btn active" id="lb-toggle" title="עברית / العربية">🇸🇦</button>
       </div>
       <div style="font-size:12px;text-align:left">
         <div style="font-weight:600;color:var(--txt)" id="top-name"></div>
         <div style="color:var(--txt3)" id="top-role"></div>
       </div>
-      <div class="av" style="width:32px;height:32px;font-size:11px" id="top-av"></div>
+      <div id="av-wrap" onclick="_syncDotInfo()"><div class="av" style="width:32px;height:32px;font-size:11px" id="top-av"></div><span id="sync-dot"></span></div>
       <button class="btn hidden" id="ai-chat-btn" style="padding:5px 9px;font-size:12px;background:var(--blue-bg);color:var(--blue-txt)" onclick="openAIChat()" title="עוזר AI">🤖</button>
       <button class="btn hidden" id="enable-notif-btn" style="padding:5px 9px;font-size:12px;background:var(--amber-bg);color:var(--amber-txt)" onclick="enableMyNotifications()" title="הפעל התראות">🔔</button>
       <button class="btn" style="padding:5px 9px;font-size:12px" onclick="doLogout()" data-i18n="logout" title="יציאה">↩</button>
@@ -3612,14 +3614,12 @@ function _syncState(){
   return _syncOnline?'ok':'off';
 }
 function _syncDot(){
-  if(!document.body)return;
-  let d=document.getElementById('sync-dot');
-  if(!d){d=document.createElement('div');d.id='sync-dot';d.onclick=_syncDotInfo;document.body.appendChild(d);}
-  if(!S.user){d.style.display='none';return;}
-  d.style.display='';
+  // הנקודה יושבת על עיגול השם בסרגל העליון (לא תופסת מקום בסרגל הצפוף)
+  const d=document.getElementById('sync-dot'),w=document.getElementById('av-wrap');
+  if(!d||!w)return;
   const st=_syncState();
-  d.className=st;d.textContent=st==='pend'?'⏳ '+_pwSet.size:'';
-  d.title=st==='ok'?'מחובר ומסונכרן':st==='off'?'אין קשר לשרת':'ממתין לשליחה: '+_pwSet.size;
+  d.className=st;w.classList.toggle('pend',st==='pend');
+  w.title=st==='ok'?'מחובר ומסונכרן':st==='off'?'אין קשר לשרת':'ממתין לשליחה: '+_pwSet.size;
   // כל עוד יש כתיבות פתוחות — בדיקה חוזרת כדי שה-⏳ יופיע אחרי 2 שנ' גם בלי אירוע חדש
   clearTimeout(_syncTimer);if(_pwSet.size)_syncTimer=setTimeout(_syncDot,2100);
 }
@@ -11701,10 +11701,12 @@ function setLang(code){
     if(b1)b1.classList.toggle('active',lc===code);
     if(b2)b2.classList.toggle('active',lc===code);
   });
+  const _lt=document.getElementById('lb-toggle');if(_lt)_lt.textContent=code==='ar'?'🇮🇱':'🇸🇦';
   // עדכן תוכן דינמי בדף הוצאות אם פתוח
   if(document.getElementById('page-expenses')?.classList.contains('active'))renderExpenses();
 }
 
+function toggleLang(){setLang(currentLang==='ar'?'he':'ar');}
 // restore on page load
 (function(){
   const saved=localStorage.getItem('txops_lang')||'he';
