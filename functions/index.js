@@ -1,4 +1,6 @@
-const functions = require('firebase-functions');
+// firebase-functions 6: הייבוא הרגיל מפנה ל-API של הדור השני — כל הפונקציות כאן דור ראשון.
+// ⚠️ לא לשדרג ל-7: הוא מסיר את functions.config() שבו יושבים כל הסודות (טלגרם/חירום/AI).
+const functions = require('firebase-functions/v1');
 const admin = require('firebase-admin');
 const https = require('https');
 const crypto = require('crypto');
