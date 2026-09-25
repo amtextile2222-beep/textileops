@@ -485,13 +485,17 @@ exports.calcTaskExpected = functions.https.onCall(async (data, context) => {
   if (pq.empty) return { ok: false, reason: 'no-product' };
   // כמו findProd בלקוח: בכפילות (מוצר ישן+חדש עם אותו cust/prod) בחר את הרשומה העדכנית ביותר
   // (createdAt מקסימלי, fallback למספר ב-id) — אחרת הצפי מחושב מרשומה ישנה עם שלבים/תמחור שונים ולא מופיע
-  let p = null, mx = -1;
+  let p = null, mx = -1, pId = null;
   for (const doc of pq.docs) {
     const x = doc.data();
     const c = +x.createdAt || parseInt(String(x.id || doc.id).replace(/\D/g, '')) || 0;
-    if (c > mx) { mx = c; p = x; }
+    if (c > mx) { mx = c; p = x; pId = doc.id; }
   }
   if (!p) return { ok: false, reason: 'no-product' };
+  // 💲 התמחור עבר ל-productPricing/{id} (25/09/2026) — מוסתר מטלפוני העובדות. ערך שם גובר;
+  // מוצר שעוד לא עבר מיגרציה נושא את השדות במסמך עצמו ⇒ נופלים אליו.
+  const prSnap = await db.collection('productPricing').doc(pId).get();
+  if (prSnap.exists) p = { ...p, ...prSnap.data() };
   const price = +p.unitPrice || 0, profit = +p.targetProfitPct || 0, mats = +p.directMaterialsCost || 0;
   if (!price) return { ok: false, reason: 'no-pricing' };
   const budget = price * (1 - profit / 100) - mats;

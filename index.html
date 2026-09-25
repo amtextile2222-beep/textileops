@@ -1568,11 +1568,11 @@ code{background:var(--bg2);border:0.5px solid var(--b);border-radius:4px;padding
 <!-- FIREBASE SDK -->
 <script type="module">
 import{initializeApp}from'https://www.gstatic.com/firebasejs/10.12.0/firebase-app.js';
-import{getFirestore,collection,doc,getDoc,getDocs,getDocsFromServer,setDoc,onSnapshot,query,where,orderBy,limit,serverTimestamp,deleteDoc,updateDoc,addDoc,runTransaction}from'https://www.gstatic.com/firebasejs/10.12.0/firebase-firestore.js';
+import{getFirestore,collection,doc,getDoc,getDocs,getDocsFromServer,setDoc,onSnapshot,query,where,orderBy,limit,serverTimestamp,deleteDoc,updateDoc,addDoc,runTransaction,deleteField}from'https://www.gstatic.com/firebasejs/10.12.0/firebase-firestore.js';
 import{getAuth,signInAnonymously,signInWithCustomToken,signOut,onAuthStateChanged}from'https://www.gstatic.com/firebasejs/10.12.0/firebase-auth.js';
 import{getMessaging,getToken,onMessage}from'https://www.gstatic.com/firebasejs/10.12.0/firebase-messaging.js';
 import{getFunctions,httpsCallable}from'https://www.gstatic.com/firebasejs/10.12.0/firebase-functions.js';
-window._fb={initializeApp,getFirestore,collection,doc,getDoc,getDocs,getDocsFromServer,setDoc,onSnapshot,query,where,orderBy,limit,serverTimestamp,deleteDoc,updateDoc,addDoc,runTransaction,getAuth,signInAnonymously,signInWithCustomToken,signOut,onAuthStateChanged,getMessaging,getToken,onMessage,getFunctions,httpsCallable};
+window._fb={initializeApp,getFirestore,collection,doc,getDoc,getDocs,getDocsFromServer,setDoc,onSnapshot,query,where,orderBy,limit,serverTimestamp,deleteDoc,updateDoc,addDoc,runTransaction,deleteField,getAuth,signInAnonymously,signInWithCustomToken,signOut,onAuthStateChanged,getMessaging,getToken,onMessage,getFunctions,httpsCallable};
 window._fbReady=true;
 document.dispatchEvent(new Event('fbSDKReady'));
 </script>
@@ -3309,7 +3309,7 @@ function updateExpectedTime(prefix){
   const cust=raw.slice(0,2),prod=raw.slice(2,7);
   if(cust!==listEl.dataset.cust||prod!==listEl.dataset.prod){box.innerHTML='';return;}
   const prodObj=findProd(cust,prod);
-  if(!prodObj||!(+prodObj.unitPrice)){box.innerHTML='';return;} // אין תמחור — אין צפי
+  if(!_isPriced(prodObj)){box.innerHTML='';return;} // אין תמחור — אין צפי (priced: בלי המספרים אצל עובדת)
   const qty=isTotalBc(raw)?getTotalQty(cust,prod,orderNoOf(raw)):parseInt(raw.slice(8,11))||0;
   if(!qty){box.innerHTML='';return;}
   const key=taskExpectedKey(cust,prod,workerId,qty);
@@ -3344,7 +3344,7 @@ async function fetchExpected(cust,prod,workerId,qty){
   const key=taskExpectedKey(cust,prod,workerId,qty);
   if(_expMap[key])return _expMap[key];
   const prodObj=findProd(cust,prod);
-  if(!prodObj||!(+prodObj.unitPrice)||!workerId||!qty||!S.fbConnected||!window._fbFunctions)return{ok:false};
+  if(!_isPriced(prodObj)||!workerId||!qty||!S.fbConnected||!window._fbFunctions)return{ok:false};
   const allSteps=(prodObj.workSteps||[]).map(s=>stepName(s)).filter(Boolean);
   try{
     const{httpsCallable}=window._fb;
@@ -3360,7 +3360,7 @@ async function recalcActiveExpected(cust,prod){
   if(!S.fbConnected||!window._fbFunctions)return;
   const prodObj=findProd(cust,prod);if(!prodObj)return;
   const affected=S.activeTasks.filter(t=>t.cust===cust&&t.prod===prod);if(!affected.length)return;
-  const hasPricing=+prodObj.unitPrice>0;
+  const hasPricing=_isPriced(prodObj);
   const allSteps=(prodObj.workSteps||[]).map(s=>stepName(s)).filter(Boolean);
   const{httpsCallable}=window._fb;
   const fn=httpsCallable(window._fbFunctions,'calcTaskExpected');
@@ -3576,10 +3576,10 @@ async function initFb(){
 // ⚠️ ניתוק WiFi רגיל *אינו* שגיאה — Firestore מתחבר מחדש לבד. זה רק לדחיית שרת.
 // הרישום לפי שם גם מונע כפילות: listenWorkerMessages/listenMgrInbox נקראות בכל כניסה.
 const _liveReg={};
-function _live(name,refFn,cb,opts){
+function _live(name,refFn,cb,opts,when){
   const{onSnapshot}=window._fb;
   const st=_liveReg[name]||(_liveReg[name]={fails:0,unsub:null,dead:false,timer:null});
-  st.refFn=refFn;st.cb=cb;st.opts=opts;st.dead=false;
+  st.refFn=refFn;st.cb=cb;st.opts=opts;st.when=when;st.dead=false;
   clearTimeout(st.timer);
   try{if(st.unsub)st.unsub();}catch(e){}
   st.unsub=null;
@@ -3587,24 +3587,24 @@ function _live(name,refFn,cb,opts){
   const onErr=err=>{
     st.unsub=null;
     console.warn('📡 מאזין '+name+' נפל:',err&&err.code,err&&err.message);
-    // אחרי יציאה — לא מנסים עכשיו; הכניסה הבאה תחייה אותו
-    if(!S.user){st.dead=true;return;}
+    // אחרי יציאה, או כשהמשתמש הנוכחי לא רשאי (when) — לא מנסים; הכניסה הבאה תחייה אם מותר
+    if(!S.user||(st.when&&!st.when())){st.dead=true;return;}
     st.fails++;_liveBanner();
     const delay=Math.min(60000,2000*Math.pow(2,st.fails-1));
     st.timer=setTimeout(async()=>{
-      if(!S.user){st.dead=true;return;}
+      if(!S.user||(st.when&&!st.when())){st.dead=true;return;}
       // שגיאת הרשאה = לרוב טוקן שפג/לא רוענן — מרעננים לפני ניסיון חוזר
       if(err&&err.code==='permission-denied'){
         try{const u=window._fb.getAuth(window._fbApp).currentUser;if(u)await u.getIdToken(true);}catch(e){}
       }
-      _live(name,st.refFn,st.cb,st.opts);
+      _live(name,st.refFn,st.cb,st.opts,st.when);
     },delay);
   };
   try{st.unsub=opts?onSnapshot(refFn(),opts,next,onErr):onSnapshot(refFn(),next,onErr);}
   catch(e){console.warn('📡 פתיחת מאזין '+name+' נכשלה:',e.message);st.dead=true;}
 }
 function _liveReviveAll(){
-  Object.keys(_liveReg).forEach(n=>{const st=_liveReg[n];if(st.dead&&!st.unsub)_live(n,st.refFn,st.cb,st.opts);});
+  Object.keys(_liveReg).forEach(n=>{const st=_liveReg[n];if(st.dead&&!st.unsub&&(!st.when||st.when()))_live(n,st.refFn,st.cb,st.opts,st.when);});
 }
 // פס אדום רק אחרי 3 כשלונות רצופים של מאזין כלשהו — נפילה בודדת נפתרת לבד ברוב המקרים
 function _liveBanner(){
@@ -3669,6 +3669,95 @@ function _syncWatchStart(){
   window.addEventListener('beforeunload',e=>{if(_pwSet.size&&!(typeof _kioskOpen!=='undefined'&&_kioskOpen)){e.preventDefault();e.returnValue='';}});
 }
 
+// ─── 💲 תמחור מוסתר (25/09/2026) ─────────────────────────────────────────────
+// מחיר ללקוח, אחוז רווח, עלות חומרים וגזירה ישבו בתוך מסמכי products — שנטענים לכל טלפון
+// (כולל עובדות) בכל פתיחה ונשמרים גם ב-localStorage. ההסתרה במסך לא הייתה הגנה.
+// עכשיו: השדות יושבים ב-productPricing/{id} (אותו מזהה), שה-Rules פותחים רק ל-_canPricing.
+// אצל מי שמורשה הם ממוזגים חזרה לאובייקט המוצר ב-S.products ⇒ שאר הקוד לא השתנה.
+// כתיבה: העוטפים (fbSet וכו') מפצלים אוטומטית כל כתיבה ל-products — השדות לא חוזרים לשם.
+// ⚠️ עובדת בלי תמחור עדיין צריכה לדעת "יש למוצר תמחור?" לצפי בסריקה ⇒ הדגל priced
+// (כן/לא, בלי מספרים) נשמר במסמך המוצר. ראה _isPriced.
+const PRICING_FIELDS=['unitPrice','targetProfitPct','directMaterialsCost','cutPrice','cutProfitPct'];
+let _pricingMap={};
+// ⚠️ חייב להישאר זהה ל-canPricing ב-firestore.rules: מנהל · permissions מפורש עם products/dnotes ·
+// אחראי בלי permissions (ברירת המחדל שלו כוללת products; dnotes דורש סימון מפורש — OPTIN_PAGES)
+function _canPricing(){
+  const u=S.user;if(!u)return false;
+  if(u.role==='manager')return true;
+  const w=(S.workers||[]).find(x=>x.id===u.id)||u;
+  if(Array.isArray(w.permissions))return w.permissions.includes('products')||w.permissions.includes('dnotes');
+  return u.role==='supervisor';
+}
+function _isPriced(p){return !!p&&(+p.unitPrice>0||p.priced===true);}
+// מפצל כתיבה למסמך מוצר: שדות התמחור יוצאים ל-productPricing (רק אם מורשה), ו-priced מתעדכן
+function _splitPricing(col,id,data){
+  if(col!=='products'||!data||typeof data!=='object')return data;
+  const out={...data},pr={};let any=false;
+  PRICING_FIELDS.forEach(f=>{if(f in out){if(out[f]!==undefined)pr[f]=out[f];delete out[f];any=true;}});
+  if(!any)return out;
+  if('unitPrice' in pr)out.priced=+pr.unitPrice>0;
+  if(_canPricing()&&db&&Object.keys(pr).length){
+    const{doc,setDoc}=window._fb;
+    _pricingMap[String(id)]={...(_pricingMap[String(id)]||{}),...pr};
+    _pw(setDoc(doc(db,'productPricing',String(id)),pr,{merge:true})).catch(e=>console.warn('💲 שמירת תמחור נכשלה:',e.message));
+  }
+  return out;
+}
+// ממזג את התמחור לתוך S.products (רק אצל מורשה; אצל אחר — מוודא שאין שאריות)
+function _applyPricing(){
+  const ok=_canPricing();
+  (S.products||[]).forEach(p=>{
+    const pr=ok?_pricingMap[String(p.id)]:null;
+    if(pr)PRICING_FIELDS.forEach(f=>{if(f in pr)p[f]=pr[f];});
+    else if(!ok){
+      // לפני המיגרציה המסמך עוד נושא מספרים ואין בו priced — גוזרים את הדגל *לפני* ההסרה,
+      // אחרת עובדת מאבדת את הצפי בסריקה עד שהמנהל נכנס ומריץ את המיגרציה
+      if(p.priced===undefined&&+p.unitPrice>0)p.priced=true;
+      PRICING_FIELDS.forEach(f=>{delete p[f];});
+    }
+  });
+}
+function _startPricingListener(){
+  if(!db||!_canPricing())return;
+  const st=_liveReg.productPricing;if(st&&st.unsub)return;
+  const{collection}=window._fb;
+  _live('productPricing',()=>collection(db,'productPricing'),snap=>{
+    _pricingMap={};snap.docs.forEach(d=>{_pricingMap[d.id]=d.data();});
+    _applyPricing();saveLS();
+    try{renderProducts();}catch(e){}
+    if(document.querySelector('.page.active')?.id==='page-dnotes')try{renderDNotes();}catch(e){}
+  },null,_canPricing);
+}
+// מיגרציה חד-פעמית, מהמכשיר של המנהל: מסמך מוצר שעדיין נושא שדות תמחור ⇒ העתקה ל-productPricing
+// **ואז** מחיקת השדות ממנו (בסדר הזה — כשל באמצע משאיר עותק כפול, לא אובדן). רצה על ה-snapshot
+// הגולמי מהשרת, לא על S.products הממוזג.
+let _pricingMigBusy=false;
+async function _migratePricing(docs){
+  if(_pricingMigBusy||S.user?.role!=='manager'||!db)return;
+  const todo=docs.filter(d=>PRICING_FIELDS.some(f=>f in d.data()));
+  if(!todo.length)return;
+  _pricingMigBusy=true;
+  const{doc,getDoc,setDoc,updateDoc,deleteField}=window._fb;
+  let n=0;
+  try{
+    for(const d of todo){
+      const raw=d.data(),pr={},del={};
+      PRICING_FIELDS.forEach(f=>{if(f in raw){if(raw[f]!==undefined)pr[f]=raw[f];del[f]=deleteField();}});
+      // ערך קיים ב-productPricing (אחראי ששמר מחיר אחרי הפריסה ולפני המיגרציה) גובר על הישן
+      // שבמסמך המוצר. נקרא ישירות מהשרת — המאזין של productPricing אולי עוד לא הגיע.
+      const curSnap=await getDoc(doc(db,'productPricing',d.id));
+      const cur=curSnap.exists()?curSnap.data():{};
+      const merged={...pr,...cur};
+      await _pw(setDoc(doc(db,'productPricing',d.id),merged,{merge:true}));
+      await _pw(updateDoc(doc(db,'products',d.id),{...del,priced:+merged.unitPrice>0}));
+      n++;
+    }
+    console.log('💲 מיגרציית תמחור: '+n+' מוצרים הועברו');
+    if(n)showToast('💲 התמחור של '+n+' מוצרים הועבר לאחסון מוגן');
+  }catch(e){console.warn('💲 מיגרציית תמחור נעצרה ('+n+' הושלמו):',e.message);}
+  finally{_pricingMigBusy=false;}
+}
+
 // listeners של נתונים — רק אחרי כניסה מאומתת (יש טוקן עם role)
 let _listenersStarted=false;
 let _adminListenerStarted=false;
@@ -3681,6 +3770,7 @@ function startDataListeners(){
     _listenersStarted=true;
     listenFb();
   }else _liveReviveAll();
+  _startPricingListener();
   _syncWatchStart();_syncDot();
   // הגדרות רגישות (עלויות) — קריאה מותרת רק למנהל ב-Rules
   if(!_adminListenerStarted&&S.user?.role==='manager'&&db){
@@ -3807,6 +3897,8 @@ function listenFb(){
   // products
   _live('products',()=>collection(db,'products'),snap=>{
     S.products=snap.docs.map(d=>({id:d.id,...d.data()}));
+    _applyPricing();
+    if(!snap.metadata.fromCache)_migratePricing(snap.docs);
     saveLS();renderProducts();
     // 📄 תעודת משלוח נשמרת **בתוך** מסמך המוצר (p.shipments), ולשונית התעודות בונה
     // את הרשימה מ-S.products. המאזין קרא רק ל-renderProducts ⇒ מי שעמד על הלשונית
@@ -3899,7 +3991,7 @@ function listenFb(){
 async function fbSet(col,id,data){
   if(!db)return;
   const{doc,setDoc}=window._fb;
-  await _pw(setDoc(doc(db,col,id),data,{merge:true}));
+  await _pw(setDoc(doc(db,col,id),_splitPricing(col,id,data),{merge:true}));
 }
 async function fbDel(col,id){
   if(!db)return;
@@ -3914,7 +4006,7 @@ async function fbDel(col,id){
 async function fbUpdateOnly(col,id,data){
   if(!db)return false;
   const{doc,updateDoc}=window._fb;
-  try{await _pw(updateDoc(doc(db,col,id),data));return true;}
+  try{await _pw(updateDoc(doc(db,col,id),_splitPricing(col,id,data)));return true;}
   catch(e){return false;} // not-found ⇒ המשימה כבר נסגרה/נמחקה במקום אחר
 }
 // משימה שכבר נסגרה (קיימת בהיסטוריה המקומית) לא תיכתב חזרה לפעילות
@@ -8417,7 +8509,7 @@ async function sendPush(title,body,alertType){
 async function fbSetMerge(col,docId,data){
   if(!db)return;
   const{doc,setDoc}=window._fb;
-  await _pw(setDoc(doc(db,col,docId),data,{merge:true}));
+  await _pw(setDoc(doc(db,col,docId),_splitPricing(col,docId,data),{merge:true}));
 }
 async function fbGet(col,docId){
   if(!db)return null;
@@ -10987,7 +11079,7 @@ function saveDepts(){
 async function fbReplaceFields(col,id,fields){
   if(!db)return;
   const{doc,updateDoc}=window._fb;
-  await _pw(updateDoc(doc(db,col,id),fields));
+  await _pw(updateDoc(doc(db,col,id),_splitPricing(col,id,fields)));
 }
 function addDept(){
   const v=document.getElementById('new-dept').value.trim();
@@ -15638,6 +15730,7 @@ async function deleteProduct(id){
   if(S.fbConnected){
     await fbDel('products',id);
     try{await fbDel('productImages',String(id));}catch(e){} // אחרת נשארות תמונות יתומות
+    try{await fbDel('productPricing',String(id));}catch(e){} // וגם תמחור יתום
   }
   delete _prodImgCache[id];
   saveLS();renderProducts();

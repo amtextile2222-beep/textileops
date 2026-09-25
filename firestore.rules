@@ -98,6 +98,25 @@ service cloud.firestore {
       allow delete: if isMgr() || isSup();
     }
 
+    // 💲 תמחור מוצרים (25/09/2026): מחיר ללקוח, אחוז רווח, עלות חומרים, גזירה — הוצאו ממסמכי
+    // products (שנטענים לכל טלפון) לאוסף נפרד. רשאים: מנהל · מי שסומן לו "מוצרים" או
+    // "תעודות משלוח" · אחראי בלי הרשאות מפורשות (ברירת המחדל שלו כוללת "מוצרים").
+    // ⚠️ חייב להישאר זהה ל-_canPricing ב-index.html. חישוב הצפי בשרת (calcTaskExpected) קורא
+    // דרך Admin SDK ולא תלוי בזה — עובדת ממשיכה לקבל צפי בלי לראות מחיר.
+    function me() {
+      return get(/databases/$(database)/documents/workers/$(request.auth.uid)).data;
+    }
+    function canPricing() {
+      return isMgr() || (hasRole() && (
+        ('permissions' in me() && me().permissions.hasAny(['products', 'dnotes']))
+        || (!('permissions' in me()) && request.auth.token.role == 'supervisor')));
+    }
+    match /productPricing/{id} {
+      allow read, create, update: if canPricing();
+      // כמו מחיקת מוצר — מנהל/אחראי (deleteProduct מוחק גם את התמחור, שלא יישאר יתום)
+      allow delete: if isMgr() || isSup();
+    }
+
     // 💸 הוצאות עובדים (25/09/2026): עובד/עוזר רואה ורושם **רק את שלו**; אחראי ומנהל רואים הכל.
     // עריכה ומחיקה — מנהל בלבד. עד כה האוסף נפל ל-catch-all: כל מחובר קרא, ערך ומחק
     // הוצאות של כולם (כולל תמונות קבלה), וההסתרה במסך לא הייתה אכיפה.
@@ -128,6 +147,7 @@ service cloud.firestore {
         && collection != 'attHistory'
         && collection != 'histTasks'
         && collection != 'products'
+        && collection != 'productPricing'
         // עד 25/09/2026 חסר כאן — וחוק הקופה הייעודי (לקיחה בלבד, על שמך) לא נאכף בפועל
         && collection != 'cashbox';
     }
