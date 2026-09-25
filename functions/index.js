@@ -233,6 +233,14 @@ exports.login = functions.https.onCall(async (data, context) => {
   } else if (Array.isArray(d.registerDescriptors) && d.registerDescriptors.length) {
     // ── רישום פנים מחדש בכניסה — רק אם המנהל אישר מראש ──
     if (!w.faceUpdateAllowed) throw new functions.https.HttpsError('permission-denied', 'no-face-update');
+    // 🔒 אישור המנהל לבדו אינו הזדהות: בלי סיסמה, כל מי שידע את שם המשתמש של עובד מאושר
+    // היה רושם את פניו שלו ונכנס בשמו (נסגר 25/09/2026). אותה בדיקה כמו במסלול הסיסמה למטה.
+    const rp = String(d.pass || '');
+    const rStored = creds.pass !== undefined ? creds.pass : (w.pass || '');
+    if (!rp || !(rStored === hashPass(rp) || (rStored && !String(rStored).startsWith('$h:') && rStored === rp))) {
+      await regFail(credRef, creds);
+      throw new functions.https.HttpsError('permission-denied', 'wrong');
+    }
     await credRef.set({ faceDescriptors: Object.fromEntries(d.registerDescriptors.map((s, i) => [i, s.map(Number)])), faceDescriptor: FieldValue.delete() }, { merge: true });
     await wDoc.ref.set({ faceUpdateAllowed: false, faceRegistered: true, faceDescriptor: FieldValue.delete(), faceDescriptors: FieldValue.delete() }, { merge: true });
   } else if (d.empBarcode !== undefined) {

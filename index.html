@@ -15820,6 +15820,8 @@ async function _onFaceAuthFailed(){
 function _startFaceUpdateAfterFail(){
   const w=S._pendingUser;
   if(!w||!w.faceUpdateAllowed)return;
+  // אם הסיסמה כבר הוקלדה במסך הכניסה — משתמשים בה ולא שואלים שוב
+  const _lp=(document.getElementById('l-pass')?.value||'').trim();if(_lp)w._pass=_lp;
   document.getElementById('l-err').textContent='';
   _startFaceFirstRegister();
 }
@@ -15908,8 +15910,11 @@ async function _captureAndLogin(){
       delete worker._authed;
     }else{
       // רישום מחדש שאושר ע"י המנהל אחרי כשל זיהוי — דרך login (עוד אין טוקן)
+      // 🔒 השרת דורש גם סיסמה (25/09/2026) — אישור המנהל לבדו אינו הזדהות
+      if(!w._pass){const p=(prompt('🔒 הזן את הסיסמה שלך כדי לעדכן פנים\nأدخل كلمة المرور لتحديث الوجه')||'').trim();
+        if(!p){const e=new Error('missing-pass');throw e;}w._pass=p;}
       const devId=await getDeviceId();
-      const res=await loginCall({user:w.user,registerDescriptors:samples,deviceId:devId||undefined});
+      const res=await loginCall({user:w.user,pass:w._pass,registerDescriptors:samples,deviceId:devId||undefined});
       await fbSignInWithToken(res.token);
       worker=res.worker;
     }
@@ -15935,7 +15940,10 @@ async function _captureAndLogin(){
     S._pendingUser=null;
     finishLogin(worker,true);
   }catch(err){
-    document.getElementById('face-reg-status').textContent='שגיאה: '+err.message+' — נסה שוב';
+    // סיסמה שגויה/חסרה — מוחקים אותה כדי שהניסיון הבא ישאל שוב
+    const _ec=_loginErrCode(err);
+    if(S._pendingUser&&(_ec==='wrong'||_ec==='missing-pass'))delete S._pendingUser._pass;
+    document.getElementById('face-reg-status').textContent=(_ec==='wrong'?'⛔ סיסמה שגויה':_ec==='missing-pass'?'⛔ נדרשת סיסמה':'שגיאה: '+err.message)+' — נסה שוב';
     document.getElementById('face-reg-btn').textContent='📸 צלם דגימה 1/5';
     document.getElementById('face-reg-btn').disabled=false;
     _faceRegSamples=[];
