@@ -749,6 +749,46 @@ exports.keepLoginWarm = functions.pubsub.schedule('*/2 6-15 * * *').timeZone('As
   });
 });
 
+// קודי FCM שמשמעותם "הרישום הזה מת לתמיד" (טלפון הוחלף / דפדפן נוקה / התראות בוטלו) —
+// לא תקלה זמנית, ולכן מוחקים את הרישום במקום לנסות שוב כל 5 דקות
+const DEAD_FCM_CODES = ['messaging/registration-token-not-registered', 'messaging/invalid-registration-token'];
+
+// Push לאחראים שרשמו טלפון (appSettings/pushSettings.tokens, role=supervisor).
+// מעדיף את אחראי המחלקה של העובדת; אם אין כזה עם טלפון — לכל האחראים. מחזיר כמה נשלחו.
+async function pushSupervisors(pushSnap, dept, title, body) {
+  const tokens = (pushSnap && pushSnap.exists && pushSnap.data().tokens) || {};
+  const entries = Object.entries(tokens)
+    .map(([key, t]) => ({ key, ...(typeof t === 'string' ? { token: t } : (t || {})) }))
+    .filter(e => e.token && e.role === 'supervisor' && e.workerId);
+  if (!entries.length) return 0;
+  const sups = {};
+  await Promise.all([...new Set(entries.map(e => e.workerId))].map(async id => {
+    const s = await db.collection('workers').doc(id).get();
+    sups[id] = s.exists ? s.data() : null;
+  }));
+  const live = entries.filter(e => sups[e.workerId] && !sups[e.workerId].disabled);
+  const sameDept = dept ? live.filter(e => sups[e.workerId].dept === dept) : [];
+  const targets = sameDept.length ? sameDept : live;
+  let sent = 0;
+  await Promise.all(targets.map(async e => {
+    try {
+      await admin.messaging().send({
+        token: e.token,
+        notification: { title, body },
+        android: { priority: 'high', notification: { sound: 'default', channelId: 'textileops' } },
+        webpush: { notification: { icon: 'https://amtextile2222-beep.github.io/textileops/icon-192.png', requireInteraction: true } }
+      });
+      sent++;
+    } catch (err) {
+      if (DEAD_FCM_CODES.includes(err.code)) {
+        // FieldPath — מפתח המכשיר עלול להכיל נקודות
+        await pushSnap.ref.update(new admin.firestore.FieldPath('tokens', e.key), FieldValue.delete()).catch(() => {});
+      }
+    }
+  }));
+  return sent;
+}
+
 // בדיקת משימות ארוכות כל 5 דקות
 exports.longTaskMonitor = functions.pubsub.schedule('every 5 minutes').onRun(async () => {
   try {
@@ -774,6 +814,7 @@ exports.longTaskMonitor = functions.pubsub.schedule('every 5 minutes').onRun(asy
       units[key].tasks.push(t);
     }
     for (const unit of Object.values(units)) {
+      try {
       const tasks = unit.tasks;
       const lead = tasks[0];
       const start = Math.min(...tasks.map(t => new Date(t.startTime).getTime()));
@@ -826,23 +867,49 @@ exports.longTaskMonitor = functions.pubsub.schedule('every 5 minutes').onRun(asy
         }
       }
 
+      // 🔔 Push לעובד. ⚠️ עד 26/09/2026 כשל כאן (טלפון שהרישום שלו פג) זרק מחוץ ללולאה:
+      // הבדיקה נעצרה על המשימה הזו, taskAlerts לא נכתב — ולכן הטלגרם שלמעלה נשלח שוב כל 5 דק'
+      // ושאר המשימות שחרגו לא נבדקו כלל. עכשיו הכשל נבלע, והרישום המת נמחק מכרטיס העובד.
       const fcmToken = workerData.fcmToken;
       const pushPrefs = workerData.pushPrefs || {};
+      let workerReached = false;
       if (fcmToken && pushPrefs.task_long !== false) {
-        await admin.messaging().send({
-          token: fcmToken,
-          notification: {
-            title: hasExpected ? '⏱ חריגה מהזמן המוקצב' : '⚠️ משימה ארוכה',
-            body: hasExpected
-              ? 'הוקצבו ' + Math.round(expSum) + ' דקות' + (tasks.length > 1 ? ' ל-' + tasks.length + ' המשימות' : ' למשימה') + ' — עברו כבר ' + mins + ' דקות'
-              : 'המשימה שלך פעילה כבר ' + mins + ' דקות'
-          },
-          android: { priority: 'high', notification: { sound: 'default', channelId: 'textileops' } },
-          webpush: { notification: { icon: 'https://amtextile2222-beep.github.io/textileops/icon-192.png', requireInteraction: true } }
-        });
+        try {
+          await admin.messaging().send({
+            token: fcmToken,
+            notification: {
+              title: hasExpected ? '⏱ חריגה מהזמן המוקצב' : '⚠️ משימה ארוכה',
+              body: hasExpected
+                ? 'הוקצבו ' + Math.round(expSum) + ' דקות' + (tasks.length > 1 ? ' ל-' + tasks.length + ' המשימות' : ' למשימה') + ' — עברו כבר ' + mins + ' דקות'
+                : 'המשימה שלך פעילה כבר ' + mins + ' דקות'
+            },
+            android: { priority: 'high', notification: { sound: 'default', channelId: 'textileops' } },
+            webpush: { notification: { icon: 'https://amtextile2222-beep.github.io/textileops/icon-192.png', requireInteraction: true } }
+          });
+          workerReached = true;
+        } catch (e) {
+          console.warn('longTaskMonitor: push לעובד נכשל', lead.workerId, e.code || e.message);
+          if (DEAD_FCM_CODES.includes(e.code)) {
+            await workerSnap.ref.set({ fcmToken: FieldValue.delete() }, { merge: true }).catch(() => {});
+          }
+        }
       }
-      await db.collection('taskAlerts').doc(alertKey).set({ sent: true, ts: now, taskId: unit.docId, batchId: lead.batchId || null, expected: hasExpected ? expSum : null });
-      console.log('longTaskMonitor: sent alert for', alertKey);
+      // 👔 חלק גדול מהעובדות בלי טלפון — האחראי פותח להן משימות בסורק. מי שלא קיבלה Push,
+      // ההתראה עוברת לאחראים (מעדיפים את אחראי המחלקה של העובדת; אם אין — לכל האחראים).
+      if (!workerReached) {
+        const who = lead.workerName || workerData.name || lead.workerId;
+        await pushSupervisors(pushSnap, workerData.dept || lead.dept || '',
+          hasExpected ? '⏱ חריגה מהזמן — ' + who : '⚠️ משימה ארוכה — ' + who,
+          (stepsTxt ? stepsTxt + ' · ' : '') + prodsTxt +
+            (hasExpected ? ' · הוקצבו ' + Math.round(expSum) + ' דק\', עברו ' + mins : ' · פעילה ' + mins + ' דק\'')
+        ).catch(e => console.warn('longTaskMonitor: push לאחראים נכשל', e.message));
+      }
+      await db.collection('taskAlerts').doc(alertKey).set({ sent: true, ts: now, taskId: unit.docId, batchId: lead.batchId || null, expected: hasExpected ? expSum : null, workerReached });
+      console.log('longTaskMonitor: sent alert for', alertKey, workerReached ? '(worker)' : '(supervisors)');
+      } catch (e) {
+        // משימה אחת שנכשלה לא עוצרת את בדיקת האחרות
+        console.error('longTaskMonitor unit error:', unit.docId, e);
+      }
     }
   } catch (e) {
     console.error('longTaskMonitor error:', e);
