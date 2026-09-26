@@ -753,9 +753,10 @@ exports.keepLoginWarm = functions.pubsub.schedule('*/2 6-15 * * *').timeZone('As
 // לא תקלה זמנית, ולכן מוחקים את הרישום במקום לנסות שוב כל 5 דקות
 const DEAD_FCM_CODES = ['messaging/registration-token-not-registered', 'messaging/invalid-registration-token'];
 
-// Push לאחראים שרשמו טלפון (appSettings/pushSettings.tokens, role=supervisor).
-// מעדיף את אחראי המחלקה של העובדת; אם אין כזה עם טלפון — לכל האחראים. מחזיר כמה נשלחו.
-async function pushSupervisors(pushSnap, dept, title, body) {
+// Push לאחראים שרשמו טלפון (appSettings/pushSettings.tokens, role=supervisor). סדר העדפה:
+// 1) האחראי שפתח את המשימה (scannedBy — מי שעומד ליד העובדת ומכיר אותה)
+// 2) אחראי המחלקה של העובדת  3) כל האחראים. מחזיר כמה נשלחו.
+async function pushSupervisors(pushSnap, dept, title, body, openerIds) {
   const tokens = (pushSnap && pushSnap.exists && pushSnap.data().tokens) || {};
   const entries = Object.entries(tokens)
     .map(([key, t]) => ({ key, ...(typeof t === 'string' ? { token: t } : (t || {})) }))
@@ -767,8 +768,9 @@ async function pushSupervisors(pushSnap, dept, title, body) {
     sups[id] = s.exists ? s.data() : null;
   }));
   const live = entries.filter(e => sups[e.workerId] && !sups[e.workerId].disabled);
+  const openers = (openerIds || []).length ? live.filter(e => openerIds.includes(e.workerId)) : [];
   const sameDept = dept ? live.filter(e => sups[e.workerId].dept === dept) : [];
-  const targets = sameDept.length ? sameDept : live;
+  const targets = openers.length ? openers : (sameDept.length ? sameDept : live);
   let sent = 0;
   await Promise.all(targets.map(async e => {
     try {
@@ -898,10 +900,13 @@ exports.longTaskMonitor = functions.pubsub.schedule('every 5 minutes').onRun(asy
       // ההתראה עוברת לאחראים (מעדיפים את אחראי המחלקה של העובדת; אם אין — לכל האחראים).
       if (!workerReached) {
         const who = lead.workerName || workerData.name || lead.workerId;
+        // מי פתח את המשימות (סורק המשימות שומר scannedBy) — בלי העובדת עצמה
+        const openerIds = [...new Set(tasks.map(t => t.scannedBy).filter(id => id && id !== lead.workerId))];
         await pushSupervisors(pushSnap, workerData.dept || lead.dept || '',
           hasExpected ? '⏱ חריגה מהזמן — ' + who : '⚠️ משימה ארוכה — ' + who,
           (stepsTxt ? stepsTxt + ' · ' : '') + prodsTxt +
-            (hasExpected ? ' · הוקצבו ' + Math.round(expSum) + ' דק\', עברו ' + mins : ' · פעילה ' + mins + ' דק\'')
+            (hasExpected ? ' · הוקצבו ' + Math.round(expSum) + ' דק\', עברו ' + mins : ' · פעילה ' + mins + ' דק\''),
+          openerIds
         ).catch(e => console.warn('longTaskMonitor: push לאחראים נכשל', e.message));
       }
       await db.collection('taskAlerts').doc(alertKey).set({ sent: true, ts: now, taskId: unit.docId, batchId: lead.batchId || null, expected: hasExpected ? expSum : null, workerReached });
