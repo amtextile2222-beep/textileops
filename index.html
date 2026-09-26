@@ -3765,6 +3765,8 @@ let _adminListenerStarted=false;
 // האוטומטית שלו. חידוש בחתימת כניסה חייב להמתין לו — אחרת העובדת הראשונה בבוקר
 // מסננת רשימה ריקה/ישנה מהזיכרון ומשימותיה נשארות מושהות (ندوه 27/07, 12 דק' אבודות).
 let _activeTasksReady=false;
+// ⚠️ כמו _activeTasksReady — לעובדים. התראות הטלגרם ממתינות לשניהם (ראה checkAlerts).
+let _workersReady=false;
 function startDataListeners(){
   if(!_listenersStarted){
     _listenersStarted=true;
@@ -3796,6 +3798,7 @@ function listenFb(){
     // אם הנתונים מגיעים מה-cache המקומי — לא לאפס, רק לרנדר
     // (cache עלול להכיל sessions מאתמול ולגרום לאיפוס שגוי)
     if(snap.metadata.fromCache){renderAll();return;}
+    _workersReady=true;
     // נקה sessions ישנות שלא אופסו כי Firebase נטען אחרי checkDailyReset
     const today=todayStr();
     const {getDoc,doc:fsDoc}=window._fb;
@@ -8259,7 +8262,8 @@ function checkAlerts(){
   const absThresh=parseInt(document.getElementById('al-absent')?.value)||5;
   S.alerts=[];
   S.activeTasks.forEach(t=>{
-    if(t.elapsed>thresh)S.alerts.push({type:'long',key:'long:'+t.id,msg:`${t.workerName} — ${fmtM(t.elapsed)} על לקוח ${t.cust} מוצר ${t.prod}`,sev:'warn'});
+    // משימה מושהית אינה "רצה הרבה זמן" — עד 26/09 נספרה עם כל הזמן שצברה
+    if(!t.paused&&t.elapsed>thresh)S.alerts.push({type:'long',key:'long:'+t.id,hasExp:+t.expectedMin>0,msg:`${t.workerName} — ${fmtM(t.elapsed)} על לקוח ${t.cust} מוצר ${t.prod}`,sev:'warn'});
   });
   const absW=S.workers.filter(w=>w.status==='out');
   const abs=absW.length;
@@ -8270,30 +8274,60 @@ function checkAlerts(){
   const s=document.getElementById('al-sum');if(s)s.textContent=cnt;
   const lg=document.getElementById('al-long');if(lg)lg.textContent=S.alerts.filter(a=>a.type==='long').length;
   const ab=document.getElementById('al-abs');if(ab)ab.textContent=S.alerts.filter(a=>a.type==='absent').length;
-  // שליחה לטלגרם — רק התראות חדשות או שהשתנו (לא לחזור על אותה התראה)
+  // 📨 שליחה לטלגרם. עד 26/09 כל מכשיר זכר לבד (localStorage) מה נשלח ⇒ כל מכשיר שנפתח
+  // (כולל החתמת כניסה) שלח שוב את כל הרשימה; ומכשיר שלא נפתח מאז חמישי שלח מהזיכרון
+  // המקומי משימות ישנות ("2861 דק'") ו"21 נעדרים" — לפני שנתוני השרת הגיעו. עכשיו:
+  // • ממתינים ל-_activeTasksReady ו-_workersReady (נתונים מהשרת, לא cache)
+  // • רישום משותף appSettings/tgAlertLog בטרנזקציה — רק המכשיר שתפס את ההתראה שולח
+  // • משימה עם צפי מהתמחור — השרת (longTaskMonitor) כבר שולח "חריגה מזמן מתוקצב"
+  // S.tgSentAlerts/tgAbsentSig נשארו כמסנן מקומי מהיר (checkAlerts רץ כל שנייה) — לא כהכרעה.
   const ws=S.settings;
-  if(ws.waEnabled&&cnt>0&&waInWorkingHours()){
-    const lines=[];const sentKeys=[];
-    if(ws.waLong){
-      S.alerts.filter(a=>a.type==='long'&&!S.tgSentAlerts[a.key]).forEach(a=>{
-        S.tgSentAlerts[a.key]=true;sentKeys.push(a.key);lines.push('⏰ '+a.msg);
-      });
-    }
-    let prevAbsSig=null;
-    if(ws.waAbsent){
-      const absAlert=S.alerts.find(a=>a.type==='absent');
-      if(absAlert&&absAlert.sig!==S.tgAbsentSig){
-        prevAbsSig=S.tgAbsentSig;S.tgAbsentSig=absAlert.sig;lines.push('👤 '+absAlert.msg);
-      }
-    }
-    if(lines.length){
-      const msg='TextileOps — התראות:\n'+lines.join('\n');
-      sendTelegram(msg).then(ok=>{
-        if(ok){S.waLastSent=Date.now();saveLS();const st=document.getElementById('wa-status');if(st){st.textContent='✅ נשלח '+new Date().toLocaleTimeString('he-IL');st.style.color='var(--green-txt)';}}
-        else{sentKeys.forEach(k=>delete S.tgSentAlerts[k]);if(prevAbsSig!==null)S.tgAbsentSig=prevAbsSig;}
-      });
+  if(ws.waEnabled&&cnt>0&&waInWorkingHours()&&_activeTasksReady&&_workersReady&&!_tgClaimBusy&&db){
+    const longs=ws.waLong?S.alerts.filter(a=>a.type==='long'&&!a.hasExp&&!S.tgSentAlerts[a.key]):[];
+    longs.forEach(a=>{S.tgSentAlerts[a.key]=true;});
+    const absAlert=ws.waAbsent?S.alerts.find(a=>a.type==='absent'&&a.sig!==S.tgAbsentSig):null;
+    if(absAlert)S.tgAbsentSig=absAlert.sig;
+    if(longs.length||absAlert){
+      _tgClaimBusy=true;
+      _tgClaimAlerts(longs.map(a=>a.key),absAlert?absAlert.sig:null).then(r=>{
+        const lines=longs.filter(a=>r.keys.includes(a.key)).map(a=>'⏰ '+a.msg);
+        if(r.abs)lines.push('👤 '+absAlert.msg);
+        if(!lines.length)return;
+        return sendTelegram('TextileOps — התראות:\n'+lines.join('\n')).then(ok=>{
+          if(ok){S.waLastSent=Date.now();saveLS();const st=document.getElementById('wa-status');if(st){st.textContent='✅ נשלח '+new Date().toLocaleTimeString('he-IL');st.style.color='var(--green-txt)';}}
+          else _tgReleaseAlerts(r.keys,r.abs);
+        });
+      }).catch(e=>console.warn('📨 רישום התראות נכשל:',e.message)).finally(()=>{_tgClaimBusy=false;});
     }
   }
+}
+// רישום משותף של התראות שנשלחו — מפתח לכל משימה ('long:'+id) + חתימת רשימת הנעדרים של היום.
+// הטרנזקציה מבטיחה שרק מכשיר אחד "תופס" כל התראה. מפתחות מעל 3 ימים נמחקים בכל כתיבה.
+let _tgClaimBusy=false;
+async function _tgClaimAlerts(keys,absSig){
+  const{doc,runTransaction}=window._fb;const ref=doc(db,'appSettings','tgAlertLog');
+  return runTransaction(db,async tx=>{
+    const snap=await tx.get(ref);const d=snap.exists()?snap.data():{};
+    const now=Date.now(),cut=now-3*864e5,sent={};
+    Object.entries(d.sent||{}).forEach(([k,ts])=>{if(ts>cut)sent[k]=ts;});
+    const got=keys.filter(k=>!sent[k]);got.forEach(k=>{sent[k]=now;});
+    const day=todayStr();const abs=!!absSig&&!(d.absDay===day&&d.absSig===absSig);
+    tx.set(ref,{sent,absSig:abs?absSig:(d.absSig||''),absDay:abs?day:(d.absDay||'')});
+    return{keys:got,abs};
+  });
+}
+// שליחה לטלגרם נכשלה ⇒ משחררים את מה שנתפס, כדי שמכשיר אחר (או הבא) ישלח
+async function _tgReleaseAlerts(keys,abs){
+  keys.forEach(k=>{delete S.tgSentAlerts[k];});
+  if(abs)S.tgAbsentSig='';
+  try{
+    const{doc,runTransaction}=window._fb;const ref=doc(db,'appSettings','tgAlertLog');
+    await runTransaction(db,async tx=>{
+      const snap=await tx.get(ref);if(!snap.exists())return;const d=snap.data();
+      const sent={...(d.sent||{})};keys.forEach(k=>{delete sent[k];});
+      tx.set(ref,{sent,absSig:abs?'':(d.absSig||''),absDay:abs?'':(d.absDay||'')});
+    });
+  }catch(e){console.warn('📨 שחרור התראות נכשל:',e.message);}
 }
 function renderAlerts(){
   const el=document.getElementById('alerts-list');if(!el)return;
