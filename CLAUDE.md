@@ -9,6 +9,8 @@
 - **בסיס נתונים:** Firebase Firestore (פרויקט `textileops-aef4a`), סנכרון בזמן אמת בין מכשירים דרך `onSnapshot`. יש גם עותק מקומי ב-localStorage (`txops_v3`) לעבודה לא מקוונת.
 - **אימות Firebase (שלב 2 — 03/07/2026):** אין יותר התחברות אנונימית. `doLogin()` קורא ל-Cloud Function `login` (מאמתת סיסמה/פנים/מכשיר/IP בצד שרת) שמחזירה **Custom Token עם `role` claim**; הלקוח נכנס עם `signInWithCustomToken`. ה-Rules דורשים `role` בטוקן — בלי כניסה דרך הפונקציה שום דבר לא נטען. ה-listeners (`startDataListeners`) מתחילים רק אחרי כניסה.
 - **חיבורים חיים (25/09/2026):** כל `onSnapshot` עובר דרך `_live(name, refFn, cb, opts, when)` — ניסיון חוזר בשגיאה, רענון טוקן, החייאה אחרי יציאה+כניסה באותו טאב. **מאזין חדש = רק דרך `_live`.** הכתיבות דרך `fbSet`/`fbDel`/`fbUpdateOnly`/`fbSetMerge`/`fbReplaceFields` נספרות ב-`_pw` למחוון הסנכרון (הנקודה על עיגול השם).
+- **התראות טלגרם מהאפליקציה (26/09/2026):** `checkAlerts` רץ בכל מכשיר כל שנייה. "מה כבר נשלח" נקבע **ברישום משותף** `appSettings/tgAlertLog` בטרנזקציה — לא ב-localStorage (שגרם לכל מכשיר שנפתח לשלוח הכל שוב). שולחים רק אחרי `_activeTasksReady` + `_workersReady`. משימות מושהות לא נחשבות "ארוכות"; משימה עם צפי — רק השרת (`longTaskMonitor`) מתריע עליה.
+- **`longTaskMonitor` (שרת, כל 5 דק'):** try/catch לכל משימה; רישום Push מת נמחק. עובדת בלי טלפון ⇒ Push לאחראית שפתחה (`scannedBy`) ← "אחראי על מחלקות" (`adminSettings/costs.oversightDepts`) ← אחראית במחלקה ← כל האחראיות.
 - **Cloud Functions:** Node 22, `firebase-functions` 6.x, ייבוא `firebase-functions/v1` (כל הפונקציות דור ראשון). 🛑 **לא לשדרג ל-7** — הוא מסיר את `functions.config()`, שבו הסודות (עד המעבר ל-Secret Manager, דדליין מרץ 2027).
 
 ## חובה לפני כל commit
