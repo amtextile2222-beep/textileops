@@ -755,7 +755,8 @@ const DEAD_FCM_CODES = ['messaging/registration-token-not-registered', 'messagin
 
 // Push לאחראים שרשמו טלפון (appSettings/pushSettings.tokens, role=supervisor). סדר העדפה:
 // 1) האחראי שפתח את המשימה (scannedBy — מי שעומד ליד העובדת ומכיר אותה)
-// 2) אחראי המחלקה של העובדת  3) כל האחראים. מחזיר כמה נשלחו.
+// 2) מי שסומן "אחראי על" מחלקת המשימה/העובדת (מסך העלויות)  3) אחראי שרשום באותה מחלקה
+// 4) כל האחראים. dept = שם מחלקה או מערך שמות. מחזיר כמה נשלחו.
 async function pushSupervisors(pushSnap, dept, title, body, openerIds) {
   const tokens = (pushSnap && pushSnap.exists && pushSnap.data().tokens) || {};
   const entries = Object.entries(tokens)
@@ -768,9 +769,18 @@ async function pushSupervisors(pushSnap, dept, title, body, openerIds) {
     sups[id] = s.exists ? s.data() : null;
   }));
   const live = entries.filter(e => sups[e.workerId] && !sups[e.workerId].disabled);
+  const depts = (Array.isArray(dept) ? dept : [dept]).filter(Boolean);
   const openers = (openerIds || []).length ? live.filter(e => openerIds.includes(e.workerId)) : [];
-  const sameDept = dept ? live.filter(e => sups[e.workerId].dept === dept) : [];
-  const targets = openers.length ? openers : (sameDept.length ? sameDept : live);
+  // "אחראי על מחלקות" במסך העלויות (adminSettings/costs.oversightDepts: {workerId: [שמות מחלקות]})
+  // קובע על מה האחראי ממונה — לא המחלקה שבה הוא עצמו רשום. נופל למחלקה שלו רק אם אין הגדרה.
+  let responsible = [];
+  if (depts.length) {
+    const cs = await db.collection('adminSettings').doc('costs').get();
+    const ov = (cs.exists && cs.data().oversightDepts) || {};
+    responsible = live.filter(e => (ov[e.workerId] || []).some(d => depts.includes(d)));
+  }
+  const sameDept = depts.length ? live.filter(e => depts.includes(sups[e.workerId].dept)) : [];
+  const targets = openers.length ? openers : responsible.length ? responsible : (sameDept.length ? sameDept : live);
   let sent = 0;
   await Promise.all(targets.map(async e => {
     try {
@@ -902,7 +912,8 @@ exports.longTaskMonitor = functions.pubsub.schedule('every 5 minutes').onRun(asy
         const who = lead.workerName || workerData.name || lead.workerId;
         // מי פתח את המשימות (סורק המשימות שומר scannedBy) — בלי העובדת עצמה
         const openerIds = [...new Set(tasks.map(t => t.scannedBy).filter(id => id && id !== lead.workerId))];
-        await pushSupervisors(pushSnap, workerData.dept || lead.dept || '',
+        // מחלקת המשימה (איפה העבודה נעשית) וגם מחלקת העובדת
+        await pushSupervisors(pushSnap, [...new Set([lead.dept, workerData.dept].filter(Boolean))],
           hasExpected ? '⏱ חריגה מהזמן — ' + who : '⚠️ משימה ארוכה — ' + who,
           (stepsTxt ? stepsTxt + ' · ' : '') + prodsTxt +
             (hasExpected ? ' · הוקצבו ' + Math.round(expSum) + ' דק\', עברו ' + mins : ' · פעילה ' + mins + ' דק\''),
