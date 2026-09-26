@@ -2419,7 +2419,8 @@ const DEF_BREAK_START='10:30';
 const DEF_BREAK_END='11:00';
 const ALL_SUPERVISOR_PAGE_IDS=[...ALL_WORKER_PAGE_IDS,...SUPERVISOR_EXTRA_PAGES.map(p=>p.id)];
 const pad2=n=>String(n).padStart(2,'0');
-const fmtS=s=>pad2(Math.floor(s/3600))+':'+pad2(Math.floor(s/60)%60)+':'+pad2(s%60);
+// עיגול למטה: צפי עם שבר (66.1 דק') הציג "00:23:18.0000000000000455"
+const fmtS=s=>(s=Math.floor(s),pad2(Math.floor(s/3600))+':'+pad2(Math.floor(s/60)%60)+':'+pad2(s%60));
 const fmtM=s=>Math.round(s/60)+' '+(window.T?.dash_min||"דק'");
 const todayStr=()=>{const d=new Date();return d.getFullYear()+'-'+pad2(d.getMonth()+1)+'-'+pad2(d.getDate());};
 const esc=s=>String(s??'').replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;');
