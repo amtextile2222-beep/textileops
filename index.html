@@ -1605,7 +1605,7 @@ const LANGS={
     st_busy_ask:'אתה עובד על המכונה הזו עכשיו?',
     st_busy_take:'🔧 אני עובד עליה',st_busy_visit:'📋 רק חלוקת עבודה',
     st_busy_kept:'השיוך לא שונה',st_released:'שוחרר/ה מ־',st_rescan:'סרוק את ברקוד המכונה שאתה עליה',
-    st_tasks_closed:'משימות נסגרו',st_push_released:'📍 שוחררת מהתחנה',
+    st_tasks_closed:'משימות נסגרו',st_push_released:'📍 שוחררת מהתחנה',remind_btn:'תזכורת',remind_title:'שלח Push תזכורת לעובד ולאחראי',remind_offline:'אין חיבור לשרת',remind_wait:'תזכורת כבר נשלחה — אפשר שוב בעוד',remind_sec:"שנ'",remind_gone:'המשימה כבר נסגרה',remind_none:'לא נשלח — אין טלפון רשום לעובד או לאחראי',remind_sent:'נשלחה תזכורת',remind_to_worker:'לעובד',remind_to_sups:'לאחראי',
     st_locked:'🔒 לא בתחנה הנכונה',
     st_no_station:'אין תחנה משויכת',
     st_no_steps_here:'אין שלבים לתחנה הזו במוצר — סרוק את התחנה הנכונה',
@@ -1882,7 +1882,7 @@ const LANGS={
     st_busy_ask:'هل تعمل على هذه المكنة الآن؟',
     st_busy_take:'🔧 أنا أعمل عليها',st_busy_visit:'📋 فقط توزيع شغل',
     st_busy_kept:'لم يتغيّر الربط',st_released:'تم تحريره/ا من',st_rescan:'امسح باركود المكنة التي تعمل عليها',
-    st_tasks_closed:'مهام أُغلقت',st_push_released:'📍 تم تحريرك من المحطة',
+    st_tasks_closed:'مهام أُغلقت',st_push_released:'📍 تم تحريرك من المحطة',remind_btn:'تذكير',remind_title:'إرسال تذكير للعامل وللمسؤول',remind_offline:'لا يوجد اتصال بالخادم',remind_wait:'تم إرسال تذكير — يمكن الإرسال مرة أخرى بعد',remind_sec:'ث',remind_gone:'المهمة أُغلقت بالفعل',remind_none:'لم يُرسل — لا يوجد هاتف مسجّل للعامل أو للمسؤول',remind_sent:'تم إرسال تذكير',remind_to_worker:'للعامل',remind_to_sups:'للمسؤول',
     st_locked:'🔒 لست في المحطة الصحيحة',
     st_no_station:'لا توجد محطة مرتبطة',
     st_no_steps_here:'لا توجد مراحل لهذه المحطة في هذا المنتج — امسح المحطة الصحيحة',
@@ -2159,7 +2159,7 @@ const LANGS={
     st_busy_ask:'Are you working on this machine now?',
     st_busy_take:'🔧 I am working on it',st_busy_visit:'📋 Just handing out work',
     st_busy_kept:'Assignment unchanged',st_released:'was released from ',st_rescan:'scan the barcode of the machine you are at',
-    st_tasks_closed:'tasks closed',st_push_released:'📍 You were released from the station',
+    st_tasks_closed:'tasks closed',st_push_released:'📍 You were released from the station',remind_btn:'Remind',remind_title:'Send a push reminder to the worker and supervisor',remind_offline:'No server connection',remind_wait:'Reminder already sent — try again in',remind_sec:'s',remind_gone:'The task was already closed',remind_none:'Not sent — no registered phone for the worker or supervisor',remind_sent:'Reminder sent',remind_to_worker:'to the worker',remind_to_sups:'to supervisor',
     st_locked:'🔒 Wrong station',
     st_no_station:'no station assigned',
     st_no_steps_here:'No steps for this station in this product — scan the correct station',
@@ -6547,7 +6547,9 @@ function renderTasks(){
     const pausedDate=lead.pausedAt?new Date(lead.pausedAt):null;
     const pausedStr=pausedDate?pad2(pausedDate.getDate())+'/'+pad2(pausedDate.getMonth()+1):null;
     const expLabel=hasExp?`<span style="font-size:11px;color:var(--txt3)">🎯 צפי ${fmtExpMin(expSec/60)}</span>`:'';
-    const statusBadge=cls==='late'?'<span class="badge" style="background:var(--red-bg,#fee2e2);color:var(--red-txt,#dc2626)">🔴 חריגה מהצפי</span>':cls==='warn'?'<span class="badge amber">🟤 מתקרב לצפי</span>':cls==='over'?'<span class="badge amber">⚠ ארוכה</span>':'';
+    // 🔔 תזכורת ידנית (מנהל/אחראי) — מוצג רק בחריגה מהצפי; ה-tick מציג/מסתיר בזמן אמת (rmd-<id>)
+    const remindBtn=isMgr&&hasExp&&!allPaused?`<button class="btn" id="rmd-${lead.id}" style="font-size:11px;padding:3px 8px;color:var(--red-txt,#dc2626);${cls==='late'?'':'display:none'}" onclick="remindLateTask('${ids}',this)" title="${T.remind_title||'שלח Push תזכורת לעובד ולאחראי'}">🔔 ${T.remind_btn||'תזכורת'}</button>`:'';
+    const statusBadge=(cls==='late'?'<span class="badge" style="background:var(--red-bg,#fee2e2);color:var(--red-txt,#dc2626)">🔴 חריגה מהצפי</span>':cls==='warn'?'<span class="badge amber">🟤 מתקרב לצפי</span>':cls==='over'?'<span class="badge amber">⚠ ארוכה</span>':'')+remindBtn;
     // בלוק טיימרים: ספירה עולה + ספירה לאחור עד הצפי
     const timerBlock=allPaused
       ?`<span class="badge" style="background:#e0e7ff;color:#4338ca;font-size:11px">⏸ ${fmtM(lead.accumulatedSec||0)}</span>`
@@ -7110,6 +7112,8 @@ setInterval(()=>{
     el.className='task-tmr'+(cls?' '+cls:'');
     const cd=document.getElementById('cd-'+el.id.slice(4));
     if(cd){cd.textContent=fmtCountdown(expSec-elapsedSec);cd.className='task-cd'+(cls?' '+cls:'');}
+    const rb=document.getElementById('rmd-'+el.id.slice(4));
+    if(rb)rb.style.display=cls==='late'?'':'none';
   });
   // live net hours update in attendance
   const tnEl=document.getElementById('att-total-net');
@@ -8493,6 +8497,21 @@ async function sendPushToWorker(workerId,title,body){
     const fn=httpsCallable(window._fbFunctions,'sendPushToWorker');
     await fn({workerId,title,body});
   }catch(e){console.error('sendPushToWorker error:',e);}
+}
+// 🔔 תזכורת על משימה שחרגה — השרת (remindLateTask) שולח לעובד + לאחראי, עם הגבלה של פעם בדקה
+async function remindLateTask(ids,btn){
+  const T=LANGS[currentLang];
+  if(!window._fbFunctions){showToast('❌ '+(T.remind_offline||'אין חיבור לשרת'),'var(--red-txt)');return;}
+  if(btn)btn.disabled=true;
+  try{
+    const{httpsCallable}=window._fb;
+    const r=(await httpsCallable(window._fbFunctions,'remindLateTask')({taskIds:ids.split(',')})).data||{};
+    if(r.reason==='cooldown')showToast('⏳ '+(T.remind_wait||'תזכורת כבר נשלחה — אפשר שוב בעוד')+' '+r.waitSec+' '+(T.remind_sec||"שנ'"),'var(--amber-txt)');
+    else if(r.reason==='gone')showToast('ℹ️ '+(T.remind_gone||'המשימה כבר נסגרה'),'var(--amber-txt)');
+    else if(!r.worker&&!(r.sups||[]).length)showToast('⚠️ '+(T.remind_none||'לא נשלח — אין טלפון רשום לעובד או לאחראי'),'var(--red-txt)',5000);
+    else showToast('🔔 '+(T.remind_sent||'נשלחה תזכורת')+(r.worker?' '+(T.remind_to_worker||'לעובד'):'')+(r.sups.length?' · '+(T.remind_to_sups||'לאחראי')+': '+r.sups.map(esc).join(', '):''),'var(--green-txt)',5000);
+  }catch(e){console.error('remindLateTask error:',e);showToast('❌ '+(e.message||e),'var(--red-txt)',5000);}
+  finally{if(btn)setTimeout(()=>{btn.disabled=false;},3000);}
 }
 async function initFCM(){
   try{

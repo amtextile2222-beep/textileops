@@ -756,19 +756,20 @@ const DEAD_FCM_CODES = ['messaging/registration-token-not-registered', 'messagin
 // Push לאחראים שרשמו טלפון (appSettings/pushSettings.tokens, role=supervisor). סדר העדפה:
 // 1) האחראי שפתח את המשימה (scannedBy — מי שעומד ליד העובדת ומכיר אותה)
 // 2) מי שסומן "אחראי על" מחלקת המשימה/העובדת (מסך העלויות)  3) אחראי שרשום באותה מחלקה
-// 4) כל האחראים. dept = שם מחלקה או מערך שמות. מחזיר כמה נשלחו.
-async function pushSupervisors(pushSnap, dept, title, body, openerIds) {
+// 4) כל האחראים. dept = שם מחלקה או מערך שמות. מחזיר את שמות האחראים שקיבלו.
+// opts.exclude = מזהים שלא יקבלו (מי שלחץ) · opts.onlyOpeners = בלי נפילה לשאר האחראים
+async function pushSupervisors(pushSnap, dept, title, body, openerIds, opts = {}) {
   const tokens = (pushSnap && pushSnap.exists && pushSnap.data().tokens) || {};
   const entries = Object.entries(tokens)
     .map(([key, t]) => ({ key, ...(typeof t === 'string' ? { token: t } : (t || {})) }))
     .filter(e => e.token && e.role === 'supervisor' && e.workerId);
-  if (!entries.length) return 0;
+  if (!entries.length) return [];
   const sups = {};
   await Promise.all([...new Set(entries.map(e => e.workerId))].map(async id => {
     const s = await db.collection('workers').doc(id).get();
     sups[id] = s.exists ? s.data() : null;
   }));
-  const live = entries.filter(e => sups[e.workerId] && !sups[e.workerId].disabled);
+  const live = entries.filter(e => sups[e.workerId] && !sups[e.workerId].disabled && !(opts.exclude || []).includes(e.workerId));
   const depts = (Array.isArray(dept) ? dept : [dept]).filter(Boolean);
   const openers = (openerIds || []).length ? live.filter(e => openerIds.includes(e.workerId)) : [];
   // "אחראי על מחלקות" במסך העלויות (adminSettings/costs.oversightDepts: {workerId: [שמות מחלקות]})
@@ -780,8 +781,8 @@ async function pushSupervisors(pushSnap, dept, title, body, openerIds) {
     responsible = live.filter(e => (ov[e.workerId] || []).some(d => depts.includes(d)));
   }
   const sameDept = depts.length ? live.filter(e => depts.includes(sups[e.workerId].dept)) : [];
-  const targets = openers.length ? openers : responsible.length ? responsible : (sameDept.length ? sameDept : live);
-  let sent = 0;
+  const targets = (openers.length || opts.onlyOpeners) ? openers : responsible.length ? responsible : (sameDept.length ? sameDept : live);
+  const reached = new Set();
   await Promise.all(targets.map(async e => {
     try {
       await admin.messaging().send({
@@ -790,7 +791,7 @@ async function pushSupervisors(pushSnap, dept, title, body, openerIds) {
         android: { priority: 'high', notification: { sound: 'default', channelId: 'textileops' } },
         webpush: { notification: { icon: 'https://amtextile2222-beep.github.io/textileops/icon-192.png', requireInteraction: true } }
       });
-      sent++;
+      reached.add(sups[e.workerId].name || e.workerId);
     } catch (err) {
       if (DEAD_FCM_CODES.includes(err.code)) {
         // FieldPath — מפתח המכשיר עלול להכיל נקודות
@@ -798,8 +799,77 @@ async function pushSupervisors(pushSnap, dept, title, body, openerIds) {
       }
     }
   }));
-  return sent;
+  return [...reached];
 }
+
+// 🔔 תזכורת ידנית על משימה שחרגה מהצפי — כפתור בכרטיס המשימה (מנהל/אחראי).
+// ההתראה האוטומטית (longTaskMonitor) נשלחת פעם אחת בלבד, ולא תמיד שמים לב אליה.
+// נשלח לעובדת (אם יש לה טלפון) + לאחראית שפתחה את המשימה; מנהל — גם לפי סדר ההעדפה הרגיל.
+// הגבלת קצב: תזכורת אחת לדקה לכל קבוצת משימות (taskAlerts/remind_<id>, בטרנזקציה).
+const REMIND_COOLDOWN_MS = 60 * 1000;
+exports.remindLateTask = functions.https.onCall(async (data, context) => {
+  const role = callerRole(context);
+  if (role !== 'manager' && role !== 'supervisor') throw new functions.https.HttpsError('permission-denied', 'למנהל ולאחראים בלבד');
+  const ids = [...new Set((Array.isArray(data && data.taskIds) ? data.taskIds : []).map(String).filter(Boolean))].slice(0, 20);
+  if (!ids.length) throw new functions.https.HttpsError('invalid-argument', 'לא נבחרה משימה');
+  const snaps = await Promise.all(ids.map(id => db.collection('activeTasks').doc(id).get()));
+  const tasks = snaps.filter(s => s.exists).map(s => s.data());
+  if (!tasks.length) return { ok: false, reason: 'gone' };
+  const lead = tasks[0];
+  const now = Date.now();
+  const lockRef = db.collection('taskAlerts').doc('remind_' + ids.slice().sort()[0]);
+  const waitMs = await db.runTransaction(async tx => {
+    const l = await tx.get(lockRef);
+    const last = l.exists ? (l.data().ts || 0) : 0;
+    if (now - last < REMIND_COOLDOWN_MS) return REMIND_COOLDOWN_MS - (now - last);
+    tx.set(lockRef, { ts: now, by: context.auth.uid, taskIds: ids });
+    return 0;
+  });
+  if (waitMs > 0) return { ok: false, reason: 'cooldown', waitSec: Math.ceil(waitMs / 1000) };
+
+  const workerSnap = await db.collection('workers').doc(lead.workerId).get();
+  const workerData = workerSnap.exists ? workerSnap.data() : {};
+  const who = lead.workerName || workerData.name || lead.workerId;
+  const expSum = tasks.reduce((s, t) => s + ((typeof t.expectedMin === 'number' && t.expectedMin > 0) ? t.expectedMin : 0), 0);
+  // זמן בפועל כמו ב-longTaskMonitor (שעון קיר מההתחלה), ועוד מה שנצבר לפני השהיה
+  const mins = Math.round(Math.max(...tasks.map(t => (t.accumulatedSec || 0) * 1000 + (t.startTime && !t.paused ? now - new Date(t.startTime).getTime() : 0))) / 60000);
+  const stepsTxt = [...new Set(tasks.map(t => t.taskType).filter(Boolean))].join(', ');
+  const prodsTxt = [...new Set(tasks.map(t => t.prod || ''))].join(', ');
+  const timeTxt = (expSum > 0 ? 'הוקצבו ' + Math.round(expSum) + ' דק\', ' : '') + 'עברו ' + mins + ' דק\'';
+
+  let worker = false;
+  if (workerData.fcmToken) {
+    try {
+      await admin.messaging().send({
+        token: workerData.fcmToken,
+        notification: { title: '⏰ תזכורת — חריגה מהזמן המוקצב', body: (stepsTxt ? stepsTxt + ' · ' : '') + prodsTxt + ' · ' + timeTxt },
+        android: { priority: 'high', notification: { sound: 'default', channelId: 'textileops' } },
+        apns: { payload: { aps: { sound: 'default', badge: 1, contentAvailable: true } }, headers: { 'apns-priority': '10', 'apns-push-type': 'alert' } },
+        webpush: { notification: { icon: 'https://amtextile2222-beep.github.io/textileops/icon-192.png', requireInteraction: true, vibrate: [200, 100, 200] } }
+      });
+      worker = true;
+    } catch (e) {
+      console.warn('remindLateTask: push לעובד נכשל', lead.workerId, e.code || e.message);
+      if (DEAD_FCM_CODES.includes(e.code)) await workerSnap.ref.set({ fcmToken: FieldValue.delete() }, { merge: true }).catch(() => {});
+    }
+  }
+  // אחראים: מי שלחץ לא מקבל על עצמו. אחראי שלוחץ — רק לאחראית אחרת שפתחה (אם יש),
+  // כדי לא להציף את כל האחראים; מנהל — לפי סדר ההעדפה המלא של pushSupervisors.
+  const openerIds = [...new Set(tasks.map(t => t.scannedBy).filter(id => id && id !== lead.workerId && id !== context.auth.uid))];
+  let sups = [];
+  if (role === 'manager' || openerIds.length) {
+    const pushSnap = await db.collection('appSettings').doc('pushSettings').get();
+    sups = await pushSupervisors(pushSnap, [...new Set([lead.dept, workerData.dept].filter(Boolean))],
+      '⏰ תזכורת — ' + who + ' חורגת מהזמן',
+      (stepsTxt ? stepsTxt + ' · ' : '') + prodsTxt + ' · ' + timeTxt,
+      openerIds, { exclude: [context.auth.uid], onlyOpeners: role !== 'manager' }
+    ).catch(e => { console.warn('remindLateTask: push לאחראים נכשל', e.message); return []; });
+  }
+  // אף אחד לא קיבל — משחררים את הנעילה כדי שאפשר יהיה לנסות שוב מיד
+  if (!worker && !sups.length) await lockRef.delete().catch(() => {});
+  console.log('remindLateTask:', ids.join(','), 'by', context.auth.uid, 'worker:', worker, 'sups:', sups.join(','));
+  return { ok: true, worker, sups };
+});
 
 // בדיקת משימות ארוכות כל 5 דקות
 exports.longTaskMonitor = functions.pubsub.schedule('every 5 minutes').onRun(async () => {
