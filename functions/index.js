@@ -802,14 +802,16 @@ async function pushSupervisors(pushSnap, dept, title, body, openerIds, opts = {}
   return [...reached];
 }
 
-// 🔔 תזכורת ידנית על משימה שחרגה מהצפי — כפתור בכרטיס המשימה (מנהל/אחראי).
+// 🔔 תזכורת ידנית על משימה שחרגה מהצפי — כפתור בכרטיס המשימה (מנהל).
 // ההתראה האוטומטית (longTaskMonitor) נשלחת פעם אחת בלבד, ולא תמיד שמים לב אליה.
 // נשלח לעובדת (אם יש לה טלפון) + לאחראית שפתחה את המשימה; מנהל — גם לפי סדר ההעדפה הרגיל.
 // הגבלת קצב: תזכורת אחת לדקה לכל קבוצת משימות (taskAlerts/remind_<id>, בטרנזקציה).
 const REMIND_COOLDOWN_MS = 60 * 1000;
 exports.remindLateTask = functions.https.onCall(async (data, context) => {
   const role = callerRole(context);
-  if (role !== 'manager' && role !== 'supervisor') throw new functions.https.HttpsError('permission-denied', 'למנהל ולאחראים בלבד');
+  // בינתיים מנהל בלבד (27/09/2026). פתיחה לאחראים = להוסיף כאן 'supervisor' ובלקוח (remindBtn) —
+  // הלוגיקה של "אחראי שלוחץ" למטה כבר קיימת ונבדקה
+  if (role !== 'manager') throw new functions.https.HttpsError('permission-denied', 'למנהל בלבד');
   const ids = [...new Set((Array.isArray(data && data.taskIds) ? data.taskIds : []).map(String).filter(Boolean))].slice(0, 20);
   if (!ids.length) throw new functions.https.HttpsError('invalid-argument', 'לא נבחרה משימה');
   const snaps = await Promise.all(ids.map(id => db.collection('activeTasks').doc(id).get()));

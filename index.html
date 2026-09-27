@@ -6547,8 +6547,8 @@ function renderTasks(){
     const pausedDate=lead.pausedAt?new Date(lead.pausedAt):null;
     const pausedStr=pausedDate?pad2(pausedDate.getDate())+'/'+pad2(pausedDate.getMonth()+1):null;
     const expLabel=hasExp?`<span style="font-size:11px;color:var(--txt3)">🎯 צפי ${fmtExpMin(expSec/60)}</span>`:'';
-    // 🔔 תזכורת ידנית (מנהל/אחראי) — מוצג רק בחריגה מהצפי; ה-tick מציג/מסתיר בזמן אמת (rmd-<id>)
-    const remindBtn=isMgr&&hasExp&&!allPaused?`<button class="btn" id="rmd-${lead.id}" style="font-size:11px;padding:3px 8px;color:var(--red-txt,#dc2626);${cls==='late'?'':'display:none'}" onclick="remindLateTask('${ids}',this)" title="${T.remind_title||'שלח Push תזכורת לעובד ולאחראי'}">🔔 ${T.remind_btn||'תזכורת'}</button>`:'';
+    // 🔔 תזכורת ידנית (מנהל בלבד — החלטת המשתמש 27/09) — מוצג רק בחריגה מהצפי; ה-tick מציג/מסתיר בזמן אמת (rmd-<id>)
+    const remindBtn=S.user?.role==='manager'&&hasExp&&!allPaused?`<button class="btn" id="rmd-${lead.id}" style="font-size:11px;padding:3px 8px;color:var(--red-txt,#dc2626);${cls==='late'?'':'display:none'}" onclick="remindLateTask('${ids}',this)" title="${T.remind_title||'שלח Push תזכורת לעובד ולאחראי'}">🔔 ${T.remind_btn||'תזכורת'}</button>`:'';
     const statusBadge=(cls==='late'?'<span class="badge" style="background:var(--red-bg,#fee2e2);color:var(--red-txt,#dc2626)">🔴 חריגה מהצפי</span>':cls==='warn'?'<span class="badge amber">🟤 מתקרב לצפי</span>':cls==='over'?'<span class="badge amber">⚠ ארוכה</span>':'')+remindBtn;
     // בלוק טיימרים: ספירה עולה + ספירה לאחור עד הצפי
     const timerBlock=allPaused
