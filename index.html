@@ -4560,6 +4560,7 @@ function finishLogin(w,autoPunch){
   listenWorkerMessages();
   listenMgrInbox();
   loadAIUrl();
+  setTimeout(_saveMyLang,5000); // אחרי שכרטיסי העובדים נטענו
   if(w.role==='worker'||w.role==='helper')document.getElementById('worker-send-msg-bar').style.display='block';
   if(w.role!=='manager'&&w.role!=='supervisor'){
     if(typeof Notification!=='undefined'&&Notification.permission==='granted'){initWorkerFCM(w.id);}
@@ -8505,7 +8506,10 @@ async function remindLateTask(ids,btn){
   if(btn)btn.disabled=true;
   try{
     const{httpsCallable}=window._fb;
-    const r=(await httpsCallable(window._fbFunctions,'remindLateTask')({taskIds:ids.split(',')})).data||{};
+    // הדקות כמו בטיימר שעל המסך (בלי ההפסקה) — השרת סופר שעון קיר ולכן היה מראה יותר
+    const gts=ids.split(',').map(id=>S.activeTasks.find(t=>t.id===id)).filter(Boolean);
+    const elapsedMin=gts.length?Math.round(Math.max(0,...gts.map(t=>t.elapsed||0))/60):null;
+    const r=(await httpsCallable(window._fbFunctions,'remindLateTask')({taskIds:ids.split(','),elapsedMin})).data||{};
     if(r.reason==='cooldown')showToast('⏳ '+(T.remind_wait||'תזכורת כבר נשלחה — אפשר שוב בעוד')+' '+r.waitSec+' '+(T.remind_sec||"שנ'"),'var(--amber-txt)');
     else if(r.reason==='gone')showToast('ℹ️ '+(T.remind_gone||'המשימה כבר נסגרה'),'var(--amber-txt)');
     else if(!r.worker&&!(r.sups||[]).length)showToast('⚠️ '+(T.remind_none||'לא נשלח — אין טלפון רשום לעובד או לאחראי'),'var(--red-txt)',5000);
@@ -11883,6 +11887,18 @@ function setLang(code){
   const _lt=document.getElementById('lb-toggle');if(_lt)_lt.textContent=code==='ar'?'🇮🇱':'🇸🇦';
   // עדכן תוכן דינמי בדף הוצאות אם פתוח
   if(document.getElementById('page-expenses')?.classList.contains('active'))renderExpenses();
+  _saveMyLang();
+}
+// שפת הממשק נשמרת בכרטיס העובד (`lang`) — השרת שולח את ה-Push של התזכורת בשפה הזו.
+// נקרא בהחלפת שפה ובכניסה; כותב רק כשהשתנה (שדה אחד, merge)
+function _saveMyLang(){
+  try{
+    const u=S.user;if(!u?.id||!db)return;
+    const l=currentLang==='ar'?'ar':'he';
+    const w=S.workers.find(x=>x.id===u.id);
+    if(!w||w.lang===l)return;
+    w.lang=l;fbSetMerge('workers',u.id,{lang:l}).catch(()=>{});
+  }catch(e){}
 }
 
 function toggleLang(){setLang(currentLang==='ar'?'he':'ar');}

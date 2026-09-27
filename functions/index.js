@@ -785,9 +785,11 @@ async function pushSupervisors(pushSnap, dept, title, body, openerIds, opts = {}
   const reached = new Set();
   await Promise.all(targets.map(async e => {
     try {
+      // title/body יכולים להיות פונקציה של שפת האחראי (workers.lang) — כמו בתזכורת הידנית
+      const lg = sups[e.workerId].lang;
       await admin.messaging().send({
         token: e.token,
-        notification: { title, body },
+        notification: { title: typeof title === 'function' ? title(lg) : title, body: typeof body === 'function' ? body(lg) : body },
         android: { priority: 'high', notification: { sound: 'default', channelId: 'textileops' } },
         webpush: { notification: { icon: 'https://amtextile2222-beep.github.io/textileops/icon-192.png', requireInteraction: true } }
       });
@@ -833,18 +835,29 @@ exports.remindLateTask = functions.https.onCall(async (data, context) => {
   const workerData = workerSnap.exists ? workerSnap.data() : {};
   const who = lead.workerName || workerData.name || lead.workerId;
   const expSum = tasks.reduce((s, t) => s + ((typeof t.expectedMin === 'number' && t.expectedMin > 0) ? t.expectedMin : 0), 0);
-  // זמן בפועל כמו ב-longTaskMonitor (שעון קיר מההתחלה), ועוד מה שנצבר לפני השהיה
-  const mins = Math.round(Math.max(...tasks.map(t => (t.accumulatedSec || 0) * 1000 + (t.startTime && !t.paused ? now - new Date(t.startTime).getTime() : 0))) / 60000);
+  // הדקות מגיעות מהטיימר שעל מסך המנהל (בלי ההפסקה — כמו שהוא רואה). שעון קיר רק כגיבוי:
+  // הוא כולל את ההפסקה ולכן הראה עד 30 דק' יותר מהמסך.
+  const cm = data && data.elapsedMin;
+  const mins = (typeof cm === 'number' && isFinite(cm) && cm >= 0 && cm < 24 * 60) ? Math.round(cm)
+    : Math.round(Math.max(...tasks.map(t => (t.accumulatedSec || 0) * 1000 + (t.startTime && !t.paused ? now - new Date(t.startTime).getTime() : 0))) / 60000);
   const stepsTxt = [...new Set(tasks.map(t => t.taskType).filter(Boolean))].join(', ');
   const prodsTxt = [...new Set(tasks.map(t => t.prod || ''))].join(', ');
-  const timeTxt = (expSum > 0 ? 'הוקצבו ' + Math.round(expSum) + ' דק\', ' : '') + 'עברו ' + mins + ' דק\'';
+  // טקסט לפי שפת הממשק של הנמען (workers.lang, נשמר מהלקוח); בלי שדה — עברית.
+  // נוסח ניטרלי (בלי "חורגת") — מתאים לעובד ולעובדת.
+  const RT = {
+    he: { wTitle: '⏰ תזכורת — חריגה מהזמן המוקצב', sTitle: n => '⏰ תזכורת — ' + n + ': חריגה מהזמן', exp: x => 'הוקצבו ' + x + ' דק\'', el: x => 'עברו ' + x + ' דק\'' },
+    ar: { wTitle: '⏰ تذكير — تجاوز الوقت المحدد', sTitle: n => '⏰ تذكير — ' + n + ': تجاوز الوقت', exp: x => 'الوقت المحدد ' + x + ' د', el: x => 'مضى ' + x + ' د' }
+  };
+  const rt = lg => RT[lg] || RT.he;
+  const bodyOf = lg => (stepsTxt ? stepsTxt + ' · ' : '') + prodsTxt + ' · ' +
+    (expSum > 0 ? rt(lg).exp(Math.round(expSum)) + (lg === 'ar' ? '، ' : ', ') : '') + rt(lg).el(mins);
 
   let worker = false;
   if (workerData.fcmToken) {
     try {
       await admin.messaging().send({
         token: workerData.fcmToken,
-        notification: { title: '⏰ תזכורת — חריגה מהזמן המוקצב', body: (stepsTxt ? stepsTxt + ' · ' : '') + prodsTxt + ' · ' + timeTxt },
+        notification: { title: rt(workerData.lang).wTitle, body: bodyOf(workerData.lang) },
         android: { priority: 'high', notification: { sound: 'default', channelId: 'textileops' } },
         apns: { payload: { aps: { sound: 'default', badge: 1, contentAvailable: true } }, headers: { 'apns-priority': '10', 'apns-push-type': 'alert' } },
         webpush: { notification: { icon: 'https://amtextile2222-beep.github.io/textileops/icon-192.png', requireInteraction: true, vibrate: [200, 100, 200] } }
@@ -862,8 +875,7 @@ exports.remindLateTask = functions.https.onCall(async (data, context) => {
   if (role === 'manager' || openerIds.length) {
     const pushSnap = await db.collection('appSettings').doc('pushSettings').get();
     sups = await pushSupervisors(pushSnap, [...new Set([lead.dept, workerData.dept].filter(Boolean))],
-      '⏰ תזכורת — ' + who + ' חורגת מהזמן',
-      (stepsTxt ? stepsTxt + ' · ' : '') + prodsTxt + ' · ' + timeTxt,
+      lg => rt(lg).sTitle(who), bodyOf,
       openerIds, { exclude: [context.auth.uid], onlyOpeners: role !== 'manager' }
     ).catch(e => { console.warn('remindLateTask: push לאחראים נכשל', e.message); return []; });
   }
