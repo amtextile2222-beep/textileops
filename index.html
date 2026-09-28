@@ -2991,7 +2991,7 @@ async function resolveStationOverlap(w){
   if(newer.length){
     // מישהו סרק את המכונה **אחרי** העובד הזה ⇒ הוא כבר לא עליה, והרישום שלו ישן.
     // משחררים אותו וחוסמים — שיסרוק את המכונה שהוא באמת יושב עליה.
-    const closed=await closeRunningTasks(w.id,srvNow());
+    const closed=await closeRunningTasks(w.id,srvNow(),null,{r:'station_stale',n:st.name+' ← '+newer.map(o=>o.name).join(' / ')});
     await closeWorkerStation(w,srvNow());
     logGateEvent('station_busy','stale',{blocked:[{step:st.name,need:newer.map(o=>o.name)}]});
     showToast('📍 '+st.name+' — '+(T.st_busy_by||'תפוסה ע"י')+' '+newer.map(o=>o.name).join(' / ')+
@@ -3002,7 +3002,7 @@ async function resolveStationOverlap(w){
   }
   // העובד הזה סרק אחרון ⇒ המכונה שלו. כל השאר ישנים יותר ומשוחררים.
   for(const o of others){
-    const closed=await closeRunningTasks(o.id,srvNow());
+    const closed=await closeRunningTasks(o.id,srvNow(),null,{r:'station_overlap',n:st.name+' ← '+w.name});
     await closeWorkerStation(o,srvNow());
     logGateEvent('station_busy','release',{blocked:[{step:st.name,need:[o.name]}]});
     showToast('🔄 '+o.name+' '+(T.st_released||'שוחרר/ה מ־')+st.name+(closed?' · 🏁 '+closed+' '+(T.st_tasks_closed||'משימות נסגרו'):''),'var(--amber-txt)',6000);
@@ -5726,7 +5726,7 @@ async function bcStartBatch(){
     // endTime=bcStart (רגע פתיחת החדשות) ⇒ אין חפיפה ואין חור בציר הזמן.
     if(created>0&&_bcCloseOnStart.length){
       const toClose=S.activeTasks.filter(t=>_bcCloseOnStart.includes(String(t.id)));
-      if(toClose.length)await closeTasksBatchAware(toClose,bcStart);
+      if(toClose.length)await closeTasksBatchAware(toClose,bcStart,'new_task');
     }else if(!created&&_bcCloseOnStart.length){
       showToast('⚠ לא נפתחה משימה חדשה — המשימה הקודמת נשארה פעילה','var(--amber-txt)',7000);
     }
@@ -5772,14 +5772,38 @@ function _batchShare(t){
   const tot=sibs.reduce((s,x)=>s+(x.qty||0),0);
   return tot>0?((t.qty||0)/tot):(1/sibs.length);
 }
-async function closeBatchProportional(tasks,endTime){
+// 🏷 מי סגר ולמה — נכתב על כל משימה שהלקוח מעביר להיסטוריה (28/09/2026: ايمان 07:54 —
+// 4 משימות נסגרו והתחנה נמחקה בלי שום עקבה ביומן). why = קוד או {r:קוד, n:פרט}.
+// בלי why ⇒ 'other' — מסלול סגירה שלא סומן, כדי שיבלוט ולא ייבלע.
+// משימה בלי closeReason בכלל = נסגרה בשרת (הסוגר הלילי) או לפני 28/09.
+function _closeMeta(why){
+  const w=typeof why==='string'?{r:why}:(why||{});
+  const ua=navigator.userAgent||'';
+  return{closeReason:w.r||'other',closeNote:w.n||null,closedBy:S.user?.id||null,closedByName:S.user?.name||null,
+    closedDev:/iPhone|iPad/i.test(ua)?'iOS':/Android/i.test(ua)?'Android':'PC'};
+}
+const CLOSE_LBL={
+  he:{manual_end:'סיום ידני',new_task:'נפתחה משימה חדשה',swap_new:'הוחלפה במשימה חדשה',resume_paused:'חזרה למשימה מושהית',
+    paused_new:'מושהית — נפתחה חדשה',paused_done:'מושהית — סומנה כהושלמה',station_handover:'המכונה נמסרה ל־',
+    station_stale:'מישהו אחר סרק את המכונה',station_overlap:'חפיפת מכונה — שוחרר/ה',station_audit:'ניקוי חפיפות',edit_end:'זמן סיום בעריכה',other:'לא ידוע'},
+  ar:{manual_end:'إنهاء يدوي',new_task:'فُتحت مهمة جديدة',swap_new:'استُبدلت بمهمة جديدة',resume_paused:'عودة لمهمة موقوفة',
+    paused_new:'موقوفة — فُتحت جديدة',paused_done:'موقوفة — اكتملت',station_handover:'سُلّمت الماكينة لـ',
+    station_stale:'شخص آخر مسح الماكينة',station_overlap:'تداخل ماكينة — تم التحرير',station_audit:'تنظيف التداخلات',edit_end:'وقت انتهاء بالتعديل',other:'غير معروف'}
+};
+function closeInfoHtml(t){
+  if(!t||!t.closeReason)return'';
+  const L=CLOSE_LBL[currentLang]||CLOSE_LBL.he;
+  const lbl=(L[t.closeReason]||CLOSE_LBL.he[t.closeReason]||t.closeReason)+(t.closeNote?(t.closeReason==='station_handover'?'':' · ')+t.closeNote:'');
+  return` <span style="color:var(--txt2)" title="${esc((t.closedDev||'')+(t.closedBy?' · '+t.closedBy:''))}">· 🏁 ${esc(lbl)}${t.closedByName?' · '+esc(t.closedByName):''}</span>`;
+}
+async function closeBatchProportional(tasks,endTime,why){
   const lead=tasks[0];
   const baseSec=_capByAttendance(lead,lead.paused?(lead.accumulatedSec||0):(lead.accumulatedSec||0)+calcTaskDurSec(lead.startTime,endTime,lead.workerId));
   for(const t of tasks){
     // המכנה נלקח מכל האחיות (כולל כאלה שכבר נסגרו בעריכה ידנית), לא רק מ-tasks שנשלחו לכאן
     const proportion=_batchShare(t);
     const duration=Math.round(baseSec*proportion);
-    const done={...t,endTime,duration};
+    const done={...t,endTime,duration,..._closeMeta(why)};
     delete done.paused;delete done.pausedAt;delete done.accumulatedSec;
     S.histTasks.unshift(done);
     S.activeTasks=S.activeTasks.filter(x=>x.id!==t.id);
@@ -5791,15 +5815,15 @@ async function closeBatchProportional(tasks,endTime){
 }
 // סוגר אוסף משימות עם חלוקת זמן נכונה: משימות שחולקות batchId (עבדו במקביל על טיימר אחד)
 // מתחלקות יחסית; משימות בודדות נסגרות עם הזמן המלא שלהן. כל מסלולי הסגירה עוברים דרך כאן.
-async function closeTasksBatchAware(tasks,endTime){
+async function closeTasksBatchAware(tasks,endTime,why){
   const groups={};
   const singles=[];
   tasks.forEach(t=>{if(t.batchId){(groups[t.workerId+'|'+t.batchId]=groups[t.workerId+'|'+t.batchId]||[]).push(t);}else singles.push(t);});
   for(const g of Object.values(groups)){
-    if(g.length>1)await closeBatchProportional(g,endTime);else singles.push(g[0]);
+    if(g.length>1)await closeBatchProportional(g,endTime,why);else singles.push(g[0]);
   }
   for(const t of singles){
-    const done={...t,endTime,duration:taskFinalDur(t,endTime)};
+    const done={...t,endTime,duration:taskFinalDur(t,endTime),..._closeMeta(why)};
     delete done.paused;delete done.pausedAt;delete done.accumulatedSec;
     S.histTasks.unshift(done);
     S.activeTasks=S.activeTasks.filter(x=>x.id!==t.id);
@@ -5984,27 +6008,27 @@ async function applySwapMode(mode,workerId,activeCurrent,swapTime){
   }
   // ⚠️ **רשימה מפורשת**, לא "כל מה שרץ" — בנקודה הזו המשימה החדשה כבר נוצרה
   // והיא רצה. סינון לפי עובד היה סוגר גם אותה מיד אחרי שנפתחה.
-  await closeTaskList(activeCurrent,swapTime);
+  await closeTaskList(activeCurrent,swapTime,'swap_new');
 }
 // סגירת רשימת משימות מפורשת להיסטוריה, מקובצות לפי batchId — אותה מכניקה בדיוק
 // כמו נקודת ההחלפה בסורקים, כולל closeBatchProportional לצביר.
 // ⚠️ הנוסחה כאן זהה לזו שבסורקים (accumulatedSec + calcTaskDurSec) ובמכוון **בלי**
 // _capByAttendance — הוספת תקרה כאן תחתוך משימות רב-יומיות אמיתיות. ראה gotcha התקרה.
-async function closeTaskList(tasks,endTime){
+async function closeTaskList(tasks,endTime,why){
   const list=(tasks||[]).filter(t=>!_isClosedTask(t.id));
   if(!list.length)return 0;
   const batches={};list.forEach(t=>{const bid=t.batchId||t.id;if(!batches[bid])batches[bid]=[];batches[bid].push(t);});
   for(const bTasks of Object.values(batches)){
-    if(bTasks.length>1)await closeBatchProportional(bTasks,endTime);
-    else{const t=bTasks[0];const done={...t,endTime,duration:(t.accumulatedSec||0)+calcTaskDurSec(t.startTime,endTime,t.workerId)};S.histTasks.unshift(done);S.activeTasks=S.activeTasks.filter(x=>x.id!==t.id);if(S.fbConnected){await fbDel('activeTasks',String(t.id));await fbSet('histTasks',String(t.id),{...done,startTime:done.startTime instanceof Date?done.startTime.toISOString():done.startTime,endTime:endTime.toISOString()});}}
+    if(bTasks.length>1)await closeBatchProportional(bTasks,endTime,why);
+    else{const t=bTasks[0];const done={...t,endTime,duration:(t.accumulatedSec||0)+calcTaskDurSec(t.startTime,endTime,t.workerId),..._closeMeta(why)};S.histTasks.unshift(done);S.activeTasks=S.activeTasks.filter(x=>x.id!==t.id);if(S.fbConnected){await fbDel('activeTasks',String(t.id));await fbSet('histTasks',String(t.id),{...done,startTime:done.startTime instanceof Date?done.startTime.toISOString():done.startTime,endTime:endTime.toISOString()});}}
   }
   return list.length;
 }
 // סגירת המשימות ה**רצות** של העובד. exceptIds מחריג משימות שאסור לסגור — בשחרור
 // מושהית זו המשימה שזה עתה חודשה, שכבר `paused=false` ולכן הייתה נסגרת מיד אחרי החידוש.
-async function closeRunningTasks(workerId,endTime,exceptIds){
+async function closeRunningTasks(workerId,endTime,exceptIds,why){
   const skip=exceptIds?new Set(exceptIds.map(String)):null;
-  return closeTaskList(S.activeTasks.filter(t=>t.workerId===workerId&&!t.paused&&!_isClosedTask(t.id)&&(!skip||!skip.has(String(t.id)))),endTime);
+  return closeTaskList(S.activeTasks.filter(t=>t.workerId===workerId&&!t.paused&&!_isClosedTask(t.id)&&(!skip||!skip.has(String(t.id)))),endTime,why);
 }
 // חידוש משימה מושהית: startTime נדרס לשעת החידוש (כך נמדדת הריצה החדשה), אבל ההתחלה
 // המקורית נשמרת ב-origStart. בלי זה משימה רב-יומית נראית בהיסטוריה כאילו התחילה ביום
@@ -6103,15 +6127,15 @@ async function handlePausedTasks(workerId,newBarcodes){
         // ⚠️ קודם מחדשים ורק אז סוגרים: אם החידוש נכשל (המשימה נסגרה במכשיר אחר),
         // סגירת הזמנית הייתה משאירה את העובדת בלי שום משימה פתוחה — הלקח של ايمان 08/08.
         // ⚠️ המשימות שחודשו מוחרגות מהסגירה, אחרת הן נסגרות מיד אחרי שחודשו.
-        const closed=okCount?await closeRunningTasks(workerId,now,bTasks.map(t=>t.id)):0;
+        const closed=okCount?await closeRunningTasks(workerId,now,bTasks.map(t=>t.id),'resume_paused'):0;
         saveLS();renderTasks();
         showToast(closed?`▶ המשימה חודשה · ${closed} זמניות נסגרו`:'▶ המשימה חודשה');
         return false; // לא לפתוח חדשה
       }else{
         // חדשה — סגור את המושהות
         const closeTime=new Date(bTasks[0].pausedAt||srvNow());
-        if(bTasks.length>1&&bTasks[0].batchId)await closeBatchProportional(bTasks,closeTime);
-        else{for(const t of bTasks){const dur=(t.accumulatedSec||0);const done={...t,endTime:closeTime,duration:dur};delete done.paused;delete done.pausedAt;delete done.accumulatedSec;S.histTasks.unshift(done);S.activeTasks=S.activeTasks.filter(x=>x.id!==t.id);if(S.fbConnected){await fbDel('activeTasks',String(t.id));await fbSet('histTasks',String(t.id),{...done,startTime:done.startTime instanceof Date?done.startTime.toISOString():done.startTime,endTime:closeTime.toISOString()});}}}
+        if(bTasks.length>1&&bTasks[0].batchId)await closeBatchProportional(bTasks,closeTime,'paused_new');
+        else{for(const t of bTasks){const dur=(t.accumulatedSec||0);const done={...t,endTime:closeTime,duration:dur,..._closeMeta('paused_new')};delete done.paused;delete done.pausedAt;delete done.accumulatedSec;S.histTasks.unshift(done);S.activeTasks=S.activeTasks.filter(x=>x.id!==t.id);if(S.fbConnected){await fbDel('activeTasks',String(t.id));await fbSet('histTasks',String(t.id),{...done,startTime:done.startTime instanceof Date?done.startTime.toISOString():done.startTime,endTime:closeTime.toISOString()});}}}
       }
     }else{
       // ברקוד שונה — הושלמה / הועברה
@@ -6120,8 +6144,8 @@ async function handlePausedTasks(workerId,newBarcodes){
         '✅ הושלמו','🔄 הועברו לעובד אחר','⏭ השאר מושהות');
       if(choice===0){
         const closeTime=new Date(bTasks[0].pausedAt||srvNow());
-        if(bTasks.length>1&&bTasks[0].batchId)await closeBatchProportional(bTasks,closeTime);
-        else{for(const t of bTasks){const dur=(t.accumulatedSec||0);const done={...t,endTime:closeTime,duration:dur};delete done.paused;delete done.pausedAt;delete done.accumulatedSec;S.histTasks.unshift(done);S.activeTasks=S.activeTasks.filter(x=>x.id!==t.id);if(S.fbConnected){await fbDel('activeTasks',String(t.id));await fbSet('histTasks',String(t.id),{...done,startTime:done.startTime instanceof Date?done.startTime.toISOString():done.startTime,endTime:closeTime.toISOString()});}}}
+        if(bTasks.length>1&&bTasks[0].batchId)await closeBatchProportional(bTasks,closeTime,'paused_done');
+        else{for(const t of bTasks){const dur=(t.accumulatedSec||0);const done={...t,endTime:closeTime,duration:dur,..._closeMeta('paused_done')};delete done.paused;delete done.pausedAt;delete done.accumulatedSec;S.histTasks.unshift(done);S.activeTasks=S.activeTasks.filter(x=>x.id!==t.id);if(S.fbConnected){await fbDel('activeTasks',String(t.id));await fbSet('histTasks',String(t.id),{...done,startTime:done.startTime instanceof Date?done.startTime.toISOString():done.startTime,endTime:closeTime.toISOString()});}}}
       }else if(choice===1){
         const eligible=S.workers.filter(w=>w.status==='in'&&w.id!==workerId);
         if(!eligible.length){showToast('אין עובדים פנויים להעברה','var(--red-txt)');continue;}
@@ -6803,7 +6827,7 @@ function _histCardHtml(tasks){
   const acts=t=>isMgr?`<button class="btn" style="font-size:11px;padding:3px 8px" onclick="openEditTask('${escj(String(t.id))}',true)" title="עריכה">✏️</button><button class="btn" style="font-size:11px;padding:3px 8px;background:#dcfce7;color:#16a34a" onclick="restoreHistTask('${escj(String(t.id))}')" title="החזר למשימות פעילות">♻️</button><button class="btn" style="font-size:11px;padding:3px 8px;background:var(--red-bg,#fee2e2);color:var(--red-txt,#dc2626)" onclick="deleteHistTask('${escj(String(t.id))}')" title="מחיקה">🗑️</button>`:'';
   const qtyHtml=q=>q===0?'<span style="color:#d97706;font-weight:700">⏳ כמות פתוחה</span>':q+" יח'";
   const meta=`${dateStr} | לקוח ${esc(lead.cust)} | ${esc(lead.prod)}${taskOrderLbl(lead)?' <b style="color:var(--green-txt,#16a34a)">'+taskOrderLbl(lead)+'</b>':''}${lead.size?' | מידה '+esc(lead.size):''} | ${qtyHtml(lead.qty)}${lead.isTotal?' | <span style="color:#059669;font-weight:700">📦 כל הכמות</span>':' | '+esc(COLORS[lead.col]||lead.col)}`;
-  const times=`<div style="font-size:11px;color:var(--txt3)">▶ ${stStr} → ◀ ${etStr}${_multiDay?` <span style="color:#d97706;font-weight:600" title="המשימה נמשכה מיום קודם — הזמן שנצבר כלול במשך">📅 התחילה ${pad2(_os.getDate())}/${pad2(_os.getMonth()+1)} ${pad2(_os.getHours())}:${pad2(_os.getMinutes())}</span>`:''}</div>`;
+  const times=`<div style="font-size:11px;color:var(--txt3)">▶ ${stStr} → ◀ ${etStr}${isMgr?closeInfoHtml(lead):''}${_multiDay?` <span style="color:#d97706;font-weight:600" title="המשימה נמשכה מיום קודם — הזמן שנצבר כלול במשך">📅 התחילה ${pad2(_os.getDate())}/${pad2(_os.getMonth()+1)} ${pad2(_os.getHours())}:${pad2(_os.getMinutes())}</span>`:''}</div>`;
   const durBadge=`<span class="badge ${over?'red':'blue'}">${over?'⚠ ':''}${fmtM(totDur)}</span>${_expDeltaBadge(totDur,totExp,false,totDed)}`;
   if(!multi){
     // משימה בודדת — בדיוק הפריסה הישנה, בלי רגרסיה
@@ -9230,7 +9254,7 @@ async function assignWorkerStation(workerId,stationId){
       // אי אפשר למסור מכונה באמצע תפירה, ולכן עובדת אחרת שנכנסת אליה מעידה שהקודמת
       // סיימה. נסגר דרך closeRunningTasks — אותה נוסחה (accumulatedSec + הצביר
       // היחסי) כמו כל נקודת סגירה אחרת, ולא חישוב מקומי משלנו.
-      const closed=await closeRunningTasks(occ.id,new Date(now));
+      const closed=await closeRunningTasks(occ.id,new Date(now),null,{r:'station_handover',n:w.name+' · '+st.name});
       await closeWorkerStation(occ,new Date(now));
       showToast('🔄 '+occ.name+' '+(T.st_released||'שוחרר/ה מ־')+st.name+(closed?' · 🏁 '+closed+' '+(T.st_tasks_closed||'משימות נסגרו'):''),'var(--amber-txt)',6000);
       try{sendPushToWorker(occ.id,T.st_push_released||'📍 שוחררת מהתחנה',st.name+' — '+w.name+(closed?' · '+(T.st_tasks_closed||'משימות נסגרו')+': '+closed:'')).catch(()=>{});}catch(e){}
@@ -9362,7 +9386,7 @@ async function auditStationOverlaps(){
   for(const {st,ws} of over){
     const sorted=[...ws].sort((a,b)=>since(b)-since(a));
     for(const o of sorted.slice(1)){
-      closed+=await closeRunningTasks(o.id,srvNow());
+      closed+=await closeRunningTasks(o.id,srvNow(),null,{r:'station_audit',n:st.name});
       await closeWorkerStation(o,srvNow());
       rel++;
       logGateEvent('station_busy','audit',{blocked:[{step:st.name,need:[o.name]}]});
@@ -10411,7 +10435,7 @@ async function mgrEndTask(taskId){
   const endTime=srvNow();
   // אם המשימה חלק מ-batch (עבדו במקביל) — סוגר את כל ה-batch יחד כדי שהזמן יתחלק נכון
   const group=t.batchId?S.activeTasks.filter(x=>x.batchId===t.batchId&&x.workerId===t.workerId):[t];
-  await closeTasksBatchAware(group,endTime);
+  await closeTasksBatchAware(group,endTime,'manual_end');
   tgTask(t,false,endTime);
   saveLS();renderMgrTasks();renderTasks();
 }
@@ -11031,7 +11055,7 @@ async function confirmModal(){
       // את elapsed/accumulatedSec כשהם קטנים מ-duration, ולכן תיקון ידני שלא עדכן אותם נמחק
       // ב-23:30 בשקט (ايمان: duration 5580 מול elapsed 36 ⇒ חיתוך ל-36 שניות). וגם:
       // origStart מאופס שתי שורות מעל, ולכן `if (t.origStart) continue` (שורה 988) *לא* מדלג.
-      const done={...t,endTime,duration:_dur,elapsed:_dur};
+      const done={...t,endTime,duration:_dur,elapsed:_dur,..._closeMeta('edit_end')};
       delete done.paused;delete done.pausedAt;delete done.accumulatedSec;
       S.histTasks.unshift(done);
       S.activeTasks=S.activeTasks.filter(x=>x.id!==t.id);
