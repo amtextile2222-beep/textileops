@@ -15068,7 +15068,7 @@ function openProductModal(id){
       <td><input type="text" value="${esc(q.size)}" maxlength="2" style="width:50px;font-size:12px" data-qi="${i}" data-qf="size"></td>
       <td><select data-qi="${i}" data-qf="color" style="font-size:12px"><option value="">--</option>${Object.entries(COLORS).map(([k,v])=>`<option value="${k}" ${q.color===k?'selected':''}>${v}</option>`).join('')}</select></td>
       <td><input type="number" value="${q.qty}" min="0" style="width:70px;font-size:12px" data-qi="${i}" data-qf="qty"></td>
-      <td><button type="button" onclick="this.closest('tr').remove()" style="background:none;border:none;color:var(--red);cursor:pointer;font-size:14px">✕</button></td>
+      <td><button type="button" onclick="this.closest('tr').remove();renderProductPricing()" style="background:none;border:none;color:var(--red);cursor:pointer;font-size:14px">✕</button></td>
     </tr>`).join(''):'';
   const imgPrev=p&&p.images&&p.images.length
     ?`<div id="prod-img-preview" style="display:flex;gap:6px;flex-wrap:wrap;margin-bottom:8px">${p.images.map((img,i)=>`<div style="position:relative"><img src="${img}" style="width:72px;height:72px;object-fit:cover;border-radius:6px;border:1px solid var(--brd)"><button type="button" onclick="removeProdImg(${i})" style="position:absolute;top:-4px;right:-4px;background:var(--red);color:#fff;border:none;border-radius:50%;width:18px;height:18px;font-size:11px;cursor:pointer;line-height:1">✕</button></div>`).join('')}</div>`
@@ -15195,7 +15195,7 @@ function addQtyBulk(){
     tr.innerHTML=`<td><input type="text" maxlength="2" style="width:50px;font-size:12px" data-qi="${i}" data-qf="size" value="${s}"></td>
       <td><select data-qi="${i}" data-qf="color" style="font-size:12px"><option value="">--</option>${colorOpts}</select></td>
       <td><input type="number" value="${qty}" min="0" style="width:70px;font-size:12px" data-qi="${i}" data-qf="qty"></td>
-      <td><button type="button" onclick="this.closest('tr').remove()" style="background:none;border:none;color:var(--red);cursor:pointer;font-size:14px">✕</button></td>`;
+      <td><button type="button" onclick="this.closest('tr').remove();renderProductPricing()" style="background:none;border:none;color:var(--red);cursor:pointer;font-size:14px">✕</button></td>`;
     document.getElementById('pm-qty-body').appendChild(tr);
   }
 }
@@ -15420,6 +15420,7 @@ function renderProductPricing(){
   // שווה ליעד — והאינדיקטור שמראה שהתמחור מחזיק מרווח היה מת בשקט.
   const manualCheckCost=mins.reduce((t,m,i)=>m>0?t+m/60*rates[i]:t,0);
   let totalMin=0,totalCost=0,tooShortCnt=0,derivedMin=0;
+  const _ordMin=[]; // דקות ליחידה פר שלב — לבלוק "זמן להזמנה לפי מחלקה"
   const rows=shownSteps.map((s,i)=>{
     const rate=rates[i];
     const manual=s.manualMin>0;
@@ -15427,6 +15428,7 @@ function renderProductPricing(){
     const min=manual?s.manualMin:bud[i].min; // בשורה מוצגות הדקות שהוזנו, לא הנגזרות
     derivedMin+=bud[i].min;
     totalMin+=min;totalCost+=share;
+    _ordMin.push({station:s.station,min});
     const tooShort=!manual&&min*60<s.level*30; // היוריסטיקה: פחות מ-30 שנ' לרמת קושי = לא ריאלי
     if(tooShort)tooShortCnt++;
     const tag=manual?` <span style="font-size:10px;color:var(--txt3)">✎ ידני</span>`:(s.level?` <span style="font-size:10px;color:var(--txt3)">(${levelName(s.level,'he')})</span>`:'');
@@ -15468,7 +15470,7 @@ function renderProductPricing(){
     let cutMin=0;
     const cutRows=cutPriced.map((s,i)=>{
       const manual=s.manualMin>0,min=manual?s.manualMin:cBud[i].min;
-      cutMin+=min;
+      cutMin+=min;_ordMin.push({station:s.station,min,cut:true});
       return`<div style="display:flex;align-items:center;gap:8px;padding:3px 0;border-bottom:0.5px solid var(--brd);font-size:12px">
         <span style="flex:1;min-width:110px">✂ ${esc(s.name)}${manual?' <span style="font-size:10px;color:var(--txt3)">✎ ידני</span>':''}</span>
         <span style="color:var(--txt3)">₪${cBud[i].ils.toFixed(2)}</span>
@@ -15493,8 +15495,36 @@ function renderProductPricing(){
     <div style="font-size:13px;font-weight:700;color:var(--green-txt);margin-top:6px">⏱ סה"כ ${allManual?'זמן שהוזן':'זמן עבודה מתוקצב'} ליחידה${cutPriced.length?' <span style="font-size:11px;font-weight:400;color:var(--txt3)">(תפירה בלבד — הגזירה בנפרד למטה)</span>':''}: ${totalMin.toFixed(1)} דק'</div>
     ${derivedLine}
     ${actualLine}
-    ${shortWarn}</div>${cutLine}`;
+    ${shortWarn}</div>${cutLine}${_orderDeptTimeHtml(_ordMin)}`;
 }
+// ⏱ זמן העבודה להזמנה כולה, לפי מחלקה (28/09/2026 — בקשת המשתמש: עד היום הוצג רק ליחידה).
+// דקות ליחידה של כל שלב × סה"כ היחידות בטבלת הכמויות, מקובץ לפי המחלקה שבמפתח התחנה
+// ("מחלקה::תחנה"). אותן דקות בדיוק כמו בשורות שמעל — לא חישוב נפרד. ✂ גזירה בשורה משלה.
+function _pmOrderUnits(){
+  let n=0;document.querySelectorAll("#pm-qty-body [data-qf=\"qty\"]").forEach(el=>{n+=parseInt(el.value)||0;});
+  return n;
+}
+function _orderDeptTimeHtml(list){
+  const units=_pmOrderUnits();
+  if(!list.length)return"";
+  if(!units)return`<div style="font-size:11px;color:var(--txt3);margin-top:8px">⏱ זמן להזמנה לפי מחלקה — הזן כמויות בטבלת הכמויות</div>`;
+  const by={},order=[];
+  for(const x of list){
+    const k=x.station?String(x.station).split("::")[0]:"";
+    const key=(x.cut?"✂ ":"")+(k||"ללא מחלקה");
+    if(!(key in by)){by[key]=0;order.push(key);}
+    by[key]+=x.min;
+  }
+  let tot=0;
+  const rows=order.map(k=>{const m=by[k]*units;tot+=m;return`<div style="display:flex;gap:8px;padding:3px 0;border-bottom:0.5px solid var(--brd);font-size:12px">
+      <span style="flex:1">${esc(k)}</span><span style="color:var(--txt3)">${by[k].toFixed(1)} דק' ליח'</span><b>${fmtExpMin(m)}</b></div>`;}).join("");
+  return`<div style="background:var(--bg2);border-radius:8px;padding:8px 10px;margin-top:8px;border:1px solid var(--brd)">
+    <div style="font-size:12px;font-weight:700;margin-bottom:4px">⏱ זמן עבודה להזמנה כולה (${units} יח') — לפי מחלקה</div>
+    ${rows}
+    <div style="font-size:13px;font-weight:700;color:var(--green-txt);margin-top:6px">סה"כ להזמנה: ${fmtExpMin(tot)}</div></div>`;
+}
+// שינוי כמות בטבלה מעדכן את הבלוק מיד (הטבלה נבנית מחדש בכל פתיחה — האזנה אחת על המסמך)
+document.addEventListener("input",e=>{if(e.target?.matches?.("#pm-qty-body [data-qf=\"qty\"]"))try{renderProductPricing();}catch(_){}});
 function addQtyRow(){
   const colorOpts=Object.entries(COLORS).map(([k,v])=>`<option value="${k}">${v}</option>`).join('');
   const i=Date.now();
@@ -15502,7 +15532,7 @@ function addQtyRow(){
   tr.innerHTML=`<td><input type="text" maxlength="2" style="width:50px;font-size:12px" data-qi="${i}" data-qf="size" placeholder="1"></td>
     <td><select data-qi="${i}" data-qf="color" style="font-size:12px"><option value="">--</option>${colorOpts}</select></td>
     <td><input type="number" value="0" min="0" style="width:70px;font-size:12px" data-qi="${i}" data-qf="qty"></td>
-    <td><button type="button" onclick="this.closest('tr').remove()" style="background:none;border:none;color:var(--red);cursor:pointer;font-size:14px">✕</button></td>`;
+    <td><button type="button" onclick="this.closest('tr').remove();renderProductPricing()" style="background:none;border:none;color:var(--red);cursor:pointer;font-size:14px">✕</button></td>`;
   document.getElementById('pm-qty-body').appendChild(tr);
 }
 
