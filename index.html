@@ -481,6 +481,7 @@ code{background:var(--bg2);border:0.5px solid var(--b);border-radius:4px;padding
           </div>
           <div style="display:flex;gap:8px;margin-bottom:1rem">
             <button class="btn primary full" onclick="startCam()" id="cam-btn" style="font-size:14px;padding:12px">📷 <span data-i18n="scan_cam">סרוק עם מצלמה</span></button>
+            <button class="btn primary nfc-only" onclick="nfcScanTo('bc')" style="display:none;font-size:14px;padding:12px;flex-shrink:0">📶 NFC</button>
           </div>
           <div style="text-align:center;font-size:12px;color:var(--txt3);margin-bottom:.75rem">— <span data-i18n="scan_manual">הזן ידנית</span> / סורק USB —</div>
           <input class="bc-inp" id="bc-inp" maxlength="16" placeholder="הזן 13 או 16 ספרות..." oninput="parseBc(this.value)" onkeydown="if(event.key==='Enter')submitBc()"/>
@@ -962,6 +963,7 @@ code{background:var(--bg2);border:0.5px solid var(--b);border-radius:4px;padding
             <div id="mgr-cam-status" style="position:absolute;bottom:8px;right:0;left:0;text-align:center;font-size:12px;color:#fff;background:rgba(0,0,0,.5);padding:4px">מכוון מצלמה...</div>
           </div>
           <button class="btn primary full" onclick="mgrStartCam()" id="mgr-cam-btn" style="font-size:13px;padding:10px;margin-bottom:8px">📷 סרוק עם מצלמה</button>
+          <button class="btn full nfc-only" onclick="nfcScanTo('mgr')" style="display:none;font-size:13px;padding:10px;margin-bottom:8px">📶 קרא מדבקת NFC</button>
           <input id="mgr-bc-inp" class="bc-inp" maxlength="16" placeholder="או הזן 13 או 16 ספרות ידנית..." oninput="parseMgrBc(this.value)"/>
         </div><!-- /field barcode -->
         <div id="mgr-bc-prev" style="margin-bottom:.5rem;min-height:30px"></div>
@@ -1020,6 +1022,7 @@ code{background:var(--bg2);border:0.5px solid var(--b);border-radius:4px;padding
           <div id="ts-cam-status" style="position:absolute;bottom:8px;right:0;left:0;text-align:center;font-size:12px;color:#fff;background:rgba(0,0,0,.5);padding:4px" data-i18n="scan_aiming">מכוון מצלמה...</div>
         </div>
         <button class="btn primary full" onclick="tsStartCam()" id="ts-cam-btn" style="font-size:13px;padding:10px;margin-bottom:8px">📷 <span data-i18n="scan_cam_all">סרוק עובד / תחנה / משימה</span></button>
+        <button class="btn full nfc-only" onclick="nfcScanTo('ts')" style="display:none;font-size:13px;padding:10px;margin-bottom:8px">📶 קרא מדבקת NFC (משימה)</button>
         <input id="ts-bc-inp" class="bc-inp" maxlength="16" placeholder="או הזן 13 או 16 ספרות ידנית..." data-i18n-ph="ts_inp_ph" oninput="tsParseBc(this.value)"/>
       </div>
       <div id="ts-bc-prev" style="margin-bottom:.5rem;min-height:30px"></div>
@@ -2463,6 +2466,137 @@ function bcFromScan(text){
   if(d.length>=BC_LEN_OLD)return d.slice(0,BC_LEN_OLD);
   return '';
 }
+// ─── 📶 מדבקות NFC — חלופה לברקוד המודפס, לא במקומו ─────────────────────
+// המדבקה מכילה רשומת NDEF טקסט עם **אותן ספרות** של הברקוד — אין טבלת שיוך ב-Firebase.
+// הקריאה נכנסת בדיוק למסלול של המצלמה (bcFromScan → parseBc/submitBc וכו').
+// Web NFC קיים רק ב-Chrome באנדרואיד ⇒ בלי תמיכה (אייפון/מחשב) הכפתורים לא מוצגים כלל.
+function nfcOk(){return 'NDEFReader' in window;}
+let _nfcAbort=null;
+function nfcStop(){try{_nfcAbort?.abort();}catch(e){}_nfcAbort=null;document.getElementById('nfc-ov')?.remove();}
+function _nfcOv(title,sub){
+  let ov=document.getElementById('nfc-ov');
+  if(!ov){ov=document.createElement('div');ov.id='nfc-ov';
+    ov.style.cssText='position:fixed;inset:0;background:rgba(0,0,0,.55);z-index:9999;display:flex;align-items:center;justify-content:center;padding:16px';
+    document.body.appendChild(ov);}
+  ov.innerHTML=`<div style="background:var(--card,#fff);color:var(--txt,#000);border-radius:12px;padding:20px;max-width:340px;width:100%;text-align:center">
+    <div style="font-size:42px">📶</div>
+    <div style="font-size:16px;font-weight:700;margin:6px 0">${title}</div>
+    <div style="font-size:13px;color:var(--txt2,#555);line-height:1.7">${sub||''}</div>
+    <button class="btn full" style="margin-top:14px" onclick="nfcStop()">ביטול</button></div>`;
+}
+function _nfcErr(e){
+  if(e?.name==='NotAllowedError')return 'אין הרשאת NFC — אשר את ההרשאה בדפדפן ונסה שוב';
+  if(e?.name==='NotSupportedError'||e?.name==='NotReadableError')return 'ה-NFC כבוי — הפעל NFC בהגדרות הטלפון ונסה שוב';
+  return 'שגיאת NFC: '+(e?.message||e);
+}
+function _nfcText(rec){
+  try{
+    if(rec.recordType==='text')return new TextDecoder(rec.encoding||'utf-8').decode(rec.data);
+    if(rec.recordType==='url'||rec.recordType==='absolute-url')return new TextDecoder().decode(rec.data);
+  }catch(e){}
+  return '';
+}
+// קריאה אחת: מחכה למדבקה, מעביר את הטקסט שלה ל-cb ונסגר
+async function nfcRead(cb){
+  if(!nfcOk())return;
+  nfcStop();
+  const ac=new AbortController();_nfcAbort=ac;
+  _nfcOv('קרב את הטלפון למדבקה','החזק את גב הטלפון צמוד למדבקה');
+  const r=new NDEFReader();
+  r.onreadingerror=()=>{if(_nfcAbort===ac)_nfcOv('קרב את הטלפון למדבקה','⚠ לא הצלחתי לקרוא — נסה שוב');};
+  r.onreading=e=>{
+    if(_nfcAbort!==ac)return;
+    const txt=(e.message?.records||[]).map(_nfcText).find(Boolean)||'';
+    nfcStop();
+    if(navigator.vibrate)navigator.vibrate(80);
+    cb(txt);
+  };
+  try{await r.scan({signal:ac.signal});}
+  catch(e){nfcStop();if(e.name!=='AbortError')alert(_nfcErr(e));}
+}
+// קריאה לעמוד סריקה — ממלא את אותו שדה וקורא לאותן פונקציות כמו המצלמה
+function nfcScanTo(where){
+  nfcRead(txt=>{
+    const bc=bcFromScan(txt);
+    if(!bc){showToast('⚠ המדבקה ריקה או שאינה ברקוד משימה','var(--red-txt)');return;}
+    if(where==='bc'){
+      try{stopCam();}catch(e){}
+      document.getElementById('bc-inp').value=bc;parseBc(bc);
+      showToast('✅ נקרא: '+bc,'var(--green-txt)');
+      setTimeout(()=>submitBc(),300);
+    }else if(where==='ts'){
+      try{tsStopCam();}catch(e){}
+      document.getElementById('ts-bc-inp').value=bc;tsParseBc(bc);
+      showToast('✅ נקרא: '+bc,'var(--green-txt)');
+    }else if(where==='mgr'){
+      try{mgrStopCam();}catch(e){}
+      document.getElementById('mgr-bc-inp').value=bc;parseMgrBc(bc);
+      showToast('✅ נקרא: '+bc,'var(--green-txt)');
+    }
+  });
+}
+// כפתור 📶 על כרטיס ברקוד במחולל — מסך בלבד (bcPrint מסיר .bc-nfc מההדפסה)
+function _bcNfcBtn(card,code,lbl){
+  card.dataset.code=code;card.dataset.nfcLbl=lbl||'';
+  if(!nfcOk())return;
+  const b=document.createElement('button');
+  b.type='button';b.className='btn bc-nfc';b.textContent='📶';b.title='כתוב למדבקת NFC';
+  b.style.cssText='position:absolute;bottom:6px;left:6px;padding:4px 8px;font-size:14px;z-index:5';
+  b.onclick=()=>bcNfcWriteOne(code,lbl);
+  card.appendChild(b);
+}
+async function bcNfcWriteOne(code,lbl){
+  if(!nfcOk())return;
+  nfcStop();
+  const ac=new AbortController();_nfcAbort=ac;
+  _nfcOv('קרב את הטלפון למדבקה',(lbl?esc(lbl)+'<br>':'')+'<b>'+code+'</b>');
+  try{
+    await new NDEFReader().write({records:[{recordType:'text',lang:'en',data:code}]},{signal:ac.signal});
+    nfcStop();
+    if(navigator.vibrate)navigator.vibrate(80);
+    showToast('✅ נכתב למדבקה: '+code,'var(--green-txt)');
+  }catch(e){nfcStop();if(e.name!=='AbortError')alert(_nfcErr(e));}
+}
+// ✍ כתיבה ברצף של כל הכרטיסים המסומנים. 🛑 הגנה מדריסה: מדבקה עם אותו מספר סידורי כמו
+// הקודמת לא נכתבת שוב — אחרת טלפון שנשאר/חזר על אותה מדבקה היה דורס אותה בברקוד הבא.
+async function bcNfcWriteAll(){
+  if(!nfcOk())return;
+  const area=document.getElementById('bc-print-area');if(!area)return;
+  const cards=[...area.querySelectorAll('.bc-card')].filter(c=>{
+    const cb=c.querySelector('.bc-sel');return c.dataset.code&&(!cb||cb.checked);});
+  if(!cards.length){alert('בחר לפחות ברקוד אחד');return;}
+  nfcStop();
+  const ac=new AbortController();_nfcAbort=ac;
+  let i=0,last='',busy=false;
+  const show=msg=>_nfcOv(`מדבקה ${i+1} מתוך ${cards.length}`,
+    esc(cards[i].dataset.nfcLbl||'')+'<br><b>'+cards[i].dataset.code+'</b>'
+    +(msg?`<br><span style="color:var(--amber-txt,#b45309)">${msg}</span>`:'')
+    +'<br><span style="font-size:11px">הדבק כל מדבקה על החבילה שלה מיד אחרי הכתיבה</span>');
+  show();
+  const r=new NDEFReader();
+  r.onreadingerror=()=>{if(_nfcAbort===ac&&!busy)show('⚠ לא הצלחתי לקרוא את המדבקה — נסה שוב');};
+  r.onreading=async e=>{
+    if(_nfcAbort!==ac||busy)return;
+    const sn=e.serialNumber||'';
+    if(sn&&sn===last){show('זו המדבקה הקודמת — קרב מדבקה חדשה');return;}
+    busy=true;
+    const c=cards[i];
+    try{
+      await r.write({records:[{recordType:'text',lang:'en',data:c.dataset.code}]},{signal:ac.signal});
+      last=sn;c.style.outline='3px solid #16a34a';
+      if(navigator.vibrate)navigator.vibrate(80);
+      i++;
+      if(i>=cards.length){nfcStop();showToast('✅ נכתבו '+cards.length+' מדבקות','var(--green-txt)');return;}
+      show('✅ נכתב — הרחק את הטלפון וקרב את המדבקה הבאה');
+    }catch(err){if(err.name!=='AbortError'&&_nfcAbort===ac)show('⚠ הכתיבה נכשלה — קרב שוב את אותה מדבקה');}
+    finally{busy=false;}
+  };
+  try{await r.scan({signal:ac.signal});}
+  catch(e){nfcStop();if(e.name!=='AbortError')alert(_nfcErr(e));}
+}
+// כפתורי 📶 בעמודי הסריקה מוסתרים כברירת מחדל — מוצגים רק במכשיר שתומך ב-NFC
+(function(){const go=()=>{if(nfcOk())document.querySelectorAll('.nfc-only').forEach(e=>e.style.display='');};
+  document.readyState==='loading'?document.addEventListener('DOMContentLoaded',go):go();})();
 // ברקוד "כל הכמות": size='9', col='00'
 function isTotalBc(raw){return !!raw&&isBcLen(raw.length)&&raw.slice(7,8)==='9'&&raw.slice(11,13)==='00';}
 // ברקוד "יצא ללקוח": size='9', col='99' (הצבעים 01-30 בלבד — אין התנגשות). מבנה: לקוח+מוצר+9+000+99
@@ -13866,6 +14000,7 @@ function bcGenerate(){
         <button class="btn" onclick="bcPrint()" style="font-size:13px">🖨️ הדפס נבחרים</button>
         <button class="btn" onclick="bcPrint('labels')" style="font-size:13px" title="רשת 105×56 מ&quot;מ (TW-2510), 10 מדבקות בדף A4">🏷️ הדפס למדבקות</button>
         <button class="btn success" onclick="bcDownloadPDF()" style="font-size:13px" title="קובץ PDF מדויק A4 (105×56 מ&quot;מ) — להדפסה מהנייד בגודל נכון">📄 הורד PDF מדבקות</button>
+        ${nfcOk()?`<button class="btn primary" onclick="bcNfcWriteAll()" style="font-size:13px" title="כותב את הברקודים המסומנים למדבקות NFC אחד אחרי השני">📶 כתוב נבחרים למדבקות NFC</button>`:''}
       </div>
     </div>
     <div style="display:flex;align-items:center;gap:8px;margin-bottom:12px;font-size:12px;color:var(--txt3)">
@@ -13898,6 +14033,7 @@ function bcGenerate(){
     div.appendChild(qrWrap);
     div.appendChild(infoDiv);
     div.appendChild(_bcSelCheckbox());
+    _bcNfcBtn(div,totalCode,'📦 כל הכמות · '+totalQtyAll+' יח׳');
     printArea.appendChild(div);
     new QRCode(qrWrap,{text:totalCode,width:150,height:150,colorDark:'#000000',colorLight:'#ffffff',correctLevel:QRCode.CorrectLevel.M});
     setTimeout(()=>{const im=qrWrap.querySelector('img');if(im)im.style.display='none';},50);
@@ -13925,6 +14061,7 @@ function bcGenerate(){
     div.appendChild(qrWrap);
     div.appendChild(infoDiv);
     div.appendChild(_bcSelCheckbox());
+    _bcNfcBtn(div,code,'מידה '+it.size+' · '+parseInt(it.qty)+' יח׳ · '+colName);
     printArea.appendChild(div);
     new QRCode(qrWrap,{text:code,width:150,height:150,colorDark:'#000000',colorLight:'#ffffff',correctLevel:QRCode.CorrectLevel.M});
     setTimeout(()=>{const im=qrWrap.querySelector('img');if(im)im.style.display='none';},50);
@@ -13965,6 +14102,7 @@ function bcGenerateSample(cust,prod,t){
     <div style="font-size:16px;font-weight:800;color:#1d4ed8">כמות: ${qty} יח׳</div>
     <div style="font-size:11px;color:#555;margin-top:4px">${code}</div>`;
   div.appendChild(qrWrap);div.appendChild(info);div.appendChild(_bcSelCheckbox());
+  _bcNfcBtn(div,code,SAMPLE_STEP+' · '+qty+' יח׳');
   document.getElementById('bc-print-area').appendChild(div);
   new QRCode(qrWrap,{text:code,width:150,height:150,colorDark:'#000000',colorLight:'#ffffff',correctLevel:QRCode.CorrectLevel.M});
   setTimeout(()=>{const im=qrWrap.querySelector('img');if(im)im.style.display='none';},50);
@@ -14879,6 +15017,7 @@ function bcPrint(mode){
     const col=card.dataset.col||'00';
     const clone=card.cloneNode(true);
     clone.querySelector('.bc-sel')?.remove();
+    clone.querySelector('.bc-nfc')?.remove();   // 📶 כפתור מסך בלבד — לא מודפס
     const origCanvas=card.querySelector('canvas');
     const cloneCanvas=clone.querySelector('canvas');
     if(origCanvas&&cloneCanvas){
