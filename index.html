@@ -1145,7 +1145,7 @@ code{background:var(--bg2);border:0.5px solid var(--b);border-radius:4px;padding
             <input type="number" id="cost-fixed-monthly" min="0" placeholder="0" style="font-size:13px"/>
           </div>
           <div class="field" style="margin:0">
-            <label>ימי עבודה בחודש</label>
+            <label title="משמש רק לחישוב התקורה לשעה (ממוצע). בדוח העלויות הקבועות מתחלקות על ימי העבודה בפועל של כל חודש.">ימי עבודה בחודש (ממוצע)</label>
             <input type="number" id="cost-workdays-month" min="1" max="31" placeholder="22" style="font-size:13px"/>
           </div>
           <div class="field" style="margin:0">
@@ -1212,8 +1212,8 @@ code{background:var(--bg2);border:0.5px solid var(--b);border-radius:4px;padding
       <div style="display:grid;grid-template-columns:1fr 1fr;gap:8px;margin-bottom:8px">
         <div class="field" style="margin:0"><label>פיצויים (% על השכר)</label><input type="number" id="lh-sev" step="0.01" min="0" placeholder="8.33" style="font-size:13px"/></div>
         <div class="field" style="margin:0"><label>ימי חג בתשלום בשנה</label><input type="number" id="lh-hol" min="0" placeholder="4" style="font-size:13px"/></div>
-        <div class="field" style="margin:0"><label>מתנות חג לעובד (₪/שנה)</label><input type="number" id="lh-gifts" min="0" placeholder="300" style="font-size:13px"/></div>
-        <div class="field" style="margin:0"><label>טיול שנתי — עלות כוללת (₪)</label><input type="number" id="lh-trip" min="0" placeholder="4000" style="font-size:13px"/></div>
+        <div class="field" style="margin:0"><label title="לעובד שלא הוזן לו סכום משלו בכרטיס העובד">מתנות חג לעובד (₪/שנה) — כללי</label><input type="number" id="lh-gifts" min="0" placeholder="300" style="font-size:13px"/></div>
+        <div class="field" style="margin:0"><label title="מתחלק שווה בין העובדים שלא הוזן להם סכום משלהם בכרטיס העובד">טיול שנתי — עלות כוללת (₪) — כללי</label><input type="number" id="lh-trip" min="0" placeholder="4000" style="font-size:13px"/></div>
       </div>
       <button class="btn success full" onclick="saveLoadedHourSettings()">💾 שמור והצג חישוב</button>
       <div id="lh-table" style="margin-top:.75rem"></div>
@@ -3449,6 +3449,7 @@ async function fillProductBalance(p){
   if(!totW)return;
   el.innerHTML='<div style="font-size:11px;color:var(--txt3);margin-top:10px">💰 מחשב מאזן…</div>';
   try{
+    await ohReady();
     const oh=overheadBreakdown().perHour;
     const rated=_costWorkers().filter(w=>S.costs.workerRates[w.id]);
     const avgAll=rated.length?rated.reduce((s,w)=>s+loadedHourlyRate(w.id),0)/rated.length:0;
@@ -3778,6 +3779,8 @@ let _activeTasksReady=false;
 // ⚠️ כמו _activeTasksReady — לעובדים. התראות הטלגרם ממתינות לשניהם (ראה checkAlerts).
 let _workersReady=false;
 function startDataListeners(){
+  // מחמם מראש את שעות הנוכחות בפועל של התקורה לשעה (מנהל בלבד — רק לו יש עלויות)
+  setTimeout(()=>{if(S.user?.role==='manager')ohReady();},4000);
   if(!_listenersStarted){
     _listenersStarted=true;
     listenFb();
@@ -8145,6 +8148,7 @@ async function buildRealProfitReport(force){
   if(!ctx){card.classList.add('hidden');return;}
   card.classList.remove('hidden');
   if(!_rr.open)return;
+  await ohReady();
   if(!force&&_rr.ts&&Date.now()-_rr.ts<5*60000){rrRender();return;}
   el.innerHTML='<div style="color:var(--txt3);font-size:12px;padding:.5rem 0">טוען את כל היסטוריית המשימות...</div>';
   if(force)_histRangeCache.ts=0;
@@ -12195,6 +12199,11 @@ function renderWorkerRates(){
             onchange="if(!S.costs.workerInsurance)S.costs.workerInsurance={};S.costs.workerInsurance['${w.id}']=parseFloat(this.value)||0"
             oninput="if(!S.costs.workerInsurance)S.costs.workerInsurance={};S.costs.workerInsurance['${w.id}']=parseFloat(this.value)||0"/>
           <div style="font-size:10px;color:var(--amber-txt)">🛡 ביטוח ₪/שנה</div>
+          <input type="number" min="0" placeholder="כללי" value="${S.costs.workerGiftsTrip?.[w.id]??''}"
+            title="עלות שנתית למתנות + טיול לעובד הזה. ריק = לפי ההגדרה הכללית בכרטיס &quot;שעה עמוסה&quot;"
+            style="width:80px;font-size:13px;text-align:left;padding:5px 8px;border-color:var(--amber-txt)"
+            oninput="setWorkerGiftsTrip('${w.id}',this.value)"/>
+          <div style="font-size:10px;color:var(--amber-txt)">🎁 מתנות+טיול ₪/שנה</div>
           <input type="number" min="0" max="100" placeholder="0" value="${S.costs.oversightPct?.[w.id]||''}"
             style="width:80px;font-size:13px;text-align:left;padding:5px 8px;border-color:var(--purple-txt,var(--blue-txt))"
             title="תקרת אחוז: כמה מיום העבודה מותר לזקוף כפיקוח. 0 = המנגנון כבוי לעובד הזה."
@@ -12549,9 +12558,10 @@ function saveCostSettings(){
   S.costs.bankPct=_pctIn('cost-bank-pct');
   saveLS();
   if(S.fbConnected)fbSet('adminSettings','costs',S.costs);
-  const btn=event.target;
+  // שני כפתורים קוראים לפונקציה (שמור / 💾 שמור הגדרות) — מחזירים לכל אחד את הכיתוב שלו
+  const btn=event.target, _lbl=btn.dataset.lbl||(btn.dataset.lbl=btn.textContent);
   btn.textContent='✅ נשמר';btn.classList.add('success');
-  setTimeout(()=>{btn.textContent='💾 שמור הגדרות';btn.classList.remove('success');},1500);
+  setTimeout(()=>{btn.textContent=_lbl;},1500);
   renderLoadedHourTable();renderOverheadResult();
   calcCosts();
 }
@@ -12570,13 +12580,24 @@ function loadedHourBreakdown(wid){
   const transport=(c.workerTransport?.[wid]||0)/8;
   const severance=daily*((c.severancePct??8.33)/100)/8;
   const holidays=daily*((c.holidayDays??4)/wdy)/8;
-  const gifts=(c.giftsAnnual||0)/wdy/8;
-  const trip=(c.tripAnnual||0)/nW/wdy/8;
+  // 🎁 מתנות+טיול: סכום שנתי לעובד מכרטיס העובד; בלי סכום משלו ⇒ ההגדרה הכללית
+  //    (הטיול הכללי מתחלק רק בין העובדים שאין להם סכום משלהם)
+  const own=_ownGiftsTrip(wid);
+  const nGen=own==null?(_costWorkers().filter(w=>_ownGiftsTrip(w.id)==null).length||nW):1;
+  const gifts=own!=null?own/wdy/8:(c.giftsAnnual||0)/wdy/8;
+  const trip=own!=null?0:(c.tripAnnual||0)/nGen/wdy/8;
   const insurance=(c.workerInsurance?.[wid]||0)/wdy/8;
   const loaded=base+transport+severance+holidays+gifts+trip+insurance;
   return {base,transport,severance,holidays,gifts,trip,insurance,loaded};
 }
 function loadedHourlyRate(wid){return loadedHourBreakdown(wid)?.loaded||0;}
+// סכום שנתי למתנות+טיול שהוזן לעובד (null = לא הוזן ⇒ כללי). 0 שהוזן = באמת 0.
+function _ownGiftsTrip(wid){const v=S.costs.workerGiftsTrip?.[wid];return v==null||v===''?null:+v||0;}
+function setWorkerGiftsTrip(wid,val){
+  if(!S.costs.workerGiftsTrip)S.costs.workerGiftsTrip={};
+  if(String(val).trim()==='')delete S.costs.workerGiftsTrip[wid];
+  else S.costs.workerGiftsTrip[wid]=Math.max(0,parseFloat(val)||0);
+}
 // תקורה מפעלית לשעה: (קבועות חודשיות + מקדם משתנות משוער) ÷ שעות עבודה חודשיות
 function overheadBreakdown(){
   const c=S.costs;
@@ -12586,9 +12607,53 @@ function overheadBreakdown(){
   const varAvg=months.length?months.reduce((s,m)=>s+(m.variableTotal||0),0)/months.length:0;
   const buffer=(c.overheadBufferPct??10)/100;
   const varEst=varAvg*(1+buffer);
-  const hours=_costWorkers().length*(c.workDaysMonth||22)*8;
-  const perHour=hours?(fixedMonthly+varEst)/hours:0;
-  return {fixedMonthly,varAvg,varEst,monthsUsed:months.length,win,hours,perHour};
+  // 🏦 מסים + עמלות בנק = אחוז מההכנסות ⇒ ממוצע ההכנסות של **אותם חודשים** של ממוצע המשתנות
+  //    (אין חודשים סגורים ⇒ החודשים המלאים האחרונים). הכנסה = משלוחים × (מחיר + מחיר גזירה).
+  const tbPct=(+c.taxPct||0)+(+c.bankPct||0);
+  let incMonths=months.map(m=>m.month);
+  if(!incMonths.length){const d=new Date();for(let i=1;i<=win;i++){const x=new Date(d.getFullYear(),d.getMonth()-i,1);incMonths.push(x.getFullYear()+'-'+pad2(x.getMonth()+1));}}
+  const incAvg=tbPct?incMonths.reduce((s,m)=>s+_incomeOfMonth(m),0)/incMonths.length:0;
+  const taxBank=incAvg*tbPct/100;
+  // 🕐 המכנה = **שעות הנוכחות בפועל** (נטו, בלי מנהלים) — ממוצע של אותם חודשים.
+  //    השעות נטענות ברקע (_ensureOhHours); עד שנטענו — הערכה תיאורטית (עובדים × ימים × 8).
+  const theo=_costWorkers().length*(c.workDaysMonth||22)*8;
+  const actOk=incMonths.every(m=>_ohAttH[m]!=null);
+  const actAvg=actOk?incMonths.reduce((s,m)=>s+_ohAttH[m],0)/incMonths.length:0;
+  if(!actOk)_ensureOhHours(incMonths);
+  const actual=actAvg>0;
+  const hours=actual?actAvg:theo;
+  const perHour=hours?(fixedMonthly+varEst+taxBank)/hours:0;
+  return {fixedMonthly,varAvg,varEst,monthsUsed:months.length,win,hours,perHour,tbPct,incAvg,taxBank,incMonths,actual,theo};
+}
+// שעות נוכחות נטו בפועל לחודש (YYYY-MM), בלי מנהלים — המכנה של התקורה לשעה. נטען פעם אחת לחודש.
+var _ohAttH={}, _ohAttP=null;
+function _ensureOhHours(months){
+  const miss=(months||[]).filter(m=>_ohAttH[m]==null);
+  if(!miss.length)return Promise.resolve();
+  if(_ohAttP)return _ohAttP;
+  if(!db||!S.fbConnected)return Promise.resolve();   // בלי שרת — נשארים בהערכה התיאורטית
+  const s=miss.slice().sort(), from=s[0]+'-01', to=s[s.length-1]+'-31';
+  _ohAttP=loadAttRange(from,to).then(recs=>{
+    const mgr={};(S.workers||[]).forEach(w=>{if(w.role==='manager')mgr[w.id]=1;});
+    const h={};miss.forEach(m=>h[m]=0);
+    (recs||[]).forEach(r=>{const m=String(r.date||'').slice(0,7);if(m in h&&!mgr[r.workerId])h[m]+=(r.netMs||0)/3600000;});
+    Object.assign(_ohAttH,h);
+  }).catch(e=>console.error('_ensureOhHours:',e)).finally(()=>{
+    _ohAttP=null;
+    try{renderOverheadResult();renderLoadedHourTable();}catch(e){}
+  });
+  return _ohAttP;
+}
+// לקוראים אסינכרוניים: מוודא שהשעות בפועל נטענו לפני חישוב התקורה
+function ohReady(){return _ensureOhHours(overheadBreakdown().incMonths);}
+// הכנסות חודש (YYYY-MM) — משלוחים שיצאו בו × (מחיר יחידה + מחיר גזירה). הזמנה בלי מחיר לא נספרת.
+function _incomeOfMonth(ym){
+  let s=0;
+  (S.products||[]).forEach(p=>{
+    const pu=(+p.unitPrice||0)+(+p.cutPrice||0);if(!(pu>0))return;
+    prodShipments(p).forEach(x=>{if(String(x.date||'').slice(0,7)===ym)s+=pu*(+x.total||0);});
+  });
+  return s;
 }
 function saveLoadedHourSettings(){
   const c=S.costs;
@@ -12729,7 +12794,8 @@ function renderOverheadResult(){
   el.innerHTML=`<div style="background:var(--bg2);border-radius:var(--r);padding:10px 12px;font-size:12px;line-height:1.9">
     <div>🏢 קבועות לחודש: <b>₪${oh.fixedMonthly.toLocaleString(undefined,{maximumFractionDigits:0})}</b></div>
     <div>📊 ממוצע משתנות (${oh.monthsUsed||0}/${oh.win} חודשים): <b>₪${oh.varAvg.toLocaleString(undefined,{maximumFractionDigits:0})}</b> ← עם מרווח ${S.costs.overheadBufferPct??10}%: <b>₪${oh.varEst.toLocaleString(undefined,{maximumFractionDigits:0})}</b></div>
-    <div>🕐 שעות עבודה חודשיות (${_costWorkers().length} עובדים × ${S.costs.workDaysMonth||22} ימים × 8): <b>${oh.hours.toLocaleString()}</b></div>
+    ${oh.tbPct?`<div>🏦 מסים + עמלות בנק (${oh.tbPct}% × ממוצע הכנסות ₪${oh.incAvg.toLocaleString(undefined,{maximumFractionDigits:0})} ב-${oh.incMonths.join(', ')}): <b>₪${oh.taxBank.toLocaleString(undefined,{maximumFractionDigits:0})}</b></div>`:''}
+    <div>🕐 ${oh.actual?`שעות עבודה בפועל לחודש (ממוצע נוכחות נטו ב-${oh.incMonths.join(', ')})`:`שעות עבודה חודשיות — הערכה (${_costWorkers().length} עובדים × ${S.costs.workDaysMonth||22} ימים × 8) · שעות בפועל נטענות…`}: <b>${Math.round(oh.hours).toLocaleString()}</b></div>
     <div style="font-size:14px;font-weight:700;color:var(--green-txt);border-top:0.5px solid var(--brd);margin-top:4px;padding-top:6px">💰 תוספת תקורה לשעת עבודה: ₪${oh.perHour.toFixed(2)}</div>
   </div>`;
   renderReconciliation();
@@ -12860,9 +12926,21 @@ async function calcCosts(){
   });
 
   // הוצאות קבועות אחידות ליום
-  const dayFixed=(S.costs.fixedDaily||0)
-    +(S.costs.fixedMonthly||0)/(S.costs.workDaysMonth||22)
-    +(S.costs.fixedAnnual||0)/(S.costs.workDaysYear||250);
+  // ⚠️ מספר ימי העבודה משתנה מחודש לחודש (שישי חופש, חגים) — לכן החודשיות + 1/12 מהשנתיות
+  //    מתחלקות על ימי העבודה **של אותו חודש**, ולא על "ימי עבודה בחודש" הקבוע מההגדרות:
+  //    חודש שכולו בטווח וכבר נגמר ⇒ הימים שהיו בהם משימות בפועל (נזקף בדיוק הסכום החודשי).
+  //    חודש חלקי / נוכחי ⇒ ימי הלוח בלי שישי (הערכה — עוד לא ידוע כמה ימים יעבדו בו).
+  const _mFix=(S.costs.fixedMonthly||0)+(S.costs.fixedAnnual||0)/12;
+  const _today=todayStr(), _daysByM={}, _mDen={};
+  Object.keys(byDay).forEach(d=>{const m=d.slice(0,7);_daysByM[m]=(_daysByM[m]||0)+1;});
+  Object.keys(_daysByM).forEach(m=>{
+    const [y,mo]=m.split('-').map(Number), last=new Date(y,mo,0).getDate();
+    const mEnd=m+'-'+pad2(last);
+    let cal=0;for(let i=1;i<=last;i++)if(new Date(y,mo-1,i).getDay()!==5)cal++;
+    const full=from<=m+'-01'&&to>=mEnd&&mEnd<_today;
+    _mDen[m]={den:full?_daysByM[m]:cal,days:_daysByM[m],full};
+  });
+  const dayFixedOf=d=>(S.costs.fixedDaily||0)+(_mFix&&_mDen[d.slice(0,7)]?_mFix/_mDen[d.slice(0,7)].den:0);
 
   // 🧾 פירוט ההוצאות ללשונית "פירוט הוצאות" — אותם כללים בדיוק כמו totalOverhead:
   // נזקף רק יום שיש בו משימות (ההוצאה מתחלקת על משימות היום); יום בלי משימות — מוצג בנפרד.
@@ -12874,7 +12952,8 @@ async function calcCosts(){
     if(e.date>=from&&e.date<=to)_expItems.push({date:e.date,desc:e.desc||'',who:e.workerName||'',amount:Number(e.amount||0),src:'wrk',on:!!byDay[e.date]});
   });
   _expItems.sort((a,b)=>a.date.localeCompare(b.date));
-  S._costExp={dayFixed,days:Object.keys(byDay).sort(),items:_expItems};
+  S._costExp={fixDaily:S.costs.fixedDaily||0,mFix:_mFix,
+    months:Object.keys(_mDen).sort().map(m=>({m,..._mDen[m],tot:_mDen[m].days*dayFixedOf(m+'-01')})),items:_expItems};
 
   // ─── שעות נוכחות לכל עובד לפי יום ───
   // 🛑 טווח העלויות נבחר ע"י המשתמש ויכול לחרוג מחלון ה-45 יום ⇒ שליפה לפי דרישה.
@@ -12928,6 +13007,7 @@ async function calcCosts(){
   // ⚠️ התקורה **מחליפה** את ההוצאות הרשומות בטווח ולא מתווספת להן: היא כבר כוללת את
   //    הקבועות ואת ממוצע המשתנות החודשי ⇒ חיבור שניהם היה סופר את אותן הוצאות פעמיים.
   // ⚠️ תקורה רק על שעות של לא-מנהל: המכנה שלה (_costWorkers) אינו סופר מנהלים.
+  await ohReady();   // התקורה מחולקת בשעות בפועל — לוודא שנטענו
   const _oh=overheadBreakdown().perHour;
   const _mgr={};(S.workers||[]).forEach(w=>{if(w.role==='manager')_mgr[w.id]=1;});
   const _ohOf=wid=>_mgr[wid]?0:_oh;
@@ -13075,7 +13155,7 @@ async function calcCosts(){
 
     // חלק מהוצאות קבועות + משתנות
     const dayVar=varByDay[d]||0;
-    const overhead=(dayFixed+dayVar)*taskRatio;
+    const overhead=(dayFixedOf(d)+dayVar)*taskRatio;
 
     // חלק משכר עוזרים/מנהלים ללא משימות
     const nonTaskShare=(nonTaskWageByDay[d]||0)*taskRatio;
@@ -13225,9 +13305,12 @@ function renderCostTab(){
     </table></div>`;
 
   } else if(tab==='exp'){
-    const X=S._costExp||{dayFixed:0,days:[],items:[]};
+    const X=S._costExp||{months:[],items:[]};
     const fmt=v=>'₪'+Math.round(v).toLocaleString();
-    const nDays=X.days.length, fixTot=X.dayFixed*nDays;
+    const fixTot=(X.months||[]).reduce((s,m)=>s+m.tot,0);
+    // פירוט הקבועות לפי חודש: כמה ימים נזקפו מתוך כמה ימי עבודה בחודש
+    const fixSub=(X.months||[]).map(m=>`${m.m}: ${m.days}${m.full?'':'/'+m.den} ימים${m.full?' — חודש מלא':' — הערכה (ימי לוח בלי שישי)'}`).join('<br>')
+      +(X.fixDaily?`<br>כולל ₪${X.fixDaily} ליום`:'');
     const on=X.items.filter(i=>i.on), off=X.items.filter(i=>!i.on);
     const sum=a=>a.reduce((s,i)=>s+i.amount,0);
     const varTot=sum(on.filter(i=>i.src==='var')), wrkTot=sum(on.filter(i=>i.src==='wrk'));
@@ -13243,7 +13326,9 @@ function renderCostTab(){
       </tr></thead><tbody>${rowsOf(a)}</tbody></table></div>`
       :`<div style="font-size:12px;color:var(--txt3);text-align:center;padding:8px">${emp}</div>`;
     // 👷 עלויות עובד נלוות — רכיבי השעה העמוסה, נכללים ב"עלות מלאה" (לא ב"עלות הוצאות")
-    const ld=X.ld||{}, LDL=[['transport','🚌 הסעות'],['severance','📑 פיצויים'],['holidays','🎉 חגים'],['gifts','🎁 מתנות'],['trip','🏞 טיול'],['insurance','🛡 ביטוח']];
+    // מתנות וטיול בכרטיס אחד — סכום אישי לעובד נשמר כולו תחת gifts
+    const ld={...(X.ld||{})};ld.gifts=(ld.gifts||0)+(ld.trip||0);
+    const LDL=[['transport','🚌 הסעות'],['severance','📑 פיצויים'],['holidays','🎉 חגים'],['gifts','🎁 מתנות וטיול'],['insurance','🛡 ביטוח']];
     const ldTot=LDL.reduce((s,[k])=>s+(ld[k]||0),0);
     // 🏦 מסים ועמלות בנק — אחוז מההכנסות בטווח
     const taxPct=+S.costs.taxPct||0, bankPct=+S.costs.bankPct||0, inc=X.income||0;
@@ -13267,7 +13352,7 @@ function renderCostTab(){
     el.innerHTML=`
       <div class="sec" style="font-size:13px">📋 הוצאות רשומות (= "עלות הוצאות")</div>
       <div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(150px,1fr));gap:8px;margin-bottom:1rem">
-        <div style="background:var(--bg2);border-radius:var(--r);padding:8px 10px"><div style="font-size:11px;color:var(--txt3)">⚙️ קבועות</div><div style="font-weight:700">${fmt(fixTot)}</div><div style="font-size:11px;color:var(--txt3)">₪${X.dayFixed.toFixed(2)} × ${nDays} ימים עם משימות</div></div>
+        <div style="background:var(--bg2);border-radius:var(--r);padding:8px 10px"><div style="font-size:11px;color:var(--txt3)">⚙️ קבועות</div><div style="font-weight:700">${fmt(fixTot)}</div><div style="font-size:11px;color:var(--txt3)">${fixSub}</div></div>
         <div style="background:var(--bg2);border-radius:var(--r);padding:8px 10px"><div style="font-size:11px;color:var(--txt3)">📄 משתנות (ידני)</div><div style="font-weight:700">${fmt(varTot)}</div></div>
         <div style="background:var(--bg2);border-radius:var(--r);padding:8px 10px"><div style="font-size:11px;color:var(--txt3)">🧾 הוצאות עובדים</div><div style="font-weight:700">${fmt(wrkTot)}</div></div>
         <div style="background:var(--bg2);border-radius:var(--r);padding:8px 10px"><div style="font-size:11px;color:var(--txt3)">סה"כ הוצאות</div><div style="font-weight:700;color:var(--blue-txt)">${fmt(fixTot+varTot+wrkTot)}</div></div>
