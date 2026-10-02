@@ -14231,6 +14231,7 @@ function dnPrintDialog(){
     ${b("document.getElementById('dnp-wrap')?.remove();printDeliveryNotes(dnFiltered(true).rows)",'📄',sel?`הדפס ${sel===1?'תעודה אחת':sel+' תעודות'} מסומנות`:'הדפס תעודות מסומנות','כל תעודה בעמוד נפרד, בהדפסה אחת',!sel)}
     ${b("document.getElementById('dnp-wrap')?.remove();printSettlement(true)",'🧾','התחשבנות — רק המסומנות','דוח אחד עם שורה לכל תעודה מסומנת',!sel)}
     ${b("document.getElementById('dnp-wrap')?.remove();printSettlement()",'🧾','התחשבנות — כל התעודות שבסינון',all+' תעודות לפי הסינון במסך',!all)}
+    ${b(`document.getElementById('dnp-wrap')?.remove();printSettlement(${sel?'true':'false'},true)`,'📋','רשימה בלי מחירים'+(sel?' — רק המסומנות':' — כל שבסינון'),'כמויות, חבילות ואריזה — לנהג / למחסן',!(sel||all))}
     <button class="btn" style="width:100%;font-size:14px;margin-top:4px" onclick="document.getElementById('dnp-wrap')?.remove()">ביטול</button>
   </div>`;
   document.body.appendChild(wrap);
@@ -14780,7 +14781,8 @@ function renderDNotes(){
 }
 // 🧾 הדפסת ההתחשבנות. הנייר מורכב מ-`dnFiltered()` בדיוק כמו המסך — אם המסך מסנן
 // לקוח וטווח, זה מה שיודפס, ואין מסלול חישוב שני שיכול להיפרד ממנו.
-function printSettlement(onlySel){
+// noPrice ⇒ "רשימת תעודות" בלי שום סכום — כמויות, חבילות וסוג אריזה, למסירה לנהג/למחסן
+function printSettlement(onlySel,noPrice){
   const f=dnFiltered(!!onlySel);
   if(!f.rows.length){showToast('⚠ אין תעודות בסינון הנוכחי','var(--red-txt)');return;}
   const co=S.settings?.company||{};
@@ -14798,14 +14800,16 @@ function printSettlement(onlySel){
     ${one?'':`<td>${esc(S.customerNames?.[r.p.cust]||('לקוח '+(r.p.cust||'')))}</td>`}
     <td>${esc(r.p.name||r.p.prod||'')}${(parseInt(r.p.orderNo,10)||0)?` <span class="ord">#${String(r.p.orderNo).padStart(3,'0')}</span>`:''}</td>
     <td class="n">${r.qty}</td>
-    ${r.pr.missing
+    ${noPrice?`<td class="c">${packsCount(r.s.packs)||'—'}</td><td class="c">${esc(packModeName(r.s.packMode))||'—'}</td><td>${esc(r.s.note||'')}</td>`
+    :`${r.pr.missing
       ? `<td class="c miss" colspan="2">⚠ חסר מחיר</td>`
       : `<td class="c">${dnMoney(r.pr.sew)}</td><td class="c">${r.pr.cut?dnMoney(r.pr.cut):'—'}</td>`}
     <td class="c">${r.pack?dnMoney(r.pack):'—'}${r.s.packMode?`<div class="pm">${esc(packModeName(r.s.packMode))}</div>`:''}</td>
-    <td class="n">${dnMoney(r.amount)}</td>
+    <td class="n">${dnMoney(r.amount)}</td>`}
   </tr>`).join('');
+  const packsTot=f.rows.reduce((t,r)=>t+packsCount(r.s.packs),0);
   const cols=one?8:9;
-  printViaIframe(`<!DOCTYPE html><html dir="rtl" lang="he"><head><meta charset="UTF-8"/><title>התחשבנות ${esc(one?one.name:'')}</title><style>
+  printViaIframe(`<!DOCTYPE html><html dir="rtl" lang="he"><head><meta charset="UTF-8"/><title>${noPrice?'רשימת תעודות':'התחשבנות'} ${esc(one?one.name:'')}</title><style>
 *{box-sizing:border-box;margin:0;padding:0}
 body{font-family:Arial,Helvetica,sans-serif;color:#000;background:#fff;font-size:13px;padding:16mm 14mm;-webkit-print-color-adjust:exact;print-color-adjust:exact}
 .top{display:flex;justify-content:space-between;align-items:flex-start;border-bottom:3px solid #185FA5;padding-bottom:10px;margin-bottom:14px}
@@ -14849,7 +14853,7 @@ thead{display:table-header-group}
     </div>
   </div>
   <div class="doc">
-    <h1>דוח התחשבנות</h1>
+    <h1>${noPrice?'רשימת תעודות משלוח':'דוח התחשבנות'}</h1>
     <div class="dt">תקופה: ${esc(period)}</div>
     <div class="dt">הופק: ${heDate(new Date().toISOString().slice(0,10))}</div>
   </div>
@@ -14865,22 +14869,24 @@ thead{display:table-header-group}
    :`<div style="font-weight:700">${esc(custs.map(c=>c.name).join(' · '))}</div>
      <div style="font-size:11px;color:#666;margin-top:4px">הדוח כולל כמה לקוחות — לסינון ללקוח אחד בחר אותו בבורר הלקוחות.</div>`}
 </div>
-${f.missing?`<div class="warn">⚠ ${f.missing} תעודות בדוח שייכות לדגם שאין לו מחיר בכרטיס המוצר. הן מסומנות בטבלה ו<u>לא נכללו בסה"כ</u> — יש להזין את המחיר ולהפיק מחדש.</div>`:''}
+${!noPrice&&f.missing?`<div class="warn">⚠ ${f.missing} תעודות בדוח שייכות לדגם שאין לו מחיר בכרטיס המוצר. הן מסומנות בטבלה ו<u>לא נכללו בסה"כ</u> — יש להזין את המחיר ולהפיק מחדש.</div>`:''}
 <table>
   <thead><tr>
     <th class="c">תעודה</th><th class="c">תאריך</th>${one?'':'<th>לקוח</th>'}<th>דגם</th>
-    <th class="c">כמות</th><th class="c">תפירה ליח'</th><th class="c">גזירה ליח'</th><th class="c">📦 אריזה</th><th class="c">סכום</th>
+    <th class="c">כמות</th>${noPrice?'<th class="c">חבילות</th><th class="c">אריזה</th><th>הערה</th>'
+      :'<th class="c">תפירה ליח\'</th><th class="c">גזירה ליח\'</th><th class="c">📦 אריזה</th><th class="c">סכום</th>'}
   </tr></thead>
   <tbody>${body}</tbody>
   <tfoot><tr>
     <td colspan="${cols-5}" style="text-align:left">סה"כ ${f.rows.length} תעודות</td>
     <td class="c">${f.units}</td>
-    <td colspan="2" class="c" style="font-weight:600;font-size:11px">עבודה ${dnMoney(f.work)}</td>
+    ${noPrice?`<td class="c">${packsTot||'—'}</td><td colspan="2"></td>`
+    :`<td colspan="2" class="c" style="font-weight:600;font-size:11px">עבודה ${dnMoney(f.work)}</td>
     <td class="c">${f.pack?dnMoney(f.pack):'—'}</td>
-    <td class="n" style="font-size:15px">${dnMoney(f.amount)}</td>
+    <td class="n" style="font-size:15px">${dnMoney(f.amount)}</td>`}
   </tr></tfoot>
 </table>
-${f.matList.length?`<table class="mat"><thead><tr><th colspan="4">📦 פירוט חומר אריזה</th></tr>
+${!noPrice&&f.matList.length?`<table class="mat"><thead><tr><th colspan="4">📦 פירוט חומר אריזה</th></tr>
   <tr><th>חומר</th><th class="c">כמות</th><th class="c">מחיר ליח'</th><th class="c">סכום</th></tr></thead>
   <tbody>${f.matList.map(m=>`<tr>
     <td>${esc(packMatName(m.k))}</td><td class="c">${m.n}</td>
@@ -14890,7 +14896,7 @@ ${f.matList.length?`<table class="mat"><thead><tr><th colspan="4">📦 פירו�
 </table>`:''}
 <div class="sign">
   <div><b>חתימת המפעל</b>_______________________</div>
-  <div><b>אישור הלקוח</b>_______________________</div>
+  <div><b>${noPrice?'שם המקבל וחתימה':'אישור הלקוח'}</b>_______________________</div>
 </div>
 <div class="foot">הופק ממערכת TextileOps · ${esc(co.name||'')}</div>
 </body></html>`);
