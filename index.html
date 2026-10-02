@@ -1361,7 +1361,7 @@ code{background:var(--bg2);border:0.5px solid var(--b);border-radius:4px;padding
       <input id="dn-from" type="date" onchange="renderDNotes()" style="padding:7px 10px;border-radius:8px;border:1px solid var(--brd);background:var(--card);color:var(--txt);font-size:13px">
       <input id="dn-to" type="date" onchange="renderDNotes()" style="padding:7px 10px;border-radius:8px;border:1px solid var(--brd);background:var(--card);color:var(--txt);font-size:13px">
       <button class="btn" style="font-size:12px" onclick="dnClearFilter()">נקה</button>
-      <button class="btn primary" style="font-size:12px" onclick="printSettlement()">🧾 הדפס התחשבנות</button>
+      <button class="btn primary" style="font-size:12px" id="dn-print-btn" onclick="dnPrintDialog()">🖨 הדפסה…</button>
     </div>
     <div id="dnotes-list"></div>
   </div>
@@ -14170,10 +14170,15 @@ function dnMatrix(rows){
 // את השורה האחרונה בדף (ראה gotcha_print_grid_pagebreak); ל-thead יש חזרה מובנית.
 // idx = איזה משלוח להדפיס (ברירת מחדל: האחרון). כל משלוח = תעודה עם מספר משלו.
 async function printDeliveryNote(pid,idx){
+  const r=await dnEnsureNo(pid,idx);
+  if(r)printViaIframe(deliveryNoteHtml(r.p,r.list[r.i],r.i,r.list.length));
+}
+// מחזיר {p,list,i} של משלוח מוכן להדפסה — ואם אין לו עדיין מספר, מקצה ושומר.
+async function dnEnsureNo(pid,idx){
   const p=(S.products||[]).find(x=>x.id===pid);
-  if(!p){showToast('⚠ מוצר לא נמצא','var(--red-txt)');return;}
+  if(!p){showToast('⚠ מוצר לא נמצא','var(--red-txt)');return null;}
   let list=prodShipments(p);
-  if(!list.length){showToast('⚠ למוצר הזה לא נרשמה יציאה','var(--red-txt)');return;}
+  if(!list.length){showToast('⚠ למוצר הזה לא נרשמה יציאה','var(--red-txt)');return null;}
   const i=(idx==null||idx<0||idx>=list.length)?list.length-1:idx;
   // משלוח שנרשם לפני המספור (או לפני מאגר המשלוחים) מקבל מספר בהדפסה הראשונה ונשמר
   if(!list[i].no){
@@ -14186,7 +14191,49 @@ async function printDeliveryNote(pid,idx){
       try{renderProducts();}catch(e){}
     }
   }
-  printViaIframe(deliveryNoteHtml(p,list[i],i,list.length));
+  return {p,list,i};
+}
+// 🖨 כמה תעודות בהדפסה אחת — כל תעודה בעמוד משלה. כל תעודה נבנית ב-deliveryNoteHtml
+// כמו בהדפסה בודדת (אין מסלול שני שיכול להיפרד ממנה); לוקחים את ה-<style> מהראשונה
+// ואת גוף כל אחת עוטפים ב-.pg. הריפוד עובר מ-body ל-.pg — אחרת רק העמוד הראשון מרופד.
+async function printDeliveryNotes(rows){
+  if(!rows.length){showToast('⚠ לא סומנו תעודות','var(--red-txt)');return;}
+  const sorted=rows.slice().sort((a,b)=>((+a.s.no||1e9)-(+b.s.no||1e9))||String(a.s.date||'').localeCompare(String(b.s.date||'')));
+  const parts=[];
+  // ברצף ולא במקביל — תעודות בלי מספר מקבלות מספרים עוקבים לפי הסדר
+  for(const r of sorted){
+    const x=await dnEnsureNo(r.p.id,r.i);
+    if(x)parts.push(deliveryNoteHtml(x.p,x.list[x.i],x.i,x.list.length));
+  }
+  if(!parts.length)return;
+  const style=(parts[0].match(/<style>[\s\S]*?<\/style>/)||[''])[0];
+  const bodies=parts.map(h=>'<div class="pg">'+((h.match(/<body>([\s\S]*)<\/body>/)||[])[1]||'')+'</div>').join('');
+  printViaIframe(`<!DOCTYPE html><html dir="rtl" lang="he"><head><meta charset="UTF-8"/><title>תעודות משלוח (${parts.length})</title>${style}<style>
+body{padding:0!important}
+.pg{padding:16mm 14mm;break-after:page;page-break-after:always}
+.pg:last-child{break-after:auto;page-break-after:auto}
+@media print{.pg{padding:10mm}}
+</style></head><body>${bodies}</body></html>`);
+  try{renderDNotes();}catch(e){}
+}
+// חלון ההדפסה בלשונית תעודות משלוח: תעודות מסומנות (כל אחת בעמוד) / התחשבנות.
+function dnPrintDialog(){
+  document.getElementById('dnp-wrap')?.remove();
+  const all=dnFiltered().rows.length,sel=dnFiltered(true).rows.length;
+  const b=(on,ic,t,sub,dis)=>`<button class="btn${dis?'':' primary'}" ${dis?'disabled style="opacity:.5;cursor:default;':'style="'}width:100%;text-align:right;padding:10px 12px;margin-bottom:8px;font-size:14px" onclick="${on}"><b>${ic} ${t}</b><div style="font-size:11px;font-weight:400;opacity:.85;margin-top:2px">${sub}</div></button>`;
+  const wrap=document.createElement('div');
+  wrap.id='dnp-wrap';
+  wrap.style.cssText='position:fixed;inset:0;background:rgba(0,0,0,.5);display:flex;align-items:flex-start;justify-content:center;z-index:10000;padding:16px;overflow-y:auto';
+  wrap.onclick=e=>{if(e.target===wrap)wrap.remove();};
+  wrap.innerHTML=`<div style="background:var(--card);border-radius:14px;padding:20px;max-width:400px;width:100%;box-shadow:0 10px 40px rgba(0,0,0,.3);margin:auto">
+    <div style="font-size:16px;font-weight:800;margin-bottom:4px">🖨 הדפסה</div>
+    <div style="font-size:12px;color:var(--txt3);margin-bottom:12px">${sel?`סומנו <b style="color:var(--txt)">${sel}</b> תעודות מתוך ${all} שבסינון`:'לא סומנו תעודות — סמן ☑ בטבלה כדי להדפיס כמה תעודות יחד'}</div>
+    ${b("document.getElementById('dnp-wrap')?.remove();printDeliveryNotes(dnFiltered(true).rows)",'📄',sel?`הדפס ${sel===1?'תעודה אחת':sel+' תעודות'} מסומנות`:'הדפס תעודות מסומנות','כל תעודה בעמוד נפרד, בהדפסה אחת',!sel)}
+    ${b("document.getElementById('dnp-wrap')?.remove();printSettlement(true)",'🧾','התחשבנות — רק המסומנות','דוח אחד עם שורה לכל תעודה מסומנת',!sel)}
+    ${b("document.getElementById('dnp-wrap')?.remove();printSettlement()",'🧾','התחשבנות — כל התעודות שבסינון',all+' תעודות לפי הסינון במסך',!all)}
+    <button class="btn" style="width:100%;font-size:14px;margin-top:4px" onclick="document.getElementById('dnp-wrap')?.remove()">ביטול</button>
+  </div>`;
+  document.body.appendChild(wrap);
 }
 // מחיקת משלוח שנרשם בטעות. **המספר לא ממוחזר** — ייתכן שהנייר כבר נמסר ללקוח,
 // ומספר שחוזר על שני משלוחים שונים הוא בלגן שאי אפשר לתקן בדיעבד.
@@ -14521,6 +14568,7 @@ function dnVoidTr(v){
     ? esc(S.customerNames?.[v.cust]||('לקוח '+(v.cust||'')))+' · '+esc(v.name||v.prod||'')+(+v.total?' · '+(+v.total)+" יח'":'')+who
     : 'אין תעודה במספר הזה — בוטלה, או שההנפקה לא הושלמה';
   return `<tr style="opacity:.62">
+    <td></td>
     <td><span class="bc-seg" style="background:var(--bg2,#f1f5f9);color:var(--txt3);font-weight:700;text-decoration:line-through">${String(v.no).padStart(4,'0')}</span></td>
     <td style="white-space:nowrap;color:var(--txt3)">${hd(v.date)}</td>
     <td colspan="10" style="color:var(--txt3);font-size:12px">🕳 <b>${lbl}</b> — ${what} <span style="opacity:.8">· המספר לא חוזר לשימוש</span></td>
@@ -14533,6 +14581,10 @@ function dnRowsWithVoids(rows,voids,fn){
     .concat(voids.map(v=>({n:+v.no||0,html:dnVoidTr(v)})))
     .sort((x,y)=>y.n-x.n).map(x=>x.html).join('');
 }
+function dnSelToggle(k,on){on?_dnSel.add(k):_dnSel.delete(k);renderDNotes();}
+function dnSelAll(on){dnFiltered().rows.forEach(r=>on?_dnSel.add(dnKey(r)):_dnSel.delete(dnKey(r)));renderDNotes();}
+function dnSelClear(){_dnSel.clear();renderDNotes();}
+function dnSelLabel(n){const b=document.getElementById('dn-print-btn');if(b)b.textContent=n?`🖨 הדפסה (${n} מסומנות)…`:'🖨 הדפסה…';}
 function dnClearFilter(){
   ['dn-search','dn-cust','dn-from','dn-to'].forEach(id=>{const el=document.getElementById(id);if(el)el.value='';});
   renderDNotes();
@@ -14590,12 +14642,18 @@ function dnCustomers(rows){
   const codes=[...new Set(rows.map(r=>r.p.cust).filter(Boolean))].sort();
   return codes.map(c=>({code:c,name:S.customerNames?.[c]||('לקוח '+c)}));
 }
+// ☑ תעודות שסומנו בטבלה להדפסה. המפתח = מוצר|מיקום המשלוח במוצר (לא מספר התעודה —
+// משלוח ותיק עדיין בלי מספר). הבחירה נשמרת בין רינדורים ומתנקה ממפתחות שכבר לא קיימים.
+let _dnSel=new Set();
+const dnKey=r=>r.p.id+'|'+r.i;
 // שורות הדוח אחרי סינון — משותף לטבלה ולהדפסה, כדי שהנייר יהיה **בדיוק** מה שבמסך.
-function dnFiltered(){
+// `onlySel` ⇒ רק מה שסומן (ועדיין בתוך הסינון — תעודה מסומנת שהסינון מסתיר לא תודפס בהפתעה).
+function dnFiltered(onlySel){
   const g=id=>(document.getElementById(id)?.value||'').trim();
   const q=g('dn-search').toLowerCase(),cust=g('dn-cust'),from=g('dn-from'),to=g('dn-to');
   // משלוח בלי תאריך לא נופל מהסינון — עדיף להראות אותו מאשר להעלים תעודה שקיימת
   const rows=allDeliveryNotes().filter(r=>{
+    if(onlySel&&!_dnSel.has(dnKey(r)))return false;
     const d=r.s.date||'';
     if(cust&&r.p.cust!==cust)return false;
     if(from&&d&&d<from)return false;
@@ -14646,13 +14704,19 @@ function renderDNotes(){
   }
   const f=dnFiltered(),rows=f.rows,voids=dnVoidRows(f);
   const packs=rows.reduce((t,r)=>t+packsCount(r.s.packs),0);
+  // ☑ ניקוי בחירה של תעודות שנמחקו בינתיים
+  const _live=new Set(allDeliveryNotes().map(dnKey));
+  _dnSel=new Set([..._dnSel].filter(k=>_live.has(k)));
+  const selVis=rows.filter(r=>_dnSel.has(dnKey(r))).length;
+  dnSelLabel(selVis);
   const sum=document.getElementById('dn-sum');
   if(sum)sum.innerHTML=(rows.length===1?'תעודה אחת':rows.length+' תעודות')+' · '+f.units+" יח'"
     +(packs?' · '+packs+' חבילות':'')
     +' · <b style="color:var(--txt)">'+dnMoney(f.amount)+'</b>'
     +(f.pack?` <span style="color:var(--txt3)">(📦 ${dnMoney(f.pack)})</span>`:'')
     +(f.missing?` · <b style="color:var(--red-txt)">⚠ ${f.missing} בלי מחיר</b>`:'')
-    +(voids.length?` · <span style="color:var(--txt3)">🕳 ${voids.length===1?'תעודה אחת בוטלה':voids.length+' תעודות בוטלו'}</span>`:'');
+    +(voids.length?` · <span style="color:var(--txt3)">🕳 ${voids.length===1?'תעודה אחת בוטלה':voids.length+' תעודות בוטלו'}</span>`:'')
+    +(selVis?` · <b style="color:#185FA5">☑ ${selVis} מסומנות</b> <a href="#" onclick="dnSelClear();return false" style="font-size:11px">נקה סימון</a>`:'');
   const heDate=d=>d?String(d).slice(8,10)+'/'+String(d).slice(5,7)+'/'+String(d).slice(0,4):'—';
   if(!rows.length&&!voids.length){
     box.innerHTML=`<div class="card" style="text-align:center;color:var(--txt3);font-size:13px;padding:18px">אין תעודות תואמות</div>`;
@@ -14660,6 +14724,7 @@ function renderDNotes(){
   }
   box.innerHTML=`<div class="card" style="padding:0"><div class="tbl-wrap"><table>
     <thead><tr>
+      <th style="width:28px;text-align:center"><input type="checkbox" title="סמן / בטל את כל התעודות שבסינון" ${rows.length&&selVis===rows.length?'checked':''} onchange="dnSelAll(this.checked)" style="width:16px;height:16px;cursor:pointer"></th>
       <th>תעודה</th><th>תאריך</th><th>לקוח</th><th>דגם</th><th>הזמנה</th>
       <th style="text-align:center">יח'</th>
       <th style="text-align:center">תפירה</th><th style="text-align:center">✂ גזירה</th>
@@ -14680,7 +14745,9 @@ function renderDNotes(){
       const money=`${work}
         <td style="text-align:center;white-space:nowrap;color:var(--txt3)"${matTip?` title="${esc((PACK_MODES[r.s.packMode]||'')+(matTip?' — '+matTip:''))}"`:''}>${r.pack?dnMoney(r.pack)+(r.mats.some(m=>!(+m.price))?' <span style="color:var(--amber-txt)">⚠</span>':''):'—'}</td>
         <td style="text-align:center;white-space:nowrap;font-weight:700">${dnMoney(r.amount)}</td>`;
-      return `<tr>
+      const _k=dnKey(r);
+      return `<tr${_dnSel.has(_k)?' style="background:rgba(24,95,165,.08)"':''}>
+        <td style="text-align:center"><input type="checkbox" ${_dnSel.has(_k)?'checked':''} onchange="dnSelToggle('${escj(_k)}',this.checked)" style="width:16px;height:16px;cursor:pointer"></td>
         <td><span class="bc-seg" style="background:var(--green-bg,#dcfce7);color:var(--green-txt,#16a34a);font-weight:700">${r.s.no?String(r.s.no).padStart(4,'0'):'—'}</span>${shipEditMark(r.s)}${r.count>1?`<span style="font-size:10px;color:var(--txt3)"> ${r.i+1}/${r.count}</span>`:''}</td>
         <td style="white-space:nowrap">${heDate(r.s.date)}</td>
         <td>${esc(S.customerNames?.[r.p.cust]||('לקוח '+(r.p.cust||'')))}</td>
@@ -14698,7 +14765,7 @@ function renderDNotes(){
       </tr>`;
     })}</tbody>
     <tfoot><tr style="background:var(--bg2,var(--card));font-weight:800">
-      <td colspan="5" style="text-align:left">סה"כ</td>
+      <td colspan="6" style="text-align:left">סה"כ</td>
       <td style="text-align:center">${f.units}</td>
       <td colspan="2" style="text-align:center;font-weight:600;color:var(--txt3);font-size:11px">עבודה ${dnMoney(f.work)}</td>
       <td style="text-align:center;white-space:nowrap">${f.pack?dnMoney(f.pack):'—'}</td>
@@ -14713,8 +14780,8 @@ function renderDNotes(){
 }
 // 🧾 הדפסת ההתחשבנות. הנייר מורכב מ-`dnFiltered()` בדיוק כמו המסך — אם המסך מסנן
 // לקוח וטווח, זה מה שיודפס, ואין מסלול חישוב שני שיכול להיפרד ממנו.
-function printSettlement(){
-  const f=dnFiltered();
+function printSettlement(onlySel){
+  const f=dnFiltered(!!onlySel);
   if(!f.rows.length){showToast('⚠ אין תעודות בסינון הנוכחי','var(--red-txt)');return;}
   const co=S.settings?.company||{};
   const custs=dnCustomers(f.rows);
