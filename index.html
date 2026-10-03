@@ -3822,7 +3822,7 @@ function _syncWatchStart(){
 // כתיבה: העוטפים (fbSet וכו') מפצלים אוטומטית כל כתיבה ל-products — השדות לא חוזרים לשם.
 // ⚠️ עובדת בלי תמחור עדיין צריכה לדעת "יש למוצר תמחור?" לצפי בסריקה ⇒ הדגל priced
 // (כן/לא, בלי מספרים) נשמר במסמך המוצר. ראה _isPriced.
-const PRICING_FIELDS=['unitPrice','targetProfitPct','directMaterialsCost','cutPrice','cutProfitPct'];
+const PRICING_FIELDS=['unitPrice','targetProfitPct','directMaterialsCost','cutPrice','cutProfitPct','extraMatPrice'];
 let _pricingMap={};
 // ⚠️ חייב להישאר זהה ל-canPricing ב-firestore.rules: מנהל · permissions מפורש עם products/dnotes ·
 // אחראי בלי permissions (ברירת המחדל שלו כוללת products; dnotes דורש סימון מפורש — OPTIN_PAGES)
@@ -8302,9 +8302,10 @@ async function buildRealProfitReport(force){
     for(const t of ts){const h=(nd[t.id]||0)/3600;hrs+=h;labor+=h*(loadedHourlyRate(t.workerId)||ctx.avgAll);}
     const shipped=+p.shippedQty||0,planned=_prodQty(p);
     const price=+p.unitPrice||0,cutPrice=+p.cutPrice||0;
-    const income=(price+cutPrice)*shipped;
+    const extraMat=+p.extraMatPrice||0; // 🧵 מחויב ללקוח ונקנה ע"י המפעל — נכנס להכנסה ולעלות
+    const income=(price+cutPrice+extraMat)*shipped;
     const overhead=hrs*ctx.oh;
-    const materials=(+p.directMaterialsCost||0)*Math.max(planned,shipped); // נקנה לכל מה שיוצר
+    const materials=(+p.directMaterialsCost||0)*Math.max(planned,shipped)+extraMat*shipped; // נקנה לכל מה שיוצר
     const cost=labor+overhead+materials;
     return{p,shipped,planned,price,cutPrice,income,hrs,labor,overhead,materials,cost,profit:income-cost,
       n:ts.length,open:openBy[k]||0,at:String(p.shippedAt||p.dnDate||'').slice(0,10),
@@ -12784,7 +12785,7 @@ function ohReady(){return _ensureOhHours(overheadBreakdown().incMonths);}
 function _incomeOfMonth(ym){
   let s=0;
   (S.products||[]).forEach(p=>{
-    const pu=(+p.unitPrice||0)+(+p.cutPrice||0);if(!(pu>0))return;
+    const pu=(+p.unitPrice||0)+(+p.cutPrice||0)+(+p.unitPrice?(+p.extraMatPrice||0):0); // 🧵 חומרים בתוספת — חלק מהחשבון ללקוחif(!(pu>0))return;
     prodShipments(p).forEach(x=>{if(String(x.date||'').slice(0,7)===ym)s+=pu*(+x.total||0);});
   });
   return s;
@@ -13337,7 +13338,7 @@ async function calcCosts(){
   // הבסיס למסים ולעמלות הבנק באחוזים. הזמנה בלי מחיר — נספרת בנפרד ולא נכנסת.
   let income=0, incShip=0, noPrice=0;
   (S.products||[]).forEach(p=>{
-    const pu=(+p.unitPrice||0)+(+p.cutPrice||0);
+    const pu=(+p.unitPrice||0)+(+p.cutPrice||0)+(+p.unitPrice?(+p.extraMatPrice||0):0); // 🧵 חומרים בתוספת — חלק מהחשבון ללקוח
     prodShipments(p).forEach(s=>{
       const sd=String(s.date||'').slice(0,10);
       if(!sd||sd<from||sd>to||!(+s.total>0))return;
@@ -14635,7 +14636,9 @@ function dnUnitPrice(p){
   const cut=+p?.cutPrice||0;
   // ✂ הגזירה מתומחרת בנפרד מהתפירה ([[feature_cut_price]]) — הלקוח משלם את שתיהן,
   // ולכן שתי עמודות + סכום, ולא מספר אחד מאוחד שמסתיר ממה הוא מורכב.
-  return {sew,cut,unit:sew+cut,missing:!sew};
+  // 🧵 חומרים בתוספת — הלקוח משלם אותם מעבר לתפירה+גזירה. כמו שאר המחיר — מהכרטיס של היום.
+  const mat=+p?.extraMatPrice||0;
+  return {sew,cut,mat,unit:sew+cut+mat,missing:!sew};
 }
 function dnMoney(v){return '₪'+(+v||0).toLocaleString('he-IL',{minimumFractionDigits:2,maximumFractionDigits:2});}
 // הלקוחות שיש להם בפועל תעודות — בורר שמציע לקוח בלי אף משלוח רק מבלבל.
@@ -14738,7 +14741,7 @@ function renderDNotes(){
       // מדוח שצועק. הסכום שלו גם לא נכנס לסה"כ.
       const work=r.pr.missing
         ? `<td colspan="2" style="text-align:center;color:var(--red-txt);font-weight:700">⚠ חסר מחיר בכרטיס המוצר</td>`
-        : `<td style="text-align:center;white-space:nowrap">${dnMoney(r.pr.sew)}${r.p.isSample&&!(+r.p.unitPrice)?'<span title="👕 דגם ראשון — מחיר קבוע" style="font-size:10px;color:var(--txt3)"> 👕</span>':''}</td>
+        : `<td style="text-align:center;white-space:nowrap">${dnMoney(r.pr.sew)}${r.p.isSample&&!(+r.p.unitPrice)?'<span title="👕 דגם ראשון — מחיר קבוע" style="font-size:10px;color:var(--txt3)"> 👕</span>':''}${r.pr.mat?`<div style="font-size:10px;color:var(--txt3)">+🧵 חומרים ${dnMoney(r.pr.mat)}</div>`:''}</td>
            <td style="text-align:center;white-space:nowrap;color:var(--txt3)">${r.pr.cut?dnMoney(r.pr.cut):'—'}</td>`;
       // מצב האריזה + החומרים בטולטיפ — הטבלה צרה מכדי לפרט קולב/ניילון בעמודה,
       // אבל בלי הפירוט אי אפשר לבדוק סכום שנראה מוזר בלי לפתוח את התעודה
@@ -14803,7 +14806,7 @@ function printSettlement(onlySel,noPrice){
     ${noPrice?`<td class="c">${packsCount(r.s.packs)||'—'}</td><td class="c">${esc(packModeName(r.s.packMode))||'—'}</td><td>${esc(r.s.note||'')}</td>`
     :`${r.pr.missing
       ? `<td class="c miss" colspan="2">⚠ חסר מחיר</td>`
-      : `<td class="c">${dnMoney(r.pr.sew)}</td><td class="c">${r.pr.cut?dnMoney(r.pr.cut):'—'}</td>`}
+      : `<td class="c">${dnMoney(r.pr.sew)}${r.pr.mat?`<div class="pm">+ חומרים ${dnMoney(r.pr.mat)}</div>`:''}</td><td class="c">${r.pr.cut?dnMoney(r.pr.cut):'—'}</td>`}
     <td class="c">${r.pack?dnMoney(r.pack):'—'}${r.s.packMode?`<div class="pm">${esc(packModeName(r.s.packMode))}</div>`:''}</td>
     <td class="n">${dnMoney(r.amount)}</td>`}
   </tr>`).join('');
@@ -15428,7 +15431,7 @@ function renderProducts(){
     if(S.user?.role==='manager'&&+p.unitPrice){
       const price=+p.unitPrice,pct=+p.targetProfitPct||0,mat=+p.directMaterialsCost||0;
       const budget=price*(1-pct/100)-mat;
-      pricingHtml=`<div style="margin-top:6px;font-size:11px;color:var(--txt3)">💰 מחיר <b style="color:var(--txt)">₪${price.toFixed(2)}</b> · רווח יעד ${pct}% (₪${(price*pct/100).toFixed(2)}) · חומרים ₪${mat.toFixed(2)} · תקציב עבודה <b style="color:${budget>0?'var(--green-txt)':'var(--red-txt)'}">₪${budget.toFixed(2)}</b>${budget<=0?' ⚠':''}</div>`;
+      pricingHtml=`<div style="margin-top:6px;font-size:11px;color:var(--txt3)">💰 מחיר <b style="color:var(--txt)">₪${price.toFixed(2)}</b> · רווח יעד ${pct}% (₪${(price*pct/100).toFixed(2)}) · חומרים ₪${mat.toFixed(2)}${+p.extraMatPrice?` · 🧵 בתוספת ₪${(+p.extraMatPrice).toFixed(2)}`:''} · תקציב עבודה <b style="color:${budget>0?'var(--green-txt)':'var(--red-txt)'}">₪${budget.toFixed(2)}</b>${budget<=0?' ⚠':''}</div>`;
     }
     return`<div class="card" style="margin-bottom:10px">
       <div style="display:flex;align-items:flex-start;justify-content:space-between;gap:8px">
@@ -15539,7 +15542,8 @@ function openProductModal(id){
       <div class="field"><label>מחיר מכירה ₪</label><input id="pm-price" type="number" min="0" step="0.1" value="${p?.unitPrice||''}" placeholder="0" style="font-size:13px" oninput="syncProfitFields('price')"/></div>
       <div class="field"><label>רווח יעד %</label><input id="pm-profit" type="number" min="0" max="95" step="1" value="${p?.targetProfitPct??''}" placeholder="0" style="font-size:13px" oninput="syncProfitFields('pct')"/></div>
       <div class="field"><label>רווח יעד ₪</label><input id="pm-profit-ils" type="number" min="0" step="0.1" value="${p&&+p.unitPrice&&p.targetProfitPct!=null?((+p.unitPrice)*(+p.targetProfitPct)/100).toFixed(2):''}" placeholder="0" style="font-size:13px" oninput="syncProfitFields('ils')"/></div>
-      <div class="field"><label>חומרים ₪ <span style="font-size:10px;color:var(--txt3)">(+אריזה+הובלה)</span></label><input id="pm-materials" type="number" min="0" step="0.1" value="${p?.directMaterialsCost||''}" placeholder="0" style="font-size:13px" oninput="renderProductPricing()"/></div>
+      <div class="field"><label>חומרים ₪ <span style="font-size:10px;color:var(--txt3)">(מתוך המחיר · +אריזה+הובלה)</span></label><input id="pm-materials" type="number" min="0" step="0.1" value="${p?.directMaterialsCost||''}" placeholder="0" title="עלות שהמפעל סופג מתוך מחיר המכירה — יורדת מתקציב העבודה" style="font-size:13px" oninput="renderProductPricing()"/></div>
+      <div class="field"><label>🧵 חומרים בתוספת ₪ <span style="font-size:10px;color:var(--txt3)">(מעבר למחיר)</span></label><input id="pm-extramat" type="number" min="0" step="0.1" value="${p?.extraMatPrice||''}" placeholder="0" title="חומרים שהלקוח משלם בנוסף למחיר התפירה והגזירה — נכנסים להתחשבנות, לא יורדים מתקציב העבודה" style="font-size:13px" oninput="renderProductPricing()"/></div>
       <div class="field"><label>✂ עלות גזירה ₪ <span style="font-size:10px;color:var(--txt3)">(ליחידה)</span></label><input id="pm-cutprice" type="number" min="0" step="0.1" value="${p?.cutPrice||''}" placeholder="0" title="מחיר הגזירה ליחידה — נוסף למחיר המכירה. מוזן בהקמת המוצר, לפני שהכמות ידועה. סמן ✂ על שלבי הגזירה כדי שייספרו מולו." style="font-size:13px" oninput="renderProductPricing()"/></div>
       <div class="field"><label>✂ רווח יעד גזירה %</label><input id="pm-cutprofit" type="number" min="0" max="99" step="1" value="${p?.cutProfitPct??''}" placeholder="לפי התפירה" title="אחוז רווח היעד של הגזירה — נפרד מאחוז התפירה. כל עוד ריק, החישוב משתמש באחוז התפירה." style="font-size:13px" oninput="renderProductPricing()"/></div>
     </div>
@@ -15673,6 +15677,7 @@ function pmCopyFromPrev(pid){
   set('pm-price',+p.unitPrice||'');
   set('pm-profit',p.targetProfitPct!=null?+p.targetProfitPct:'');
   set('pm-materials',+p.directMaterialsCost||'');
+  set('pm-extramat',+p.extraMatPrice||'');
   set('pm-cutprice',+p.cutPrice||''); // ✂ מחיר הגזירה הוא חלק מהתמחור ומועתק איתו (הכמות עדיין לא)
   set('pm-cutprofit',hasCutProfitPct(p)?+p.cutProfitPct:''); // ✂ אחוז רווח הגזירה נוסע יחד עם המחיר
   const pr=+p.unitPrice||0,pc=+p.targetProfitPct||0;
@@ -15768,7 +15773,10 @@ function renderProductPricing(){
   if(!price){box.innerHTML='<div style="font-size:11px;color:var(--txt3)">הזן מחיר מכירה כדי לראות תקצוב זמן לשלבים</div>';return;}
   const budget=price*(1-profitPct/100)-materials;
   const profitILS=price*profitPct/100;
-  const head=`<div style="font-size:12px;line-height:1.8">💵 מחיר ₪${price.toFixed(2)} − רווח ${profitPct}% (₪${profitILS.toFixed(2)}) − חומרים ₪${materials.toFixed(2)} = <b>תקציב עבודה+תקורה: ₪${budget.toFixed(2)}</b></div>`;
+  const extraMat=parseFloat(document.getElementById('pm-extramat')?.value)||0;
+  const cutP=parseFloat(document.getElementById('pm-cutprice')?.value)||0;
+  const head=`<div style="font-size:12px;line-height:1.8">💵 מחיר ₪${price.toFixed(2)} − רווח ${profitPct}% (₪${profitILS.toFixed(2)}) − חומרים ₪${materials.toFixed(2)} = <b>תקציב עבודה+תקורה: ₪${budget.toFixed(2)}</b></div>`
+    +(extraMat?`<div style="font-size:12px;color:var(--txt3)">🧵 + חומרים בתוספת ₪${extraMat.toFixed(2)} — לא נוגעים בתקציב · ללקוח ליחידה: <b style="color:var(--txt)">₪${(price+cutP+extraMat).toFixed(2)}</b></div>`:'');
   if(budget<=0){
     box.innerHTML=`<div style="background:var(--red-bg,#fee2e2);border-radius:8px;padding:8px 10px">${head}
       <div style="font-size:12px;color:var(--red-txt);font-weight:700;margin-top:4px">❌ המחיר לא מחזיק את יעד הרווח — לא נשאר תקציב לעבודה</div></div>`;
@@ -16180,6 +16188,8 @@ async function saveProduct(){
   const unitPrice=parseFloat(document.getElementById('pm-price')?.value)||0;
   const targetProfitPct=parseFloat(document.getElementById('pm-profit')?.value)||0;
   const directMaterialsCost=parseFloat(document.getElementById('pm-materials')?.value)||0;
+  // 🧵 חומרים בתוספת — הלקוח משלם אותם מעבר למחיר; **לא** נכנסים לחישוב תקציב העבודה
+  const extraMatPrice=parseFloat(document.getElementById('pm-extramat')?.value)||0;
   // ✂ מחיר הגזירה — הכנסה נוספת ליחידה, נפרדת ממחיר המכירה, עם **אחוז רווח יעד משלה**.
   // ריק נשמר כ-`null` ולא כ-0: 0 הוא "גזירה בלי רווח", null הוא "לא הוזן ⇒ לפי התפירה".
   const cutPrice=parseFloat(document.getElementById('pm-cutprice')?.value)||0;
@@ -16199,7 +16209,7 @@ async function saveProduct(){
           sendTelegram('📦 TextileOps — מוצר עבר שלב ייצור\n🏷 מוצר: '+name+' ('+cust+'-'+prod+')\n📍 שלב: '+stageName+'\n📅 תאריך: '+s.date+' '+s.time+'\n🕐 עודכן: '+now).catch(()=>{});
         }
       }
-      Object.assign(p,{prod,cust,name,images:_prodImgs,imgCount:_prodImgs.length,docs:_prodDocs,quantities,stageLog,stageSkipped,workSteps,unitPrice,targetProfitPct,directMaterialsCost,cutPrice,cutProfitPct,isSample});
+      Object.assign(p,{prod,cust,name,images:_prodImgs,imgCount:_prodImgs.length,docs:_prodDocs,quantities,stageLog,stageSkipped,workSteps,unitPrice,targetProfitPct,directMaterialsCost,cutPrice,cutProfitPct,extraMatPrice,isSample});
     }
   }else{
     const id='p'+Date.now();
@@ -16210,7 +16220,7 @@ async function saveProduct(){
       stageLog.sort((a,b)=>PROD_STAGES.findIndex(x=>x.id===a.id)-PROD_STAGES.findIndex(x=>x.id===b.id));
     }
     const _ordF=await newProdOrderFields(cust,prod);
-    S.products.push({id,createdAt:Date.now(),..._ordF,prod,cust,name,images:_prodImgs,imgCount:_prodImgs.length,docs:_prodDocs,quantities,stageLog,stageSkipped,workSteps,unitPrice,targetProfitPct,directMaterialsCost,cutPrice,cutProfitPct,isSample});
+    S.products.push({id,createdAt:Date.now(),..._ordF,prod,cust,name,images:_prodImgs,imgCount:_prodImgs.length,docs:_prodDocs,quantities,stageLog,stageSkipped,workSteps,unitPrice,targetProfitPct,directMaterialsCost,cutPrice,cutProfitPct,extraMatPrice,isSample});
   }
   saveLS();
   if(S.fbConnected){
