@@ -843,6 +843,17 @@ code{background:var(--bg2);border:0.5px solid var(--b);border-radius:4px;padding
           <input type="number" id="co-dnstart" min="1" style="width:100%;font-size:13px;margin-top:4px"/>
           <div id="co-dnlast" style="font-size:11px;color:var(--txt3);margin-top:3px"></div>
         </div>
+        <div style="margin-top:10px;padding-top:9px;border-top:1px solid var(--brd);display:grid;grid-template-columns:2fr 1fr;gap:8px">
+          <div>
+            <label style="font-size:12px;font-weight:600">🧾 מספר חשבונית העסקה הבאה</label>
+            <input type="number" id="co-invstart" min="1" style="width:100%;font-size:13px;margin-top:4px"/>
+          </div>
+          <div>
+            <label style="font-size:12px;font-weight:600">מע"מ %</label>
+            <input type="number" id="co-vat" min="0" max="50" step="0.1" style="width:100%;font-size:13px;margin-top:4px"/>
+          </div>
+          <div id="co-invlast" style="grid-column:1/-1;font-size:11px;color:var(--txt3)"></div>
+        </div>
         <div style="margin-top:12px;padding-top:10px;border-top:1px solid var(--brd)">
           <div style="font-size:12px;font-weight:700">📦 מחירון חומר אריזה — ₪ ליחידה</div>
           <div style="font-size:11px;color:var(--txt3);margin:3px 0 7px">המחיר נצרב על התעודה בעת אישור המשלוח — שינוי כאן <b>לא</b> משנה תעודות שכבר יצאו.</div>
@@ -2824,6 +2835,8 @@ let S={
     company:{name:'א.מ טקסטיל',addr:'באקה אלגרבייה',city:'',phone:'052-3381376',taxId:'066055450',email:''},
     // המספר הראשון שיונפק — ממשיך את הפנקס הידני
     dnStart:645,
+    // 🧾 חשבונית עסקה — המספר הראשון שיונפק (ממשיך את הפנקס הידני) ואחוז המע"מ
+    invStart:171,vatPct:18,
     // 🕳 יומן תעודות שבוטלו — ראה dnVoidAdd. נשמר כדי שחור ברצף המספור
     // לא ייראה כתעודה שנעלמה מהמערכת.
     dnVoids:[],
@@ -4085,6 +4098,8 @@ function listenFb(){
         if(data.shiftEnd)S.settings.shiftEnd=data.shiftEnd;
         if(data.roundMinutes!==undefined)S.settings.roundMinutes=data.roundMinutes;
         if(data.dnStart!==undefined)S.settings.dnStart=parseInt(data.dnStart,10)||S.settings.dnStart;
+        if(data.invStart!==undefined)S.settings.invStart=parseInt(data.invStart,10)||S.settings.invStart;
+        if(data.vatPct!==undefined&&isFinite(+data.vatPct))S.settings.vatPct=+data.vatPct;
         // 🔒 מתג האכיפה של נעילת התחנה — מסונכרן לכל המכשירים דרך אותו מסמך הגדרות,
         // כדי שכיבוי חירום מהניהול ישחרר את כל רצפת הייצור מיד ולא מכשיר-מכשיר.
         if(data.stationLock!==undefined)S.settings.stationLock=!!data.stationLock;
@@ -11784,6 +11799,44 @@ async function nextDeliveryNoteNo(){
     return out;
   }catch(e){console.warn('dnNo:',e.message);return base()+1;}
 }
+// 🧾 מספר חשבונית עסקה — מונה משותף בטרנזקציה (כמו התעודות), ויומן קצר של מה שהונפק:
+// מספר, תאריך, לקוח, תעודות וסכומים — כדי שאפשר יהיה לדעת בדיעבד מה יצא בכל מספר.
+async function nextProformaNo(rec){
+  const base=()=>Math.max(+S.settings?.invLast||0,(parseInt(S.settings?.invStart,10)||1)-1);
+  let out=0;
+  if(db&&S.fbConnected){
+    try{
+      const{doc,runTransaction}=window._fb;
+      await runTransaction(db,async tx=>{
+        const ref=doc(db,'appSettings','proformaInvoice');
+        const d=await tx.get(ref);
+        const cur=d.exists()?(parseInt(d.data().last,10)||0):0;
+        out=Math.max(cur,base())+1;
+        const log=(Array.isArray(d.data()?.log)?d.data().log:[]).concat([{...rec,no:out}]).slice(-500);
+        tx.set(ref,{last:out,log},{merge:true});
+      });
+    }catch(e){console.warn('invNo:',e.message);out=0;}
+  }
+  // 🛑 בלי חיבור לא מנפיקים — מספר שנבחר במכשיר מנותק עלול להתנגש במספר שהונפק במקביל
+  if(!out)return 0;
+  S.settings.invLast=out;saveLS();
+  return out;
+}
+async function printProforma(onlySel){
+  const f=dnFiltered(!!onlySel);
+  if(!f.rows.length){showToast('⚠ אין תעודות לחשבונית','var(--red-txt)');return;}
+  const custs=dnCustomers(f.rows);
+  // חשבונית היא ללקוח אחד — מסמך עם כמה לקוחות אי אפשר למסור לאף אחד מהם
+  if(custs.length!==1){showToast('⚠ חשבונית עסקה היא ללקוח אחד — בחר לקוח בבורר הלקוחות','var(--red-txt)',5000);return;}
+  if(f.missing){showToast('⚠ '+f.missing+' תעודות בלי מחיר בכרטיס המוצר — יש להזין מחיר לפני הפקת חשבונית','var(--red-txt)',6000);return;}
+  if(!db||!S.fbConnected){showToast('⚠ אין חיבור — אי אפשר להנפיק מספר חשבונית','var(--red-txt)');return;}
+  const vat=+(S.settings?.vatPct??18)||0;
+  const vatAmt=Math.round(f.amount*vat)/100,total=f.amount+vatAmt;
+  if(!await showConfirm('🧾 חשבונית עסקה',`ללקוח: ${esc(custs[0].name)}\n${f.rows.length} תעודות · לפני מע"מ ${dnMoney(f.amount)}\nמע"מ ${vat}%: ${dnMoney(vatAmt)}\n<b>סה"כ לתשלום: ${dnMoney(total)}</b>\n\nיונפק מספר חשבונית חדש (${Math.max(+S.settings?.invLast||0,(parseInt(S.settings?.invStart,10)||1)-1)+1} או הבא בתור).`,'הפק והדפס','ביטול'))return;
+  const no=await nextProformaNo({date:todayStr(),cust:custs[0].code,notes:f.rows.map(r=>+r.s.no||0).filter(Boolean),net:f.amount,vatPct:vat,vat:vatAmt,total,by:S.user?.name||''});
+  if(!no){showToast('⚠ הנפקת המספר נכשלה — נסה שוב','var(--red-txt)');return;}
+  printSettlement(onlySel,false,{no,vat,vatAmt,total});
+}
 // החלפת הזמנה בבורר — הכמות המתוכננת ושדה הקלט עוברים לרשומה הנבחרת
 function shipPickChanged(){
   const p=S.products.find(x=>x.id===document.getElementById('ship-prod-sel')?.value);
@@ -12148,13 +12201,22 @@ function saveCompanyInfo(){
     return;
   }
   if(dn>0)S.settings.dnStart=dn;
+  // 🧾 אותו כלל לחשבונית העסקה — המספר הבא לא יורד מתחת למה שכבר הונפק
+  const inv=parseInt(g('co-invstart'),10)||0,invLast=+S.settings.invLast||0;
+  if(inv>0&&invLast&&inv<=invLast){
+    alert('כבר הונפקה חשבונית עסקה מספר '+invLast+'.\nהמספר הבא חייב להיות '+(invLast+1)+' ומעלה.');
+    return;
+  }
+  if(inv>0)S.settings.invStart=inv;
+  const _vat=g('co-vat');
+  if(_vat!==''&&isFinite(+_vat)&&+_vat>=0&&+_vat<=50)S.settings.vatPct=+_vat;
   // 📦 מחירון האריזה נשמר במסמך משלו — הוא נקרא בכל אישור משלוח, ולכן עדיף לו
   // מסמך קטן שלא נוגע בפרטי העסק ולא בהגדרות הטלגרם
   const num=id=>Math.max(0,parseFloat(document.getElementById(id)?.value)||0);
   const pp={hanger:num('pp-hanger'),nylon:num('pp-nylon'),cello:num('pp-cello')};
   S.settings.packPrices=pp;
   saveLS();
-  if(S.fbConnected){fbSet('appSettings','company',co);fbSet('appSettings','telegramSettings',{dnStart:S.settings.dnStart});fbSet('appSettings','packPrices',pp);}
+  if(S.fbConnected){fbSet('appSettings','company',co);fbSet('appSettings','telegramSettings',{dnStart:S.settings.dnStart,invStart:S.settings.invStart,vatPct:S.settings.vatPct});fbSet('appSettings','packPrices',pp);}
   showToast('✅ פרטי העסק נשמרו');
   renderAdmin();
 }
@@ -12170,6 +12232,16 @@ function fillCompanyInfo(){
   s('co-dnstart',Math.max(parseInt(S.settings?.dnStart,10)||1,issued+1));
   const el=document.getElementById('co-dnlast');
   if(el)el.textContent=issued?('התעודה האחרונה שהונפקה במערכת: '+String(issued).padStart(4,'0')):'עדיין לא הונפקה תעודה במערכת';
+  s('co-vat',S.settings?.vatPct??18);
+  const _invFill=()=>{
+    const last=+S.settings?.invLast||0;
+    s('co-invstart',Math.max(parseInt(S.settings?.invStart,10)||1,last+1));
+    const e2=document.getElementById('co-invlast');
+    if(e2)e2.textContent=last?'חשבונית העסקה האחרונה שהונפקה: '+last:'עדיין לא הונפקה חשבונית עסקה במערכת';
+  };
+  _invFill();
+  // המספר האחרון יושב במונה המשותף — נקרא מהשרת כדי שמכשיר אחר לא יציג מספר ישן
+  if(db&&S.fbConnected){try{const{doc,getDoc}=window._fb;getDoc(doc(db,'appSettings','proformaInvoice')).then(d=>{const l=parseInt(d.data()?.last,10)||0;if(l>(+S.settings.invLast||0)){S.settings.invLast=l;_invFill();}}).catch(()=>{});}catch(e){}}
 }
 function editCustomerInfo(code){
   const ci=(S.customerInfo||{})[code]||{};
@@ -14251,6 +14323,7 @@ function dnPrintDialog(){
     ${b("document.getElementById('dnp-wrap')?.remove();printDeliveryNotes(dnFiltered(true).rows)",'📄',sel?`הדפס ${sel===1?'תעודה אחת':sel+' תעודות'} מסומנות`:'הדפס תעודות מסומנות','כל תעודה בעמוד נפרד, בהדפסה אחת',!sel)}
     ${b("document.getElementById('dnp-wrap')?.remove();printSettlement(true)",'🧾','התחשבנות — רק המסומנות','דוח אחד עם שורה לכל תעודה מסומנת',!sel)}
     ${b("document.getElementById('dnp-wrap')?.remove();printSettlement()",'🧾','התחשבנות — כל התעודות שבסינון',all+' תעודות לפי הסינון במסך',!all)}
+    ${b(`document.getElementById('dnp-wrap')?.remove();printProforma(${sel?'true':'false'})`,'🧾','חשבונית עסקה'+(sel?' — רק המסומנות':' — כל שבסינון'),'מספר חשבונית + מע"מ '+(S.settings?.vatPct??18)+'% · ללקוח אחד',!(sel||all))}
     ${b(`document.getElementById('dnp-wrap')?.remove();printSettlement(${sel?'true':'false'},true)`,'📋','רשימה בלי מחירים'+(sel?' — רק המסומנות':' — כל שבסינון'),'כמויות, חבילות ואריזה — לנהג / למחסן',!(sel||all))}
     <button class="btn" style="width:100%;font-size:14px;margin-top:4px" onclick="document.getElementById('dnp-wrap')?.remove()">ביטול</button>
   </div>`;
@@ -14804,7 +14877,8 @@ function renderDNotes(){
 // 🧾 הדפסת ההתחשבנות. הנייר מורכב מ-`dnFiltered()` בדיוק כמו המסך — אם המסך מסנן
 // לקוח וטווח, זה מה שיודפס, ואין מסלול חישוב שני שיכול להיפרד ממנו.
 // noPrice ⇒ "רשימת תעודות" בלי שום סכום — כמויות, חבילות וסוג אריזה, למסירה לנהג/למחסן
-function printSettlement(onlySel,noPrice){
+// inv ⇒ "חשבונית עסקה": אותה טבלה + מספר מסמך ושורות מע"מ וסה"כ לתשלום (מ-printProforma)
+function printSettlement(onlySel,noPrice,inv){
   const f=dnFiltered(!!onlySel);
   if(!f.rows.length){showToast('⚠ אין תעודות בסינון הנוכחי','var(--red-txt)');return;}
   const co=S.settings?.company||{};
@@ -14831,7 +14905,7 @@ function printSettlement(onlySel,noPrice){
   </tr>`).join('');
   const packsTot=f.rows.reduce((t,r)=>t+packsCount(r.s.packs),0);
   const cols=one?8:9;
-  printViaIframe(`<!DOCTYPE html><html dir="rtl" lang="he"><head><meta charset="UTF-8"/><title>${noPrice?'רשימת תעודות':'התחשבנות'} ${esc(one?one.name:'')}</title><style>
+  printViaIframe(`<!DOCTYPE html><html dir="rtl" lang="he"><head><meta charset="UTF-8"/><title>${inv?'חשבונית עסקה '+inv.no:noPrice?'רשימת תעודות':'התחשבנות'} ${esc(one?one.name:'')}</title><style>
 *{box-sizing:border-box;margin:0;padding:0}
 body{font-family:Arial,Helvetica,sans-serif;color:#000;background:#fff;font-size:13px;padding:16mm 14mm;-webkit-print-color-adjust:exact;print-color-adjust:exact}
 .top{display:flex;justify-content:space-between;align-items:flex-start;border-bottom:3px solid #185FA5;padding-bottom:10px;margin-bottom:14px}
@@ -14875,9 +14949,9 @@ thead{display:table-header-group}
     </div>
   </div>
   <div class="doc">
-    <h1>${noPrice?'רשימת תעודות משלוח':'דוח התחשבנות'}</h1>
+    <h1>${inv?'חשבונית עסקה מס\' '+inv.no:noPrice?'רשימת תעודות משלוח':'דוח התחשבנות'}</h1>
     <div class="dt">תקופה: ${esc(period)}</div>
-    <div class="dt">הופק: ${heDate(new Date().toISOString().slice(0,10))}</div>
+    <div class="dt">${inv?'תאריך':'הופק'}: ${heDate(new Date().toISOString().slice(0,10))}</div>${inv?'<div class="dt" style="font-weight:700">מקור</div>':''}
   </div>
 </div>
 <div class="box">
@@ -14916,6 +14990,14 @@ ${!noPrice&&f.matList.length?`<table class="mat"><thead><tr><th colspan="4">📦
     <td class="n">${dnMoney(m.amount)}</td></tr>`).join('')}</tbody>
   <tfoot><tr><td colspan="3" style="text-align:left">סה"כ חומר אריזה</td><td class="n">${dnMoney(f.pack)}</td></tr></tfoot>
 </table>`:''}
+${inv?`<table class="mat" style="margin-right:auto;margin-left:0;min-width:42%">
+  <tbody>
+    <tr><td>סה"כ לפני מע"מ</td><td class="n">${dnMoney(f.amount)}</td></tr>
+    <tr><td>מע"מ ${inv.vat}%</td><td class="n">${dnMoney(inv.vatAmt)}</td></tr>
+  </tbody>
+  <tfoot><tr><td style="text-align:left">סה"כ לתשלום</td><td class="n" style="font-size:16px">${dnMoney(inv.total)}</td></tr></tfoot>
+</table>
+<div style="margin-top:10px;font-size:11px;color:#555;border:1px dashed #999;border-radius:6px;padding:6px 9px">מסמך זה הוא חשבונית עסקה (דרישת תשלום) ו<b>אינו חשבונית מס</b>. חשבונית מס תופק עם קבלת התשלום.</div>`:''}
 <div class="sign">
   <div><b>חתימת המפעל</b>_______________________</div>
   <div><b>${noPrice?'שם המקבל וחתימה':'אישור הלקוח'}</b>_______________________</div>
