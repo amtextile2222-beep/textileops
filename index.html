@@ -3608,7 +3608,7 @@ async function fillProductBalance(p){
     for(const t of done){
       const st=lvl.find(s=>stepName(s)===t.taskType);
       if(!st)continue;
-      const rate=(loadedHourlyRate(t.workerId)||avgAll)+oh;
+      const rate=(loadedHourlyRate(t.workerId,_tDay(t))||avgAll)+oh;
       bud+=budgetUnit*(+weights[stepLevel(st)]||1)/totW*(t.qty||0);
       act+=((nd[t.id]||0)/3600)*rate;
       counted++;
@@ -7583,8 +7583,12 @@ function buildSummaryReport(fl){
   const rows=Object.entries(workers).map(([wid,w])=>{
     const secs=calcActualTaskTime(w.tasks);
     const units=w.tasks.reduce((s,t)=>s+(t.qty||0),0);
-    const rate=showCost?loadedHourlyRate(wid):0; // עמוסה (בלי תקורה — מתווספת בנפרד)
-    const cost=rate>0?secs/3600*(rate+oh):null; // עמוסה + תקורה
+    // עמוסה + תקורה — לפי התעריף שהיה בתוקף **בכל יום** (📅 היסטוריית עלויות)
+    let cost=null;
+    if(showCost){
+      const byD={};w.tasks.forEach(t=>{(byD[_tDay(t)]=byD[_tDay(t)]||[]).push(t);});
+      for(const dd in byD){const rate=loadedHourlyRate(wid,dd);if(rate>0)cost=(cost||0)+calcActualTaskTime(byD[dd])/3600*(rate+oh);}
+    }
     return{name:w.name,dept:w.dept,secs,units,cost};
   }).sort((a,b)=>b.secs-a.secs);
   const grandSecs=rows.reduce((s,r)=>s+r.secs,0);
@@ -8061,7 +8065,7 @@ function buildBudgetReport(fl){
     const units=taskUnits(t); // "כמות פתוחה" = כל ההזמנה, אחרת alloc=0 והמשימה נזרקת בשקט
     // ⚠️ התעריף הוא של **העובד שביצע**, לא הממוצע שב-stepBud — הצפי במשימה נקבע כך
     // ב-calcTaskExpected, וחישוב אחר כאן היה מייצר "חריגה" מול מספר שהעובדת מעולם לא ראתה.
-    const rate=(loadedHourlyRate(t.workerId)||ctx.avgAll)+ctx.oh;
+    const rate=(loadedHourlyRate(t.workerId,_tDay(t))||ctx.avgAll)+ctx.oh;
     if(isCut){ // ✂ תקציב הגזירה, מחולק בין שלבי ה-✂ לפי הדקות שהוזנו
       alloc=rate>0?pb.cutStepBud[si].ils*units/rate*60:0;
     }else if(pb.allManual){ // חלוקה יחסית לפי זמן — ראה splitStepBudget
@@ -8137,7 +8141,7 @@ function buildCutReport(fl){
     let actual=0,hrs=0;const byW={};
     for(const t of ts){
       const h=(nd[t.id]||0)/3600;
-      const c=h*((loadedHourlyRate(t.workerId)||ctx.avgAll)+ctx.oh);
+      const c=h*((loadedHourlyRate(t.workerId,_tDay(t))||ctx.avgAll)+ctx.oh);
       actual+=c;hrs+=h;
       const g=byW[t.workerName||'—']||(byW[t.workerName||'—']={h:0,c:0,n:0});
       g.h+=h;g.c+=c;g.n++;
@@ -8223,7 +8227,7 @@ function buildProfitReport(fl){
       const units=ts.reduce((sum,t)=>sum+taskUnits(t),0); // כולל "כמות פתוחה" — אחרת actPU נופל לתקציב
       let actPU=null;
       if(units>0){
-        const cost=ts.reduce((sum,t)=>sum+((nd[t.id]||0)/3600)*((loadedHourlyRate(t.workerId)||ctx.avgAll)+ctx.oh),0);
+        const cost=ts.reduce((sum,t)=>sum+((nd[t.id]||0)/3600)*((loadedHourlyRate(t.workerId,_tDay(t))||ctx.avgAll)+ctx.oh),0);
         actPU=cost/units;withData++;
       }
       costUnit+=actPU!=null?actPU:budPU;
@@ -8333,7 +8337,7 @@ async function buildRealProfitReport(force){
     const pst=prodStampOf(p),k=p.cust+'|'+p.prod+'|'+pst;
     const ts=byOrder[k]||[];
     let hrs=0,labor=0;
-    for(const t of ts){const h=(nd[t.id]||0)/3600;hrs+=h;labor+=h*(loadedHourlyRate(t.workerId)||ctx.avgAll);}
+    for(const t of ts){const h=(nd[t.id]||0)/3600;hrs+=h;labor+=h*(loadedHourlyRate(t.workerId,_tDay(t))||ctx.avgAll);}
     const shipped=+p.shippedQty||0,planned=_prodQty(p);
     const price=+p.unitPrice||0,cutPrice=+p.cutPrice||0;
     const extraMat=+p.extraMatPrice||0; // 🧵 מחויב ללקוח ונקנה ע"י המפעל — נכנס להכנסה ולעלות
@@ -12457,9 +12461,12 @@ function setScanMinPerTask(v){
   if(S.fbConnected)fbSet('adminSettings','costs',S.costs);
   try{calcCosts();}catch(e){}
 }
+// 📸 הערכים כפי שהוצגו — כדי לזהות בשמירה מה השתנה (השדות כותבים ל-S.costs תוך כדי הקלדה)
+let _wcSnap={};
 function renderWorkerRates(){
   const el=document.getElementById('cost-worker-rates');
   if(!el)return;
+  _wcSnap={};S.workers.forEach(w=>{_wcSnap[w.id]=_wcCur(w.id);});
   // ⏱️ הגדרה גלובלית אחת — כמה דקות עולה סריקה אחת עבור עובד אחר.
   // המקור: רגרסיה על 58 משימות של האחראי (18/09/2026) — 2.4 דק' לסריקה.
   // 0 = המנגנון כבוי לגמרי (גם הניכוי בזמן וגם העלות שנזקפת למוצר).
@@ -12505,6 +12512,7 @@ function renderWorkerRates(){
             style="width:80px;font-size:13px;text-align:left;padding:5px 8px;border-color:var(--amber-txt)"
             oninput="setWorkerGiftsTrip('${w.id}',this.value)"/>
           <div style="font-size:10px;color:var(--amber-txt)">🎁 מתנות+טיול ₪/שנה</div>
+          ${(S.costs.workerHist?.[w.id]||[]).length>1?`<a href="#" onclick="showWorkerCostHist('${escj(w.id)}');return false" style="font-size:10px;color:var(--blue-txt)">📅 היסטוריה (${S.costs.workerHist[w.id].length-1} שינויים)</a>`:''}
           <input type="number" min="0" max="100" placeholder="0" value="${S.costs.oversightPct?.[w.id]||''}"
             style="width:80px;font-size:13px;text-align:left;padding:5px 8px;border-color:var(--purple-txt,var(--blue-txt))"
             title="תקרת אחוז: כמה מיום העבודה מותר לזקוף כפיקוח. 0 = המנגנון כבוי לעובד הזה."
@@ -12848,7 +12856,97 @@ function showCashPhoto(id){
 }
 // ─────────────────────────────────────────────────────────────
 
-function saveCostSettings(){
+// חלון "בתוקף מתאריך" — מחזיר YYYY-MM-DD או null (ביטול)
+function askEffectiveDate(names){
+  return new Promise(res=>{
+    document.getElementById('wcd-wrap')?.remove();
+    const t=todayStr();
+    const wrap=document.createElement('div');wrap.id='wcd-wrap';
+    wrap.style.cssText='position:fixed;inset:0;background:rgba(0,0,0,.5);display:flex;align-items:center;justify-content:center;z-index:10001;padding:16px';
+    wrap.innerHTML=`<div style="background:var(--card);border-radius:14px;padding:20px;max-width:380px;width:100%;box-shadow:0 10px 40px rgba(0,0,0,.3)">
+      <div style="font-size:16px;font-weight:800;margin-bottom:6px">📅 מאיזה תאריך השינוי בתוקף?</div>
+      <div style="font-size:12px;color:var(--txt3);margin-bottom:10px">השתנו עלויות של: <b style="color:var(--txt)">${esc(names.join(', '))}</b><br>ימי עבודה <b>לפני</b> התאריך יישארו מחושבים לפי הערכים הקודמים.</div>
+      <input type="date" id="wcd-date" value="${t}" max="${t}" style="width:100%;font-size:14px"/>
+      <div style="display:flex;gap:8px;margin-top:14px">
+        <button class="btn primary" style="flex:1" id="wcd-ok">💾 שמור</button>
+        <button class="btn" style="flex:1" id="wcd-no">ביטול</button>
+      </div></div>`;
+    document.body.appendChild(wrap);
+    const done=v=>{wrap.remove();res(v);};
+    document.getElementById('wcd-ok').onclick=()=>{const v=document.getElementById('wcd-date').value;if(!v||v>t){alert('בחר תאריך עד היום');return;}done(v);};
+    document.getElementById('wcd-no').onclick=()=>done(null);
+  });
+}
+// מעדכן את המפות "הנוכחיות" לפי הרשומה האחרונה בהיסטוריה (שינוי עם תאריך ישן
+// שנכנס לפני שינוי מאוחר יותר לא דורס את מה שבתוקף היום)
+function _wcApplyLatest(wid){
+  const h=S.costs.workerHist?.[wid];if(!h||!h.length)return;
+  const e=h[h.length-1],c=S.costs;
+  ['workerRates','workerUnitRates','workerTransport','workerInsurance','workerGiftsTrip'].forEach(k=>{if(!c[k])c[k]={};});
+  c.workerRates[wid]=+e.daily||0;c.workerUnitRates[wid]=+e.unit||0;c.workerTransport[wid]=+e.transport||0;c.workerInsurance[wid]=+e.insurance||0;
+  if(e.giftsTrip==null)delete c.workerGiftsTrip[wid];else c.workerGiftsTrip[wid]=+e.giftsTrip||0;
+}
+// רושם בהיסטוריה את מה שהשתנה מאז הרינדור. מחזיר false אם בוטל.
+async function _wcRecordChanges(){
+  const changed=S.workers.filter(w=>{const a=_wcSnap[w.id],b=_wcCur(w.id);return a&&WC_FIELDS.some(f=>(a[f]??null)!==(b[f]??null));});
+  if(!changed.length)return true;
+  const d=await askEffectiveDate(changed.map(w=>w.name));
+  if(!d){ // ביטול ⇒ חזרה לערכים שהיו
+    changed.forEach(w=>{const a=_wcSnap[w.id],c=S.costs;c.workerRates[w.id]=a.daily;(c.workerUnitRates||(c.workerUnitRates={}))[w.id]=a.unit;
+      (c.workerTransport||(c.workerTransport={}))[w.id]=a.transport;(c.workerInsurance||(c.workerInsurance={}))[w.id]=a.insurance;
+      if(a.giftsTrip==null)delete (c.workerGiftsTrip||{})[w.id];else (c.workerGiftsTrip||(c.workerGiftsTrip={}))[w.id]=a.giftsTrip;});
+    renderWorkerRates();return false;
+  }
+  if(!S.costs.workerHist)S.costs.workerHist={};
+  changed.forEach(w=>{
+    const old=_wcSnap[w.id],nv=_wcCur(w.id);
+    const fields=WC_FIELDS.filter(f=>(old[f]??null)!==(nv[f]??null));
+    let h=(S.costs.workerHist[w.id]||[]).slice();
+    if(!h.length)h.push({from:'2000-01-01',...old}); // מה שהיה עד עכשיו
+    // 🔑 רק השדות שהשתנו, ומהתאריך והלאה: הסעה שהשתנתה מ-01/09 לא מעתיקה לספטמבר
+    // שכר יומי שהשתנה רק ב-01/10. הבסיס = מה שהיה בתוקף ביום d לפי ההיסטוריה.
+    let base=h[0];for(const x of h){if(x.from<=d)base=x;else break;}
+    const ent={...base,from:d};fields.forEach(f=>{ent[f]=nv[f];});
+    h=h.filter(x=>x.from!==d).map(x=>{if(x.from>d){const y={...x};fields.forEach(f=>{y[f]=nv[f];});return y;}return x;});
+    h=h.concat([ent]).sort((x,y)=>x.from.localeCompare(y.from));
+    S.costs.workerHist[w.id]=h;
+    _wcApplyLatest(w.id);
+  });
+  return true;
+}
+function showWorkerCostHist(wid){
+  const w=S.workers.find(x=>x.id===wid);const h=S.costs.workerHist?.[wid]||[];
+  document.getElementById('wch-wrap')?.remove();
+  const hd=d=>d==='2000-01-01'?'עד השינוי הראשון':String(d).slice(8,10)+'/'+String(d).slice(5,7)+'/'+String(d).slice(0,4);
+  const v=x=>x==null?'כללי':'₪'+(+x).toLocaleString();
+  const wrap=document.createElement('div');wrap.id='wch-wrap';
+  wrap.style.cssText='position:fixed;inset:0;background:rgba(0,0,0,.5);display:flex;align-items:flex-start;justify-content:center;z-index:10000;padding:16px;overflow-y:auto';
+  wrap.onclick=e=>{if(e.target===wrap)wrap.remove();};
+  wrap.innerHTML=`<div style="background:var(--card);border-radius:14px;padding:18px;max-width:640px;width:100%;margin:auto;box-shadow:0 10px 40px rgba(0,0,0,.3)">
+    <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:10px">
+      <div style="font-size:16px;font-weight:800">📅 היסטוריית עלויות — ${esc(w?.name||wid)}</div>
+      <button class="btn" style="font-size:12px" onclick="document.getElementById('wch-wrap').remove()">סגור</button></div>
+    <div class="tbl-wrap"><table><thead><tr><th>בתוקף מ-</th><th>₪/יום</th><th>₪/יחידה</th><th>🚌 הסעה/יום</th><th>🛡 ביטוח/שנה</th><th>🎁 מתנות+טיול</th><th></th></tr></thead>
+    <tbody>${h.slice().reverse().map((x,i)=>`<tr>
+      <td style="white-space:nowrap;font-weight:600">${hd(x.from)}${i===0?' <span style="font-size:10px;color:var(--green-txt)">· היום</span>':''}</td>
+      <td>${v(x.daily)}</td><td>${x.unit?v(x.unit):'—'}</td><td>${v(x.transport)}</td><td>${v(x.insurance)}</td><td>${v(x.giftsTrip)}</td>
+      <td>${x.from!=='2000-01-01'?`<button class="btn" style="font-size:11px;padding:3px 8px;color:var(--red-txt)" onclick="delWorkerCostHist('${escj(wid)}','${x.from}')">🗑</button>`:''}</td></tr>`).join('')}</tbody></table></div>
+    <div style="font-size:11px;color:var(--txt3);margin-top:8px">מחיקת שינוי מחזירה את התקופה שלו לערכים שלפניו. כדי לשנות ערך — ערוך בכרטיס העובד ושמור עם התאריך הרצוי.</div>
+  </div>`;
+  document.body.appendChild(wrap);
+}
+async function delWorkerCostHist(wid,from){
+  if(!await showConfirm('מחיקת שינוי','למחוק את השינוי שבתוקף מ-'+from+'?\nהתקופה שלו תחושב לפי הערכים שלפניו.','מחק','ביטול'))return;
+  const h=(S.costs.workerHist?.[wid]||[]).filter(x=>x.from!==from);
+  S.costs.workerHist[wid]=h;
+  if(h.length)_wcApplyLatest(wid);
+  if(h.length<=1)S.costs.workerHist[wid]=[]; // נשאר רק הבסיס ⇒ אין היסטוריה, הערכים חזרו אליו
+  saveLS();if(S.fbConnected)fbSet('adminSettings','costs',S.costs);
+  renderWorkerRates();showWorkerCostHist(wid);try{calcCosts();}catch(e){}
+}
+async function saveCostSettings(){
+  const btn=event?.target;
+  if(!await _wcRecordChanges())return;
   S.costs.fixedDaily=parseFloat(document.getElementById('cost-fixed').value)||0;
   S.costs.fixedMonthly=parseFloat(document.getElementById('cost-fixed-monthly').value)||0;
   S.costs.workDaysMonth=parseInt(document.getElementById('cost-workdays-month').value)||22;
@@ -12860,9 +12958,10 @@ function saveCostSettings(){
   saveLS();
   if(S.fbConnected)fbSet('adminSettings','costs',S.costs);
   // שני כפתורים קוראים לפונקציה (שמור / 💾 שמור הגדרות) — מחזירים לכל אחד את הכיתוב שלו
-  const btn=event.target, _lbl=btn.dataset.lbl||(btn.dataset.lbl=btn.textContent);
+  if(btn){const _lbl=btn.dataset.lbl||(btn.dataset.lbl=btn.textContent);
   btn.textContent='✅ נשמר';btn.classList.add('success');
-  setTimeout(()=>{btn.textContent=_lbl;},1500);
+  setTimeout(()=>{btn.textContent=_lbl;},1500);}
+  renderWorkerRates();
   renderLoadedHourTable();renderOverheadResult();
   calcCosts();
 }
@@ -12871,29 +12970,60 @@ function saveCostSettings(){
 // עובדים שנכנסים לחישובי עלות (לא מנהל, לא מושעים)
 function _costWorkers(){return S.workers.filter(w=>w.role!=='manager'&&!w.disabled);}
 // פירוט שעה עמוסה לעובד (₪/שעה) — לפי התוכנית: שכר+הסעה+פיצויים+חגים+מתנות+טיול+ביטוח
-function loadedHourBreakdown(wid){
+// ─── 📅 היסטוריית עלויות עובד (04/10/2026) ───────────────────────────────
+// כל שינוי בעלויות של עובד (שכר יומי, ליחידה, הסעה, ביטוח, מתנות+טיול) נרשם עם
+// "בתוקף מתאריך" ב-`S.costs.workerHist[wid]` = [{from,daily,unit,transport,insurance,giftsTrip}]
+// ממוין עולה. הרשומה הראשונה (from 2000-01-01) היא מה שהיה לפני השינוי הראשון.
+// הדוחות שואלים "מה היה בתוקף ביום d" ⇒ שינוי היום לא משכתב חודשים שעברו.
+// המפות הישנות (workerRates וכו') נשארות = הערכים שבתוקף היום — משם קוראים התמחור,
+// הצפי בשרת (calcTaskExpected) וכל חישוב שאינו מתוארך.
+const WC_FIELDS=['daily','unit','transport','insurance','giftsTrip'];
+function _wcCur(wid){
+  const c=S.costs;const g=c.workerGiftsTrip?.[wid];
+  return {daily:+(c.workerRates||{})[wid]||0,unit:+(c.workerUnitRates||{})[wid]||0,transport:+(c.workerTransport||{})[wid]||0,
+    insurance:+(c.workerInsurance||{})[wid]||0,giftsTrip:(g==null||g==='')?null:(+g||0)};
+}
+// הערכים שבתוקף ביום d (YYYY-MM-DD). בלי d / בלי היסטוריה ⇒ הנוכחיים.
+function wCostAt(wid,d){
+  const h=d&&S.costs.workerHist?.[wid];
+  if(!h||!h.length)return _wcCur(wid);
+  let e=null,last=false;for(let i=0;i<h.length;i++){if(h[i].from<=d){e=h[i];last=i===h.length-1;}else break;}
+  // התקופה האחרונה = המפות הנוכחיות (זהות לרשומה האחרונה; אם נערכו בלי שמירה מתוארכת —
+  // ההתנהגות הישנה, ולא התעלמות מהשינוי)
+  return last?_wcCur(wid):(e||h[0]);
+}
+function wRate(wid,d){return +wCostAt(wid,d).daily||0;}
+function wUnitRate(wid,d){return +wCostAt(wid,d).unit||0;}
+// יום (מקומי) של משימה — לתעריף שהיה בתוקף כשבוצעה
+function _tDay(t){
+  const v=t?.startTime||t?.endTime;if(!v)return '';
+  const x=v instanceof Date?v:new Date(v);if(isNaN(x))return '';
+  return x.getFullYear()+'-'+pad2(x.getMonth()+1)+'-'+pad2(x.getDate());
+}
+function loadedHourBreakdown(wid,d){
   const c=S.costs;
-  const daily=c.workerRates[wid]||0;
+  const wc=wCostAt(wid,d);
+  const daily=+wc.daily||0;
   if(!daily)return null;
   const wdy=c.workDaysYear||250;
   const nW=_costWorkers().length||1;
   const base=daily/8;
-  const transport=(c.workerTransport?.[wid]||0)/8;
+  const transport=(+wc.transport||0)/8;
   const severance=daily*((c.severancePct??8.33)/100)/8;
   const holidays=daily*((c.holidayDays??4)/wdy)/8;
   // 🎁 מתנות+טיול: סכום שנתי לעובד מכרטיס העובד; בלי סכום משלו ⇒ ההגדרה הכללית
   //    (הטיול הכללי מתחלק רק בין העובדים שאין להם סכום משלהם)
-  const own=_ownGiftsTrip(wid);
-  const nGen=own==null?(_costWorkers().filter(w=>_ownGiftsTrip(w.id)==null).length||nW):1;
+  const own=_ownGiftsTrip(wid,d);
+  const nGen=own==null?(_costWorkers().filter(w=>_ownGiftsTrip(w.id,d)==null).length||nW):1;
   const gifts=own!=null?own/wdy/8:(c.giftsAnnual||0)/wdy/8;
   const trip=own!=null?0:(c.tripAnnual||0)/nGen/wdy/8;
-  const insurance=(c.workerInsurance?.[wid]||0)/wdy/8;
+  const insurance=(+wc.insurance||0)/wdy/8;
   const loaded=base+transport+severance+holidays+gifts+trip+insurance;
   return {base,transport,severance,holidays,gifts,trip,insurance,loaded};
 }
-function loadedHourlyRate(wid){return loadedHourBreakdown(wid)?.loaded||0;}
+function loadedHourlyRate(wid,d){return loadedHourBreakdown(wid,d)?.loaded||0;}
 // סכום שנתי למתנות+טיול שהוזן לעובד (null = לא הוזן ⇒ כללי). 0 שהוזן = באמת 0.
-function _ownGiftsTrip(wid){const v=S.costs.workerGiftsTrip?.[wid];return v==null||v===''?null:+v||0;}
+function _ownGiftsTrip(wid,d){const v=wCostAt(wid,d).giftsTrip;return v==null||v===''?null:+v||0;}
 function setWorkerGiftsTrip(wid,val){
   if(!S.costs.workerGiftsTrip)S.costs.workerGiftsTrip={};
   if(String(val).trim()==='')delete S.costs.workerGiftsTrip[wid];
@@ -13315,7 +13445,7 @@ async function calcCosts(){
   let fullLoaded=0, fullOh=0;
   // 🧾 רכיבי השעה העמוסה (מעבר לשכר הרגיל) — על אותן שעות שנכנסות ל-fullLoaded, לפירוט בלבד
   const _ld={transport:0,severance:0,holidays:0,gifts:0,trip:0,insurance:0};
-  const _addLd=(wid,h)=>{const b=loadedHourBreakdown(wid);if(!b||!(h>0))return;for(const k in _ld)_ld[k]+=h*b[k];};
+  const _addLd=(wid,h,d)=>{const b=loadedHourBreakdown(wid,d);if(!b||!(h>0))return;for(const k in _ld)_ld[k]+=h*b[k];};
 
   // ─── ⇄ עלות חלוקת עבודה — לפי **מספר הסריקות בפועל**, לא לפי אחוז ──────────
   // החלטת המשתמש 18/09/2026: הכמות נקבעת ממספר הסריקות שהעובד ביצע עבור אחרים
@@ -13345,8 +13475,8 @@ async function calcCosts(){
     });
     Object.keys(byWD).forEach(k=>{
       const _i=k.lastIndexOf('_'), wid=k.slice(0,_i), d=k.slice(_i+1);
-      const dailyRate=S.costs.workerRates[wid]||0;if(!dailyRate)return;
-      if((S.costs.workerUnitRates||{})[wid]>0)return;   // תשלום ליחידה — אין שעות להפחית
+      const dailyRate=wRate(wid,d);if(!dailyRate)return;
+      if(wUnitRate(wid,d)>0)return;   // תשלום ליחידה — אין שעות להפחית
       const attH=(attByWorkerDay[k]||0)/3600000;if(attH<=0)return;
       const list=byWD[k];
       const hrs=Math.min(list.length*scanMinPer()/60,attH);
@@ -13362,7 +13492,7 @@ async function calcCosts(){
         scanCostByProd[pk]=(scanCostByProd[pk]||0)+wage/list.length;
         scanNByProd[pk]=(scanNByProd[pk]||0)+1;
       });
-      fullLoaded+=hrs*loadedHourlyRate(wid);fullOh+=hrs*_ohOf(wid);_addLd(wid,hrs);
+      fullLoaded+=hrs*loadedHourlyRate(wid,d);fullOh+=hrs*_ohOf(wid);_addLd(wid,hrs,d);
     });
   }
 
@@ -13374,14 +13504,14 @@ async function calcCosts(){
     if(d<from||d>to)return;
     if(_isOv(rec.workerId))return;   // מסומן — עובר במסלול הפיקוח למטה, לא כאן
     if(taskWorkersByDay[d]?.has(rec.workerId))return;
-    const dailyRate=S.costs.workerRates[rec.workerId]||0;
+    const dailyRate=wRate(rec.workerId,d);
     if(!dailyRate)return;
     // ⇄ שעות שכבר נזקפו למוצרים שנסרקו לא נמרחות שוב על כל המפעל
     const hoursWorked=Math.max(0,(rec.netMs||0)/3600000-(_scanHrs[rec.workerId+'_'+d]||0));
     const wage=(dailyRate/8)*hoursWorked;
     nonTaskWageByDay[d]=(nonTaskWageByDay[d]||0)+wage;
     // 💎 רק ביום עם משימות — ביום בלי משימות גם הגולמי לא מתחלק לשום מקום
-    if(byDay[d]){fullLoaded+=hoursWorked*loadedHourlyRate(rec.workerId);fullOh+=hoursWorked*_ohOf(rec.workerId);_addLd(rec.workerId,hoursWorked);}
+    if(byDay[d]){fullLoaded+=hoursWorked*loadedHourlyRate(rec.workerId,d);fullOh+=hoursWorked*_ohOf(rec.workerId);_addLd(rec.workerId,hoursWorked,d);}
   });
 
   // ─── 🎯 הקצאת זמן פיקוח ──────────────────────────────────────────
@@ -13401,7 +13531,7 @@ async function calcCosts(){
     const wid=k.slice(0,_i), d=k.slice(_i+1);
     if(_scanHrs[k]>0)return;                    // ⇄ מטופל במסלול הסריקות
     if(!_isOv(wid))return;
-    const dailyRate=S.costs.workerRates[wid]||0;if(!dailyRate)return;
+    const dailyRate=wRate(wid,d);if(!dailyRate)return;
     const attSec=(attByWorkerDay[k]||0)/1000;if(attSec<=0)return;
     const mySec=taskSecByWorkerDay[k]||0;
     // בלי משימות כלל ⇒ כל היום פיקוח (אחרת שאר שכרו לא ייספר בשום מקום)
@@ -13421,7 +13551,7 @@ async function calcCosts(){
     const wage=(dailyRate/8)*(attSec/3600)*frac;
     elig.forEach(ix=>{ovByIdx[ix]+=wage*((tasks[ix].duration||0)/tot);});
     const _ovH=(attSec/3600)*frac;
-    fullLoaded+=_ovH*loadedHourlyRate(wid);fullOh+=_ovH*_ohOf(wid);_addLd(wid,_ovH);
+    fullLoaded+=_ovH*loadedHourlyRate(wid,d);fullOh+=_ovH*_ohOf(wid);_addLd(wid,_ovH,d);
   });
 
   // חישוב עלות לכל משימה
@@ -13437,8 +13567,8 @@ async function calcCosts(){
     const taskRatio=(t.duration||0)/dayTotalSec;
 
     // שכר עובד: לפי יחידות (אם יש תעריף ליחידה וכמות>0) או לפי זמן
-    const dailyRate=S.costs.workerRates[t.workerId]||0;
-    const unitRate=(S.costs.workerUnitRates||{})[t.workerId]||0;
+    const dailyRate=wRate(t.workerId,d);
+    const unitRate=wUnitRate(t.workerId,d);
     const attMs=attByWorkerDay[t.workerId+'_'+d]||0;
     const attHours=attMs/3600000;
     const workerTotalTaskSec=taskSecByWorkerDay[t.workerId+'_'+d]||1;
@@ -13452,7 +13582,7 @@ async function calcCosts(){
     // 💎 אותן שעות בתעריף מלא. ליחידה: השכר כמו שהוא (אין שעה להעמיס) + תקורה על השעות
     const _hrs=attHours*taskShare*(byUnit?1:ovCut);
     if(byUnit){fullLoaded+=wage;fullOh+=_hrs*_ohOf(t.workerId);}
-    else if(dailyRate){fullLoaded+=_hrs*loadedHourlyRate(t.workerId);fullOh+=_hrs*_ohOf(t.workerId);_addLd(t.workerId,_hrs);}
+    else if(dailyRate){fullLoaded+=_hrs*loadedHourlyRate(t.workerId,d);fullOh+=_hrs*_ohOf(t.workerId);_addLd(t.workerId,_hrs,d);}
 
     // חלק מהוצאות קבועות + משתנות
     const dayVar=varByDay[d]||0;
@@ -13719,17 +13849,14 @@ function renderCostTab(){
     (_costAtt||S.attHistory||[]).forEach(rec=>{
       if(rec.date<from||rec.date>to)return;
       if(taskWorkerIds.has(rec.workerId))return;
-      const dailyRate=S.costs.workerRates[rec.workerId]||0;
+      const dailyRate=wRate(rec.workerId,rec.date);
       if(!dailyRate)return;
       const k=rec.workerId;
-      if(!nonTaskMap[k])nonTaskMap[k]={id:k,name:rec.workerName||k,netMs:0};
+      if(!nonTaskMap[k])nonTaskMap[k]={id:k,name:rec.workerName||k,netMs:0,wage:0};
       nonTaskMap[k].netMs+=(rec.netMs||0);
+      nonTaskMap[k].wage+=(dailyRate/8)*((rec.netMs||0)/3600000);
     });
-    const nonTaskRows=Object.values(nonTaskMap).map(r=>{
-      const dailyRate=S.costs.workerRates[r.id]||0;
-      const wage=(dailyRate/8)*(r.netMs/3600000);
-      return{...r,wage};
-    });
+    const nonTaskRows=Object.values(nonTaskMap);
     const w=S.workers;
     const roleLabel=id=>{const ww=w.find(x=>x.id===id);return ww?.role==='helper'?'עוזר':ww?.role==='manager'?'מנהל':ww?.role==='supervisor'?'אחראי':'עובד';};
 
@@ -13745,7 +13872,7 @@ function renderCostTab(){
         <th style="padding:8px 6px;color:var(--green-txt)">שכר</th>
       </tr></thead>
       <tbody>${rows.map(r=>{
-        const dailyRate=S.costs.workerRates[r.id]||0;
+        const dailyRate=wRate(r.id,to);
         return`<tr style="border-bottom:0.5px solid var(--b)">
           <td style="padding:7px 6px;font-weight:500">${esc(r.name)}</td>
           <td style="padding:7px 6px;color:var(--txt2)">${roleLabel(r.id)}</td>
@@ -13766,7 +13893,7 @@ function renderCostTab(){
         <th style="padding:8px 6px;color:var(--amber-txt)">שכר (מחולק)</th>
       </tr></thead>
       <tbody>${nonTaskRows.map(r=>{
-        const dailyRate=S.costs.workerRates[r.id]||0;
+        const dailyRate=wRate(r.id,to);
         return`<tr style="border-bottom:0.5px solid var(--b)">
           <td style="padding:7px 6px;font-weight:500">${esc(r.name)}</td>
           <td style="padding:7px 6px;color:var(--txt2)">${roleLabel(r.id)}</td>
@@ -13785,21 +13912,22 @@ function renderCostTab(){
     (_costAtt||S.attHistory||[]).forEach(rec=>{
       if(rec.date<from||rec.date>to)return;
       const k=rec.workerId;
-      if(!pMap[k])pMap[k]={id:k,name:rec.workerName||k,days:0,netMs:0};
+      if(!pMap[k])pMap[k]={id:k,name:rec.workerName||k,days:0,netMs:0,pay:0};
       pMap[k].days++;
       pMap[k].netMs+=(rec.netMs||0);
+      pMap[k].pay+=(wRate(k,rec.date)/8)*((rec.netMs||0)/3600000); // 📅 תעריף של אותו יום
     });
     // עובדים ללא היסטוריה שקיימים במערכת עם תעריף
     S.workers.forEach(w=>{
       if(!pMap[w.id]&&S.costs.workerRates[w.id]){
-        pMap[w.id]={id:w.id,name:w.name,days:0,netMs:0};
+        pMap[w.id]={id:w.id,name:w.name,days:0,netMs:0,pay:0};
       }
     });
     const roleLabel2=id=>{const ww=S.workers.find(x=>x.id===id);return ww?.role==='helper'?'עוזר':ww?.role==='manager'?'מנהל':ww?.role==='supervisor'?'אחראי':'עובד';};
     const rows=Object.values(pMap).map(r=>{
-      const dailyRate=S.costs.workerRates[r.id]||0;
+      const dailyRate=wRate(r.id,to);
       const hours=r.netMs/3600000;
-      const salary=Math.round((dailyRate/8)*hours);
+      const salary=Math.round(r.pay||0);
       return{...r,dailyRate,hours,salary};
     }).sort((a,b)=>b.salary-a.salary);
     const totalSalary=rows.reduce((s,r)=>s+r.salary,0);
