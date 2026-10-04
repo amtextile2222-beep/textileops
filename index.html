@@ -3964,14 +3964,15 @@ function listenFb(){
             const existingData=existing.exists()?existing.data():null;
             // אין יציאה — סוגרים את הרשומה בשעת סוף המשמרת של אותו יום (לא ב"עכשיו")
             const _cutISO=shiftEndDate(sessionDate).toISOString();
+            const _cl=attCloseSessions(existingData?.sessions||w.sessions,_cutISO);
             const rec={
               workerId:w.id,workerName:w.name,dept:w.dept,date:sessionDate,
-              sessions:(existingData?.sessions||w.sessions).map(s=>s.out?s:{...s,out:_cutISO}),
+              sessions:_cl.sessions,
               checkin:existingData?.checkin||w.sessions[0]?.in||'',
-              checkout:_cutISO,
+              checkout:_cl.checkout,
               breakStart:w.breakStart||'',breakEnd:w.breakEnd||'',
               breakActive:!!w.breakActive,
-              autoClosed:true,
+              autoClosed:_cl.autoClosed,
               netMs:calcNetWorkCapped(w,sessionDate)
             };
             if(!existing.exists())S.attHistory.unshift(rec);
@@ -4280,7 +4281,7 @@ async function runDailyReset(){
         // אין יציאה מאתמול — חיתוך בסוף המשמרת של יום העבודה (לא ב"עכשיו" של הבוקר שאחרי)
         const _cutISO=shiftEndDate(sessionDay).toISOString();
         const rec={workerId:w.id,workerName:w.name,dept:w.dept,date:lastDate,
-          sessions:sessions.map(s=>s.out?s:{...s,out:_cutISO}),checkin:sessions[0]?.in||w.checkin,checkout:_cutISO,autoClosed:true,
+          ...attCloseSessions(sessions,_cutISO),checkin:sessions[0]?.in||w.checkin,
           breakStart:w.breakStart||'',breakEnd:w.breakEnd||'',breakActive:!!w.breakActive,netMs:calcNetWorkCapped({...w,sessions},sessionDay)};
         S.attHistory.unshift(rec);
         if(S.fbConnected){
@@ -5166,6 +5167,21 @@ function initAttRep(){
   if(sel){sel.innerHTML='<option value="">כל העובדים</option>'+S.workers.map(w=>`<option value="${esc(w.id)}">${esc(w.name)}</option>`).join('');}
   buildAttRep();
 }
+// 🚪 שעת היציאה של רשומת נוכחות — **היציאה האחרונה מתוך ה-sessions**, לא שדה checkout.
+// הסוגר האוטומטי (לילה/בוקר) כתב עד 04/10/2026 checkout = סוף משמרת (15:00) גם לעובדת
+// שכבר יצאה ב-10:09 — ה-netMs נשאר נכון אבל עמודת היציאה בדוח הראתה 15:00 לכולן.
+// גזירה מה-sessions מתקנת גם את הרשומות הישנות בלי מיגרציה.
+function attLastOut(r){
+  const ss=(r.sessions||[]).filter(s=>s&&s.in);
+  if(ss.length&&ss.every(s=>s.out))return ss.map(s=>s.out).sort().pop();
+  return r.checkout||null;
+}
+// סגירת sessions פתוחות בשעת החיתוך + checkout = היציאה האחרונה בפועל
+function attCloseSessions(sessions,cutISO){
+  const out=(sessions||[]).map(s=>s.out?s:{...s,out:cutISO});
+  const wasOpen=(sessions||[]).some(s=>s&&s.in&&!s.out);
+  return {sessions:out,checkout:out.length?out.map(s=>s.out).sort().pop():cutISO,autoClosed:wasOpen};
+}
 async function buildAttRep(){
   const from=document.getElementById('ar-from')?.value;
   const to=document.getElementById('ar-to')?.value;
@@ -5198,7 +5214,8 @@ async function buildAttRep(){
   if(!fl.length){tbody.innerHTML='<tr><td colspan="8" style="text-align:center;color:var(--txt3);padding:1.5rem">אין נתונים לתקופה זו</td></tr>';return;}
   tbody.innerHTML=fl.map(r=>{
     const ci=r.checkin?new Date(r.checkin):null;
-    const co=r.checkout?new Date(r.checkout):null;
+    const _co=r.live?r.checkout:attLastOut(r);
+    const co=_co?new Date(_co):null;
     const ciStr=ci?pad2(ci.getHours())+':'+pad2(ci.getMinutes()):'—';
     const coStr=co?pad2(co.getHours())+':'+pad2(co.getMinutes()):r.live?'<span class="badge green" style="font-size:10px">עדיין בעבודה</span>':'—';
     const brkStr=r.breakActive&&r.breakStart?`${r.breakStart}–${r.breakEnd}`:'—';
@@ -5231,7 +5248,8 @@ async function exportAttCSV(){
   const rows=[['עובד','מחלקה','תאריך','יום','כניסה','יציאה','הפסקה מ','הפסקה עד','שעות נטו']];
   fl.forEach(r=>{
     const ci=r.checkin?new Date(r.checkin):null;
-    const co=r.checkout?new Date(r.checkout):null;
+    const _co=attLastOut(r);
+    const co=_co?new Date(_co):null;
     const d=new Date(r.date+'T00:00:00');
     rows.push([r.workerName,r.dept,pad2(d.getDate())+'/'+pad2(d.getMonth()+1)+'/'+d.getFullYear(),DAYS_HE[d.getDay()],ci?pad2(ci.getHours())+':'+pad2(ci.getMinutes()):'',co?pad2(co.getHours())+':'+pad2(co.getMinutes()):'',r.breakStart||'',r.breakEnd||'',fmtNetH(r.netMs)]);
   });

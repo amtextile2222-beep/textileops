@@ -1227,12 +1227,16 @@ async function runAttendanceCloser() {
     const histSnap = await histRef.get();
     if (histSnap.exists && histSnap.data().checkout) continue; // יש יציאה אמיתית
     const baseSessions = (w.sessions && w.sessions.length) ? w.sessions : [{ in: firstIn, out: null }];
+    // checkout = היציאה האחרונה בפועל. עד 04/10/2026 נכתב תמיד סוף המשמרת — גם לעובדת שכבר
+    // יצאה ב-10:09 — ודוח הנוכחות הראה 15:00 לכולן (ה-netMs עצמו היה נכון).
+    const closedSessions = baseSessions.map(s => s.out ? s : { ...s, out: cutISO });
+    const lastOut = closedSessions.map(s => s.out).sort().pop() || cutISO;
     const rec = {
       workerId: w.id, workerName: w.name || '', dept: w.dept || '', date: day,
-      sessions: baseSessions.map(s => s.out ? s : { ...s, out: cutISO }),
-      checkin: baseSessions[0].in, checkout: cutISO,
+      sessions: closedSessions,
+      checkin: baseSessions[0].in, checkout: lastOut,
       breakStart: w.breakStart || '', breakEnd: w.breakEnd || '', breakActive: !!w.breakActive,
-      autoClosed: true,
+      autoClosed: baseSessions.some(s => s.in && !s.out),
       netMs: calcNetCapped({ ...w, sessions: baseSessions }, cutMs)
     };
     await histRef.set(rec);
