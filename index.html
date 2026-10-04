@@ -10353,7 +10353,7 @@ function mgrBulkToggle(){
   const bar=document.getElementById('mgr-bulk-bar');
   if(bar)bar.style.display=window._mgrBulkMode?'flex':'none';
   if(window._mgrBulkMode){
-    const now=new Date();
+    const now=roundAttTime(srvNow(),true); // ⏱ השעה המוצעת כבר מעוגלת (06:32 ⇒ 06:30)
     const ti=document.getElementById('mgr-bulk-time');
     if(ti)ti.value=pad2(now.getHours())+':'+pad2(now.getMinutes());
   }
@@ -10385,7 +10385,8 @@ async function mgrBulkPunchIn(){
   await waitForActiveTasks(); // פעם אחת לכולם — בלולאה מעבירים 0 כדי לא להכפיל את ההמתנה
   for(const w of selected){
     if(!w.sessions)w.sessions=[];
-    const dt=new Date(today+'T'+pad2(hh)+':'+pad2(mm)+':00');
+    // ⏱ גם כניסה קבוצתית עוברת עיגול — עד 04/10/2026 היא דילגה עליו, וכל הקבוצה נרשמה 06:32
+    const dt=roundAttTime(new Date(today+'T'+pad2(hh)+':'+pad2(mm)+':00'),true);
     w.sessions.push({in:dt.toISOString(),out:null});
     w.status='in';w.checkin=w.sessions[0].in;
     if(S.fbConnected)await fbSet('workers',w.id,w);
