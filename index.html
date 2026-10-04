@@ -11839,15 +11839,62 @@ async function printProforma(onlySel){
   if(!db||!S.fbConnected){showToast('⚠ אין חיבור — אי אפשר להנפיק מספר חשבונית','var(--red-txt)');return;}
   const vat=+(S.settings?.vatPct??18)||0;
   const vatAmt=Math.round(f.amount*vat)/100,total=f.amount+vatAmt;
-  if(!await showConfirm('🧾 חשבונית עסקה',`ללקוח: ${esc(custs[0].name)}\n${f.rows.length} תעודות · לפני מע"מ ${dnMoney(f.amount)}\nמע"מ ${vat}%: ${dnMoney(vatAmt)}\n<b>סה"כ לתשלום: ${dnMoney(total)}</b>\n\nיונפק מספר חשבונית חדש (${Math.max(+S.settings?.invLast||0,(parseInt(S.settings?.invStart,10)||1)-1)+1} או הבא בתור).`,'הפק והדפס','ביטול'))return;
+  // 📅 חודש ההתחשבנות — ברירת מחדל: החודש של התעודה האחרונה בחשבונית
+  const lastNote=f.rows.map(r=>r.s.date||'').filter(Boolean).sort().pop()||todayStr();
+  const meta=await askProformaMeta({month:lastNote.slice(0,7),title:'🧾 חשבונית עסקה',
+    summary:`ללקוח: <b>${esc(custs[0].name)}</b><br>${f.rows.length} תעודות · לפני מע"מ ${dnMoney(f.amount)}<br>מע"מ ${vat}%: ${dnMoney(vatAmt)}<br><b>סה"כ לתשלום: ${dnMoney(total)}</b><br><span style="font-size:11px">יונפק מספר חדש (${Math.max(+S.settings?.invLast||0,(parseInt(S.settings?.invStart,10)||1)-1)+1} או הבא בתור).</span>`,
+    ok:'הפק והדפס'});
+  if(!meta)return;
   // 📸 תמונת מצב של השורות — הדפסה חוזרת יוצאת זהה גם אם מחיר בכרטיס המוצר השתנה מאז
   const rows=f.rows.map(r=>({no:+r.s.no||0,date:r.s.date||'',cust:r.p.cust||'',name:r.p.name||r.p.prod||'',orderNo:r.p.orderNo||'',
     qty:r.qty,sew:r.pr.sew,cut:r.pr.cut,mat:r.pr.mat||0,pack:r.pack,packMode:r.s.packMode||'',amount:r.amount}));
-  const no=await nextProformaNo({date:todayStr(),cust:custs[0].code,custName:custs[0].name,from:f.from||'',to:f.to||'',
+  const no=await nextProformaNo({date:meta.date,month:meta.month,issuedOn:todayStr(),cust:custs[0].code,custName:custs[0].name,from:f.from||'',to:f.to||'',
     notes:rows.map(r=>r.no).filter(Boolean),rows,units:f.units,work:f.work,pack:f.pack,matList:f.matList.map(m=>({k:m.k,n:m.n,amount:m.amount})),
     net:f.amount,vatPct:vat,vat:vatAmt,total,by:S.user?.name||'',byId:S.user?.id||''});
   if(!no){showToast('⚠ הנפקת המספר נכשלה — נסה שוב','var(--red-txt)');return;}
-  printSettlement(onlySel,false,{no,vat,vatAmt,total});
+  printSettlement(onlySel,false,{no,vat,vatAmt,total,date:meta.date,month:meta.month});
+}
+// היום האחרון בחודש (YYYY-MM ⇒ YYYY-MM-DD)
+function monthEnd(ym){const[y,m]=ym.split('-').map(Number);return ym+'-'+pad2(new Date(y,m,0).getDate());}
+// 📅 חלון חודש ההתחשבנות + תאריך החשבונית. בחירת חודש ממלאת את התאריך לסוף החודש
+// (אפשר לשנות). מחזיר {month,date} או null.
+function askProformaMeta(o){
+  return new Promise(res=>{
+    document.getElementById('pfm-wrap')?.remove();
+    const wrap=document.createElement('div');wrap.id='pfm-wrap';
+    wrap.style.cssText='position:fixed;inset:0;background:rgba(0,0,0,.5);display:flex;align-items:center;justify-content:center;z-index:10001;padding:16px';
+    const m=o.month||todayStr().slice(0,7),d=o.date||monthEnd(m);
+    wrap.innerHTML=`<div style="background:var(--card);border-radius:14px;padding:20px;max-width:400px;width:100%;box-shadow:0 10px 40px rgba(0,0,0,.3)">
+      <div style="font-size:16px;font-weight:800;margin-bottom:8px">${o.title||'🧾 חשבונית עסקה'}</div>
+      ${o.summary?`<div style="font-size:13px;line-height:1.7;margin-bottom:12px">${o.summary}</div>`:''}
+      <div style="display:grid;grid-template-columns:1fr 1fr;gap:8px">
+        <div class="field" style="margin:0"><label>📅 חודש ההתחשבנות</label><input type="month" id="pfm-month" value="${m}" style="font-size:14px"/></div>
+        <div class="field" style="margin:0"><label>תאריך החשבונית</label><input type="date" id="pfm-date" value="${d}" style="font-size:14px"/></div>
+      </div>
+      <div style="font-size:11px;color:var(--txt3);margin-top:6px">בחירת חודש קובעת את התאריך לסוף החודש. התעודות שבחשבונית לא משתנות.</div>
+      <div style="display:flex;gap:8px;margin-top:14px">
+        <button class="btn primary" style="flex:1" id="pfm-ok">${o.ok||'שמור'}</button>
+        <button class="btn" style="flex:1" id="pfm-no">ביטול</button>
+      </div></div>`;
+    document.body.appendChild(wrap);
+    const done=v=>{wrap.remove();res(v);};
+    document.getElementById('pfm-month').onchange=e=>{if(e.target.value)document.getElementById('pfm-date').value=monthEnd(e.target.value);};
+    document.getElementById('pfm-ok').onclick=()=>{
+      const mm=document.getElementById('pfm-month').value,dd=document.getElementById('pfm-date').value;
+      if(!mm||!dd){alert('בחר חודש ותאריך');return;}
+      done({month:mm,date:dd});
+    };
+    document.getElementById('pfm-no').onclick=()=>done(null);
+  });
+}
+// ✏️ תיקון חודש/תאריך של חשבונית שכבר הופקה (מנהל) — המספר והסכומים לא משתנים
+async function editProformaDate(no){
+  if(S.user?.role!=='manager')return;
+  const d=_pfList.find(x=>+x.no===+no);if(!d)return;
+  const meta=await askProformaMeta({month:d.month||String(d.date||'').slice(0,7),date:d.date,title:'✏️ חשבונית עסקה '+no+' — חודש ותאריך'});
+  if(!meta)return;
+  try{await fbSet('proformaInvoices',String(no),meta);Object.assign(d,meta);renderProformaList();showToast('✅ עודכן');}
+  catch(e){showToast('⚠ העדכון נכשל: '+(e.message||''),'var(--red-txt)');}
 }
 // 🔁 מתמונת המצב השמורה בחזרה לצורה ש-printSettlement מקבל
 function proformaToF(d){
@@ -11889,10 +11936,11 @@ function renderProformaList(){
   const hd=d=>d?String(d).slice(8,10)+'/'+String(d).slice(5,7)+'/'+String(d).slice(0,4):'—';
   const isMgr=S.user?.role==='manager';
   box.innerHTML=`<div class="tbl-wrap"><table>
-    <thead><tr><th>מס'</th><th>תאריך</th><th>לקוח</th><th style="text-align:center">תעודות</th><th style="text-align:center">לפני מע"מ</th><th style="text-align:center">סה"כ</th><th>הופק ע"י</th><th></th></tr></thead>
+    <thead><tr><th>מס'</th><th>תאריך</th><th>חודש</th><th>לקוח</th><th style="text-align:center">תעודות</th><th style="text-align:center">לפני מע"מ</th><th style="text-align:center">סה"כ</th><th>הופק ע"י</th><th></th></tr></thead>
     <tbody>${_pfList.map(d=>`<tr${d.void?' style="opacity:.55"':''}>
       <td><b>${+d.no}</b>${d.void?' <span style="color:var(--red-txt);font-size:11px;font-weight:700">מבוטלת</span>':''}</td>
       <td style="white-space:nowrap">${hd(d.date)}</td>
+      <td style="white-space:nowrap">${d.month?d.month.slice(5,7)+'/'+d.month.slice(0,4):'—'}</td>
       <td>${esc(d.custName||S.customerNames?.[d.cust]||d.cust||'')}</td>
       <td style="text-align:center" title="${esc((d.notes||[]).map(n=>String(n).padStart(4,'0')).join(', '))}">${(d.notes||[]).length}</td>
       <td style="text-align:center;white-space:nowrap">${dnMoney(d.net)}</td>
@@ -11900,13 +11948,14 @@ function renderProformaList(){
       <td style="font-size:12px;color:var(--txt3)">${esc(d.by||'')}${d.void&&d.voidBy?'<div style="font-size:10px">בוטלה ע"י '+esc(d.voidBy)+'</div>':''}</td>
       <td style="white-space:nowrap;text-align:left">
         ${d.rows?`<button class="btn" style="font-size:11px;padding:4px 9px" onclick="reprintProforma(${+d.no})">🖨 הדפס שוב</button>`:'<span style="font-size:10px;color:var(--txt3)">אין פירוט שמור</span>'}
+        ${isMgr&&!d.void?`<button class="btn" style="font-size:11px;padding:4px 9px" title="חודש ותאריך" onclick="editProformaDate(${+d.no})">✏️</button>`:''}
         ${isMgr&&!d.void?`<button class="btn" style="font-size:11px;padding:4px 9px;color:var(--red-txt)" onclick="voidProforma(${+d.no})">🚫 בטל</button>`:''}
       </td></tr>`).join('')}</tbody></table></div>
     <div style="font-size:11px;color:var(--txt3);margin-top:8px">הדפסה חוזרת יוצאת באותו מספר ובאותם סכומים שהיו בהפקה, ומסומנת "העתק". חשבונית מבוטלת נשארת ברשימה — המספר לא חוזר לשימוש.</div>`;
 }
 function reprintProforma(no){
   const d=_pfList.find(x=>+x.no===+no);if(!d||!d.rows)return;
-  printSettlement(false,false,{no:+d.no,vat:+d.vatPct||0,vatAmt:+d.vat||0,total:+d.total||0,f:proformaToF(d),date:d.date,copy:true,void:!!d.void});
+  printSettlement(false,false,{no:+d.no,vat:+d.vatPct||0,vatAmt:+d.vat||0,total:+d.total||0,f:proformaToF(d),date:d.date,month:d.month,copy:true,void:!!d.void});
 }
 async function voidProforma(no){
   if(S.user?.role!=='manager')return;
@@ -15154,7 +15203,7 @@ thead{display:table-header-group}
   </div>
   <div class="doc">
     <h1>${inv?'חשבונית עסקה מס\' '+inv.no:noPrice?'רשימת תעודות משלוח':'דוח התחשבנות'}</h1>
-    <div class="dt">תקופה: ${esc(period)}</div>
+    <div class="dt">${inv?.month?'עבור חודש: <b>'+inv.month.slice(5,7)+'/'+inv.month.slice(0,4)+'</b>':'תקופה: '+esc(period)}</div>
     <div class="dt">${inv?'תאריך':'הופק'}: ${heDate(inv?.date||new Date().toISOString().slice(0,10))}</div>${inv?`<div class="dt" style="font-weight:700">${inv.copy?'העתק':'מקור'}</div>`:''}${inv?.void?'<div class="dt" style="font-weight:800;color:#b91c1c;font-size:15px">🚫 מבוטלת</div>':''}
   </div>
 </div>
