@@ -11892,7 +11892,10 @@ function askProformaMeta(o){
 async function editProformaDate(no){
   if(S.user?.role!=='manager')return;
   const d=_pfList.find(x=>+x.no===+no);if(!d)return;
-  const meta=await askProformaMeta({month:d.month||String(d.date||'').slice(0,7),date:d.date,title:'✏️ חשבונית עסקה '+no+' — חודש ותאריך'});
+  // חשבונית בלי חודש (הופקה לפני 04/10/2026) ⇒ ברירת מחדל: החודש שלפני תאריך ההפקה, ותאריך = סוף אותו חודש
+  let _m=d.month,_d=d.date;
+  if(!_m){const x=String(d.date||todayStr());const pm=new Date(+x.slice(0,4),+x.slice(5,7)-2,1);_m=pm.getFullYear()+'-'+pad2(pm.getMonth()+1);_d=monthEnd(_m);}
+  const meta=await askProformaMeta({month:_m,date:_d,title:'✏️ חשבונית עסקה '+no+' — חודש ותאריך'});
   if(!meta)return;
   try{await fbSet('proformaInvoices',String(no),meta);Object.assign(d,meta);renderProformaList();showToast('✅ עודכן');}
   catch(e){showToast('⚠ העדכון נכשל: '+(e.message||''),'var(--red-txt)');}
