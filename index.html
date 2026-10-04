@@ -11839,9 +11839,10 @@ async function printProforma(onlySel){
   if(!db||!S.fbConnected){showToast('⚠ אין חיבור — אי אפשר להנפיק מספר חשבונית','var(--red-txt)');return;}
   const vat=+(S.settings?.vatPct??18)||0;
   const vatAmt=Math.round(f.amount*vat)/100,total=f.amount+vatAmt;
-  // 📅 חודש ההתחשבנות — ברירת מחדל: החודש של התעודה האחרונה בחשבונית
-  const lastNote=f.rows.map(r=>r.s.date||'').filter(Boolean).sort().pop()||todayStr();
-  const meta=await askProformaMeta({month:lastNote.slice(0,7),title:'🧾 חשבונית עסקה',
+  // 📅 חודש ההתחשבנות — ברירת מחדל: **החודש הקודם** להיום. לא לפי תאריך התעודה האחרונה:
+  // תעודות של תחילת החודש (01–03/10) נכנסות לא פעם להתחשבנות של החודש שהסתיים (09).
+  const _t=todayStr(),_pm=new Date(+_t.slice(0,4),+_t.slice(5,7)-2,1);
+  const meta=await askProformaMeta({month:_pm.getFullYear()+'-'+pad2(_pm.getMonth()+1),title:'🧾 חשבונית עסקה',
     summary:`ללקוח: <b>${esc(custs[0].name)}</b><br>${f.rows.length} תעודות · לפני מע"מ ${dnMoney(f.amount)}<br>מע"מ ${vat}%: ${dnMoney(vatAmt)}<br><b>סה"כ לתשלום: ${dnMoney(total)}</b><br><span style="font-size:11px">יונפק מספר חדש (${Math.max(+S.settings?.invLast||0,(parseInt(S.settings?.invStart,10)||1)-1)+1} או הבא בתור).</span>`,
     ok:'הפק והדפס'});
   if(!meta)return;
