@@ -1372,6 +1372,7 @@ code{background:var(--bg2);border:0.5px solid var(--b);border-radius:4px;padding
       <input id="dn-from" type="date" onchange="renderDNotes()" style="padding:7px 10px;border-radius:8px;border:1px solid var(--brd);background:var(--card);color:var(--txt);font-size:13px">
       <input id="dn-to" type="date" onchange="renderDNotes()" style="padding:7px 10px;border-radius:8px;border:1px solid var(--brd);background:var(--card);color:var(--txt);font-size:13px">
       <button class="btn" style="font-size:12px" onclick="dnClearFilter()">נקה</button>
+      <button class="btn" style="font-size:12px" onclick="openProformaList()">🧾 חשבוניות עסקה</button>
       <button class="btn primary" style="font-size:12px" id="dn-print-btn" onclick="dnPrintDialog()">🖨 הדפסה…</button>
     </div>
     <div id="dnotes-list"></div>
@@ -11812,8 +11813,10 @@ async function nextProformaNo(rec){
         const d=await tx.get(ref);
         const cur=d.exists()?(parseInt(d.data().last,10)||0):0;
         out=Math.max(cur,base())+1;
-        const log=(Array.isArray(d.data()?.log)?d.data().log:[]).concat([{...rec,no:out}]).slice(-500);
-        tx.set(ref,{last:out,log},{merge:true});
+        tx.set(ref,{last:out},{merge:true});
+        // 🧾 החשבונית נשמרת ב-proformaInvoices/{מספר} — באותה טרנזקציה, כך שאין מספר
+        // שננעל בלי רשומה. האוסף פתוח רק ל-canPricing (יש בו מחירים).
+        tx.set(doc(db,'proformaInvoices',String(out)),{...rec,no:out,at:Date.now()});
       });
     }catch(e){console.warn('invNo:',e.message);out=0;}
   }
@@ -11833,9 +11836,81 @@ async function printProforma(onlySel){
   const vat=+(S.settings?.vatPct??18)||0;
   const vatAmt=Math.round(f.amount*vat)/100,total=f.amount+vatAmt;
   if(!await showConfirm('🧾 חשבונית עסקה',`ללקוח: ${esc(custs[0].name)}\n${f.rows.length} תעודות · לפני מע"מ ${dnMoney(f.amount)}\nמע"מ ${vat}%: ${dnMoney(vatAmt)}\n<b>סה"כ לתשלום: ${dnMoney(total)}</b>\n\nיונפק מספר חשבונית חדש (${Math.max(+S.settings?.invLast||0,(parseInt(S.settings?.invStart,10)||1)-1)+1} או הבא בתור).`,'הפק והדפס','ביטול'))return;
-  const no=await nextProformaNo({date:todayStr(),cust:custs[0].code,notes:f.rows.map(r=>+r.s.no||0).filter(Boolean),net:f.amount,vatPct:vat,vat:vatAmt,total,by:S.user?.name||''});
+  // 📸 תמונת מצב של השורות — הדפסה חוזרת יוצאת זהה גם אם מחיר בכרטיס המוצר השתנה מאז
+  const rows=f.rows.map(r=>({no:+r.s.no||0,date:r.s.date||'',cust:r.p.cust||'',name:r.p.name||r.p.prod||'',orderNo:r.p.orderNo||'',
+    qty:r.qty,sew:r.pr.sew,cut:r.pr.cut,mat:r.pr.mat||0,pack:r.pack,packMode:r.s.packMode||'',amount:r.amount}));
+  const no=await nextProformaNo({date:todayStr(),cust:custs[0].code,custName:custs[0].name,from:f.from||'',to:f.to||'',
+    notes:rows.map(r=>r.no).filter(Boolean),rows,units:f.units,work:f.work,pack:f.pack,matList:f.matList.map(m=>({k:m.k,n:m.n,amount:m.amount})),
+    net:f.amount,vatPct:vat,vat:vatAmt,total,by:S.user?.name||'',byId:S.user?.id||''});
   if(!no){showToast('⚠ הנפקת המספר נכשלה — נסה שוב','var(--red-txt)');return;}
   printSettlement(onlySel,false,{no,vat,vatAmt,total});
+}
+// 🔁 מתמונת המצב השמורה בחזרה לצורה ש-printSettlement מקבל
+function proformaToF(d){
+  const rows=(d.rows||[]).map(r=>({p:{cust:r.cust,name:r.name,orderNo:r.orderNo},s:{no:r.no,date:r.date,packMode:r.packMode},
+    qty:+r.qty||0,pr:{sew:+r.sew||0,cut:+r.cut||0,mat:+r.mat||0,unit:(+r.sew||0)+(+r.cut||0)+(+r.mat||0),missing:false},pack:+r.pack||0,amount:+r.amount||0}));
+  return {rows,units:+d.units||0,work:+d.work||0,pack:+d.pack||0,amount:+d.net||0,missing:0,noPrice:0,
+    matList:(d.matList||[]).map(m=>({...m})),from:d.from||'',to:d.to||'',q:'',cust:d.cust||''};
+}
+// 📜 רשימת חשבוניות העסקה שהופקו
+let _pfList=[];
+async function openProformaList(){
+  if(!_canPricing()){showToast('⚠ אין הרשאה לחשבוניות','var(--red-txt)');return;}
+  if(!db||!S.fbConnected){showToast('⚠ אין חיבור','var(--red-txt)');return;}
+  document.getElementById('pfl-wrap')?.remove();
+  const wrap=document.createElement('div');
+  wrap.id='pfl-wrap';
+  wrap.style.cssText='position:fixed;inset:0;background:rgba(0,0,0,.5);display:flex;align-items:flex-start;justify-content:center;z-index:10000;padding:16px;overflow-y:auto;overscroll-behavior:contain;-webkit-overflow-scrolling:touch';
+  wrap.onclick=e=>{if(e.target===wrap)wrap.remove();};
+  wrap.innerHTML=`<div style="background:var(--card);border-radius:14px;padding:18px;max-width:760px;width:100%;box-shadow:0 10px 40px rgba(0,0,0,.3);margin:auto">
+    <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:10px">
+      <div style="font-size:16px;font-weight:800">🧾 חשבוניות עסקה</div>
+      <button class="btn" style="font-size:12px" onclick="document.getElementById('pfl-wrap').remove()">סגור</button>
+    </div>
+    <div id="pfl-body" style="font-size:13px;color:var(--txt3)">טוען…</div>
+  </div>`;
+  document.body.appendChild(wrap);
+  try{
+    const{collection,getDocs}=window._fb;
+    const snap=await getDocs(collection(db,'proformaInvoices'));
+    _pfList=snap.docs.map(d=>d.data()).sort((a,b)=>(+b.no||0)-(+a.no||0));
+  }catch(e){
+    const b=document.getElementById('pfl-body');if(b)b.innerHTML='<span style="color:var(--red-txt)">⚠ טעינה נכשלה: '+esc(e.message||'')+'</span>';return;
+  }
+  renderProformaList();
+}
+function renderProformaList(){
+  const box=document.getElementById('pfl-body');if(!box)return;
+  if(!_pfList.length){box.innerHTML='עדיין לא הופקו חשבוניות עסקה.';return;}
+  const hd=d=>d?String(d).slice(8,10)+'/'+String(d).slice(5,7)+'/'+String(d).slice(0,4):'—';
+  const isMgr=S.user?.role==='manager';
+  box.innerHTML=`<div class="tbl-wrap"><table>
+    <thead><tr><th>מס'</th><th>תאריך</th><th>לקוח</th><th style="text-align:center">תעודות</th><th style="text-align:center">לפני מע"מ</th><th style="text-align:center">סה"כ</th><th>הופק ע"י</th><th></th></tr></thead>
+    <tbody>${_pfList.map(d=>`<tr${d.void?' style="opacity:.55"':''}>
+      <td><b>${+d.no}</b>${d.void?' <span style="color:var(--red-txt);font-size:11px;font-weight:700">מבוטלת</span>':''}</td>
+      <td style="white-space:nowrap">${hd(d.date)}</td>
+      <td>${esc(d.custName||S.customerNames?.[d.cust]||d.cust||'')}</td>
+      <td style="text-align:center" title="${esc((d.notes||[]).map(n=>String(n).padStart(4,'0')).join(', '))}">${(d.notes||[]).length}</td>
+      <td style="text-align:center;white-space:nowrap">${dnMoney(d.net)}</td>
+      <td style="text-align:center;white-space:nowrap;font-weight:700${d.void?';text-decoration:line-through':''}">${dnMoney(d.total)}</td>
+      <td style="font-size:12px;color:var(--txt3)">${esc(d.by||'')}${d.void&&d.voidBy?'<div style="font-size:10px">בוטלה ע"י '+esc(d.voidBy)+'</div>':''}</td>
+      <td style="white-space:nowrap;text-align:left">
+        ${d.rows?`<button class="btn" style="font-size:11px;padding:4px 9px" onclick="reprintProforma(${+d.no})">🖨 הדפס שוב</button>`:'<span style="font-size:10px;color:var(--txt3)">אין פירוט שמור</span>'}
+        ${isMgr&&!d.void?`<button class="btn" style="font-size:11px;padding:4px 9px;color:var(--red-txt)" onclick="voidProforma(${+d.no})">🚫 בטל</button>`:''}
+      </td></tr>`).join('')}</tbody></table></div>
+    <div style="font-size:11px;color:var(--txt3);margin-top:8px">הדפסה חוזרת יוצאת באותו מספר ובאותם סכומים שהיו בהפקה, ומסומנת "העתק". חשבונית מבוטלת נשארת ברשימה — המספר לא חוזר לשימוש.</div>`;
+}
+function reprintProforma(no){
+  const d=_pfList.find(x=>+x.no===+no);if(!d||!d.rows)return;
+  printSettlement(false,false,{no:+d.no,vat:+d.vatPct||0,vatAmt:+d.vat||0,total:+d.total||0,f:proformaToF(d),date:d.date,copy:true,void:!!d.void});
+}
+async function voidProforma(no){
+  if(S.user?.role!=='manager')return;
+  const d=_pfList.find(x=>+x.no===+no);if(!d)return;
+  if(!await showConfirm('ביטול חשבונית עסקה','לבטל את חשבונית עסקה מס\' '+no+' ('+dnMoney(d.total)+')?\nהיא תישאר ברשימה כמבוטלת, והמספר לא יחזור לשימוש.','בטל חשבונית','חזור'))return;
+  const upd={void:true,voidBy:S.user?.name||'',voidAt:Date.now()};
+  try{await fbSet('proformaInvoices',String(no),upd);Object.assign(d,upd);renderProformaList();showToast('🚫 חשבונית '+no+' בוטלה');}
+  catch(e){showToast('⚠ הביטול נכשל: '+(e.message||''),'var(--red-txt)');}
 }
 // החלפת הזמנה בבורר — הכמות המתוכננת ושדה הקלט עוברים לרשומה הנבחרת
 function shipPickChanged(){
@@ -14879,7 +14954,8 @@ function renderDNotes(){
 // noPrice ⇒ "רשימת תעודות" בלי שום סכום — כמויות, חבילות וסוג אריזה, למסירה לנהג/למחסן
 // inv ⇒ "חשבונית עסקה": אותה טבלה + מספר מסמך ושורות מע"מ וסה"כ לתשלום (מ-printProforma)
 function printSettlement(onlySel,noPrice,inv){
-  const f=dnFiltered(!!onlySel);
+  // הדפסה חוזרת של חשבונית ⇒ מתמונת המצב השמורה, לא מהמסך
+  const f=inv?.f||dnFiltered(!!onlySel);
   if(!f.rows.length){showToast('⚠ אין תעודות בסינון הנוכחי','var(--red-txt)');return;}
   const co=S.settings?.company||{};
   const custs=dnCustomers(f.rows);
@@ -14951,7 +15027,7 @@ thead{display:table-header-group}
   <div class="doc">
     <h1>${inv?'חשבונית עסקה מס\' '+inv.no:noPrice?'רשימת תעודות משלוח':'דוח התחשבנות'}</h1>
     <div class="dt">תקופה: ${esc(period)}</div>
-    <div class="dt">${inv?'תאריך':'הופק'}: ${heDate(new Date().toISOString().slice(0,10))}</div>${inv?'<div class="dt" style="font-weight:700">מקור</div>':''}
+    <div class="dt">${inv?'תאריך':'הופק'}: ${heDate(inv?.date||new Date().toISOString().slice(0,10))}</div>${inv?`<div class="dt" style="font-weight:700">${inv.copy?'העתק':'מקור'}</div>`:''}${inv?.void?'<div class="dt" style="font-weight:800;color:#b91c1c;font-size:15px">🚫 מבוטלת</div>':''}
   </div>
 </div>
 <div class="box">

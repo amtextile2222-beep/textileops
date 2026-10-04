@@ -111,6 +111,12 @@ service cloud.firestore {
         ('permissions' in me() && me().permissions.hasAny(['products', 'dnotes']))
         || (!('permissions' in me()) && request.auth.token.role == 'supervisor')));
     }
+    // 🧾 חשבוניות עסקה (04/10/2026) — מכילות מחירים ⇒ אותה הרשאה כמו התמחור.
+    // יצירה (בהפקה) ועדכון (סימון "מבוטלת") — לא מוחקים: המספר לא חוזר לשימוש.
+    match /proformaInvoices/{id} {
+      allow read, create, update: if canPricing();
+      allow delete: if false;
+    }
     match /productPricing/{id} {
       allow read, create, update: if canPricing();
       // כמו מחיקת מוצר — מנהל/אחראי (deleteProduct מוחק גם את התמחור, שלא יישאר יתום)
@@ -148,6 +154,7 @@ service cloud.firestore {
         && collection != 'histTasks'
         && collection != 'products'
         && collection != 'productPricing'
+        && collection != 'proformaInvoices'
         // עד 25/09/2026 חסר כאן — וחוק הקופה הייעודי (לקיחה בלבד, על שמך) לא נאכף בפועל
         && collection != 'cashbox';
     }
