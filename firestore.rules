@@ -113,6 +113,11 @@ service cloud.firestore {
     }
     // 🧾 חשבוניות עסקה (04/10/2026) — מכילות מחירים ⇒ אותה הרשאה כמו התמחור.
     // יצירה (בהפקה) ועדכון (סימון "מבוטלת") — לא מוחקים: המספר לא חוזר לשימוש.
+    // ✍ חתימת העסק (05/10/2026) — מי שמדפיס תעודות/חשבוניות קורא; רק מנהל מחליף/מוחק.
+    match /bizSignature/{id} {
+      allow read: if canPricing();
+      allow write: if isMgr();
+    }
     match /proformaInvoices/{id} {
       allow read, create, update: if canPricing();
       allow delete: if false;
@@ -155,6 +160,7 @@ service cloud.firestore {
         && collection != 'products'
         && collection != 'productPricing'
         && collection != 'proformaInvoices'
+        && collection != 'bizSignature'
         // עד 25/09/2026 חסר כאן — וחוק הקופה הייעודי (לקיחה בלבד, על שמך) לא נאכף בפועל
         && collection != 'cashbox';
     }

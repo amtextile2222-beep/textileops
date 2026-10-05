@@ -854,6 +854,17 @@ code{background:var(--bg2);border:0.5px solid var(--b);border-radius:4px;padding
           </div>
           <div id="co-invlast" style="grid-column:1/-1;font-size:11px;color:var(--txt3)"></div>
         </div>
+        <div style="margin-top:10px;padding-top:9px;border-top:1px solid var(--brd)">
+          <label style="font-size:12px;font-weight:600">✍ חתימה / חותמת העסק</label>
+          <div style="font-size:11px;color:var(--txt3);margin:2px 0 6px">בכל הדפסה של תעודה, התחשבנות או חשבונית — נשאלים אם להפיק עם חתימה.</div>
+          <div id="co-sig-prev" style="min-height:40px;border:1px dashed var(--brd);border-radius:8px;padding:6px;display:flex;align-items:center;justify-content:center;background:#fff;font-size:11px;color:#888">—</div>
+          <div id="co-sig-btns" style="display:flex;gap:6px;margin-top:6px;flex-wrap:wrap">
+            <button class="btn" style="font-size:12px" onclick="sigDrawOpen()">✍ חתום על המסך</button>
+            <button class="btn" style="font-size:12px" onclick="document.getElementById('co-sig-file').click()">📷 העלה תמונה</button>
+            <button class="btn" style="font-size:12px;color:var(--red-txt)" onclick="sigDelete()">🗑 מחק</button>
+            <input type="file" id="co-sig-file" accept="image/*" style="display:none" onchange="sigUpload(this)"/>
+          </div>
+        </div>
         <div style="margin-top:12px;padding-top:10px;border-top:1px solid var(--brd)">
           <div style="font-size:12px;font-weight:700">📦 מחירון חומר אריזה — ₪ ליחידה</div>
           <div style="font-size:11px;color:var(--txt3);margin:3px 0 7px">המחיר נצרב על התעודה בעת אישור המשלוח — שינוי כאן <b>לא</b> משנה תעודות שכבר יצאו.</div>
@@ -12352,7 +12363,93 @@ function saveCompanyInfo(){
   showToast('✅ פרטי העסק נשמרו');
   renderAdmin();
 }
+// ─── ✍ חתימת העסק (05/10/2026) ─────────────────────────────────────────
+// נשמרת ב-bizSignature/main: קריאה רק ל-canPricing (מי שמדפיס תעודות/חשבוניות), כתיבה —
+// מנהל בלבד (Rules). לא ב-appSettings — שם כל עובד יכול לקרוא ולהעתיק אותה.
+let _bizSig; // undefined = לא נטען · null = אין · dataURL
+async function bizSigGet(force){
+  if(!_canPricing()||!db||!S.fbConnected)return null;
+  if(_bizSig!==undefined&&!force)return _bizSig;
+  try{const{doc,getDoc}=window._fb;const d=await getDoc(doc(db,'bizSignature','main'));_bizSig=d.data()?.img||null;}
+  catch(e){console.warn('sig:',e.message);return null;}
+  return _bizSig;
+}
+async function sigRenderPrev(){
+  const el=document.getElementById('co-sig-prev');if(!el)return;
+  const b=document.getElementById('co-sig-btns');if(b)b.style.display=S.user?.role==='manager'?'flex':'none';
+  const s=await bizSigGet(true);
+  el.innerHTML=s?`<img src="${s}" style="max-height:70px;max-width:100%"/>`:'אין חתימה שמורה';
+}
+// חיתוך לשוליים של הציור + הקטנה ⇒ PNG שקוף
+function _sigCrop(cv){
+  const ctx=cv.getContext('2d'),{width:w,height:h}=cv,px=ctx.getImageData(0,0,w,h).data;
+  let x0=w,y0=h,x1=-1,y1=-1;
+  for(let y=0;y<h;y++)for(let x=0;x<w;x++)if(px[(y*w+x)*4+3]>20){if(x<x0)x0=x;if(x>x1)x1=x;if(y<y0)y0=y;if(y>y1)y1=y;}
+  if(x1<0)return null;
+  const pad=6;x0=Math.max(0,x0-pad);y0=Math.max(0,y0-pad);x1=Math.min(w-1,x1+pad);y1=Math.min(h-1,y1+pad);
+  const cw=x1-x0+1,ch=y1-y0+1,sc=Math.min(1,500/cw,200/ch);
+  const out=document.createElement('canvas');out.width=Math.round(cw*sc);out.height=Math.round(ch*sc);
+  out.getContext('2d').drawImage(cv,x0,y0,cw,ch,0,0,out.width,out.height);
+  return out.toDataURL('image/png');
+}
+async function sigSave(img){
+  if(S.user?.role!=='manager'){showToast('⚠ מנהל בלבד','var(--red-txt)');return;}
+  if(!img){showToast('⚠ החתימה ריקה','var(--red-txt)');return;}
+  if(img.length>700000){showToast('⚠ התמונה גדולה מדי — נסה תמונה קטנה יותר','var(--red-txt)');return;}
+  try{await fbSet('bizSignature','main',{img,at:Date.now(),by:S.user?.name||''});_bizSig=img;showToast('✅ החתימה נשמרה');sigRenderPrev();}
+  catch(e){showToast('⚠ השמירה נכשלה: '+(e.message||''),'var(--red-txt)');}
+}
+async function sigDelete(){
+  if(S.user?.role!=='manager')return;
+  if(!await showConfirm('מחיקת חתימה','למחוק את חתימת העסק?\nמסמכים יודפסו בלי חתימה עד שתישמר חדשה.','מחק','ביטול'))return;
+  try{await fbDel('bizSignature','main');_bizSig=null;sigRenderPrev();showToast('🗑 נמחקה');}catch(e){showToast('⚠ '+(e.message||''),'var(--red-txt)');}
+}
+// 📷 תמונה של חתימה/חותמת על דף לבן — הרקע הבהיר הופך לשקוף
+function sigUpload(inp){
+  const file=inp.files&&inp.files[0];inp.value='';if(!file)return;
+  const im=new Image();
+  im.onload=()=>{
+    const sc=Math.min(1,1200/im.width,1200/im.height);
+    const cv=document.createElement('canvas');cv.width=Math.round(im.width*sc);cv.height=Math.round(im.height*sc);
+    const ctx=cv.getContext('2d');ctx.drawImage(im,0,0,cv.width,cv.height);
+    const d=ctx.getImageData(0,0,cv.width,cv.height),p=d.data;
+    for(let i=0;i<p.length;i+=4){const l=0.299*p[i]+0.587*p[i+1]+0.114*p[i+2];
+      if(l>185)p[i+3]=0;else if(l>140)p[i+3]=Math.round(255*(185-l)/45);}
+    ctx.putImageData(d,0,0);
+    URL.revokeObjectURL(im.src);
+    sigSave(_sigCrop(cv));
+  };
+  im.onerror=()=>showToast('⚠ לא הצלחתי לקרוא את התמונה','var(--red-txt)');
+  im.src=URL.createObjectURL(file);
+}
+// ✍ חתימה על המסך — עכבר / אצבע
+function sigDrawOpen(){
+  if(S.user?.role!=='manager'){showToast('⚠ מנהל בלבד','var(--red-txt)');return;}
+  document.getElementById('sgd-wrap')?.remove();
+  const wrap=document.createElement('div');wrap.id='sgd-wrap';
+  wrap.style.cssText='position:fixed;inset:0;background:rgba(0,0,0,.5);display:flex;align-items:center;justify-content:center;z-index:10001;padding:12px';
+  wrap.innerHTML=`<div style="background:var(--card);border-radius:14px;padding:16px;max-width:560px;width:100%">
+    <div style="font-size:16px;font-weight:800;margin-bottom:8px">✍ חתום בתוך המסגרת</div>
+    <canvas id="sgd-cv" width="520" height="200" style="width:100%;height:auto;background:#fff;border:1px solid #bbb;border-radius:8px;touch-action:none;cursor:crosshair"></canvas>
+    <div style="display:flex;gap:8px;margin-top:10px">
+      <button class="btn primary" style="flex:1" id="sgd-ok">💾 שמור</button>
+      <button class="btn" style="flex:1" id="sgd-clr">נקה</button>
+      <button class="btn" style="flex:1" id="sgd-no">ביטול</button>
+    </div></div>`;
+  document.body.appendChild(wrap);
+  const cv=document.getElementById('sgd-cv'),ctx=cv.getContext('2d');
+  ctx.lineWidth=3;ctx.lineCap='round';ctx.lineJoin='round';ctx.strokeStyle='#14306b';
+  let dn=false;
+  const pt=e=>{const r=cv.getBoundingClientRect();return[(e.clientX-r.left)*cv.width/r.width,(e.clientY-r.top)*cv.height/r.height];};
+  cv.onpointerdown=e=>{dn=true;cv.setPointerCapture(e.pointerId);const[x,y]=pt(e);ctx.beginPath();ctx.moveTo(x,y);ctx.lineTo(x+.1,y+.1);ctx.stroke();};
+  cv.onpointermove=e=>{if(!dn)return;const[x,y]=pt(e);ctx.lineTo(x,y);ctx.stroke();};
+  cv.onpointerup=cv.onpointercancel=()=>{dn=false;};
+  document.getElementById('sgd-clr').onclick=()=>ctx.clearRect(0,0,cv.width,cv.height);
+  document.getElementById('sgd-no').onclick=()=>wrap.remove();
+  document.getElementById('sgd-ok').onclick=()=>{const img=_sigCrop(cv);if(!img){showToast('⚠ לא נחתם כלום','var(--red-txt)');return;}wrap.remove();sigSave(img);};
+}
 function fillCompanyInfo(){
+  try{sigRenderPrev();}catch(e){}
   const co=S.settings?.company||{};
   const s=(id,v)=>{const el=document.getElementById(id);if(el&&document.activeElement!==el)el.value=v||'';};
   s('co-name',co.name);s('co-addr',co.addr);s('co-city',co.city);s('co-phone',co.phone);s('co-taxid',co.taxId);s('co-email',co.email);
@@ -14456,7 +14553,19 @@ function bcGenerateSample(cust,prod,t){
   setTimeout(()=>{const im=qrWrap.querySelector('img');if(im)im.style.display='none';},50);
 }
 // הדפסה דרך iframe נסתר במקום window.open — ב-PWA במסך הבית (standalone) window.open נתקע על דף ההדפסה ואי אפשר לסגור אותו אלא בסגירת האפליקציה כולה
+// ✍ מסמך עם מקום לחתימת העסק (sig-slot) ⇒ שואלים אם לחתום, ומכניסים את התמונה.
+// בלי חתימה שמורה / בלי הרשאה — המקום פשוט נמחק והמסמך יוצא כרגיל.
 function printViaIframe(html){
+  if(html.includes('<span class="sig-slot"></span>')){_sigPrint(html);return;}
+  _printViaIframe(html);
+}
+async function _sigPrint(html){
+  let img=null;
+  try{const sig=await bizSigGet();if(sig&&await showConfirm('✍ חתימה','להפיק את המסמך עם חתימת העסק?','✍ עם חתימה','בלי חתימה'))img=sig;}catch(e){}
+  html=html.split('<span class="sig-slot"></span>').join(img?`<img src="${img}" alt="" style="display:block;max-height:58px;max-width:180px;margin:-6px 0 -20px"/>`:'');
+  _printViaIframe(html);
+}
+function _printViaIframe(html){
   const old=document.getElementById('print-iframe');if(old)old.remove();
   const f=document.createElement('iframe');
   f.id='print-iframe';
@@ -15256,7 +15365,7 @@ ${inv?`<table class="mat" style="margin-right:auto;margin-left:0;min-width:42%">
 </table>
 <div style="margin-top:10px;font-size:11px;color:#555;border:1px dashed #999;border-radius:6px;padding:6px 9px">מסמך זה הוא חשבונית עסקה (דרישת תשלום) ו<b>אינו חשבונית מס</b>. חשבונית מס תופק עם קבלת התשלום.</div>`:''}
 <div class="sign">
-  <div><b>חתימת המפעל</b>_______________________</div>
+  <div><b>חתימת המפעל</b><span class="sig-slot"></span>_______________________</div>
   <div><b>${noPrice?'שם המקבל וחתימה':'אישור הלקוח'}</b>_______________________</div>
 </div>
 <div class="foot">הופק ממערכת TextileOps · ${esc(co.name||'')}</div>
@@ -15402,7 +15511,7 @@ ${packs.length?`<table class="pk">
 ${packUnits!==total?`<div class="warn">⚠ סכום האריזה (${packUnits}) שונה מהכמות שיצאה במשלוח (${total}).</div>`:''}`:''}
 ${dnote?`<div class="note"><b>הערות:</b> ${esc(dnote)}</div>`:''}
 <div class="sign">
-  <div><b>שם וחתימת המוסר</b>____________________</div>
+  <div><b>שם וחתימת המוסר</b><span class="sig-slot"></span>____________________</div>
   <div><b>שם וחתימת המקבל</b>____________________</div>
   <div><b>תאריך קבלה</b>____________________</div>
 </div>
