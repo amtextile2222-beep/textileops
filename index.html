@@ -6382,7 +6382,20 @@ function showConfirm3(title,msg,btn1,btn2,btn3){
 
 function calcTaskDurSec(startTime,endTime,workerId){
   const st=startTime instanceof Date?startTime:new Date(startTime);
-  const et=endTime instanceof Date?endTime:(endTime?new Date(endTime):srvNow());
+  let et=endTime instanceof Date?endTime:(endTime?new Date(endTime):srvNow());
+  // 🛑 קטע עבודה רץ לא חוצה את סוף יום העבודה שלו (06/10/2026). משימה שלא הושהתה
+  // בסוף היום (מכשיר עם עותק ישן, השהיה שלא נשמרה) נעצרה רק ב-05/10 — ונספרו לה
+  // 5,697 דק' של לילות וסופ"ש (شهناز, תאסיסי עיבוד). חידוש מתחיל קטע חדש עם startTime
+  // של אותו יום, ולכן קטע לגיטימי אף פעם לא עובר לילה. החיתוך כמו בשרת (attendanceCloser):
+  // יציאת העובד באותו יום אם ידועה, אחרת סוף המשמרת.
+  if(!isNaN(st)&&!isNaN(et)&&et.toDateString()!==st.toDateString()){
+    const d=st.getFullYear()+'-'+pad2(st.getMonth()+1)+'-'+pad2(st.getDate());
+    let cut=shiftEndDate(d);
+    const rec=(S.attHistory||[]).find(r=>r.workerId===workerId&&r.date===d);
+    const co=rec?(attLastOut(rec)||rec.checkout):null;
+    if(co&&!isNaN(new Date(co)))cut=new Date(co);
+    if(et>cut)et=cut<st?st:cut;
+  }
   const w=S.workers.find(x=>x.id===workerId);
   let ms=et-st;
   if(w&&w.breakActive&&w.breakStart&&w.breakEnd){
