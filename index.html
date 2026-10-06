@@ -3548,7 +3548,9 @@ async function recalcActiveExpected(cust,prod){
     let taskChanged=false;
     if(newExp!=null){if(t.expectedMin!==newExp){t.expectedMin=newExp;taskChanged=true;}}
     else if(t.expectedMin!=null){delete t.expectedMin;taskChanged=true;}
-    if(taskChanged){changed=true;if(S.fbConnected)await fbUpdateOnly('activeTasks',String(t.id),{...t,startTime:t.startTime instanceof Date?t.startTime.toISOString():t.startTime});}
+    // 🛑 כותבים **רק את הצפי** — לא את כל המשימה. כתיבה של {...t} ממכשיר שמחזיק עותק ישן
+    // (משימה שבינתיים הושהתה במכשיר אחר) מחזירה אותה ל'רצה' ומוחקת את הזמן שנצבר.
+    if(taskChanged){changed=true;if(S.fbConnected)await fbUpdateOnly('activeTasks',String(t.id),{expectedMin:newExp!=null?newExp:window._fb.deleteField()});}
   }
   if(changed){saveLS();renderTasks();if(typeof renderMgrTasks==='function')renderMgrTasks();}
 }
@@ -6146,6 +6148,9 @@ async function reanchorWorkerTasks(workerId,newOutAt){
 // בלעדיו הסינון "כל מה שלא מושהה של העובד" תופס גם את המשימה החדשה שזה עתה נוצרה
 // ומשהה אותה מיד. שני הקוראים הישנים (חתימת יציאה) לא מעבירים כלום ולא מושפעים.
 async function pauseWorkerTasks(workerId,pausedAt,onlyIds){
+  // הרשימה חייבת להיות מהשרת — מסך שנפתח זה עתה מחזיק עדיין את העותק מ-localStorage,
+  // ומשימה שנפתחה במכשיר אחר לא תהיה בו ולא תושהה (שהנאז 01/10 — יציאה בלי השהיה).
+  await waitForActiveTasks(8000);
   const only=onlyIds?new Set(onlyIds.map(String)):null;
   const tasks=S.activeTasks.filter(t=>t.workerId===workerId&&!t.paused&&!_isClosedTask(t.id)&&(!only||only.has(String(t.id))));
   for(const t of tasks){
