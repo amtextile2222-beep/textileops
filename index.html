@@ -1530,8 +1530,8 @@ code{background:var(--bg2);border:0.5px solid var(--b);border-radius:4px;padding
     </div>
   </div>
 
-  <!-- מודל מוצר -->
-  <div class="overlay hidden" id="prod-modal-wrap" onclick="if(event.target===this)closeProdModal()">
+  <!-- מודל מוצר — לא נסגר בלחיצה על הרקע (לחיצה בטעות מחקה את כל השלבים שהוזנו); סגירה רק בכפתורים -->
+  <div class="overlay hidden" id="prod-modal-wrap">
     <div class="modal" style="max-width:600px;max-height:90vh;overflow-y:auto" id="prod-modal-box">
       <div class="modal-title" id="prod-modal-title">מוצר</div>
       <div id="prod-modal-body"></div>
