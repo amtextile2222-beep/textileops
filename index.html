@@ -11946,7 +11946,7 @@ async function openProformaList(){
   wrap.id='pfl-wrap';
   wrap.style.cssText='position:fixed;inset:0;background:rgba(0,0,0,.5);display:flex;align-items:flex-start;justify-content:center;z-index:10000;padding:16px;overflow-y:auto;overscroll-behavior:contain;-webkit-overflow-scrolling:touch';
   wrap.onclick=e=>{if(e.target===wrap)wrap.remove();};
-  wrap.innerHTML=`<div style="background:var(--card);border-radius:14px;padding:18px;max-width:760px;width:100%;box-shadow:0 10px 40px rgba(0,0,0,.3);margin:auto">
+  wrap.innerHTML=`<div style="background:var(--card);border-radius:14px;padding:18px;max-width:900px;width:100%;box-shadow:0 10px 40px rgba(0,0,0,.3);margin:auto">
     <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:10px">
       <div style="font-size:16px;font-weight:800">🧾 חשבוניות עסקה</div>
       <button class="btn" style="font-size:12px" onclick="document.getElementById('pfl-wrap').remove()">סגור</button>
@@ -11969,7 +11969,7 @@ function renderProformaList(){
   const hd=d=>d?String(d).slice(8,10)+'/'+String(d).slice(5,7)+'/'+String(d).slice(0,4):'—';
   const isMgr=S.user?.role==='manager';
   box.innerHTML=`<div class="tbl-wrap"><table>
-    <thead><tr><th>מס'</th><th>תאריך</th><th>חודש</th><th>לקוח</th><th style="text-align:center">תעודות</th><th style="text-align:center">לפני מע"מ</th><th style="text-align:center">סה"כ</th><th>הופק ע"י</th><th></th></tr></thead>
+    <thead><tr><th>מס'</th><th>תאריך</th><th>חודש</th><th>לקוח</th><th style="text-align:center">תעודות</th><th style="text-align:center">לפני מע"מ</th><th style="text-align:center">סה"כ</th><th>תשלום</th><th>הופק ע"י</th><th></th></tr></thead>
     <tbody>${_pfList.map(d=>`<tr${d.void?' style="opacity:.55"':''}>
       <td><b>${+d.no}</b>${d.void?' <span style="color:var(--red-txt);font-size:11px;font-weight:700">מבוטלת</span>':''}</td>
       <td style="white-space:nowrap">${hd(d.date)}</td>
@@ -11978,8 +11978,10 @@ function renderProformaList(){
       <td style="text-align:center" title="${esc((d.notes||[]).map(n=>String(n).padStart(4,'0')).join(', '))}">${(d.notes||[]).length}</td>
       <td style="text-align:center;white-space:nowrap">${dnMoney(d.net)}</td>
       <td style="text-align:center;white-space:nowrap;font-weight:700${d.void?';text-decoration:line-through':''}">${dnMoney(d.total)}</td>
+      <td style="font-size:12px;white-space:nowrap">${pfPayCell(d)}</td>
       <td style="font-size:12px;color:var(--txt3)">${esc(d.by||'')}${d.void&&d.voidBy?'<div style="font-size:10px">בוטלה ע"י '+esc(d.voidBy)+'</div>':''}</td>
       <td style="white-space:nowrap;text-align:left">
+        ${!d.void||(d.checks||[]).length?`<button class="btn" style="font-size:11px;padding:4px 9px" onclick="openInvChecks(${+d.no})">💳 שיקים${(d.checks||[]).length?' ('+d.checks.length+')':''}</button>`:''}
         ${d.rows?`<button class="btn" style="font-size:11px;padding:4px 9px" onclick="reprintProforma(${+d.no})">🖨 הדפס שוב</button>`:'<span style="font-size:10px;color:var(--txt3)">אין פירוט שמור</span>'}
         ${isMgr&&!d.void?`<button class="btn" style="font-size:11px;padding:4px 9px" title="חודש ותאריך" onclick="editProformaDate(${+d.no})">✏️</button>`:''}
         ${isMgr&&!d.void?`<button class="btn" style="font-size:11px;padding:4px 9px;color:var(--red-txt)" onclick="voidProforma(${+d.no})">🚫 בטל</button>`:''}
@@ -11997,6 +11999,225 @@ async function voidProforma(no){
   const upd={void:true,voidBy:S.user?.name||'',voidAt:Date.now()};
   try{await fbSet('proformaInvoices',String(no),upd);Object.assign(d,upd);renderProformaList();showToast('🚫 חשבונית '+no+' בוטלה');}
   catch(e){showToast('⚠ הביטול נכשל: '+(e.message||''),'var(--red-txt)');}
+}
+// ─── 💳 שיקים לחשבונית עסקה (08/10/2026) ─────────────────────────────
+// כל חשבונית מחזיקה `checks` (מערך במסמך החשבונית) ⇒ יתרה = total פחות סכום השיקים.
+// 📷 הצילומים ב-checkImages/{מס' חשבונית}_{מזהה שיק} ונטענים רק בלחיצה — כמו productImages:
+// רשימת החשבוניות נטענת שלמה, ו-2 צילומים לשיק היו מנפחים מסמך מעבר ל-1MB.
+// ⚠️ זה **אישור קבלת תשלום פנימי**, לא קבלה לצורכי מס (החלטת המשתמש 08/10) — הקבלה/חשבונית
+// המס ממשיכות לצאת אצל רואה החשבון. הוספה/מחיקה בטרנזקציה: שני מכשירים שרושמים במקביל לא דורסים.
+const CHK_BANKS=['04 יהב','09 בנק הדואר','10 לאומי','11 דיסקונט','12 הפועלים','13 איגוד','14 אוצר החייל','17 מרכנתיל','20 מזרחי טפחות','31 הבינלאומי','34 ערבי ישראלי','46 מסד','52 פאג"י','54 ירושלים'];
+const CHK_IMG_MAX=4,CHK_IMG_BYTES=900000; // מסמך Firestore עד 1MB
+let _chkNo=0,_chkImgs=[];
+const pfPaid=d=>Math.round((d?.checks||[]).reduce((t,c)=>t+(+c.amount||0),0)*100)/100;
+const pfLeft=d=>Math.round(((+d?.total||0)-pfPaid(d))*100)/100;
+function pfPayCell(d){
+  if(!(d.checks||[]).length)return '<span style="color:var(--txt3)">—</span>';
+  const left=pfLeft(d);
+  if(left<=0.009)return `<span style="color:var(--green-txt,#16a34a);font-weight:700">✅ שולם</span>${left<-0.009?'<div style="font-size:10px;color:var(--txt3)">עודף '+dnMoney(-left)+'</div>':''}`;
+  return `<span style="color:var(--amber-txt);font-weight:700">יתרה ${dnMoney(left)}</span>`;
+}
+function openInvChecks(no){
+  if(!_canPricing())return;
+  const d=_pfList.find(x=>+x.no===+no);if(!d)return;
+  _chkNo=+no;_chkImgs=[];
+  document.getElementById('chk-wrap')?.remove();
+  const wrap=document.createElement('div');wrap.id='chk-wrap';
+  wrap.style.cssText='position:fixed;inset:0;background:rgba(0,0,0,.5);display:flex;align-items:flex-start;justify-content:center;z-index:10002;padding:16px;overflow-y:auto;overscroll-behavior:contain;-webkit-overflow-scrolling:touch';
+  // 🛑 לא נסגר בלחיצה על הרקע — שיק חצי ממולא עם צילום היה הולך לאיבוד (כמו חלון המוצר, 07/10)
+  wrap.innerHTML='<div id="chk-box" style="background:var(--card);border-radius:14px;padding:18px;max-width:680px;width:100%;box-shadow:0 10px 40px rgba(0,0,0,.3);margin:auto"></div>';
+  document.body.appendChild(wrap);
+  renderInvChecks();
+}
+function renderInvChecks(){
+  const box=document.getElementById('chk-box');if(!box)return;
+  const d=_pfList.find(x=>+x.no===_chkNo);if(!d)return;
+  const isMgr=S.user?.role==='manager',list=d.checks||[],left=pfLeft(d);
+  const hd=x=>x?String(x).slice(8,10)+'/'+String(x).slice(5,7)+'/'+String(x).slice(0,4):'—';
+  const inp='font-size:14px;padding:7px;border-radius:8px;border:1px solid var(--brd);background:var(--card);color:var(--txt);width:100%';
+  box.innerHTML=`<div style="display:flex;align-items:center;justify-content:space-between;gap:8px;margin-bottom:10px">
+      <div style="font-size:16px;font-weight:800">💳 שיקים — חשבונית עסקה ${+d.no}</div>
+      <button class="btn" style="font-size:12px" onclick="document.getElementById('chk-wrap').remove()">סגור</button>
+    </div>
+    <div style="font-size:13px;line-height:1.8;background:var(--bg);border-radius:8px;padding:8px 10px;margin-bottom:10px">
+      ${esc(d.custName||S.customerNames?.[d.cust]||d.cust||'')} · תאריך ${hd(d.date)}<br>
+      סה"כ לתשלום <b>${dnMoney(d.total)}</b> · התקבל <b style="color:var(--green-txt,#16a34a)">${dnMoney(pfPaid(d))}</b> ·
+      ${left>0.009?`יתרה <b style="color:var(--amber-txt)">${dnMoney(left)}</b>`:left<-0.009?`עודף <b>${dnMoney(-left)}</b>`:'<b style="color:var(--green-txt,#16a34a)">✅ שולם במלואו</b>'}
+    </div>
+    ${list.length?`<div class="tbl-wrap"><table>
+      <thead><tr><th>מס' שיק</th><th>בנק</th><th>סניף</th><th>חשבון</th><th>פירעון</th><th style="text-align:center">סכום</th><th></th></tr></thead>
+      <tbody>${list.map(c=>`<tr>
+        <td><b>${esc(c.chk)}</b><div style="font-size:10px;color:var(--txt3)">${esc(c.by||'')}</div></td>
+        <td style="font-size:12px">${esc(c.bank||'')}</td><td>${esc(c.branch||'')}</td><td>${esc(c.acct||'')}</td>
+        <td style="white-space:nowrap">${hd(c.due)}</td>
+        <td style="text-align:center;white-space:nowrap;font-weight:700">${dnMoney(c.amount)}</td>
+        <td style="white-space:nowrap;text-align:left">
+          ${+c.imgs?`<button class="btn" style="font-size:11px;padding:4px 8px" onclick="chkShowImgs('${escj(c.id)}')">📷 ${+c.imgs}</button>`:''}
+          ${isMgr?`<button class="btn" style="font-size:11px;padding:4px 8px;color:var(--red-txt)" onclick="delInvCheck('${escj(c.id)}')">🗑</button>`:''}
+        </td></tr>`).join('')}</tbody></table></div>
+      <button class="btn" style="font-size:12px;margin-top:8px" onclick="printInvChecks()">🖨 אישור קבלת תשלום ללקוח</button>`
+    :'<div style="font-size:13px;color:var(--txt3);margin-bottom:6px">עדיין לא נרשמו שיקים לחשבונית הזו.</div>'}
+    ${d.void?'<div style="margin-top:12px;color:var(--red-txt);font-weight:700;font-size:13px">🚫 החשבונית מבוטלת — אין רישום שיקים חדשים</div>':`
+    <div class="sec" style="margin-top:16px;margin-bottom:8px">➕ שיק חדש</div>
+    <datalist id="chk-banks">${CHK_BANKS.map(b=>`<option value="${esc(b)}">`).join('')}</datalist>
+    <div style="display:grid;grid-template-columns:1fr 1fr;gap:8px">
+      <div class="field" style="margin:0"><label>מספר שיק</label><input id="chk-num" inputmode="numeric" style="${inp}"/></div>
+      <div class="field" style="margin:0"><label>סכום ₪</label><input id="chk-amt" type="number" step="0.01" min="0" inputmode="decimal" value="${left>0.009?left.toFixed(2):''}" style="${inp}"/></div>
+      <div class="field" style="margin:0"><label>בנק</label><input id="chk-bank" list="chk-banks" placeholder="בחר או הקלד" style="${inp}"/></div>
+      <div class="field" style="margin:0"><label>סניף</label><input id="chk-branch" inputmode="numeric" style="${inp}"/></div>
+      <div class="field" style="margin:0"><label>מספר חשבון</label><input id="chk-acct" inputmode="numeric" style="${inp}"/></div>
+      <div class="field" style="margin:0"><label>תאריך פירעון</label><input id="chk-due" type="date" value="${todayStr()}" style="${inp}"/></div>
+    </div>
+    <div style="display:flex;gap:8px;margin-top:10px;flex-wrap:wrap">
+      <button type="button" class="btn" style="font-size:12px" onclick="document.getElementById('chk-cam').click()">📷 צלם שיק</button>
+      <button type="button" class="btn" style="font-size:12px" onclick="document.getElementById('chk-file').click()">📁 העלה צילום</button>
+      <input id="chk-cam" type="file" accept="image/*" capture="environment" class="hidden" onchange="chkAddImgs(this)">
+      <input id="chk-file" type="file" accept="image/*" multiple class="hidden" onchange="chkAddImgs(this)">
+    </div>
+    <div id="chk-thumbs" style="display:flex;gap:8px;flex-wrap:wrap;margin-top:8px"></div>
+    <button class="btn primary" id="chk-save" style="width:100%;margin-top:12px;font-size:14px" onclick="saveInvCheck()">💾 שמור שיק</button>`}`;
+  renderChkThumbs();
+}
+function renderChkThumbs(){
+  const el=document.getElementById('chk-thumbs');if(!el)return;
+  el.innerHTML=_chkImgs.map((s,i)=>`<div style="position:relative"><img src="${s}" style="height:80px;border-radius:6px;border:1px solid var(--brd)"/>
+    <button type="button" onclick="_chkImgs.splice(${i},1);renderChkThumbs()" style="position:absolute;top:2px;left:2px;background:var(--red);color:#fff;border:none;border-radius:50%;width:22px;height:22px;cursor:pointer;font-size:12px">✕</button></div>`).join('');
+}
+async function chkAddImgs(input){
+  for(const file of input.files){
+    if(_chkImgs.length>=CHK_IMG_MAX){showToast('⚠ עד '+CHK_IMG_MAX+' צילומים לשיק','var(--amber-txt)');break;}
+    const raw=await new Promise(res=>{const r=new FileReader();r.onload=e=>res(e.target.result);r.readAsDataURL(file);});
+    // 1600px — מספיק לקרוא מספר שיק/חשבון; ~200KB לצילום
+    _chkImgs.push(await compressImage(raw,1600,1600,0.6));
+  }
+  input.value='';
+  renderChkThumbs();
+}
+// 🔒 הוספה/מחיקה של שיק בטרנזקציה — קוראים את המערך העדכני מהשרת, לא את מה שנטען בפתיחת הרשימה
+async function _chkTx(fn){
+  const{doc,runTransaction}=window._fb;let out=null;
+  await _pw(runTransaction(db,async tx=>{
+    const ref=doc(db,'proformaInvoices',String(_chkNo));
+    const s=await tx.get(ref);if(!s.exists())throw new Error('החשבונית לא נמצאה');
+    out=fn(s.data().checks||[]);
+    tx.update(ref,{checks:out});
+  }));
+  return out;
+}
+async function saveInvCheck(){
+  const d=_pfList.find(x=>+x.no===_chkNo);if(!d||d.void)return;
+  if(!db||!S.fbConnected){showToast('⚠ אין חיבור — השיק לא נשמר','var(--red-txt)');return;}
+  const v=id=>(document.getElementById(id)?.value||'').trim();
+  const amount=Math.round((parseFloat(v('chk-amt'))||0)*100)/100;
+  const c={id:'c'+Date.now(),chk:v('chk-num'),bank:v('chk-bank'),branch:v('chk-branch'),acct:v('chk-acct'),due:v('chk-due'),amount,imgs:_chkImgs.length,by:S.user?.name||'',byId:S.user?.id||'',at:Date.now()};
+  if(!c.chk){alert('יש להזין מספר שיק');return;}
+  if(!(amount>0)){alert('יש להזין סכום');return;}
+  if(!c.due){alert('יש להזין תאריך פירעון');return;}
+  if(_chkImgs.reduce((t,s)=>t+s.length,0)>CHK_IMG_BYTES){alert('הצילומים גדולים מדי — הסר צילום אחד ונסה שוב');return;}
+  if((d.checks||[]).some(x=>x.chk===c.chk&&x.acct===c.acct)&&!confirm('שיק מספר '+c.chk+' כבר רשום בחשבונית הזו. לרשום אותו שוב?'))return;
+  const left=pfLeft(d);
+  if(amount>left+0.009&&!confirm('הסכום ('+dnMoney(amount)+') גבוה מהיתרה בחשבונית ('+dnMoney(Math.max(0,left))+'). לרשום בכל זאת?'))return;
+  const btn=document.getElementById('chk-save');if(btn){btn.disabled=true;btn.textContent='⏳ שומר…';}
+  try{
+    // הצילום קודם: שיק שנרשם עם imgs>0 בלי מסמך צילום היה מציג כפתור 📷 ריק
+    if(_chkImgs.length)await fbSet('checkImages',_chkNo+'_'+c.id,{imgs:_chkImgs,invNo:_chkNo,chk:c.chk,by:c.by,at:c.at});
+    d.checks=await _chkTx(arr=>[...arr,c]);
+    _chkImgs=[];
+    showToast('✅ שיק '+c.chk+' נשמר — '+dnMoney(amount));
+    renderInvChecks();renderProformaList();
+  }catch(e){
+    showToast('⚠ השמירה נכשלה: '+(e.message||''),'var(--red-txt)',6000);
+    if(btn){btn.disabled=false;btn.textContent='💾 שמור שיק';}
+  }
+}
+async function delInvCheck(id){
+  if(S.user?.role!=='manager')return;
+  const d=_pfList.find(x=>+x.no===_chkNo);const c=(d?.checks||[]).find(x=>x.id===id);if(!c)return;
+  if(!await showConfirm('מחיקת שיק','למחוק את שיק '+c.chk+' ('+dnMoney(c.amount)+') מחשבונית '+_chkNo+'?','מחק','חזור'))return;
+  try{
+    d.checks=await _chkTx(arr=>arr.filter(x=>x.id!==id));
+    if(+c.imgs)try{await fbDel('checkImages',_chkNo+'_'+id);}catch(e){}
+    showToast('🗑 השיק נמחק');renderInvChecks();renderProformaList();
+  }catch(e){showToast('⚠ המחיקה נכשלה: '+(e.message||''),'var(--red-txt)');}
+}
+async function chkShowImgs(id){
+  let imgs=[];
+  try{const{doc,getDoc}=window._fb;const s=await getDoc(doc(db,'checkImages',_chkNo+'_'+id));imgs=s.data()?.imgs||[];}
+  catch(e){showToast('⚠ טעינת הצילום נכשלה: '+(e.message||''),'var(--red-txt)');return;}
+  if(!imgs.length){showToast('⚠ לא נמצא צילום','var(--amber-txt)');return;}
+  const w=document.createElement('div');
+  w.style.cssText='position:fixed;inset:0;background:rgba(0,0,0,.85);z-index:10003;overflow-y:auto;padding:16px;text-align:center';
+  w.onclick=e=>{if(e.target===w)w.remove();}; // צפייה בלבד — אין מה לאבד
+  w.innerHTML=`<button class="btn" style="margin-bottom:10px" onclick="this.parentElement.remove()">✕ סגור</button>`+imgs.map(s=>`<img src="${s}" style="display:block;max-width:100%;margin:0 auto 10px;border-radius:8px"/>`).join('');
+  document.body.appendChild(w);
+}
+// 🖨 אישור קבלת תשלום ללקוח — **לא** "קבלה": מסמך פנימי שמפרט את השיקים שהתקבלו על החשבונית
+function printInvChecks(){
+  const d=_pfList.find(x=>+x.no===_chkNo);if(!d||!(d.checks||[]).length)return;
+  const co=S.settings?.company||{},ci=(S.customerInfo||{})[d.cust]||{};
+  const hd=x=>x?String(x).slice(8,10)+'/'+String(x).slice(5,7)+'/'+String(x).slice(0,4):'—';
+  const left=pfLeft(d);
+  printViaIframe(`<!DOCTYPE html><html dir="rtl" lang="he"><head><meta charset="UTF-8"/><title>אישור קבלת תשלום — חשבונית ${+d.no}</title><style>
+*{box-sizing:border-box;margin:0;padding:0}
+body{font-family:Arial,Helvetica,sans-serif;color:#000;background:#fff;font-size:13px;padding:16mm 14mm;-webkit-print-color-adjust:exact;print-color-adjust:exact}
+.top{display:flex;justify-content:space-between;align-items:flex-start;border-bottom:3px solid #185FA5;padding-bottom:10px;margin-bottom:14px}
+.co{font-size:19px;font-weight:800;color:#185FA5;margin-bottom:3px}
+.co-d{font-size:11px;color:#444;line-height:1.6}
+.doc{text-align:left;flex-shrink:0;margin-right:16px}
+.doc h1{font-size:20px;font-weight:800;margin-bottom:6px}
+.doc .dt{font-size:12px;color:#444;margin-top:3px}
+.box{border:1px solid #bbb;border-radius:6px;padding:9px 11px;line-height:1.7;margin-bottom:14px}
+.box h2{font-size:12px;font-weight:800;color:#185FA5;margin-bottom:5px;border-bottom:1px solid #e2e2e2;padding-bottom:3px}
+table{width:100%;border-collapse:collapse;font-size:12.5px}
+thead th{background:#eef2ff;padding:7px 6px;text-align:right;font-weight:700;border:1px solid #bbb;font-size:12px}
+td{padding:6px;border:1px solid #ddd}
+td.c,th.c{text-align:center}
+td.n{text-align:center;font-weight:800;background:#fafafa;white-space:nowrap}
+tfoot td{background:#eef2ff;font-weight:800;font-size:14px;border:1px solid #bbb;padding:9px 6px}
+table.sum{width:auto;min-width:42%;margin:16px 0 0 auto}
+.sign{display:flex;gap:14px;margin-top:26px}
+.sign div{flex:1;border-top:1px solid #666;padding-top:5px;font-size:11px;color:#444}
+.sign b{display:block;font-size:12px;color:#000;margin-bottom:16px}
+.foot{margin-top:20px;padding-top:8px;border-top:1px solid #e2e2e2;font-size:10px;color:#888;text-align:center}
+@media print{body{padding:10mm}}
+</style></head><body>
+<div class="top">
+  <div>
+    <div class="co">${esc(co.name||'— שם העסק לא הוגדר —')}</div>
+    <div class="co-d">
+      ${co.addr?esc(co.addr)+(co.city?', '+esc(co.city):''):''}
+      ${co.phone?'<br>טלפון: '+esc(co.phone):''}
+      ${co.taxId?'<br>ח.פ./ע.מ.: '+esc(co.taxId):''}
+    </div>
+  </div>
+  <div class="doc">
+    <h1>אישור קבלת תשלום</h1>
+    <div class="dt">עבור חשבונית עסקה מס' <b>${+d.no}</b> מיום ${hd(d.date)}</div>
+    <div class="dt">הופק: ${hd(todayStr())}</div>
+  </div>
+</div>
+<div class="box">
+  <h2>התקבל מאת</h2>
+  <div style="font-weight:800;font-size:14px">${esc(d.custName||S.customerNames?.[d.cust]||d.cust||'')}</div>
+  ${ci.taxId?'<div>ח.פ./ע.מ.: '+esc(ci.taxId)+'</div>':''}
+</div>
+<table>
+  <thead><tr><th class="c">#</th><th>מספר שיק</th><th>בנק</th><th class="c">סניף</th><th class="c">חשבון</th><th class="c">תאריך פירעון</th><th class="c">סכום</th></tr></thead>
+  <tbody>${d.checks.map((c,i)=>`<tr><td class="c">${i+1}</td><td>${esc(c.chk)}</td><td>${esc(c.bank||'')}</td><td class="c">${esc(c.branch||'')}</td><td class="c">${esc(c.acct||'')}</td><td class="c">${hd(c.due)}</td><td class="n">${dnMoney(c.amount)}</td></tr>`).join('')}</tbody>
+  <tfoot><tr><td colspan="6" style="text-align:left">סה"כ ${d.checks.length} שיקים</td><td class="n">${dnMoney(pfPaid(d))}</td></tr></tfoot>
+</table>
+<table class="sum"><tbody>
+  <tr><td>סה"כ החשבונית</td><td class="n">${dnMoney(d.total)}</td></tr>
+  <tr><td>התקבל</td><td class="n">${dnMoney(pfPaid(d))}</td></tr>
+  <tr><td><b>${left<-0.009?'עודף':'יתרה לתשלום'}</b></td><td class="n">${dnMoney(Math.abs(left)<0.01?0:Math.abs(left))}</td></tr>
+</tbody></table>
+<div style="margin-top:10px;font-size:11px;color:#555;border:1px dashed #999;border-radius:6px;padding:6px 9px">מסמך זה מאשר את קבלת השיקים המפורטים ו<b>אינו קבלה לצורכי מס</b>. התשלום נחשב שולם עם כיבוד השיקים.</div>
+<div class="sign">
+  <div><b>חתימת המפעל</b><span class="sig-slot"></span>_______________________</div>
+  <div><b>חתימת הלקוח</b>_______________________</div>
+</div>
+<div class="foot">הופק ממערכת TextileOps · ${esc(co.name||'')}</div>
+</body></html>`);
 }
 // החלפת הזמנה בבורר — הכמות המתוכננת ושדה הקלט עוברים לרשומה הנבחרת
 function shipPickChanged(){
