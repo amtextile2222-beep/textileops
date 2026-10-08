@@ -16636,6 +16636,8 @@ async function saveProduct(){
   const cust=(document.getElementById('pm-cust')?.value||'').trim().padStart(2,'0').slice(0,2);
   const name=(document.getElementById('pm-name')?.value||'').trim();
   if(!prod||prod==='00000'){alert('יש להזין מספר מוצר');return;}
+  // 🔢 08/10: לקוח ריק נשמר כ-'00' ⇒ מספר ההזמנה חושב ללקוח 00 (#001) ונשאר כך גם אחרי תיקון ל-02
+  if(!(document.getElementById('pm-cust')?.value||'').trim()){alert('יש להזין מספר לקוח');return;}
   // קמויות
   const quantities=[];
   document.querySelectorAll('#pm-qty-body tr').forEach(tr=>{
@@ -16693,6 +16695,14 @@ async function saveProduct(){
           const stageName=PROD_STAGES.find(x=>x.id===s.id)?.label||s.id;
           sendTelegram('📦 TextileOps — מוצר עבר שלב ייצור\n🏷 מוצר: '+name+' ('+cust+'-'+prod+')\n📍 שלב: '+stageName+'\n📅 תאריך: '+s.date+' '+s.time+'\n🕐 עודכן: '+now).catch(()=>{});
         }
+      }
+      // 🔢 מספר ההזמנה שייך ללקוח+מוצר. שינוי שלהם בעריכה, או מספר שכבר תפוס ע"י הזמנה אחרת של
+      // אותו דגם (נצפה 08/10: 02-03413 קיבלה #001 כפול) ⇒ מספור מחדש. רשומה בלי מספר (0) — לא נוגעים
+      // בכפילות — רק הרשומה **החדשה** מבין השתיים מתמספרת; הישנה שומרת את המספר שעל המדבקות שלה
+      const _oNo=parseInt(p.orderNo,10)||0,_rk=x=>+x.createdAt||parseInt(String(x.id).replace(/\D/g,''))||0;
+      if(_oNo&&(p.cust!==cust||p.prod!==prod||prodMatches(cust,prod).some(x=>x.id!==p.id&&(parseInt(x.orderNo,10)||0)===_oNo&&_rk(x)<_rk(p)))){
+        const{orderNo}=await newProdOrderFields(cust,prod);
+        if(orderNo!==_oNo){p.orderNo=orderNo;showToast('🔢 מספר ההזמנה עודכן ל-#'+String(orderNo).padStart(3,'0')+' — אם כבר הודפסו ברקודים, יש להדפיס מחדש','var(--amber-txt)',8000);}
       }
       Object.assign(p,{prod,cust,name,images:_prodImgs,imgCount:_prodImgs.length,docs:_prodDocs,quantities,stageLog,stageSkipped,workSteps,unitPrice,targetProfitPct,directMaterialsCost,cutPrice,cutProfitPct,extraMatPrice,isSample});
     }
