@@ -1386,6 +1386,7 @@ code{background:var(--bg2);border:0.5px solid var(--b);border-radius:4px;padding
       <button class="btn" style="font-size:12px" onclick="dnClearFilter()">נקה</button>
       <button class="btn" style="font-size:12px" onclick="openProformaList()">🧾 חשבוניות עסקה</button>
       <button class="btn" style="font-size:12px" onclick="openChecksReport()">💳 שיקים</button>
+      <button class="btn" style="font-size:12px" title="סמן את התעודות המסומנות ☑ כמחויבות בחשבונית ידנית מהפנקס" onclick="dnManualInvoice()">📒 חשבונית ידנית</button>
       <button class="btn primary" style="font-size:12px" id="dn-print-btn" onclick="dnPrintDialog()">🖨 הדפסה…</button>
     </div>
     <div id="dnotes-list"></div>
@@ -11870,8 +11871,8 @@ async function printProforma(onlySel){
   if(!db||!S.fbConnected){showToast('⚠ אין חיבור — אי אפשר להנפיק מספר חשבונית','var(--red-txt)');return;}
   // 🛑 09/10: תעודה שכבר בחשבונית לא מבוטלת ⇒ חיוב כפול. נבדק מול רשימה טרייה מהשרת
   try{await _pfLoad();_pfAt=Date.now();}catch(e){}
-  const _dup=f.rows.map(r=>dnInvOf(r.s.no)).filter(Boolean);
-  if(_dup.length&&!await showConfirm('⚠ תעודות שכבר הותחשבנו',_dup.length+' מהתעודות כבר כלולות בחשבונית עסקה '+[...new Set(_dup.map(d=>+d.no))].join(', ')+'.\nהפקה נוספת תחייב אותן פעמיים. להפיק בכל זאת?','הפק בכל זאת','חזור'))return;
+  const _dup=f.rows.map(r=>dnInvOf(r)).filter(Boolean);
+  if(_dup.length&&!await showConfirm('⚠ תעודות שכבר הותחשבנו',_dup.length+' מהתעודות כבר כלולות בחשבונית '+[...new Set(_dup.map(d=>(d.manual?'ידנית ':'')+d.no))].join(', ')+'.\nהפקה נוספת תחייב אותן פעמיים. להפיק בכל זאת?','הפק בכל זאת','חזור'))return;
   const vat=+(S.settings?.vatPct??18)||0;
   const vatAmt=Math.round(f.amount*vat)/100,total=f.amount+vatAmt;
   // 📅 חודש ההתחשבנות — ברירת מחדל: **החודש הקודם** להיום. לא לפי תאריך התעודה האחרונה:
@@ -11948,7 +11949,9 @@ let _pfList=[];
 async function _pfLoad(){
   const{collection,getDocs}=window._fb;
   const snap=await getDocs(collection(db,'proformaInvoices'));
-  _pfList=snap.docs.map(d=>d.data()).sort((a,b)=>(+b.no||0)-(+a.no||0));
+  // _id = מזהה המסמך: בחשבונית רגילה = המספר, בחשבונית ידנית (📒) = manual_...
+  // הידניות בסוף: כל ה-find(+x.no===no) של החשבוניות הרגילות פוגש קודם את הרגילה גם אם מספר מהפנקס זהה
+  _pfList=snap.docs.map(d=>({...d.data(),_id:d.id})).sort((a,b)=>(!!a.manual-!!b.manual)||(+b.no||0)-(+a.no||0));
 }
 async function openProformaList(){
   if(!_canPricing()){showToast('⚠ אין הרשאה לחשבוניות','var(--red-txt)');return;}
@@ -11981,20 +11984,22 @@ function renderProformaList(){
   box.innerHTML=`<div class="tbl-wrap"><table>
     <thead><tr><th>מס'</th><th>תאריך</th><th>חודש</th><th>לקוח</th><th style="text-align:center">תעודות</th><th style="text-align:center">לפני מע"מ</th><th style="text-align:center">סה"כ</th><th>תשלום</th><th>הופק ע"י</th><th></th></tr></thead>
     <tbody>${_pfList.map(d=>`<tr${d.void?' style="opacity:.55"':''}>
-      <td><b>${+d.no}</b>${d.void?' <span style="color:var(--red-txt);font-size:11px;font-weight:700">מבוטלת</span>':''}</td>
+      <td><b>${esc(String(d.no))}</b>${d.manual?' <span style="font-size:10px;color:var(--txt3)">📒 ידנית</span>':''}${d.void?' <span style="color:var(--red-txt);font-size:11px;font-weight:700">מבוטלת</span>':''}</td>
       <td style="white-space:nowrap">${hd(d.date)}</td>
       <td style="white-space:nowrap">${d.month?d.month.slice(5,7)+'/'+d.month.slice(0,4):'—'}</td>
       <td>${esc(d.custName||S.customerNames?.[d.cust]||d.cust||'')}</td>
-      <td style="text-align:center" title="${esc((d.notes||[]).map(n=>String(n).padStart(4,'0')).join(', '))}">${(d.notes||[]).length}</td>
+      <td style="text-align:center" title="${esc((d.notes||[]).map(n=>String(n).padStart(4,'0')).join(', '))}">${(d.notes||[]).length+(d.keys||[]).length}</td>
       <td style="text-align:center;white-space:nowrap">${dnMoney(d.net)}</td>
       <td style="text-align:center;white-space:nowrap;font-weight:700${d.void?';text-decoration:line-through':''}">${dnMoney(d.total)}</td>
       <td style="font-size:12px;white-space:nowrap">${pfPayCell(d)}</td>
       <td style="font-size:12px;color:var(--txt3)">${esc(d.by||'')}${d.void&&d.voidBy?'<div style="font-size:10px">בוטלה ע"י '+esc(d.voidBy)+'</div>':''}</td>
-      <td style="white-space:nowrap;text-align:left">
+      <td style="white-space:nowrap;text-align:left">${d.manual?`
+        ${isMgr&&!d.void?`<button class="btn" style="font-size:11px;padding:4px 9px" onclick="pfManualPaid('${escj(d._id)}')">${d.paid?'↩ סמן לא שולם':'✅ סמן שולם'}</button>
+        <button class="btn" style="font-size:11px;padding:4px 9px;color:var(--red-txt)" onclick="pfManualVoid('${escj(d._id)}')">🚫 בטל</button>`:''}`:`
         ${!d.void||(d.checks||[]).length?`<button class="btn" style="font-size:11px;padding:4px 9px" onclick="openInvChecks(${+d.no})">💳 שיקים${(d.checks||[]).length?' ('+d.checks.length+')':''}</button>`:''}
         ${d.rows?`<button class="btn" style="font-size:11px;padding:4px 9px" onclick="reprintProforma(${+d.no})">🖨 הדפס שוב</button>`:'<span style="font-size:10px;color:var(--txt3)">אין פירוט שמור</span>'}
         ${isMgr&&!d.void?`<button class="btn" style="font-size:11px;padding:4px 9px" title="חודש ותאריך" onclick="editProformaDate(${+d.no})">✏️</button>`:''}
-        ${isMgr&&!d.void?`<button class="btn" style="font-size:11px;padding:4px 9px;color:var(--red-txt)" onclick="voidProforma(${+d.no})">🚫 בטל</button>`:''}
+        ${isMgr&&!d.void?`<button class="btn" style="font-size:11px;padding:4px 9px;color:var(--red-txt)" onclick="voidProforma(${+d.no})">🚫 בטל</button>`:''}`}
       </td></tr>`).join('')}</tbody></table></div>
     <div style="font-size:11px;color:var(--txt3);margin-top:8px">הדפסה חוזרת יוצאת באותו מספר ובאותם סכומים שהיו בהפקה, ומסומנת "העתק". חשבונית מבוטלת נשארת ברשימה — המספר לא חוזר לשימוש.</div>`;
 }
@@ -12019,9 +12024,11 @@ async function voidProforma(no){
 const CHK_BANKS=['04 יהב','09 בנק הדואר','10 לאומי','11 דיסקונט','12 הפועלים','13 איגוד','14 אוצר החייל','17 מרכנתיל','20 מזרחי טפחות','31 הבינלאומי','34 ערבי ישראלי','46 מסד','52 פאג"י','54 ירושלים'];
 const CHK_IMG_MAX=4,CHK_IMG_BYTES=900000; // מסמך Firestore עד 1MB
 let _chkNo=0,_chkImgs=[],_chkEdit=null; // _chkEdit = מזהה השיק שבעריכה (מנהל בלבד, החלטת המשתמש 08/10)
-const pfPaid=d=>Math.round((d?.checks||[]).reduce((t,c)=>t+(+c.amount||0),0)*100)/100;
+// 📒 חשבונית ידנית — אין לה שיקים במערכת; "שולם" הוא סימון של המנהל
+const pfPaid=d=>d?.manual?(d.paid?+d.total||0:0):Math.round((d?.checks||[]).reduce((t,c)=>t+(+c.amount||0),0)*100)/100;
 const pfLeft=d=>Math.round(((+d?.total||0)-pfPaid(d))*100)/100;
 function pfPayCell(d){
+  if(d.manual)return d.paid?'<span style="color:var(--green-txt,#16a34a);font-weight:700">✅ שולם</span>':'<span style="color:var(--amber-txt)">לא שולם</span>';
   if(!(d.checks||[]).length)return '<span style="color:var(--txt3)">—</span>';
   const left=pfLeft(d);
   if(left<=0.009)return `<span style="color:var(--green-txt,#16a34a);font-weight:700">✅ שולם</span>${left<-0.009?'<div style="font-size:10px;color:var(--txt3)">עודף '+dnMoney(-left)+'</div>':''}`;
@@ -15436,19 +15443,88 @@ function _pfEnsure(force){
   _pfBusy=true;
   _pfLoad().then(()=>{_pfAt=Date.now();_pfBusy=false;renderDNotes();}).catch(e=>{console.warn('pf:',e.message);_pfAt=Date.now();_pfBusy=false;});
 }
-function dnInvOf(no){
-  if(!+no)return null;
-  return _pfList.find(d=>!d.void&&(d.notes||[]).some(n=>+n===+no))||null;
+// תעודה עם מספר ⇒ לפי notes. תעודה ותיקה בלי מספר ⇒ לפי המפתח שלה (keys) — קיים רק בחשבונית ידנית
+function dnInvOf(r){
+  const no=+r?.s?.no||0,k=no?'':dnKey(r);
+  return _pfList.find(d=>!d.void&&(no?(d.notes||[]).some(n=>+n===no):(d.keys||[]).includes(k)))||null;
 }
-function dnPayState(r){const d=dnInvOf(r.s.no);return !d?'none':pfLeft(d)<=0.009?'paid':'inv';}
+function dnPayState(r){const d=dnInvOf(r);return !d?'none':pfLeft(d)<=0.009?'paid':'inv';}
 function dnPayCell(r){
-  const d=dnInvOf(r.s.no);
+  const d=dnInvOf(r);
   if(!d)return '<span style="color:var(--txt3);font-size:11px">⏳ טרם</span>';
+  if(d.manual)return `<span title="חשבונית ידנית מהפנקס${d.month?' · חודש '+d.month.slice(5,7)+'/'+d.month.slice(0,4):''}" style="font-weight:700;font-size:12px">📒 ${esc(String(d.no))}</span><div style="font-size:11px">${pfPayCell(d)}</div>`;
   const left=pfLeft(d),paid=pfPaid(d);
   const st=left<=0.009?'<span style="color:var(--green-txt,#16a34a);font-weight:700">✅ שולם</span>'
     :paid>0?'<span style="color:var(--amber-txt);font-weight:700">💳 חלקי</span>'
     :'<span style="color:var(--amber-txt)">לא שולם</span>';
   return `<a href="#" onclick="event.preventDefault();openInvChecks(${+d.no})" title="פתח את השיקים של החשבונית" style="color:var(--blue-txt,#1d4ed8);font-weight:700;font-size:12px">🧾 ${+d.no}</a><div style="font-size:11px">${st}</div>`;
+}
+// 📒 חשבונית ידנית (09/10/2026): תעודות שחויבו בפנקס לפני שהמערכת הפיקה חשבוניות — נרשמות
+// כמסמך ב-proformaInvoices עם manual:true, כדי שיסומנו כ"הותחשבנו" ושה-🛑 של החיוב הכפול יכיר אותן.
+// מזהה manual_... ולא המספר — מספרי הפנקס עלולים להתנגש במספרים שהמערכת מנפיקה.
+async function dnManualInvoice(){
+  if(!_canPricing()){showToast('⚠ אין הרשאה','var(--red-txt)');return;}
+  if(!db||!S.fbConnected){showToast('⚠ אין חיבור','var(--red-txt)');return;}
+  const f=dnFiltered(true);
+  if(!f.rows.length){showToast('⚠ סמן ☑ קודם את התעודות שחויבו בחשבונית הידנית','var(--amber-txt)',5000);return;}
+  const custs=dnCustomers(f.rows);
+  if(custs.length!==1){showToast('⚠ חשבונית היא ללקוח אחד — סמן תעודות של לקוח אחד בלבד','var(--red-txt)',5000);return;}
+  try{await _pfLoad();_pfAt=Date.now();}catch(e){}
+  const dup=f.rows.filter(r=>dnInvOf(r));
+  if(dup.length){showToast('⚠ '+dup.length+' מהתעודות המסומנות כבר בחשבונית — בטל את הסימון שלהן','var(--red-txt)',6000);return;}
+  const vat=+(S.settings?.vatPct??18)||0,vatAmt=Math.round(f.amount*vat)/100,total=f.amount+vatAmt;
+  const _t=todayStr(),_pm=new Date(+_t.slice(0,4),+_t.slice(5,7)-2,1);
+  const meta=await new Promise(res=>{
+    const w=document.createElement('div');
+    w.style.cssText='position:fixed;inset:0;background:rgba(0,0,0,.5);display:flex;align-items:center;justify-content:center;z-index:10001;padding:16px';
+    w.innerHTML=`<div style="background:var(--card);border-radius:14px;padding:20px;max-width:400px;width:100%;box-shadow:0 10px 40px rgba(0,0,0,.3)">
+      <div style="font-size:16px;font-weight:800;margin-bottom:8px">📒 חשבונית ידנית מהפנקס</div>
+      <div style="font-size:13px;line-height:1.7;margin-bottom:12px">ללקוח: <b>${esc(custs[0].name)}</b><br>${f.rows.length} תעודות · לפני מע"מ ${dnMoney(f.amount)} · כולל מע"מ ${dnMoney(total)}</div>
+      <div style="display:grid;grid-template-columns:1fr 1fr;gap:8px">
+        <div class="field" style="margin:0"><label>מספר החשבונית בפנקס</label><input id="mi-no" inputmode="numeric" style="font-size:14px"/></div>
+        <div class="field" style="margin:0"><label>📅 חודש</label><input id="mi-month" type="month" value="${_pm.getFullYear()+'-'+pad2(_pm.getMonth()+1)}" style="font-size:14px"/></div>
+      </div>
+      <label style="display:flex;align-items:center;gap:6px;margin-top:10px;font-size:13px;cursor:pointer"><input id="mi-paid" type="checkbox" style="width:auto"/> ✅ החשבונית כבר שולמה</label>
+      <div style="font-size:11px;color:var(--txt3);margin-top:6px">לא מודפס דבר — רק מסמן שהתעודות כבר חויבו.</div>
+      <div style="display:flex;gap:8px;margin-top:14px">
+        <button class="btn primary" style="flex:1" id="mi-ok">שמור</button>
+        <button class="btn" style="flex:1" id="mi-cancel">ביטול</button>
+      </div></div>`;
+    document.body.appendChild(w);
+    const done=v=>{w.remove();res(v);};
+    w.querySelector('#mi-ok').onclick=()=>{
+      const no=(w.querySelector('#mi-no').value||'').trim(),month=w.querySelector('#mi-month').value;
+      if(!no){alert('יש להזין את מספר החשבונית');return;}
+      if(!month){alert('יש לבחור חודש');return;}
+      done({no,month,paid:w.querySelector('#mi-paid').checked});
+    };
+    w.querySelector('#mi-cancel').onclick=()=>done(null);
+  });
+  if(!meta)return;
+  const id='manual_'+meta.no.replace(/[^\w-]/g,'')+'_'+Date.now().toString(36);
+  const rec={manual:true,no:/^\d+$/.test(meta.no)?+meta.no:meta.no,month:meta.month,date:monthEnd(meta.month),
+    cust:custs[0].code,custName:custs[0].name,notes:f.rows.map(r=>+r.s.no||0).filter(Boolean),keys:f.rows.filter(r=>!(+r.s.no)).map(dnKey),
+    net:f.amount,vatPct:vat,vat:vatAmt,total,paid:meta.paid,by:S.user?.name||'',byId:S.user?.id||'',at:Date.now(),issuedOn:todayStr()};
+  try{await fbSet('proformaInvoices',id,rec);}
+  catch(e){showToast('⚠ השמירה נכשלה: '+(e.message||''),'var(--red-txt)',6000);return;}
+  _pfList.push({...rec,_id:id});
+  dnSelClear();
+  showToast('📒 '+f.rows.length+' תעודות סומנו כמחויבות בחשבונית ידנית '+meta.no);
+}
+async function pfManualPaid(id){
+  if(S.user?.role!=='manager')return;
+  const d=_pfList.find(x=>x._id===id);if(!d)return;
+  try{await fbSet('proformaInvoices',id,{paid:!d.paid});d.paid=!d.paid;renderProformaList();renderDNotes();}
+  catch(e){showToast('⚠ העדכון נכשל: '+(e.message||''),'var(--red-txt)');}
+}
+// אין מחיקה ב-proformaInvoices (Rules) ⇒ ביטול = void, והתעודות חוזרות ל"⏳ טרם"
+async function pfManualVoid(id){
+  if(S.user?.role!=='manager')return;
+  const d=_pfList.find(x=>x._id===id);if(!d)return;
+  if(!await showConfirm('ביטול חשבונית ידנית','לבטל את הסימון של חשבונית ידנית '+d.no+'?\nהתעודות שלה יחזרו ל"טרם הותחשבנו".','בטל','חזור'))return;
+  const upd={void:true,voidBy:S.user?.name||'',voidAt:Date.now()};
+  try{await fbSet('proformaInvoices',id,upd);Object.assign(d,upd);renderProformaList();renderDNotes();showToast('🚫 בוטל');}
+  catch(e){showToast('⚠ הביטול נכשל: '+(e.message||''),'var(--red-txt)');}
 }
 function dnClearFilter(){
   ['dn-search','dn-cust','dn-from','dn-to','dn-pay'].forEach(id=>{const el=document.getElementById(id);if(el)el.value='';});
