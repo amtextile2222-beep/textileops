@@ -1382,6 +1382,7 @@ code{background:var(--bg2);border:0.5px solid var(--b);border-radius:4px;padding
       <select id="dn-cust" onchange="renderDNotes()" style="padding:7px 10px;border-radius:8px;border:1px solid var(--brd);background:var(--card);color:var(--txt);font-size:13px"><option value="">כל הלקוחות</option></select>
       <input id="dn-from" type="date" onchange="renderDNotes()" style="padding:7px 10px;border-radius:8px;border:1px solid var(--brd);background:var(--card);color:var(--txt);font-size:13px">
       <input id="dn-to" type="date" onchange="renderDNotes()" style="padding:7px 10px;border-radius:8px;border:1px solid var(--brd);background:var(--card);color:var(--txt);font-size:13px">
+      <select id="dn-pay" onchange="renderDNotes()" style="display:none;padding:7px 10px;border-radius:8px;border:1px solid var(--brd);background:var(--card);color:var(--txt);font-size:13px"><option value="">כל המצבים</option><option value="none">⏳ טרם הותחשבנו</option><option value="inv">🧾 בחשבונית — טרם שולם</option><option value="paid">✅ שולם</option></select>
       <button class="btn" style="font-size:12px" onclick="dnClearFilter()">נקה</button>
       <button class="btn" style="font-size:12px" onclick="openProformaList()">🧾 חשבוניות עסקה</button>
       <button class="btn" style="font-size:12px" onclick="openChecksReport()">💳 שיקים</button>
@@ -11867,6 +11868,10 @@ async function printProforma(onlySel){
   if(custs.length!==1){showToast('⚠ חשבונית עסקה היא ללקוח אחד — בחר לקוח בבורר הלקוחות','var(--red-txt)',5000);return;}
   if(f.missing){showToast('⚠ '+f.missing+' תעודות בלי מחיר בכרטיס המוצר — יש להזין מחיר לפני הפקת חשבונית','var(--red-txt)',6000);return;}
   if(!db||!S.fbConnected){showToast('⚠ אין חיבור — אי אפשר להנפיק מספר חשבונית','var(--red-txt)');return;}
+  // 🛑 09/10: תעודה שכבר בחשבונית לא מבוטלת ⇒ חיוב כפול. נבדק מול רשימה טרייה מהשרת
+  try{await _pfLoad();_pfAt=Date.now();}catch(e){}
+  const _dup=f.rows.map(r=>dnInvOf(r.s.no)).filter(Boolean);
+  if(_dup.length&&!await showConfirm('⚠ תעודות שכבר הותחשבנו',_dup.length+' מהתעודות כבר כלולות בחשבונית עסקה '+[...new Set(_dup.map(d=>+d.no))].join(', ')+'.\nהפקה נוספת תחייב אותן פעמיים. להפיק בכל זאת?','הפק בכל זאת','חזור'))return;
   const vat=+(S.settings?.vatPct??18)||0;
   const vatAmt=Math.round(f.amount*vat)/100,total=f.amount+vatAmt;
   // 📅 חודש ההתחשבנות — ברירת מחדל: **החודש הקודם** להיום. לא לפי תאריך התעודה האחרונה:
@@ -11883,6 +11888,7 @@ async function printProforma(onlySel){
     notes:rows.map(r=>r.no).filter(Boolean),rows,units:f.units,work:f.work,pack:f.pack,matList:f.matList.map(m=>({k:m.k,n:m.n,amount:m.amount})),
     net:f.amount,vatPct:vat,vat:vatAmt,total,by:S.user?.name||'',byId:S.user?.id||''});
   if(!no){showToast('⚠ הנפקת המספר נכשלה — נסה שוב','var(--red-txt)');return;}
+  _pfEnsure(true); // התעודות מסומנות 🧾 מיד
   printSettlement(onlySel,false,{no,vat,vatAmt,total,date:meta.date,month:meta.month});
 }
 // היום האחרון בחודש (YYYY-MM ⇒ YYYY-MM-DD)
@@ -12001,7 +12007,7 @@ async function voidProforma(no){
   const d=_pfList.find(x=>+x.no===+no);if(!d)return;
   if(!await showConfirm('ביטול חשבונית עסקה','לבטל את חשבונית עסקה מס\' '+no+' ('+dnMoney(d.total)+')?\nהיא תישאר ברשימה כמבוטלת, והמספר לא יחזור לשימוש.','בטל חשבונית','חזור'))return;
   const upd={void:true,voidBy:S.user?.name||'',voidAt:Date.now()};
-  try{await fbSet('proformaInvoices',String(no),upd);Object.assign(d,upd);renderProformaList();showToast('🚫 חשבונית '+no+' בוטלה');}
+  try{await fbSet('proformaInvoices',String(no),upd);Object.assign(d,upd);renderProformaList();renderDNotes();showToast('🚫 חשבונית '+no+' בוטלה');}
   catch(e){showToast('⚠ הביטול נכשל: '+(e.message||''),'var(--red-txt)');}
 }
 // ─── 💳 שיקים לחשבונית עסקה (08/10/2026) ─────────────────────────────
@@ -12143,7 +12149,7 @@ async function saveInvCheck(){
     if(ed&&+ed.imgs&&!_chkImgs.length)try{await fbDel('checkImages',_chkNo+'_'+c.id);}catch(e){}
     _chkImgs=[];_chkEdit=null;
     showToast((ed?'✅ שיק '+c.chk+' עודכן — ':'✅ שיק '+c.chk+' נשמר — ')+dnMoney(amount));
-    renderInvChecks();renderProformaList();renderChecksReport();
+    renderInvChecks();renderProformaList();renderChecksReport();renderDNotes();
   }catch(e){
     showToast('⚠ השמירה נכשלה: '+(e.message||''),'var(--red-txt)',6000);
     if(btn){btn.disabled=false;btn.textContent=ed?'💾 עדכן שיק':'💾 שמור שיק';}
@@ -12168,7 +12174,7 @@ async function delInvCheck(id){
     d.checks=await _chkTx(arr=>arr.filter(x=>x.id!==id));
     if(_chkEdit===id){_chkEdit=null;_chkImgs=[];}
     if(+c.imgs)try{await fbDel('checkImages',_chkNo+'_'+id);}catch(e){}
-    showToast('🗑 השיק נמחק');renderInvChecks();renderProformaList();renderChecksReport();
+    showToast('🗑 השיק נמחק');renderInvChecks();renderProformaList();renderChecksReport();renderDNotes();
   }catch(e){showToast('⚠ המחיקה נכשלה: '+(e.message||''),'var(--red-txt)');}
 }
 // no — מס' החשבונית כשנפתח מטבלת השיקים (שם _chkNo לא נקבע)
@@ -15379,6 +15385,7 @@ function dnVoidRows(f){
     for(let k=min;k<=max;k++)if(!used.has(k)&&!logged.has(k))out.push({no:k,known:false});
   }
   const q=(f?.q||'').trim(),cust=f?.cust||'',from=f?.from||'',to=f?.to||'';
+  if(f?.pay)return []; // סינון לפי מצב תשלום — לתעודה שבוטלה אין מצב
   return out.filter(v=>{
     // חור בלי רישום הוא מספר ותו לא — אין לו לקוח ואין לו תאריך, ולכן סינון לפי
     // לקוח או טווח תאריכים **מסתיר אותו** במקום לנחש שהוא מתאים לסינון.
@@ -15405,7 +15412,7 @@ function dnVoidTr(v){
     <td></td>
     <td><span class="bc-seg" style="background:var(--bg2,#f1f5f9);color:var(--txt3);font-weight:700;text-decoration:line-through">${String(v.no).padStart(4,'0')}</span></td>
     <td style="white-space:nowrap;color:var(--txt3)">${hd(v.date)}</td>
-    <td colspan="10" style="color:var(--txt3);font-size:12px">🕳 <b>${lbl}</b> — ${what} <span style="opacity:.8">· המספר לא חוזר לשימוש</span></td>
+    <td colspan="${_canPricing()?11:10}" style="color:var(--txt3);font-size:12px">🕳 <b>${lbl}</b> — ${what} <span style="opacity:.8">· המספר לא חוזר לשימוש</span></td>
   </tr>`;
 }
 // מיזוג לפי מספר יורד — שורת הרפאים יושבת **במקומה ברצף** ולא בסוף הטבלה,
@@ -15419,8 +15426,32 @@ function dnSelToggle(k,on){on?_dnSel.add(k):_dnSel.delete(k);renderDNotes();}
 function dnSelAll(on){dnFiltered().rows.forEach(r=>on?_dnSel.add(dnKey(r)):_dnSel.delete(dnKey(r)));renderDNotes();}
 function dnSelClear(){_dnSel.clear();renderDNotes();}
 function dnSelLabel(n){const b=document.getElementById('dn-print-btn');if(b)b.textContent=n?`🖨 הדפסה (${n} מסומנות)…`:'🖨 הדפסה…';}
+// ─── 🧾 סטטוס התחשבנות לתעודה (09/10/2026) ────────────────────────────
+// **נגזר, לא מסומן ידנית:** תעודה שמספרה ב-notes של חשבונית עסקה לא מבוטלת = הותחשבנה;
+// "שולם" = יתרת החשבונית 0 לפי השיקים. מספרי התעודות רצים במונה משותף ⇒ ייחודיים.
+// החשבוניות נטענות לפי דרישה (getDocs, לא מאזין) — ומתרעננות לכל היותר פעם בדקה.
+let _pfAt=0,_pfBusy=false;
+function _pfEnsure(force){
+  if(!_canPricing()||!db||!S.fbConnected||_pfBusy||(!force&&Date.now()-_pfAt<60000))return;
+  _pfBusy=true;
+  _pfLoad().then(()=>{_pfAt=Date.now();_pfBusy=false;renderDNotes();}).catch(e=>{console.warn('pf:',e.message);_pfAt=Date.now();_pfBusy=false;});
+}
+function dnInvOf(no){
+  if(!+no)return null;
+  return _pfList.find(d=>!d.void&&(d.notes||[]).some(n=>+n===+no))||null;
+}
+function dnPayState(r){const d=dnInvOf(r.s.no);return !d?'none':pfLeft(d)<=0.009?'paid':'inv';}
+function dnPayCell(r){
+  const d=dnInvOf(r.s.no);
+  if(!d)return '<span style="color:var(--txt3);font-size:11px">⏳ טרם</span>';
+  const left=pfLeft(d),paid=pfPaid(d);
+  const st=left<=0.009?'<span style="color:var(--green-txt,#16a34a);font-weight:700">✅ שולם</span>'
+    :paid>0?'<span style="color:var(--amber-txt);font-weight:700">💳 חלקי</span>'
+    :'<span style="color:var(--amber-txt)">לא שולם</span>';
+  return `<a href="#" onclick="event.preventDefault();openInvChecks(${+d.no})" title="פתח את השיקים של החשבונית" style="color:var(--blue-txt,#1d4ed8);font-weight:700;font-size:12px">🧾 ${+d.no}</a><div style="font-size:11px">${st}</div>`;
+}
 function dnClearFilter(){
-  ['dn-search','dn-cust','dn-from','dn-to'].forEach(id=>{const el=document.getElementById(id);if(el)el.value='';});
+  ['dn-search','dn-cust','dn-from','dn-to','dn-pay'].forEach(id=>{const el=document.getElementById(id);if(el)el.value='';});
   renderDNotes();
 }
 // ─── 📦 חומר אריזה ────────────────────────────────────────────
@@ -15486,7 +15517,7 @@ const dnKey=r=>r.p.id+'|'+r.i;
 // `onlySel` ⇒ רק מה שסומן (ועדיין בתוך הסינון — תעודה מסומנת שהסינון מסתיר לא תודפס בהפתעה).
 function dnFiltered(onlySel){
   const g=id=>(document.getElementById(id)?.value||'').trim();
-  const q=g('dn-search').toLowerCase(),cust=g('dn-cust'),from=g('dn-from'),to=g('dn-to');
+  const q=g('dn-search').toLowerCase(),cust=g('dn-cust'),from=g('dn-from'),to=g('dn-to'),pay=_canPricing()?g('dn-pay'):'';
   // משלוח בלי תאריך לא נופל מהסינון — עדיף להראות אותו מאשר להעלים תעודה שקיימת
   const rows=allDeliveryNotes().filter(r=>{
     if(onlySel&&!_dnSel.has(dnKey(r)))return false;
@@ -15494,6 +15525,7 @@ function dnFiltered(onlySel){
     if(cust&&r.p.cust!==cust)return false;
     if(from&&d&&d<from)return false;
     if(to&&d&&d>to)return false;
+    if(pay&&dnPayState(r)!==pay)return false;
     if(!q)return true;
     const hay=[String(r.s.no||''),String(r.s.no||'').padStart(4,'0'),r.p.cust||'',S.customerNames?.[r.p.cust]||'',
       r.p.prod||'',r.p.name||'',String(parseInt(r.p.orderNo,10)||'')].join(' ').toLowerCase();
@@ -15523,7 +15555,7 @@ function dnFiltered(onlySel){
     if(r.pr.missing)missing++;
   });
   const matList=PACK_MATS.map(d=>mats.get(d.k)).filter(Boolean);
-  return {rows,units,work,pack,amount:work+pack,missing,noPrice,matList,q,cust,from,to};
+  return {rows,units,work,pack,amount:work+pack,missing,noPrice,matList,q,cust,from,to,pay};
 }
 function renderDNotes(){
   const box=document.getElementById('dnotes-list');
@@ -15538,6 +15570,9 @@ function renderDNotes(){
     if(sel.innerHTML!==html)sel.innerHTML=html;
     sel.value=opts.some(c=>c.code===keep)?keep:'';
   }
+  const cp=_canPricing();
+  const ps=document.getElementById('dn-pay');if(ps)ps.style.display=cp?'':'none';
+  _pfEnsure();
   const f=dnFiltered(),rows=f.rows,voids=dnVoidRows(f);
   const packs=rows.reduce((t,r)=>t+packsCount(r.s.packs),0);
   // ☑ ניקוי בחירה של תעודות שנמחקו בינתיים
@@ -15565,7 +15600,7 @@ function renderDNotes(){
       <th style="text-align:center">יח'</th>
       <th style="text-align:center">תפירה</th><th style="text-align:center">✂ גזירה</th>
       <th style="text-align:center">📦 אריזה</th><th style="text-align:center">סכום</th>
-      <th style="text-align:center">חבילות</th><th></th>
+      <th style="text-align:center">חבילות</th>${cp?'<th>🧾 התחשבנות</th>':''}<th></th>
     </tr></thead>
     <tbody>${dnRowsWithVoids(rows,voids,r=>{
       const pk=packsCount(r.s.packs);
@@ -15592,6 +15627,7 @@ function renderDNotes(){
         <td style="text-align:center;font-weight:700">${r.qty}</td>
         ${money}
         <td style="text-align:center">${pk||''}</td>
+        ${cp?'<td style="white-space:nowrap">'+dnPayCell(r)+'</td>':''}
         <td style="white-space:nowrap;text-align:left">
           <button class="btn" style="font-size:11px;padding:4px 8px" title="עריכת כמויות, אריזה והערה — המספר והתאריך לא משתנים" onclick="editShipment('${escj(r.p.id)}',${r.i})">✏️</button>
           <button class="btn" style="font-size:11px;padding:4px 8px" title="עריכת חומר אריזה (קולב/ניילון/צלופן)" onclick="editShipMats('${escj(r.p.id)}',${r.i})">📦</button>
@@ -15606,7 +15642,7 @@ function renderDNotes(){
       <td colspan="2" style="text-align:center;font-weight:600;color:var(--txt3);font-size:11px">עבודה ${dnMoney(f.work)}</td>
       <td style="text-align:center;white-space:nowrap">${f.pack?dnMoney(f.pack):'—'}</td>
       <td style="text-align:center;white-space:nowrap">${dnMoney(f.amount)}</td>
-      <td colspan="2">${f.missing?`<span style="color:var(--red-txt);font-size:11px">⚠ ${f.missing} תעודות ללא מחיר עבודה</span>`:''}</td>
+      <td colspan="${cp?3:2}">${f.missing?`<span style="color:var(--red-txt);font-size:11px">⚠ ${f.missing} תעודות ללא מחיר עבודה</span>`:''}</td>
     </tr></tfoot>
   </table></div>
   ${f.matList.length?`<div style="padding:9px 12px;border-top:1px solid var(--brd);font-size:12px;display:flex;flex-wrap:wrap;gap:4px 14px;align-items:center">
