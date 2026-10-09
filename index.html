@@ -12185,7 +12185,7 @@ function renderTaxInvs(){
         <td><b>${esc(String(t.no))}</b><div style="font-size:10px;color:var(--txt3)">${esc(t.by||'')}</div></td>
         <td style="white-space:nowrap">${hd(t.date)}</td>
         <td style="text-align:center;white-space:nowrap">${dnMoney(t.net)}</td>
-        <td style="text-align:center;white-space:nowrap">${dnMoney(t.vat)}</td>
+        <td style="text-align:center;white-space:nowrap">${dnMoney(t.vat!=null?t.vat:(+t.total||0)-(+t.net||0))}</td>
         <td style="text-align:center;white-space:nowrap;font-weight:700">${dnMoney(t.total)}</td>
         <td style="font-size:12px">${(t.chkIds||[]).map(chkNo).filter(Boolean).map(esc).join(', ')||'—'}</td>
         <td style="white-space:nowrap;text-align:left">
@@ -12268,7 +12268,8 @@ async function saveTaxInv(){
   const left=taxLeft(d);
   if(total>left+0.009&&!confirm('הסכום ('+dnMoney(total)+') גבוה ממה שנשאר בלי חשבונית מס ('+dnMoney(Math.max(0,left))+'). לרשום בכל זאת?'))return;
   const vatPct=+(d.vatPct??S.settings?.vatPct??18)||0,net=Math.round(total/(1+vatPct/100)*100)/100;
-  const rec={id:'t'+Date.now(),no,date,total,net, // המספר כמו שהוקלד — "0200" ולא 200, כמו בפנקסvat:Math.round((total-net)*100)/100,vatPct,
+  // המספר כמו שהוקלד — "0200" ולא 200, כמו בפנקס
+  const rec={id:'t'+Date.now(),no,date,total,net,vat:Math.round((total-net)*100)/100,vatPct,
     chkIds:[...document.querySelectorAll('.tx-chk:checked')].map(x=>x.value),imgs:_taxImgs.length,by:S.user?.name||'',byId:S.user?.id||'',at:Date.now()};
   if(_taxImgs.reduce((t,x)=>t+x.length,0)>CHK_IMG_BYTES){alert('הצילומים גדולים מדי — הסר צילום אחד ונסה שוב');return;}
   try{
