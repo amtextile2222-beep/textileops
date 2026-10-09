@@ -12498,6 +12498,12 @@ async function openChecksReport(){
   if(sel)sel.innerHTML='<option value="">כל הלקוחות</option>'+Object.entries(cs).sort((a,b)=>a[1].localeCompare(b[1],'he')).map(([k,n])=>`<option value="${esc(k)}">${esc(n)}</option>`).join('');
   renderChecksReport();
 }
+// חודש ההתחשבנות של החשבונית (09/10: "לאיזה חודש שייך השיק"). חשבונית מלפני שדה החודש ⇒ החודש שלפני התאריך
+function pfMonthLbl(d){
+  let m=d?.month||'';
+  if(!m&&d?.date){const x=String(d.date);const pm=new Date(+x.slice(0,4),+x.slice(5,7)-2,1);m=pm.getFullYear()+'-'+pad2(pm.getMonth()+1);}
+  return m?m.slice(5,7)+'/'+m.slice(0,4):'—';
+}
 function chrClear(){['chr-cust','chr-from','chr-to','chr-tax'].forEach(i=>{const e=document.getElementById(i);if(e)e.value='';});renderChecksReport();}
 function _chrRows(){
   const cu=document.getElementById('chr-cust')?.value||'',fr=document.getElementById('chr-from')?.value||'',to=document.getElementById('chr-to')?.value||'';
@@ -12523,18 +12529,19 @@ function renderChecksReport(){
   const tag=due=>!due?'':due<today?'<div style="font-size:10px;color:var(--txt3)">עבר</div>':due<=wks?'<div style="font-size:10px;color:var(--amber-txt);font-weight:700">השבוע</div>':'';
   const tot=rows.reduce((t,r)=>t+(+r.c.amount||0),0);
   box.innerHTML=`<div class="tbl-wrap"><table>
-    <thead><tr><th>פירעון</th><th>לקוח</th><th>חשבונית</th><th>מס' שיק</th><th>בנק</th><th>סניף</th><th>חשבון</th><th style="text-align:center">סכום</th><th>חשבונית מס</th><th></th></tr></thead>
+    <thead><tr><th>פירעון</th><th>לקוח</th><th>חשבונית</th><th>חודש</th><th>מס' שיק</th><th>בנק</th><th>סניף</th><th>חשבון</th><th style="text-align:center">סכום</th><th>חשבונית מס</th><th></th></tr></thead>
     <tbody>${rows.map(({c,d,name})=>`<tr${(c.due||'')<today?' style="opacity:.6"':''}>
       <td style="white-space:nowrap"><b>${hd(c.due)}</b>${tag(c.due)}</td>
       <td>${esc(name)}</td>
       <td><a href="#" onclick="event.preventDefault();openInvChecks('${escj(d._id)}')" style="color:var(--blue-txt,#1d4ed8);font-weight:700">${d.manual?'📒 ':''}${esc(String(d.no))}</a>${d.void?' <span style="color:var(--red-txt);font-size:10px;font-weight:700">מבוטלת</span>':''}</td>
+      <td style="white-space:nowrap">${pfMonthLbl(d)}</td>
       <td><b>${esc(c.chk)}</b></td>
       <td style="font-size:12px">${esc(c.bank||'')}</td><td>${esc(c.branch||'')}</td><td>${esc(c.acct||'')}</td>
       <td style="text-align:center;white-space:nowrap;font-weight:700">${dnMoney(c.amount)}</td>
       <td style="white-space:nowrap;font-size:12px">${chkTaxTag(d,c)}</td>
       <td style="white-space:nowrap;text-align:left">${+c.imgs?`<button class="btn" style="font-size:11px;padding:4px 8px" onclick="chkShowImgs('${escj(c.id)}','${escj(d._id)}')">📷 ${+c.imgs}</button>`:''}</td>
     </tr>`).join('')}</tbody>
-    <tfoot><tr><td colspan="7" style="text-align:left;font-weight:700">סה"כ ${rows.length} שיקים</td><td style="text-align:center;font-weight:800;white-space:nowrap">${dnMoney(tot)}</td><td colspan="2"></td></tr></tfoot>
+    <tfoot><tr><td colspan="8" style="text-align:left;font-weight:700">סה"כ ${rows.length} שיקים</td><td style="text-align:center;font-weight:800;white-space:nowrap">${dnMoney(tot)}</td><td colspan="2"></td></tr></tfoot>
   </table></div>
   <div style="font-size:11px;color:var(--txt3);margin-top:8px">לחיצה על מספר החשבונית פותחת את השיקים שלה — שם אפשר לערוך ולמחוק.</div>`;
 }
@@ -12558,9 +12565,9 @@ tr{page-break-inside:avoid}thead{display:table-header-group}
 </style></head><body>
 <h1>${esc(co.name||'')} — שיקים לפי תאריך פירעון</h1>
 <div class="sub">${esc(flt)} · הופק ${hd(todayStr())}</div>
-<table><thead><tr><th>פירעון</th><th>לקוח</th><th>חשבונית</th><th>מס' שיק</th><th>בנק</th><th>סניף</th><th>חשבון</th><th>סכום</th><th>חשבונית מס</th></tr></thead>
-<tbody>${rows.map(({c,d,name})=>`<tr><td>${hd(c.due)}</td><td>${esc(name)}</td><td>${d.manual?'📒 ':''}${esc(String(d.no))}${d.void?' (מבוטלת)':''}</td><td>${esc(c.chk)}</td><td>${esc(c.bank||'')}</td><td>${esc(c.branch||'')}</td><td>${esc(c.acct||'')}</td><td class="n">${dnMoney(c.amount)}</td><td>${(t=>t?esc(String(t.no)):(c.due||'')<=todayStr()?'⚠ חסרה':'—')(chkTaxOf(d,c))}</td></tr>`).join('')}</tbody>
-<tfoot><tr><td colspan="7" style="text-align:left">סה"כ ${rows.length} שיקים</td><td class="n">${dnMoney(tot)}</td><td></td></tr></tfoot></table>
+<table><thead><tr><th>פירעון</th><th>לקוח</th><th>חשבונית</th><th>חודש</th><th>מס' שיק</th><th>בנק</th><th>סניף</th><th>חשבון</th><th>סכום</th><th>חשבונית מס</th></tr></thead>
+<tbody>${rows.map(({c,d,name})=>`<tr><td>${hd(c.due)}</td><td>${esc(name)}</td><td>${d.manual?'📒 ':''}${esc(String(d.no))}${d.void?' (מבוטלת)':''}</td><td>${pfMonthLbl(d)}</td><td>${esc(c.chk)}</td><td>${esc(c.bank||'')}</td><td>${esc(c.branch||'')}</td><td>${esc(c.acct||'')}</td><td class="n">${dnMoney(c.amount)}</td><td>${(t=>t?esc(String(t.no)):(c.due||'')<=todayStr()?'⚠ חסרה':'—')(chkTaxOf(d,c))}</td></tr>`).join('')}</tbody>
+<tfoot><tr><td colspan="8" style="text-align:left">סה"כ ${rows.length} שיקים</td><td class="n">${dnMoney(tot)}</td><td></td></tr></tfoot></table>
 </body></html>`);
 }
 // החלפת הזמנה בבורר — הכמות המתוכננת ושדה הקלט עוברים לרשומה הנבחרת
