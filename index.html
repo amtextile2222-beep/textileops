@@ -1384,6 +1384,7 @@ code{background:var(--bg2);border:0.5px solid var(--b);border-radius:4px;padding
       <input id="dn-to" type="date" onchange="renderDNotes()" style="padding:7px 10px;border-radius:8px;border:1px solid var(--brd);background:var(--card);color:var(--txt);font-size:13px">
       <button class="btn" style="font-size:12px" onclick="dnClearFilter()">נקה</button>
       <button class="btn" style="font-size:12px" onclick="openProformaList()">🧾 חשבוניות עסקה</button>
+      <button class="btn" style="font-size:12px" onclick="openChecksReport()">💳 שיקים</button>
       <button class="btn primary" style="font-size:12px" id="dn-print-btn" onclick="dnPrintDialog()">🖨 הדפסה…</button>
     </div>
     <div id="dnotes-list"></div>
@@ -11938,6 +11939,11 @@ function proformaToF(d){
 }
 // 📜 רשימת חשבוניות העסקה שהופקו
 let _pfList=[];
+async function _pfLoad(){
+  const{collection,getDocs}=window._fb;
+  const snap=await getDocs(collection(db,'proformaInvoices'));
+  _pfList=snap.docs.map(d=>d.data()).sort((a,b)=>(+b.no||0)-(+a.no||0));
+}
 async function openProformaList(){
   if(!_canPricing()){showToast('⚠ אין הרשאה לחשבוניות','var(--red-txt)');return;}
   if(!db||!S.fbConnected){showToast('⚠ אין חיבור','var(--red-txt)');return;}
@@ -11955,9 +11961,7 @@ async function openProformaList(){
   </div>`;
   document.body.appendChild(wrap);
   try{
-    const{collection,getDocs}=window._fb;
-    const snap=await getDocs(collection(db,'proformaInvoices'));
-    _pfList=snap.docs.map(d=>d.data()).sort((a,b)=>(+b.no||0)-(+a.no||0));
+    await _pfLoad();
   }catch(e){
     const b=document.getElementById('pfl-body');if(b)b.innerHTML='<span style="color:var(--red-txt)">⚠ טעינה נכשלה: '+esc(e.message||'')+'</span>';return;
   }
@@ -12139,7 +12143,7 @@ async function saveInvCheck(){
     if(ed&&+ed.imgs&&!_chkImgs.length)try{await fbDel('checkImages',_chkNo+'_'+c.id);}catch(e){}
     _chkImgs=[];_chkEdit=null;
     showToast((ed?'✅ שיק '+c.chk+' עודכן — ':'✅ שיק '+c.chk+' נשמר — ')+dnMoney(amount));
-    renderInvChecks();renderProformaList();
+    renderInvChecks();renderProformaList();renderChecksReport();
   }catch(e){
     showToast('⚠ השמירה נכשלה: '+(e.message||''),'var(--red-txt)',6000);
     if(btn){btn.disabled=false;btn.textContent=ed?'💾 עדכן שיק':'💾 שמור שיק';}
@@ -12164,12 +12168,13 @@ async function delInvCheck(id){
     d.checks=await _chkTx(arr=>arr.filter(x=>x.id!==id));
     if(_chkEdit===id){_chkEdit=null;_chkImgs=[];}
     if(+c.imgs)try{await fbDel('checkImages',_chkNo+'_'+id);}catch(e){}
-    showToast('🗑 השיק נמחק');renderInvChecks();renderProformaList();
+    showToast('🗑 השיק נמחק');renderInvChecks();renderProformaList();renderChecksReport();
   }catch(e){showToast('⚠ המחיקה נכשלה: '+(e.message||''),'var(--red-txt)');}
 }
-async function chkShowImgs(id){
+// no — מס' החשבונית כשנפתח מטבלת השיקים (שם _chkNo לא נקבע)
+async function chkShowImgs(id,no){
   let imgs=[];
-  try{const{doc,getDoc}=window._fb;const s=await getDoc(doc(db,'checkImages',_chkNo+'_'+id));imgs=s.data()?.imgs||[];}
+  try{const{doc,getDoc}=window._fb;const s=await getDoc(doc(db,'checkImages',(+no||_chkNo)+'_'+id));imgs=s.data()?.imgs||[];}
   catch(e){showToast('⚠ טעינת הצילום נכשלה: '+(e.message||''),'var(--red-txt)');return;}
   if(!imgs.length){showToast('⚠ לא נמצא צילום','var(--amber-txt)');return;}
   const w=document.createElement('div');
@@ -12179,8 +12184,15 @@ async function chkShowImgs(id){
   document.body.appendChild(w);
 }
 // 🖨 אישור קבלת תשלום ללקוח — **לא** "קבלה": מסמך פנימי שמפרט את השיקים שהתקבלו על החשבונית
-function printInvChecks(){
+// 📷 09/10: צילומי השיקים מצורפים בעמוד נפרד אחרי החתימות (בקשת המשתמש)
+async function printInvChecks(){
   const d=_pfList.find(x=>+x.no===_chkNo);if(!d||!(d.checks||[]).length)return;
+  const pics=[];
+  for(const c of d.checks){
+    if(!+c.imgs)continue;
+    try{const{doc,getDoc}=window._fb;const s=await getDoc(doc(db,'checkImages',_chkNo+'_'+c.id));const im=s.data()?.imgs||[];if(im.length)pics.push({c,im});}
+    catch(e){showToast('⚠ צילום שיק '+c.chk+' לא נטען — יודפס בלעדיו','var(--amber-txt)');}
+  }
   const co=S.settings?.company||{},ci=(S.customerInfo||{})[d.cust]||{};
   const hd=x=>x?String(x).slice(8,10)+'/'+String(x).slice(5,7)+'/'+String(x).slice(0,4):'—';
   const left=pfLeft(d);
@@ -12243,7 +12255,104 @@ table.sum{width:auto;min-width:42%;margin:16px 0 0 auto}
   <div><b>חתימת המפעל</b><span class="sig-slot"></span>_______________________</div>
   <div><b>חתימת הלקוח</b>_______________________</div>
 </div>
+${pics.length?`<div style="page-break-before:always"><div class="box" style="margin-bottom:10px"><h2>צילומי השיקים</h2>חשבונית עסקה מס' ${+d.no} · ${esc(d.custName||S.customerNames?.[d.cust]||d.cust||'')}</div>
+${pics.map(x=>`<div style="page-break-inside:avoid;margin-bottom:12px"><div style="font-weight:700;margin-bottom:4px">שיק ${esc(x.c.chk)} · ${esc(x.c.bank||'')} · פירעון ${hd(x.c.due)} · ${dnMoney(x.c.amount)}</div>${x.im.map(u=>`<img src="${u}" style="display:block;max-width:100%;max-height:115mm;margin-bottom:6px;border:1px solid #ccc;border-radius:4px"/>`).join('')}</div>`).join('')}</div>`:''}
 <div class="foot">הופק ממערכת TextileOps · ${esc(co.name||'')}</div>
+</body></html>`);
+}
+// ─── 📅 טבלת שיקים לפי תאריך פירעון (09/10/2026) ─────────────────────
+// כל השיקים מכל החשבוניות, ממוינים לפי פירעון, עם סינון לקוח + טווח תאריכי פירעון.
+// אין אוסף נפרד — נבנה מ-proformaInvoices.checks (אותה הרשאה: canPricing).
+async function openChecksReport(){
+  if(!_canPricing()){showToast('⚠ אין הרשאה לשיקים','var(--red-txt)');return;}
+  if(!db||!S.fbConnected){showToast('⚠ אין חיבור','var(--red-txt)');return;}
+  document.getElementById('chr-wrap')?.remove();
+  const wrap=document.createElement('div');wrap.id='chr-wrap';
+  wrap.style.cssText='position:fixed;inset:0;background:rgba(0,0,0,.5);display:flex;align-items:flex-start;justify-content:center;z-index:10001;padding:16px;overflow-y:auto;overscroll-behavior:contain;-webkit-overflow-scrolling:touch';
+  const fs='padding:7px 10px;border-radius:8px;border:1px solid var(--brd);background:var(--card);color:var(--txt);font-size:13px';
+  wrap.innerHTML=`<div style="background:var(--card);border-radius:14px;padding:18px;max-width:1000px;width:100%;box-shadow:0 10px 40px rgba(0,0,0,.3);margin:auto">
+    <div style="display:flex;align-items:center;justify-content:space-between;gap:8px;margin-bottom:10px;flex-wrap:wrap">
+      <div style="font-size:16px;font-weight:800">💳 שיקים לפי תאריך פירעון</div>
+      <div style="display:flex;gap:6px">
+        <button class="btn" style="font-size:12px" onclick="printChecksReport()">🖨 הדפס</button>
+        <button class="btn" style="font-size:12px" onclick="document.getElementById('chr-wrap').remove()">סגור</button>
+      </div>
+    </div>
+    <div style="display:flex;gap:8px;flex-wrap:wrap;align-items:flex-end;margin-bottom:10px">
+      <div><div style="font-size:11px;color:var(--txt3);margin-bottom:2px">לקוח</div><select id="chr-cust" onchange="renderChecksReport()" style="${fs}"><option value="">כל הלקוחות</option></select></div>
+      <div><div style="font-size:11px;color:var(--txt3);margin-bottom:2px">פירעון מתאריך</div><input id="chr-from" type="date" onchange="renderChecksReport()" style="${fs}"></div>
+      <div><div style="font-size:11px;color:var(--txt3);margin-bottom:2px">עד תאריך</div><input id="chr-to" type="date" onchange="renderChecksReport()" style="${fs}"></div>
+      <button class="btn" style="font-size:12px" onclick="chrClear()">נקה</button>
+    </div>
+    <div id="chr-body" style="font-size:13px;color:var(--txt3)">טוען…</div>
+  </div>`;
+  document.body.appendChild(wrap);
+  try{await _pfLoad();}
+  catch(e){const b=document.getElementById('chr-body');if(b)b.innerHTML='<span style="color:var(--red-txt)">⚠ טעינה נכשלה: '+esc(e.message||'')+'</span>';return;}
+  const cs={};_pfList.forEach(d=>{if((d.checks||[]).length)cs[d.cust||'']=d.custName||S.customerNames?.[d.cust]||d.cust||'';});
+  const sel=document.getElementById('chr-cust');
+  if(sel)sel.innerHTML='<option value="">כל הלקוחות</option>'+Object.entries(cs).sort((a,b)=>a[1].localeCompare(b[1],'he')).map(([k,n])=>`<option value="${esc(k)}">${esc(n)}</option>`).join('');
+  renderChecksReport();
+}
+function chrClear(){['chr-cust','chr-from','chr-to'].forEach(i=>{const e=document.getElementById(i);if(e)e.value='';});renderChecksReport();}
+function _chrRows(){
+  const cu=document.getElementById('chr-cust')?.value||'',fr=document.getElementById('chr-from')?.value||'',to=document.getElementById('chr-to')?.value||'';
+  const out=[];
+  _pfList.forEach(d=>(d.checks||[]).forEach(c=>{
+    if(cu&&(d.cust||'')!==cu)return;
+    if(fr&&(c.due||'')<fr)return;
+    if(to&&(c.due||'')>to)return;
+    out.push({c,d,name:d.custName||S.customerNames?.[d.cust]||d.cust||''});
+  }));
+  return out.sort((a,b)=>String(a.c.due||'').localeCompare(String(b.c.due||''))||(+a.d.no-+b.d.no));
+}
+function renderChecksReport(){
+  const box=document.getElementById('chr-body');if(!box)return;
+  const rows=_chrRows(),today=todayStr();
+  if(!rows.length){box.innerHTML='אין שיקים בסינון הזה.';return;}
+  const hd=x=>x?String(x).slice(8,10)+'/'+String(x).slice(5,7)+'/'+String(x).slice(0,4):'—';
+  const wk=new Date();wk.setDate(wk.getDate()+7);const wks=wk.getFullYear()+'-'+pad2(wk.getMonth()+1)+'-'+pad2(wk.getDate());
+  // סימון: מועד הפירעון עבר (אפור) · בשבוע הקרוב (כתום) — כדי לדעת מה להפקיד
+  const tag=due=>!due?'':due<today?'<div style="font-size:10px;color:var(--txt3)">עבר</div>':due<=wks?'<div style="font-size:10px;color:var(--amber-txt);font-weight:700">השבוע</div>':'';
+  const tot=rows.reduce((t,r)=>t+(+r.c.amount||0),0);
+  box.innerHTML=`<div class="tbl-wrap"><table>
+    <thead><tr><th>פירעון</th><th>לקוח</th><th>חשבונית</th><th>מס' שיק</th><th>בנק</th><th>סניף</th><th>חשבון</th><th style="text-align:center">סכום</th><th></th></tr></thead>
+    <tbody>${rows.map(({c,d,name})=>`<tr${(c.due||'')<today?' style="opacity:.6"':''}>
+      <td style="white-space:nowrap"><b>${hd(c.due)}</b>${tag(c.due)}</td>
+      <td>${esc(name)}</td>
+      <td><a href="#" onclick="event.preventDefault();openInvChecks(${+d.no})" style="color:var(--blue-txt,#1d4ed8);font-weight:700">${+d.no}</a>${d.void?' <span style="color:var(--red-txt);font-size:10px;font-weight:700">מבוטלת</span>':''}</td>
+      <td><b>${esc(c.chk)}</b></td>
+      <td style="font-size:12px">${esc(c.bank||'')}</td><td>${esc(c.branch||'')}</td><td>${esc(c.acct||'')}</td>
+      <td style="text-align:center;white-space:nowrap;font-weight:700">${dnMoney(c.amount)}</td>
+      <td style="white-space:nowrap;text-align:left">${+c.imgs?`<button class="btn" style="font-size:11px;padding:4px 8px" onclick="chkShowImgs('${escj(c.id)}',${+d.no})">📷 ${+c.imgs}</button>`:''}</td>
+    </tr>`).join('')}</tbody>
+    <tfoot><tr><td colspan="7" style="text-align:left;font-weight:700">סה"כ ${rows.length} שיקים</td><td style="text-align:center;font-weight:800;white-space:nowrap">${dnMoney(tot)}</td><td></td></tr></tfoot>
+  </table></div>
+  <div style="font-size:11px;color:var(--txt3);margin-top:8px">לחיצה על מספר החשבונית פותחת את השיקים שלה — שם אפשר לערוך ולמחוק.</div>`;
+}
+function printChecksReport(){
+  const rows=_chrRows();if(!rows.length){showToast('⚠ אין שיקים להדפסה','var(--amber-txt)');return;}
+  const co=S.settings?.company||{};
+  const hd=x=>x?String(x).slice(8,10)+'/'+String(x).slice(5,7)+'/'+String(x).slice(0,4):'—';
+  const cu=document.getElementById('chr-cust'),fr=document.getElementById('chr-from')?.value||'',to=document.getElementById('chr-to')?.value||'';
+  const flt=[cu?.value?'לקוח: '+cu.options[cu.selectedIndex].text:'כל הלקוחות',(fr||to)?'פירעון: '+(fr?hd(fr):'…')+' — '+(to?hd(to):'…'):'כל התאריכים'].join(' · ');
+  const tot=rows.reduce((t,r)=>t+(+r.c.amount||0),0);
+  printViaIframe(`<!DOCTYPE html><html dir="rtl" lang="he"><head><meta charset="UTF-8"/><title>שיקים לפי תאריך פירעון</title><style>
+*{box-sizing:border-box;margin:0;padding:0}
+body{font-family:Arial,Helvetica,sans-serif;color:#000;background:#fff;font-size:12.5px;padding:14mm 12mm;-webkit-print-color-adjust:exact;print-color-adjust:exact}
+h1{font-size:18px;margin-bottom:4px}.sub{font-size:12px;color:#444;margin-bottom:12px}
+table{width:100%;border-collapse:collapse}
+th{background:#eef2ff;padding:6px;text-align:right;border:1px solid #bbb;font-size:12px}
+td{padding:5px 6px;border:1px solid #ddd}td.n{text-align:center;font-weight:800;white-space:nowrap}
+tfoot td{background:#eef2ff;font-weight:800;border:1px solid #bbb}
+tr{page-break-inside:avoid}thead{display:table-header-group}
+@media print{body{padding:8mm}}
+</style></head><body>
+<h1>${esc(co.name||'')} — שיקים לפי תאריך פירעון</h1>
+<div class="sub">${esc(flt)} · הופק ${hd(todayStr())}</div>
+<table><thead><tr><th>פירעון</th><th>לקוח</th><th>חשבונית</th><th>מס' שיק</th><th>בנק</th><th>סניף</th><th>חשבון</th><th>סכום</th></tr></thead>
+<tbody>${rows.map(({c,d,name})=>`<tr><td>${hd(c.due)}</td><td>${esc(name)}</td><td>${+d.no}${d.void?' (מבוטלת)':''}</td><td>${esc(c.chk)}</td><td>${esc(c.bank||'')}</td><td>${esc(c.branch||'')}</td><td>${esc(c.acct||'')}</td><td class="n">${dnMoney(c.amount)}</td></tr>`).join('')}</tbody>
+<tfoot><tr><td colspan="7" style="text-align:left">סה"כ ${rows.length} שיקים</td><td class="n">${dnMoney(tot)}</td></tr></tfoot></table>
 </body></html>`);
 }
 // החלפת הזמנה בבורר — הכמות המתוכננת ושדה הקלט עוברים לרשומה הנבחרת
