@@ -11822,6 +11822,14 @@ function openShipModal(cust,prod,orderNo){
   setTimeout(()=>{shipRowsTotal();const i=document.getElementById('ship-qty-inp')||document.querySelector('.ship-row-inp');if(i){i.focus();i.select();}},50);
 }
 function closeShipModal(){document.getElementById('ship-modal-wrap')?.remove();_shipRestore=null;}
+// 🚚 "יצא ללקוח" מכרטיס המוצר (09/10/2026) — בלי לסרוק/להקליד ברקוד. נבחרת **הרשומה הזו**
+// בבורר, גם כשלדגם כמה הזמנות וגם בהזמנה ישנה בלי מספר (שם הבורר היה בוחר את האחרונה)
+function shipFromProduct(id){
+  const p=(S.products||[]).find(x=>x.id===id);if(!p)return;
+  openShipModal(p.cust,p.prod,parseInt(p.orderNo,10)||0);
+  const sel=document.getElementById('ship-prod-sel');
+  if(sel&&sel.value!==id&&[...sel.options].some(o=>o.value===id)){sel.value=id;shipPickChanged();}
+}
 // ♻ שחזור תעודה שנמחקה בטעות (09/10/2026): היומן (dnVoids) שומר רק סיכום — לא מידות/צבעים/אריזה.
 // לכן פותחים את חלון "יצא ללקוח" הרגיל, מזינים לפי העותק המודפס, והאישור נרשם **באותו מספר
 // ובאותו תאריך** במקום מספר חדש. מספר שחזר לרשומה חיה יוצא מרשימת הבוטלות לבד (dnVoidRows).
@@ -16510,6 +16518,7 @@ function renderProducts(){
           ${isDone?(prodShipments(p).length>1
             ?`<button class="btn" style="font-size:11px;padding:4px 10px;color:var(--green-txt,#16a34a)" onclick="showShipments('${p.id}')">📄 ${prodShipments(p).length} תעודות</button>`
             :`<button class="btn" style="font-size:11px;padding:4px 10px;color:var(--green-txt,#16a34a)" onclick="printDeliveryNote('${p.id}')">📄 תעודת משלוח</button>`):''}
+          <button class="btn" style="font-size:11px;padding:4px 10px" title="פותח את חלון יצא ללקוח של ההזמנה הזו — כמו סריקת ברקוד יצא ללקוח" onclick="shipFromProduct('${p.id}')">🚚 יצא ללקוח</button>
           <button class="btn" style="font-size:11px;padding:4px 10px" onclick="bcFromProduct('${p.id}')">🏷️ ברקודים</button>
           <button class="btn" style="font-size:11px;padding:4px 10px" onclick="openProductModal('${p.id}')">✏️ עריכה</button>
           <button class="btn danger" style="font-size:11px;padding:4px 8px;opacity:.7" onclick="deleteProduct('${p.id}')">🗑</button>
