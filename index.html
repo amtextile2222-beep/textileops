@@ -12016,7 +12016,7 @@ function renderProformaList(){
   const hd=d=>d?String(d).slice(8,10)+'/'+String(d).slice(5,7)+'/'+String(d).slice(0,4):'—';
   const isMgr=S.user?.role==='manager';
   box.innerHTML=`<div class="tbl-wrap"><table>
-    <thead><tr><th>מס'</th><th>תאריך</th><th>חודש</th><th>לקוח</th><th style="text-align:center">תעודות</th><th style="text-align:center">לפני מע"מ</th><th style="text-align:center">סה"כ</th><th>תשלום</th><th>הופק ע"י</th><th></th></tr></thead>
+    <thead><tr><th>מס'</th><th>תאריך</th><th>חודש</th><th>לקוח</th><th style="text-align:center">תעודות</th><th style="text-align:center">לפני מע"מ</th><th style="text-align:center">סה"כ</th><th>תשלום</th><th>חשבונית מס</th><th>הופק ע"י</th><th></th></tr></thead>
     <tbody>${_pfList.map(d=>`<tr${d.void?' style="opacity:.55"':''}>
       <td><b>${esc(String(d.no))}</b>${d.manual?' <span style="font-size:10px;color:var(--txt3)">📒 ידנית</span>':''}${d.void?' <span style="color:var(--red-txt);font-size:11px;font-weight:700">מבוטלת</span>':''}</td>
       <td style="white-space:nowrap">${hd(d.date)}</td>
@@ -12026,6 +12026,7 @@ function renderProformaList(){
       <td style="text-align:center;white-space:nowrap">${dnMoney(d.net)}</td>
       <td style="text-align:center;white-space:nowrap;font-weight:700${d.void?';text-decoration:line-through':''}">${dnMoney(d.total)}</td>
       <td style="font-size:12px;white-space:nowrap">${pfPayCell(d)}</td>
+      <td style="font-size:12px;white-space:nowrap">${pfTaxCell(d)}</td>
       <td style="font-size:12px;color:var(--txt3)">${esc(d.by||'')}${d.void&&d.voidBy?'<div style="font-size:10px">בוטלה ע"י '+esc(d.voidBy)+'</div>':''}</td>
       <td style="white-space:nowrap;text-align:left">${d.manual?`
         ${!d.void||(d.checks||[]).length?`<button class="btn" style="font-size:11px;padding:4px 9px" onclick="openInvChecks('${escj(d._id)}')">💳 שיקים${(d.checks||[]).length?' ('+d.checks.length+')':''}</button>`:''}
@@ -12104,12 +12105,13 @@ function renderInvChecks(){
       ${left>0.009?`יתרה <b style="color:var(--amber-txt)">${dnMoney(left)}</b>`:left<-0.009?`עודף <b>${dnMoney(-left)}</b>`:'<b style="color:var(--green-txt,#16a34a)">✅ שולם במלואו</b>'}
     </div>
     ${list.length?`<div class="tbl-wrap"><table>
-      <thead><tr><th>מס' שיק</th><th>בנק</th><th>סניף</th><th>חשבון</th><th>פירעון</th><th style="text-align:center">סכום</th><th></th></tr></thead>
+      <thead><tr><th>מס' שיק</th><th>בנק</th><th>סניף</th><th>חשבון</th><th>פירעון</th><th style="text-align:center">סכום</th><th>חשבונית מס</th><th></th></tr></thead>
       <tbody>${list.map(c=>`<tr${ed&&ed.id===c.id?' style="background:var(--amber-bg)"':''}>
         <td><b>${esc(c.chk)}</b><div style="font-size:10px;color:var(--txt3)">${esc(c.by||'')}${c.editedBy?' · ✏️ '+esc(c.editedBy):''}</div></td>
         <td style="font-size:12px">${esc(c.bank||'')}</td><td>${esc(c.branch||'')}</td><td>${esc(c.acct||'')}</td>
         <td style="white-space:nowrap">${hd(c.due)}</td>
         <td style="text-align:center;white-space:nowrap;font-weight:700">${dnMoney(c.amount)}</td>
+        <td style="white-space:nowrap;font-size:12px">${chkTaxTag(d,c)}</td>
         <td style="white-space:nowrap;text-align:left">
           ${+c.imgs?`<button class="btn" style="font-size:11px;padding:4px 8px" onclick="chkShowImgs('${escj(c.id)}')">📷 ${+c.imgs}</button>`:''}
           ${isMgr&&!d.void?`<button class="btn" style="font-size:11px;padding:4px 8px" title="עריכה" onclick="editInvCheck('${escj(c.id)}')">✏️</button>`:''}
@@ -12117,6 +12119,7 @@ function renderInvChecks(){
         </td></tr>`).join('')}</tbody></table></div>
       <button class="btn" style="font-size:12px;margin-top:8px" onclick="printInvChecks()">🖨 אישור קבלת תשלום ללקוח</button>`
     :'<div style="font-size:13px;color:var(--txt3);margin-bottom:6px">עדיין לא נרשמו שיקים לחשבונית הזו.</div>'}
+    <div id="tax-box"></div>
     ${d.void?'<div style="margin-top:12px;color:var(--red-txt);font-weight:700;font-size:13px">🚫 החשבונית מבוטלת — אין רישום שיקים חדשים</div>':`
     <div class="sec" id="chk-form-ttl" style="margin-top:16px;margin-bottom:8px">${ed?'✏️ עריכת שיק '+esc(ed.chk):'➕ שיק חדש'}</div>
     <datalist id="chk-banks">${CHK_BANKS.map(b=>`<option value="${esc(b)}">`).join('')}</datalist>
@@ -12140,6 +12143,94 @@ function renderInvChecks(){
       ${ed?'<button class="btn" style="font-size:14px" onclick="_chkEdit=null;_chkImgs=[];renderInvChecks()">ביטול עריכה</button>':''}
     </div>`}`;
   renderChkThumbs();
+  renderTaxInvs();
+}
+// ─── 🧾 חשבוניות מס ידניות (09/10/2026) ─────────────────────────────
+// חשבונית מס יוצאת **מהפנקס** כשהשיק נפרע — או מוקדם יותר, כשהלקוח מכסה את המע"מ עד מועד
+// תשלומו (8/2026: שיק בסכום המע"מ ל-15/10 ⇒ חשבונית מס 0199 על הכל כבר ב-9/9).
+// המערכת **לא מפיקה** חשבונית מס — רק רושמת (taxInvs במסמך החשבונית, בטרנזקציה כמו השיקים)
+// ומראה על איזה שיק עוד לא הוצאה. שיק "מכוסה" = סומן בחשבונית מס, או שהחשבוניות מכסות את כל הסכום.
+const taxSum=d=>Math.round((d?.taxInvs||[]).reduce((t,x)=>t+(+x.total||0),0)*100)/100;
+const taxLeft=d=>Math.round(((+d?.total||0)-taxSum(d))*100)/100;
+function chkTaxOf(d,c){
+  const l=d?.taxInvs||[];
+  return l.find(x=>(x.chkIds||[]).includes(c.id))||(l.length&&taxLeft(d)<=0.009?l[l.length-1]:null);
+}
+// ⚠ חסרה = מועד הפירעון הגיע ואין חשבונית מס — זה מה שצריך להוציא עכשיו
+function chkTaxTag(d,c){
+  const t=chkTaxOf(d,c);
+  if(t)return `<span style="color:var(--green-txt,#16a34a);font-weight:700">🧾 ${esc(String(t.no))}</span>`;
+  return (c.due||'')<=todayStr()?'<span style="color:var(--red-txt);font-weight:700">⚠ חסרה</span>':'<span style="color:var(--txt3)">—</span>';
+}
+function pfTaxCell(d){
+  const l=d.taxInvs||[];if(!l.length)return '<span style="color:var(--txt3)">—</span>';
+  const nos=l.map(x=>esc(String(x.no))).join(', '),left=taxLeft(d);
+  return left<=0.009?`<span style="color:var(--green-txt,#16a34a);font-weight:700">✅ ${nos}</span>`
+    :`<span style="color:var(--amber-txt);font-weight:700">${nos}</span><div style="font-size:10px;color:var(--amber-txt)">נשאר ${dnMoney(left)}</div>`;
+}
+function renderTaxInvs(){
+  const box=document.getElementById('tax-box');if(!box)return;
+  const d=_chkD();if(!d)return;
+  const isMgr=S.user?.role==='manager',list=d.taxInvs||[],left=taxLeft(d);
+  const hd=x=>x?String(x).slice(8,10)+'/'+String(x).slice(5,7)+'/'+String(x).slice(0,4):'—';
+  const chkNo=id=>(d.checks||[]).find(c=>c.id===id)?.chk||'';
+  const open=(d.checks||[]).filter(c=>!chkTaxOf(d,c));
+  const inp='font-size:14px;padding:7px;border-radius:8px;border:1px solid var(--brd);background:var(--card);color:var(--txt);width:100%';
+  box.innerHTML=`<div class="sec" style="margin-top:16px;margin-bottom:6px">🧾 חשבוניות מס</div>
+    <div style="font-size:12px;margin-bottom:6px;color:${!list.length?'var(--txt3)':left<=0.009?'var(--green-txt,#16a34a)':'var(--amber-txt)'};font-weight:${list.length?700:400}">${!list.length?'עדיין לא נרשמה חשבונית מס':left<=0.009?'✅ הוצאה חשבונית מס על כל הסכום':'הוצאה על '+dnMoney(taxSum(d))+' · נשאר '+dnMoney(left)}</div>
+    ${list.length?`<div class="tbl-wrap"><table>
+      <thead><tr><th>מס'</th><th>תאריך</th><th style="text-align:center">לפני מע"מ</th><th style="text-align:center">מע"מ</th><th style="text-align:center">סה"כ</th><th>שיקים</th><th></th></tr></thead>
+      <tbody>${list.map(t=>`<tr>
+        <td><b>${esc(String(t.no))}</b><div style="font-size:10px;color:var(--txt3)">${esc(t.by||'')}</div></td>
+        <td style="white-space:nowrap">${hd(t.date)}</td>
+        <td style="text-align:center;white-space:nowrap">${dnMoney(t.net)}</td>
+        <td style="text-align:center;white-space:nowrap">${dnMoney(t.vat)}</td>
+        <td style="text-align:center;white-space:nowrap;font-weight:700">${dnMoney(t.total)}</td>
+        <td style="font-size:12px">${(t.chkIds||[]).map(chkNo).filter(Boolean).map(esc).join(', ')||'—'}</td>
+        <td>${isMgr?`<button class="btn" style="font-size:11px;padding:4px 8px;color:var(--red-txt)" onclick="delTaxInv('${escj(t.id)}')">🗑</button>`:''}</td>
+      </tr>`).join('')}</tbody></table></div>`:''}
+    ${d.void||left<=0.009?'':`<details style="margin-top:8px;border:1px dashed var(--brd);border-radius:8px;padding:6px 9px"${list.length?'':' open'}>
+      <summary style="font-size:13px;font-weight:600;cursor:pointer">➕ רישום חשבונית מס מהפנקס</summary>
+      <div style="display:grid;grid-template-columns:1fr 1fr 1fr;gap:8px;margin-top:8px">
+        <div class="field" style="margin:0"><label>מספר</label><input id="tx-no" inputmode="numeric" style="${inp}"/></div>
+        <div class="field" style="margin:0"><label>תאריך</label><input id="tx-date" type="date" value="${todayStr()}" style="${inp}"/></div>
+        <div class="field" style="margin:0"><label>סה"כ כולל מע"מ</label><input id="tx-total" type="number" step="0.01" inputmode="decimal" value="${left.toFixed(2)}" style="${inp}"/></div>
+      </div>
+      ${open.length?`<div style="font-size:12px;font-weight:600;margin-top:8px">על אילו שיקים? <span style="font-weight:400;color:var(--txt3)">(סימון ממלא את הסכום)</span></div>
+      ${open.map(c=>`<label style="display:flex;align-items:center;gap:6px;font-size:12px;margin-top:4px;cursor:pointer"><input type="checkbox" class="tx-chk" value="${esc(c.id)}" data-amt="${+c.amount||0}" onchange="txSyncTotal()" style="width:auto"/> שיק ${esc(c.chk)} · פירעון ${hd(c.due)} · ${dnMoney(c.amount)}</label>`).join('')}`:''}
+      <div style="font-size:11px;color:var(--txt3);margin-top:6px">לא מודפס דבר — רק נרשם שחשבונית המס הוצאה. הסכום לפני מע"מ והמע"מ מחושבים מהסה"כ.</div>
+      <button class="btn primary" style="width:100%;margin-top:8px" onclick="saveTaxInv()">💾 רשום חשבונית מס</button>
+    </details>`}`;
+}
+function txSyncTotal(){
+  const s=[...document.querySelectorAll('.tx-chk:checked')].reduce((t,x)=>t+(+x.dataset.amt||0),0);
+  const el=document.getElementById('tx-total');if(el)el.value=(s>0?s:taxLeft(_chkD())).toFixed(2);
+}
+async function saveTaxInv(){
+  const d=_chkD();if(!d||d.void)return;
+  if(!db||!S.fbConnected){showToast('⚠ אין חיבור — לא נשמר','var(--red-txt)');return;}
+  const no=(document.getElementById('tx-no')?.value||'').trim(),date=document.getElementById('tx-date')?.value||'';
+  const total=Math.round((parseFloat(document.getElementById('tx-total')?.value)||0)*100)/100;
+  if(!no){alert('יש להזין את מספר חשבונית המס');return;}
+  if(!date){alert('יש לבחור תאריך');return;}
+  if(!(total>0)){alert('יש להזין סכום');return;}
+  if(_pfList.some(x=>(x.taxInvs||[]).some(t=>String(t.no)===no))&&!confirm('חשבונית מס '+no+' כבר רשומה. לרשום שוב?'))return;
+  const left=taxLeft(d);
+  if(total>left+0.009&&!confirm('הסכום ('+dnMoney(total)+') גבוה ממה שנשאר בלי חשבונית מס ('+dnMoney(Math.max(0,left))+'). לרשום בכל זאת?'))return;
+  const vatPct=+(d.vatPct??S.settings?.vatPct??18)||0,net=Math.round(total/(1+vatPct/100)*100)/100;
+  const rec={id:'t'+Date.now(),no,date,total,net, // המספר כמו שהוקלד — "0200" ולא 200, כמו בפנקסvat:Math.round((total-net)*100)/100,vatPct,
+    chkIds:[...document.querySelectorAll('.tx-chk:checked')].map(x=>x.value),by:S.user?.name||'',byId:S.user?.id||'',at:Date.now()};
+  try{d.taxInvs=await _chkTx(arr=>[...arr,rec],'taxInvs');}
+  catch(e){showToast('⚠ השמירה נכשלה: '+(e.message||''),'var(--red-txt)',6000);return;}
+  showToast('🧾 חשבונית מס '+no+' נרשמה — '+dnMoney(total));
+  renderInvChecks();renderProformaList();renderChecksReport();
+}
+async function delTaxInv(id){
+  if(S.user?.role!=='manager')return;
+  const d=_chkD();const t=(d?.taxInvs||[]).find(x=>x.id===id);if(!t)return;
+  if(!await showConfirm('מחיקת רישום','למחוק את רישום חשבונית מס '+t.no+' ('+dnMoney(t.total)+')?\nחשבונית המס עצמה בפנקס לא מושפעת.','מחק','חזור'))return;
+  try{d.taxInvs=await _chkTx(arr=>arr.filter(x=>x.id!==id),'taxInvs');renderInvChecks();renderProformaList();renderChecksReport();showToast('🗑 נמחק');}
+  catch(e){showToast('⚠ המחיקה נכשלה: '+(e.message||''),'var(--red-txt)');}
 }
 function renderChkThumbs(){
   const el=document.getElementById('chk-thumbs');if(!el)return;
@@ -12157,13 +12248,14 @@ async function chkAddImgs(input){
   renderChkThumbs();
 }
 // 🔒 הוספה/מחיקה של שיק בטרנזקציה — קוראים את המערך העדכני מהשרת, לא את מה שנטען בפתיחת הרשימה
-async function _chkTx(fn){
+async function _chkTx(fn,field){
+  field=field||'checks'; // גם taxInvs (חשבוניות מס) — אותו מנגנון
   const{doc,runTransaction}=window._fb;let out=null;
   await _pw(runTransaction(db,async tx=>{
     const ref=doc(db,'proformaInvoices',String(_chkNo));
     const s=await tx.get(ref);if(!s.exists())throw new Error('החשבונית לא נמצאה');
-    out=fn(s.data().checks||[]);
-    tx.update(ref,{checks:out});
+    out=fn(s.data()[field]||[]);
+    tx.update(ref,{[field]:out});
   }));
   return out;
 }
@@ -12336,6 +12428,7 @@ async function openChecksReport(){
       <div><div style="font-size:11px;color:var(--txt3);margin-bottom:2px">לקוח</div><select id="chr-cust" onchange="renderChecksReport()" style="${fs}"><option value="">כל הלקוחות</option></select></div>
       <div><div style="font-size:11px;color:var(--txt3);margin-bottom:2px">פירעון מתאריך</div><input id="chr-from" type="date" onchange="renderChecksReport()" style="${fs}"></div>
       <div><div style="font-size:11px;color:var(--txt3);margin-bottom:2px">עד תאריך</div><input id="chr-to" type="date" onchange="renderChecksReport()" style="${fs}"></div>
+      <div><div style="font-size:11px;color:var(--txt3);margin-bottom:2px">חשבונית מס</div><select id="chr-tax" onchange="renderChecksReport()" style="${fs}"><option value="">הכל</option><option value="missing">⚠ נפרעו ואין חשבונית מס</option><option value="none">בלי חשבונית מס</option><option value="done">🧾 יש חשבונית מס</option></select></div>
       <button class="btn" style="font-size:12px" onclick="chrClear()">נקה</button>
     </div>
     <div id="chr-body" style="font-size:13px;color:var(--txt3)">טוען…</div>
@@ -12348,14 +12441,17 @@ async function openChecksReport(){
   if(sel)sel.innerHTML='<option value="">כל הלקוחות</option>'+Object.entries(cs).sort((a,b)=>a[1].localeCompare(b[1],'he')).map(([k,n])=>`<option value="${esc(k)}">${esc(n)}</option>`).join('');
   renderChecksReport();
 }
-function chrClear(){['chr-cust','chr-from','chr-to'].forEach(i=>{const e=document.getElementById(i);if(e)e.value='';});renderChecksReport();}
+function chrClear(){['chr-cust','chr-from','chr-to','chr-tax'].forEach(i=>{const e=document.getElementById(i);if(e)e.value='';});renderChecksReport();}
 function _chrRows(){
   const cu=document.getElementById('chr-cust')?.value||'',fr=document.getElementById('chr-from')?.value||'',to=document.getElementById('chr-to')?.value||'';
+  const tx=document.getElementById('chr-tax')?.value||'',today=todayStr();
   const out=[];
   _pfList.forEach(d=>(d.checks||[]).forEach(c=>{
     if(cu&&(d.cust||'')!==cu)return;
     if(fr&&(c.due||'')<fr)return;
     if(to&&(c.due||'')>to)return;
+    const ht=!!chkTaxOf(d,c);
+    if((tx==='done'&&!ht)||(tx==='none'&&ht)||(tx==='missing'&&(ht||(c.due||'')>today)))return;
     out.push({c,d,name:d.custName||S.customerNames?.[d.cust]||d.cust||''});
   }));
   return out.sort((a,b)=>String(a.c.due||'').localeCompare(String(b.c.due||''))||(+a.d.no-+b.d.no));
@@ -12370,7 +12466,7 @@ function renderChecksReport(){
   const tag=due=>!due?'':due<today?'<div style="font-size:10px;color:var(--txt3)">עבר</div>':due<=wks?'<div style="font-size:10px;color:var(--amber-txt);font-weight:700">השבוע</div>':'';
   const tot=rows.reduce((t,r)=>t+(+r.c.amount||0),0);
   box.innerHTML=`<div class="tbl-wrap"><table>
-    <thead><tr><th>פירעון</th><th>לקוח</th><th>חשבונית</th><th>מס' שיק</th><th>בנק</th><th>סניף</th><th>חשבון</th><th style="text-align:center">סכום</th><th></th></tr></thead>
+    <thead><tr><th>פירעון</th><th>לקוח</th><th>חשבונית</th><th>מס' שיק</th><th>בנק</th><th>סניף</th><th>חשבון</th><th style="text-align:center">סכום</th><th>חשבונית מס</th><th></th></tr></thead>
     <tbody>${rows.map(({c,d,name})=>`<tr${(c.due||'')<today?' style="opacity:.6"':''}>
       <td style="white-space:nowrap"><b>${hd(c.due)}</b>${tag(c.due)}</td>
       <td>${esc(name)}</td>
@@ -12378,9 +12474,10 @@ function renderChecksReport(){
       <td><b>${esc(c.chk)}</b></td>
       <td style="font-size:12px">${esc(c.bank||'')}</td><td>${esc(c.branch||'')}</td><td>${esc(c.acct||'')}</td>
       <td style="text-align:center;white-space:nowrap;font-weight:700">${dnMoney(c.amount)}</td>
+      <td style="white-space:nowrap;font-size:12px">${chkTaxTag(d,c)}</td>
       <td style="white-space:nowrap;text-align:left">${+c.imgs?`<button class="btn" style="font-size:11px;padding:4px 8px" onclick="chkShowImgs('${escj(c.id)}','${escj(d._id)}')">📷 ${+c.imgs}</button>`:''}</td>
     </tr>`).join('')}</tbody>
-    <tfoot><tr><td colspan="7" style="text-align:left;font-weight:700">סה"כ ${rows.length} שיקים</td><td style="text-align:center;font-weight:800;white-space:nowrap">${dnMoney(tot)}</td><td></td></tr></tfoot>
+    <tfoot><tr><td colspan="7" style="text-align:left;font-weight:700">סה"כ ${rows.length} שיקים</td><td style="text-align:center;font-weight:800;white-space:nowrap">${dnMoney(tot)}</td><td colspan="2"></td></tr></tfoot>
   </table></div>
   <div style="font-size:11px;color:var(--txt3);margin-top:8px">לחיצה על מספר החשבונית פותחת את השיקים שלה — שם אפשר לערוך ולמחוק.</div>`;
 }
@@ -12404,9 +12501,9 @@ tr{page-break-inside:avoid}thead{display:table-header-group}
 </style></head><body>
 <h1>${esc(co.name||'')} — שיקים לפי תאריך פירעון</h1>
 <div class="sub">${esc(flt)} · הופק ${hd(todayStr())}</div>
-<table><thead><tr><th>פירעון</th><th>לקוח</th><th>חשבונית</th><th>מס' שיק</th><th>בנק</th><th>סניף</th><th>חשבון</th><th>סכום</th></tr></thead>
-<tbody>${rows.map(({c,d,name})=>`<tr><td>${hd(c.due)}</td><td>${esc(name)}</td><td>${+d.no}${d.void?' (מבוטלת)':''}</td><td>${esc(c.chk)}</td><td>${esc(c.bank||'')}</td><td>${esc(c.branch||'')}</td><td>${esc(c.acct||'')}</td><td class="n">${dnMoney(c.amount)}</td></tr>`).join('')}</tbody>
-<tfoot><tr><td colspan="7" style="text-align:left">סה"כ ${rows.length} שיקים</td><td class="n">${dnMoney(tot)}</td></tr></tfoot></table>
+<table><thead><tr><th>פירעון</th><th>לקוח</th><th>חשבונית</th><th>מס' שיק</th><th>בנק</th><th>סניף</th><th>חשבון</th><th>סכום</th><th>חשבונית מס</th></tr></thead>
+<tbody>${rows.map(({c,d,name})=>`<tr><td>${hd(c.due)}</td><td>${esc(name)}</td><td>${d.manual?'📒 ':''}${esc(String(d.no))}${d.void?' (מבוטלת)':''}</td><td>${esc(c.chk)}</td><td>${esc(c.bank||'')}</td><td>${esc(c.branch||'')}</td><td>${esc(c.acct||'')}</td><td class="n">${dnMoney(c.amount)}</td><td>${(t=>t?esc(String(t.no)):(c.due||'')<=todayStr()?'⚠ חסרה':'—')(chkTaxOf(d,c))}</td></tr>`).join('')}</tbody>
+<tfoot><tr><td colspan="7" style="text-align:left">סה"כ ${rows.length} שיקים</td><td class="n">${dnMoney(tot)}</td><td></td></tr></tfoot></table>
 </body></html>`);
 }
 // החלפת הזמנה בבורר — הכמות המתוכננת ושדה הקלט עוברים לרשומה הנבחרת
