@@ -11774,7 +11774,7 @@ function openShipModal(cust,prod,orderNo){
   // היה להגיע לכפתור האישור — בנייד ובמחשב כאחד. הגלילה היא על השכבה, והכרטיס
   // ממורכז ב-margin:auto ולא ב-align-items:center (שחותך את הראש בקונטיינר גולל).
   wrap.style.cssText='position:fixed;inset:0;background:rgba(0,0,0,.5);display:flex;align-items:flex-start;justify-content:center;z-index:9999;padding:16px;overflow-y:auto;overscroll-behavior:contain;-webkit-overflow-scrolling:touch';
-  wrap.onclick=e=>{if(e.target===wrap)closeShipModal();};
+  // 🛑 09/10: לא נסגר בלחיצה על הרקע — כמויות לפי מידה/צבע שהוזנו הלכו לאיבוד (כמו חלון המוצר)
   wrap.innerHTML=`<div style="background:var(--card);border-radius:14px;padding:20px;max-width:360px;width:100%;box-shadow:0 10px 40px rgba(0,0,0,.3);margin:auto">
     <div style="font-size:16px;font-weight:800;margin-bottom:4px">🚚 יצא ללקוח</div>
     <div style="font-size:13px;color:var(--txt3);margin-bottom:12px"><span class="bc-seg bc-c">לקוח ${esc(cust)}</span> <span class="bc-seg bc-p">${esc(prod)}</span> ${multi?'':esc(p.name||'')}</div>
@@ -11813,7 +11813,24 @@ function openShipModal(cust,prod,orderNo){
   document.body.appendChild(wrap);
   setTimeout(()=>{shipRowsTotal();const i=document.getElementById('ship-qty-inp')||document.querySelector('.ship-row-inp');if(i){i.focus();i.select();}},50);
 }
-function closeShipModal(){document.getElementById('ship-modal-wrap')?.remove();}
+function closeShipModal(){document.getElementById('ship-modal-wrap')?.remove();_shipRestore=null;}
+// ♻ שחזור תעודה שנמחקה בטעות (09/10/2026): היומן (dnVoids) שומר רק סיכום — לא מידות/צבעים/אריזה.
+// לכן פותחים את חלון "יצא ללקוח" הרגיל, מזינים לפי העותק המודפס, והאישור נרשם **באותו מספר
+// ובאותו תאריך** במקום מספר חדש. מספר שחזר לרשומה חיה יוצא מרשימת הבוטלות לבד (dnVoidRows).
+let _shipRestore=null;
+async function restoreVoidNote(no){
+  if(S.user?.role!=='manager')return;
+  const v=dnVoidLog().find(x=>+x.no===+no);
+  if(!v){showToast('⚠ אין רישום לתעודה הזו','var(--red-txt)');return;}
+  if(allDeliveryNotes().some(r=>+r.s.no===+no)){showToast('⚠ תעודה '+String(no).padStart(4,'0')+' כבר קיימת','var(--amber-txt)');return;}
+  const hd=d=>d?String(d).slice(8,10)+'/'+String(d).slice(5,7)+'/'+String(d).slice(0,4):'—';
+  if(!await showConfirm('♻ שחזור תעודה '+String(no).padStart(4,'0'),'ייפתח חלון "יצא ללקוח" של '+(v.name||v.prod)+'.\nהזן את הכמויות והאריזה לפי העותק המודפס ('+(+v.total||0)+" יח').\nהתעודה תישמר במספר "+String(no).padStart(4,'0')+' ובתאריך '+hd(v.date)+'.','המשך','ביטול'))return;
+  openShipModal(v.cust,v.prod,v.orderNo);
+  const box=document.getElementById('ship-modal-wrap')?.firstElementChild;
+  if(!box)return;
+  _shipRestore={no:+v.no,date:v.date||todayStr()};
+  box.insertAdjacentHTML('afterbegin',`<div style="background:var(--amber-bg);color:var(--amber-txt);font-size:12px;font-weight:700;padding:8px 10px;border-radius:8px;margin-bottom:10px">♻ שחזור תעודה ${String(no).padStart(4,'0')} מ-${hd(v.date)} — במקור ${+v.total||0} יח'. ודא שנבחרה ההזמנה הנכונה.</div>`);
+}
 // מונה תעודות משלוח — **בטרנזקציה**. שני מנהלים שמוציאים סחורה באותו רגע חייבים לקבל
 // מספרים שונים; מונה מקומי היה מנפיק את אותו מספר פעמיים בשקט. הבסיס נלקח גם מהרשומות
 // הקיימות כדי שמונה שאופס בטעות לא ימחזר מספר שכבר הודפס ונמסר ללקוח.
@@ -12399,9 +12416,11 @@ async function confirmShip(){
   const packMode=packModeOf(mats);
   const dnote=(document.getElementById('ship-note')?.value||'').trim();
   const autoPrint=!!document.getElementById('ship-autoprint')?.checked;
+  const rs=_shipRestore; // ♻ שחזור: המספר והתאריך המקוריים
+  if(rs&&allDeliveryNotes().some(r=>+r.s.no===rs.no)){showToast('⚠ תעודה '+String(rs.no).padStart(4,'0')+' כבר קיימת','var(--red-txt)');closeShipModal();return;}
   if(!Array.isArray(p.stageLog))p.stageLog=[];
   const now=new Date();
-  const date=now.getFullYear()+'-'+pad2(now.getMonth()+1)+'-'+pad2(now.getDate());
+  const date=rs?rs.date:now.getFullYear()+'-'+pad2(now.getMonth()+1)+'-'+pad2(now.getDate());
   const time=pad2(now.getHours())+':'+pad2(now.getMinutes());
   if(!qty){
     if(!await showConfirm('משלוח ריק','לא הוזנה שום כמות. לרשום בכל זאת?','רשום','ביטול'))return;
@@ -12423,17 +12442,19 @@ async function confirmShip(){
   // 📦 packMode ו-mats נגררים כאן מאותה סיבה כמו packs ו-note: בנייה מחדש של
   // הרשימה בלעדיהם הייתה מוחקת בשקט את חיוב האריזה של כל תעודה קודמת.
   const list=prodShipments(p).map(s=>({no:+s.no||0,date:s.date||'',at:s.at||'',rows:s.rows||[],total:+s.total||0,packs:Array.isArray(s.packs)?s.packs:[],note:s.note||'',packMode:s.packMode||'',mats:Array.isArray(s.mats)?s.mats:[]}));
-  const no=await nextDeliveryNoteNo();
-  list.push({no:no||0,date,at:now.toISOString(),rows,total:qty,packs,note:dnote,packMode,mats});
+  const no=rs?rs.no:await nextDeliveryNoteNo();
+  list.push({no:no||0,date,at:now.toISOString(),rows,total:qty,packs,note:dnote,packMode,mats,...(rs?{restoredAt:now.toISOString(),restoredBy:S.user?.name||''}:{})});
   p.shipments=list;
   // הסך המצטבר נשמר בשדות הוותיקים כדי שדוח הרווח וכל שאר הקוראים לא ישתנו
   p.shippedQty=list.reduce((t,s)=>t+(+s.total||0),0);
   p.shippedRows=mergeShipRows(list);
-  p.shippedAt=now.toISOString();
-  p.dnNo=no||p.dnNo;p.dnDate=date;
+  if(!rs||!p.shippedAt)p.shippedAt=now.toISOString();
+  // בשחזור — dnNo נשאר המספר הגבוה (הוא "התעודה האחרונה" של ההזמנה), והתאריך לא זז אחורה
+  if(rs){p.dnNo=Math.max(parseInt(p.dnNo,10)||0,no);if(!p.dnDate)p.dnDate=date;}
+  else{p.dnNo=no||p.dnNo;p.dnDate=date;}
   const note='משלוח '+list.length+': '+qty+" יח' · סה\"כ "+p.shippedQty+" יח'";
   const ex=p.stageLog.find(s=>s.id==='shipped');
-  if(ex){ex.date=date;ex.time=time;ex.note=note;ex.auto=true;}
+  if(ex){if(!rs){ex.date=date;ex.time=time;}ex.note=note;ex.auto=true;}
   else p.stageLog.push({id:'shipped',date,time,note,auto:true});
   p.stageLog.sort((a,b)=>PROD_STAGES.findIndex(x=>x.id===a.id)-PROD_STAGES.findIndex(x=>x.id===b.id));
   // העדפת ההדפסה היא **פר מכשיר** ונשמרת מקומית בלבד: במסך מגע ליד הסורק רוצים
@@ -12442,7 +12463,8 @@ async function confirmShip(){
   saveLS();
   if(S.fbConnected)try{await fbSet('products',p.id,{...p});}catch(e){}
   closeShipModal();
-  showToast('✅ תעודת משלוח '+String(no||0).padStart(4,'0')+' · '+qty+" יח'"+(list.length>1?' (משלוח '+list.length+')':''));
+  showToast((rs?'♻ תעודה '+String(no).padStart(4,'0')+' שוחזרה':'✅ תעודת משלוח '+String(no||0).padStart(4,'0'))+' · '+qty+" יח'"+(list.length>1?' (משלוח '+list.length+')':''));
+  try{renderDNotes();}catch(e){}
   try{buildStageReport();}catch(e){}
   try{renderProducts();}catch(e){}
   // 🖨 הדפסה מיד אחרי האישור — עד כאן היה צריך לחזור לכרטיס המוצר וללחוץ על
@@ -15423,7 +15445,7 @@ function dnVoidTr(v){
     <td></td>
     <td><span class="bc-seg" style="background:var(--bg2,#f1f5f9);color:var(--txt3);font-weight:700;text-decoration:line-through">${String(v.no).padStart(4,'0')}</span></td>
     <td style="white-space:nowrap;color:var(--txt3)">${hd(v.date)}</td>
-    <td colspan="${_canPricing()?11:10}" style="color:var(--txt3);font-size:12px">🕳 <b>${lbl}</b> — ${what} <span style="opacity:.8">· המספר לא חוזר לשימוש</span></td>
+    <td colspan="${_canPricing()?11:10}" style="color:var(--txt3);font-size:12px">🕳 <b>${lbl}</b> — ${what} <span style="opacity:.8">· המספר לא חוזר לשימוש</span>${v.known&&S.user?.role==='manager'?` <button class="btn" style="font-size:11px;padding:3px 9px;margin-right:6px" title="שחזור באותו מספר ותאריך — מזינים את הכמויות לפי העותק המודפס" onclick="restoreVoidNote(${+v.no})">♻ שחזר</button>`:''}</td>
   </tr>`;
 }
 // מיזוג לפי מספר יורד — שורת הרפאים יושבת **במקומה ברצף** ולא בסוף הטבלה,
