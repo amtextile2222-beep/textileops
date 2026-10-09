@@ -11805,6 +11805,14 @@ function openShipModal(cust,prod,orderNo){
       <input type="checkbox" id="ship-autoprint"${S.settings?.dnAutoPrint===false?'':' checked'} style="width:16px;height:16px"/>
       🖨 הדפס את התעודה מיד אחרי האישור
     </label>
+    ${S.user?.role==='manager'?`<details id="ship-past" style="margin-top:10px;border:1px dashed var(--brd);border-radius:8px;padding:6px 9px">
+      <summary style="font-size:12px;font-weight:600;cursor:pointer">📅 משלוח מתאריך קודם (רישום בדיעבד)</summary>
+      <div style="display:flex;gap:8px;align-items:center;flex-wrap:wrap;margin-top:8px">
+        <input id="ship-past-date" type="date" max="${todayStr()}" style="font-size:13px;padding:6px;border-radius:8px;border:1px solid var(--brd);background:var(--bg);color:var(--txt)"/>
+        <label style="display:flex;align-items:center;gap:5px;font-size:12px;cursor:pointer"><input id="ship-past-nonum" type="checkbox" style="width:auto"/> בלי מספר תעודה</label>
+      </div>
+      <div style="font-size:11px;color:var(--txt3);margin-top:4px">למשלוח שיצא בפועל ולא נרשם. "בלי מספר" — כמו התעודות שלפני המספור; אחרת יינתן המספר הבא בתור.</div>
+    </details>`:''}
     <div style="display:flex;gap:8px;margin-top:16px">
       <button class="btn primary" style="flex:1;font-size:14px" onclick="confirmShip()">✅ אשר יציאה</button>
       <button class="btn" style="flex:1;font-size:14px" onclick="closeShipModal()">ביטול</button>
@@ -12416,8 +12424,15 @@ async function confirmShip(){
   const packMode=packModeOf(mats);
   const dnote=(document.getElementById('ship-note')?.value||'').trim();
   const autoPrint=!!document.getElementById('ship-autoprint')?.checked;
-  const rs=_shipRestore; // ♻ שחזור: המספר והתאריך המקוריים
-  if(rs&&allDeliveryNotes().some(r=>+r.s.no===rs.no)){showToast('⚠ תעודה '+String(rs.no).padStart(4,'0')+' כבר קיימת','var(--red-txt)');closeShipModal();return;}
+  // ♻ שחזור: המספר והתאריך המקוריים · 📅 בדיעבד (09/10, מנהל): תאריך שנבחר, ומספר — הבא בתור או בלי
+  let rs=_shipRestore?{..._shipRestore,restore:true}:null;
+  const _pd=S.user?.role==='manager'&&document.getElementById('ship-past')?.open?(document.getElementById('ship-past-date')?.value||''):'';
+  if(!rs&&document.getElementById('ship-past')?.open&&S.user?.role==='manager'){
+    if(!_pd){alert('בחר את התאריך שבו יצא המשלוח');return;}
+    if(_pd>todayStr()){alert('תאריך עתידי');return;}
+    rs={no:document.getElementById('ship-past-nonum')?.checked?0:null,date:_pd,past:true};
+  }
+  if(rs&&rs.no>0&&allDeliveryNotes().some(r=>+r.s.no===rs.no)){showToast('⚠ תעודה '+String(rs.no).padStart(4,'0')+' כבר קיימת','var(--red-txt)');closeShipModal();return;}
   if(!Array.isArray(p.stageLog))p.stageLog=[];
   const now=new Date();
   const date=rs?rs.date:now.getFullYear()+'-'+pad2(now.getMonth()+1)+'-'+pad2(now.getDate());
@@ -12442,8 +12457,10 @@ async function confirmShip(){
   // 📦 packMode ו-mats נגררים כאן מאותה סיבה כמו packs ו-note: בנייה מחדש של
   // הרשימה בלעדיהם הייתה מוחקת בשקט את חיוב האריזה של כל תעודה קודמת.
   const list=prodShipments(p).map(s=>({no:+s.no||0,date:s.date||'',at:s.at||'',rows:s.rows||[],total:+s.total||0,packs:Array.isArray(s.packs)?s.packs:[],note:s.note||'',packMode:s.packMode||'',mats:Array.isArray(s.mats)?s.mats:[]}));
-  const no=rs?rs.no:await nextDeliveryNoteNo();
-  list.push({no:no||0,date,at:now.toISOString(),rows,total:qty,packs,note:dnote,packMode,mats,...(rs?{restoredAt:now.toISOString(),restoredBy:S.user?.name||''}:{})});
+  const no=rs&&rs.no!=null?rs.no:await nextDeliveryNoteNo();
+  list.push({no:no||0,date,at:now.toISOString(),rows,total:qty,packs,note:dnote,packMode,mats,
+    ...(rs?.restore?{restoredAt:now.toISOString(),restoredBy:S.user?.name||''}:{}),
+    ...(rs?.past?{backdatedAt:now.toISOString(),backdatedBy:S.user?.name||''}:{})});
   p.shipments=list;
   // הסך המצטבר נשמר בשדות הוותיקים כדי שדוח הרווח וכל שאר הקוראים לא ישתנו
   p.shippedQty=list.reduce((t,s)=>t+(+s.total||0),0);
@@ -12463,7 +12480,7 @@ async function confirmShip(){
   saveLS();
   if(S.fbConnected)try{await fbSet('products',p.id,{...p});}catch(e){}
   closeShipModal();
-  showToast((rs?'♻ תעודה '+String(no).padStart(4,'0')+' שוחזרה':'✅ תעודת משלוח '+String(no||0).padStart(4,'0'))+' · '+qty+" יח'"+(list.length>1?' (משלוח '+list.length+')':''));
+  showToast((rs?.restore?'♻ תעודה '+String(no).padStart(4,'0')+' שוחזרה':rs?.past?'📅 משלוח מ-'+date.slice(8,10)+'/'+date.slice(5,7)+(no?' · תעודה '+String(no).padStart(4,'0'):' · בלי מספר'):'✅ תעודת משלוח '+String(no||0).padStart(4,'0'))+' · '+qty+" יח'"+(list.length>1?' (משלוח '+list.length+')':''));
   try{renderDNotes();}catch(e){}
   try{buildStageReport();}catch(e){}
   try{renderProducts();}catch(e){}
@@ -15135,6 +15152,67 @@ async function delShipment(pid,idx){
   try{renderProducts();}catch(e){}
   try{renderDNotes();}catch(e){}
 }
+// ↔ העברת תעודה להזמנה אחרת של אותו דגם (09/10/2026, מנהל). לפני מספרי ההזמנה, משלוח נרשם
+// על ההזמנה **האחרונה** של הדגם (5215: ה-81 של #002 נרשמו על #003). התעודה עוברת כמו שהיא —
+// מספר, תאריך, כמויות, אריזה — ושתי ההזמנות מחושבות מחדש. לא נרשם ביטול: המספר לא נשרף.
+// ⚠️ תעודה בלי מספר מזוהה בחשבונית ידנית לפי מוצר|מיקום — להעביר **לפני** סימון החשבונית.
+function _shipRecalc(p,list){
+  p.shipments=list;
+  p.shippedQty=list.length?list.reduce((t,x)=>t+(+x.total||0),0):null;
+  p.shippedRows=mergeShipRows(list);
+  p.dnNo=list.reduce((m,x)=>Math.max(m,+x.no||0),0);
+  if(!Array.isArray(p.stageLog))p.stageLog=[];
+  if(!list.length){delete p.shippedAt;p.stageLog=p.stageLog.filter(e=>e.id!=='shipped');return;}
+  const last=list.reduce((a,x)=>String(x.date||'')>String(a.date||'')?x:a,list[0]);
+  if(!p.shippedAt)p.shippedAt=last.at||new Date().toISOString();
+  const note='משלוח '+list.length+': '+(+list[list.length-1].total||0)+" יח' · סה\"כ "+p.shippedQty+" יח'";
+  const ex=p.stageLog.find(e=>e.id==='shipped');
+  if(ex){ex.note=note;ex.auto=true;}
+  else{p.stageLog.push({id:'shipped',date:last.date||todayStr(),time:'',note,auto:true});
+    p.stageLog.sort((a,b)=>PROD_STAGES.findIndex(x=>x.id===a.id)-PROD_STAGES.findIndex(x=>x.id===b.id));}
+}
+async function moveShipment(pid,idx){
+  if(S.user?.role!=='manager')return;
+  const p=(S.products||[]).find(x=>x.id===pid);if(!p)return;
+  const list=prodShipments(p),s=list[idx];if(!s)return;
+  const others=prodMatches(p.cust,p.prod).filter(x=>x.id!==p.id);
+  if(!others.length){showToast('⚠ אין הזמנה אחרת לדגם הזה','var(--amber-txt)');return;}
+  const lbl=x=>((parseInt(x.orderNo,10)||0)?'#'+String(x.orderNo).padStart(3,'0')+' ':'')+(x.name||x.prod)+' — הוזמנו '+_prodQty(x)+(x.shippedQty!=null?' · יצאו '+x.shippedQty:'');
+  const hd=d=>d?String(d).slice(8,10)+'/'+String(d).slice(5,7)+'/'+String(d).slice(0,4):'—';
+  const to=await new Promise(res=>{
+    const w=document.createElement('div');
+    w.style.cssText='position:fixed;inset:0;background:rgba(0,0,0,.5);display:flex;align-items:center;justify-content:center;z-index:10001;padding:16px';
+    w.innerHTML=`<div style="background:var(--card);border-radius:14px;padding:20px;max-width:440px;width:100%;box-shadow:0 10px 40px rgba(0,0,0,.3)">
+      <div style="font-size:16px;font-weight:800;margin-bottom:8px">↔ העברת תעודה להזמנה אחרת</div>
+      <div style="font-size:13px;line-height:1.7;margin-bottom:10px">תעודה <b>${s.no?String(s.no).padStart(4,'0'):'בלי מספר'}</b> מ-${hd(s.date)} · <b>${+s.total||0} יח'</b><br>כרגע על: ${esc(lbl(p))}</div>
+      <label style="font-size:12px;font-weight:600">להעביר אל:</label>
+      <select id="mv-to" style="width:100%;font-size:13px;padding:7px;border-radius:8px;border:1px solid var(--brd);background:var(--bg);color:var(--txt);margin-top:4px">${others.map(x=>`<option value="${esc(x.id)}">${esc(lbl(x))}</option>`).join('')}</select>
+      <div style="font-size:11px;color:var(--txt3);margin-top:6px">המספר, התאריך, הכמויות והאריזה עוברים כמו שהם.</div>
+      <div style="display:flex;gap:8px;margin-top:14px">
+        <button class="btn primary" style="flex:1" id="mv-ok">העבר</button>
+        <button class="btn" style="flex:1" id="mv-no">ביטול</button>
+      </div></div>`;
+    document.body.appendChild(w);
+    const done=v=>{w.remove();res(v);};
+    w.querySelector('#mv-ok').onclick=()=>done(w.querySelector('#mv-to').value);
+    w.querySelector('#mv-no').onclick=()=>done(null);
+  });
+  if(!to)return;
+  const q=(S.products||[]).find(x=>x.id===to);if(!q)return;
+  // ⚠️ שתי הרשימות נבנות מ-prodShipments — שדות ותיקים (shippedRows בלבד) הופכים למערך shipments
+  const from=list.filter((_,k)=>k!==idx);
+  const dest=prodShipments(q).concat([{...s,movedFrom:p.id,movedAt:new Date().toISOString(),movedBy:S.user?.name||''}]);
+  _shipRecalc(p,from);_shipRecalc(q,dest);
+  saveLS();
+  if(S.fbConnected)try{
+    await fbReplaceFields('products',p.id,{shipments:p.shipments,shippedQty:p.shippedQty,shippedRows:p.shippedRows,dnNo:p.dnNo,stageLog:p.stageLog||[]});
+    await fbReplaceFields('products',q.id,{shipments:q.shipments,shippedQty:q.shippedQty,shippedRows:q.shippedRows,dnNo:q.dnNo,stageLog:q.stageLog||[],shippedAt:q.shippedAt||null});
+  }catch(e){showToast('⚠ השמירה נכשלה: '+(e.message||''),'var(--red-txt)',6000);return;}
+  showToast('↔ התעודה הועברה ל'+lbl(q));
+  try{buildStageReport();}catch(e){}
+  try{renderProducts();}catch(e){}
+  try{renderDNotes();}catch(e){}
+}
 // ─── ✏️ עריכת חומר האריזה של תעודה קיימת ──────────────────────
 // חומר האריזה נוסף למערכת אחרי שכבר הונפקו תעודות, ולכן לכל המשלוחים הישנים אין
 // אריזה ואי אפשר לחייב עליה. כאן מזינים אותה בדיעבד. **רק האריזה נערכת** —
@@ -15742,6 +15820,7 @@ function renderDNotes(){
           <button class="btn" style="font-size:11px;padding:4px 8px" title="עריכת חומר אריזה (קולב/ניילון/צלופן)" onclick="editShipMats('${escj(r.p.id)}',${r.i})">📦</button>
           <button class="btn" style="font-size:11px;padding:4px 9px" onclick="printDeliveryNote('${escj(r.p.id)}',${r.i})">📄 הדפס</button>
           <button class="btn" style="font-size:11px;padding:4px 9px" onclick="showShipments('${escj(r.p.id)}')">🚚 משלוחים</button>
+          ${S.user?.role==='manager'&&prodMatches(r.p.cust,r.p.prod).length>1?`<button class="btn" style="font-size:11px;padding:4px 8px" title="העבר את התעודה להזמנה אחרת של אותו דגם" onclick="moveShipment('${escj(r.p.id)}',${r.i})">↔</button>`:''}
         </td>
       </tr>`;
     })}</tbody>
