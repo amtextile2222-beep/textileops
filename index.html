@@ -11994,9 +11994,11 @@ function renderProformaList(){
       <td style="font-size:12px;white-space:nowrap">${pfPayCell(d)}</td>
       <td style="font-size:12px;color:var(--txt3)">${esc(d.by||'')}${d.void&&d.voidBy?'<div style="font-size:10px">בוטלה ע"י '+esc(d.voidBy)+'</div>':''}</td>
       <td style="white-space:nowrap;text-align:left">${d.manual?`
-        ${isMgr&&!d.void?`<button class="btn" style="font-size:11px;padding:4px 9px" onclick="pfManualPaid('${escj(d._id)}')">${d.paid?'↩ סמן לא שולם':'✅ סמן שולם'}</button>
+        ${!d.void||(d.checks||[]).length?`<button class="btn" style="font-size:11px;padding:4px 9px" onclick="openInvChecks('${escj(d._id)}')">💳 שיקים${(d.checks||[]).length?' ('+d.checks.length+')':''}</button>`:''}
+        ${isMgr&&!d.void&&!(d.checks||[]).length?`<button class="btn" style="font-size:11px;padding:4px 9px" onclick="pfManualPaid('${escj(d._id)}')">${d.paid?'↩ סמן לא שולם':'✅ סמן שולם'}</button>`:''}
+        ${isMgr&&!d.void?`
         <button class="btn" style="font-size:11px;padding:4px 9px;color:var(--red-txt)" onclick="pfManualVoid('${escj(d._id)}')">🚫 בטל</button>`:''}`:`
-        ${!d.void||(d.checks||[]).length?`<button class="btn" style="font-size:11px;padding:4px 9px" onclick="openInvChecks(${+d.no})">💳 שיקים${(d.checks||[]).length?' ('+d.checks.length+')':''}</button>`:''}
+        ${!d.void||(d.checks||[]).length?`<button class="btn" style="font-size:11px;padding:4px 9px" onclick="openInvChecks('${escj(d._id)}')">💳 שיקים${(d.checks||[]).length?' ('+d.checks.length+')':''}</button>`:''}
         ${d.rows?`<button class="btn" style="font-size:11px;padding:4px 9px" onclick="reprintProforma(${+d.no})">🖨 הדפס שוב</button>`:'<span style="font-size:10px;color:var(--txt3)">אין פירוט שמור</span>'}
         ${isMgr&&!d.void?`<button class="btn" style="font-size:11px;padding:4px 9px" title="חודש ותאריך" onclick="editProformaDate(${+d.no})">✏️</button>`:''}
         ${isMgr&&!d.void?`<button class="btn" style="font-size:11px;padding:4px 9px;color:var(--red-txt)" onclick="voidProforma(${+d.no})">🚫 בטל</button>`:''}`}
@@ -12023,12 +12025,14 @@ async function voidProforma(no){
 // המס ממשיכות לצאת אצל רואה החשבון. הוספה/מחיקה בטרנזקציה: שני מכשירים שרושמים במקביל לא דורסים.
 const CHK_BANKS=['04 יהב','09 בנק הדואר','10 לאומי','11 דיסקונט','12 הפועלים','13 איגוד','14 אוצר החייל','17 מרכנתיל','20 מזרחי טפחות','31 הבינלאומי','34 ערבי ישראלי','46 מסד','52 פאג"י','54 ירושלים'];
 const CHK_IMG_MAX=4,CHK_IMG_BYTES=900000; // מסמך Firestore עד 1MB
-let _chkNo=0,_chkImgs=[],_chkEdit=null; // _chkEdit = מזהה השיק שבעריכה (מנהל בלבד, החלטת המשתמש 08/10)
-// 📒 חשבונית ידנית — אין לה שיקים במערכת; "שולם" הוא סימון של המנהל
-const pfPaid=d=>d?.manual?(d.paid?+d.total||0:0):Math.round((d?.checks||[]).reduce((t,c)=>t+(+c.amount||0),0)*100)/100;
+// _chkNo = מזהה מסמך החשבונית (_id): ברגילה = המספר, בידנית = manual_... (09/10)
+let _chkNo='',_chkImgs=[],_chkEdit=null;
+const _chkD=()=>_pfList.find(x=>x._id===_chkNo); // _chkEdit = מזהה השיק שבעריכה (מנהל בלבד, החלטת המשתמש 08/10)
+// 📒 חשבונית ידנית: עם שיקים — לפי השיקים כמו רגילה; בלי — לפי הסימון "שולם" של המנהל
+const pfPaid=d=>d?.manual&&!(d.checks||[]).length?(d.paid?+d.total||0:0):Math.round((d?.checks||[]).reduce((t,c)=>t+(+c.amount||0),0)*100)/100;
 const pfLeft=d=>Math.round(((+d?.total||0)-pfPaid(d))*100)/100;
 function pfPayCell(d){
-  if(d.manual)return d.paid?'<span style="color:var(--green-txt,#16a34a);font-weight:700">✅ שולם</span>':'<span style="color:var(--amber-txt)">לא שולם</span>';
+  if(d.manual&&!(d.checks||[]).length)return d.paid?'<span style="color:var(--green-txt,#16a34a);font-weight:700">✅ שולם</span>':'<span style="color:var(--amber-txt)">לא שולם</span>';
   if(!(d.checks||[]).length)return '<span style="color:var(--txt3)">—</span>';
   const left=pfLeft(d);
   if(left<=0.009)return `<span style="color:var(--green-txt,#16a34a);font-weight:700">✅ שולם</span>${left<-0.009?'<div style="font-size:10px;color:var(--txt3)">עודף '+dnMoney(-left)+'</div>':''}`;
@@ -12036,8 +12040,8 @@ function pfPayCell(d){
 }
 function openInvChecks(no){
   if(!_canPricing())return;
-  const d=_pfList.find(x=>+x.no===+no);if(!d)return;
-  _chkNo=+no;_chkImgs=[];_chkEdit=null;
+  const d=_pfList.find(x=>x._id===String(no));if(!d)return;
+  _chkNo=String(no);_chkImgs=[];_chkEdit=null;
   document.getElementById('chk-wrap')?.remove();
   const wrap=document.createElement('div');wrap.id='chk-wrap';
   wrap.style.cssText='position:fixed;inset:0;background:rgba(0,0,0,.5);display:flex;align-items:flex-start;justify-content:center;z-index:10002;padding:16px;overflow-y:auto;overscroll-behavior:contain;-webkit-overflow-scrolling:touch';
@@ -12048,7 +12052,7 @@ function openInvChecks(no){
 }
 function renderInvChecks(){
   const box=document.getElementById('chk-box');if(!box)return;
-  const d=_pfList.find(x=>+x.no===_chkNo);if(!d)return;
+  const d=_chkD();if(!d)return;
   const isMgr=S.user?.role==='manager',list=d.checks||[],left=pfLeft(d);
   const ed=_chkEdit?list.find(x=>x.id===_chkEdit)||null:null;
   const hd=x=>x?String(x).slice(8,10)+'/'+String(x).slice(5,7)+'/'+String(x).slice(0,4):'—';
@@ -12127,7 +12131,7 @@ async function _chkTx(fn){
   return out;
 }
 async function saveInvCheck(){
-  const d=_pfList.find(x=>+x.no===_chkNo);if(!d||d.void)return;
+  const d=_chkD();if(!d||d.void)return;
   if(!db||!S.fbConnected){showToast('⚠ אין חיבור — השיק לא נשמר','var(--red-txt)');return;}
   const v=id=>(document.getElementById(id)?.value||'').trim();
   const amount=Math.round((parseFloat(v('chk-amt'))||0)*100)/100;
@@ -12165,7 +12169,7 @@ async function saveInvCheck(){
 // ✏️ טוען את השיק לטופס, כולל הצילומים הקיימים (כדי שאפשר יהיה להסיר/להוסיף ולא רק להחליף)
 async function editInvCheck(id){
   if(S.user?.role!=='manager')return;
-  const d=_pfList.find(x=>+x.no===_chkNo);const c=(d?.checks||[]).find(x=>x.id===id);if(!c||d.void)return;
+  const d=_chkD();const c=(d?.checks||[]).find(x=>x.id===id);if(!c||d.void)return;
   let imgs=[];
   if(+c.imgs)try{const{doc,getDoc}=window._fb;const s=await getDoc(doc(db,'checkImages',_chkNo+'_'+id));imgs=s.data()?.imgs||[];}
   catch(e){showToast('⚠ טעינת הצילום נכשלה: '+(e.message||''),'var(--red-txt)');return;}
@@ -12175,8 +12179,8 @@ async function editInvCheck(id){
 }
 async function delInvCheck(id){
   if(S.user?.role!=='manager')return;
-  const d=_pfList.find(x=>+x.no===_chkNo);const c=(d?.checks||[]).find(x=>x.id===id);if(!c)return;
-  if(!await showConfirm('מחיקת שיק','למחוק את שיק '+c.chk+' ('+dnMoney(c.amount)+') מחשבונית '+_chkNo+'?','מחק','חזור'))return;
+  const d=_chkD();const c=(d?.checks||[]).find(x=>x.id===id);if(!c)return;
+  if(!await showConfirm('מחיקת שיק','למחוק את שיק '+c.chk+' ('+dnMoney(c.amount)+') מחשבונית '+d.no+'?','מחק','חזור'))return;
   try{
     d.checks=await _chkTx(arr=>arr.filter(x=>x.id!==id));
     if(_chkEdit===id){_chkEdit=null;_chkImgs=[];}
@@ -12187,7 +12191,7 @@ async function delInvCheck(id){
 // no — מס' החשבונית כשנפתח מטבלת השיקים (שם _chkNo לא נקבע)
 async function chkShowImgs(id,no){
   let imgs=[];
-  try{const{doc,getDoc}=window._fb;const s=await getDoc(doc(db,'checkImages',(+no||_chkNo)+'_'+id));imgs=s.data()?.imgs||[];}
+  try{const{doc,getDoc}=window._fb;const s=await getDoc(doc(db,'checkImages',(no!=null&&no!==''?String(no):_chkNo)+'_'+id));imgs=s.data()?.imgs||[];}
   catch(e){showToast('⚠ טעינת הצילום נכשלה: '+(e.message||''),'var(--red-txt)');return;}
   if(!imgs.length){showToast('⚠ לא נמצא צילום','var(--amber-txt)');return;}
   const w=document.createElement('div');
@@ -12199,7 +12203,7 @@ async function chkShowImgs(id,no){
 // 🖨 אישור קבלת תשלום ללקוח — **לא** "קבלה": מסמך פנימי שמפרט את השיקים שהתקבלו על החשבונית
 // 📷 09/10: צילומי השיקים מצורפים בעמוד נפרד אחרי החתימות (בקשת המשתמש)
 async function printInvChecks(){
-  const d=_pfList.find(x=>+x.no===_chkNo);if(!d||!(d.checks||[]).length)return;
+  const d=_chkD();if(!d||!(d.checks||[]).length)return;
   const pics=[];
   for(const c of d.checks){
     if(!+c.imgs)continue;
@@ -12333,11 +12337,11 @@ function renderChecksReport(){
     <tbody>${rows.map(({c,d,name})=>`<tr${(c.due||'')<today?' style="opacity:.6"':''}>
       <td style="white-space:nowrap"><b>${hd(c.due)}</b>${tag(c.due)}</td>
       <td>${esc(name)}</td>
-      <td><a href="#" onclick="event.preventDefault();openInvChecks(${+d.no})" style="color:var(--blue-txt,#1d4ed8);font-weight:700">${+d.no}</a>${d.void?' <span style="color:var(--red-txt);font-size:10px;font-weight:700">מבוטלת</span>':''}</td>
+      <td><a href="#" onclick="event.preventDefault();openInvChecks('${escj(d._id)}')" style="color:var(--blue-txt,#1d4ed8);font-weight:700">${d.manual?'📒 ':''}${esc(String(d.no))}</a>${d.void?' <span style="color:var(--red-txt);font-size:10px;font-weight:700">מבוטלת</span>':''}</td>
       <td><b>${esc(c.chk)}</b></td>
       <td style="font-size:12px">${esc(c.bank||'')}</td><td>${esc(c.branch||'')}</td><td>${esc(c.acct||'')}</td>
       <td style="text-align:center;white-space:nowrap;font-weight:700">${dnMoney(c.amount)}</td>
-      <td style="white-space:nowrap;text-align:left">${+c.imgs?`<button class="btn" style="font-size:11px;padding:4px 8px" onclick="chkShowImgs('${escj(c.id)}',${+d.no})">📷 ${+c.imgs}</button>`:''}</td>
+      <td style="white-space:nowrap;text-align:left">${+c.imgs?`<button class="btn" style="font-size:11px;padding:4px 8px" onclick="chkShowImgs('${escj(c.id)}','${escj(d._id)}')">📷 ${+c.imgs}</button>`:''}</td>
     </tr>`).join('')}</tbody>
     <tfoot><tr><td colspan="7" style="text-align:left;font-weight:700">סה"כ ${rows.length} שיקים</td><td style="text-align:center;font-weight:800;white-space:nowrap">${dnMoney(tot)}</td><td></td></tr></tfoot>
   </table></div>
@@ -15452,12 +15456,12 @@ function dnPayState(r){const d=dnInvOf(r);return !d?'none':pfLeft(d)<=0.009?'pai
 function dnPayCell(r){
   const d=dnInvOf(r);
   if(!d)return '<span style="color:var(--txt3);font-size:11px">⏳ טרם</span>';
-  if(d.manual)return `<span title="חשבונית ידנית מהפנקס${d.month?' · חודש '+d.month.slice(5,7)+'/'+d.month.slice(0,4):''}" style="font-weight:700;font-size:12px">📒 ${esc(String(d.no))}</span><div style="font-size:11px">${pfPayCell(d)}</div>`;
+  if(d.manual)return `<a href="#" onclick="event.preventDefault();openInvChecks('${escj(d._id)}')" title="חשבונית ידנית מהפנקס${d.month?' · חודש '+d.month.slice(5,7)+'/'+d.month.slice(0,4):''}" style="color:var(--blue-txt,#1d4ed8);font-weight:700;font-size:12px">📒 ${esc(String(d.no))}</a><div style="font-size:11px">${pfPayCell(d)}</div>`;
   const left=pfLeft(d),paid=pfPaid(d);
   const st=left<=0.009?'<span style="color:var(--green-txt,#16a34a);font-weight:700">✅ שולם</span>'
     :paid>0?'<span style="color:var(--amber-txt);font-weight:700">💳 חלקי</span>'
     :'<span style="color:var(--amber-txt)">לא שולם</span>';
-  return `<a href="#" onclick="event.preventDefault();openInvChecks(${+d.no})" title="פתח את השיקים של החשבונית" style="color:var(--blue-txt,#1d4ed8);font-weight:700;font-size:12px">🧾 ${+d.no}</a><div style="font-size:11px">${st}</div>`;
+  return `<a href="#" onclick="event.preventDefault();openInvChecks('${escj(d._id)}')" title="פתח את השיקים של החשבונית" style="color:var(--blue-txt,#1d4ed8);font-weight:700;font-size:12px">🧾 ${+d.no}</a><div style="font-size:11px">${st}</div>`;
 }
 // 📒 חשבונית ידנית (09/10/2026): תעודות שחויבו בפנקס לפני שהמערכת הפיקה חשבוניות — נרשמות
 // כמסמך ב-proformaInvoices עם manual:true, כדי שיסומנו כ"הותחשבנו" ושה-🛑 של החיוב הכפול יכיר אותן.
@@ -15472,18 +15476,20 @@ async function dnManualInvoice(){
   try{await _pfLoad();_pfAt=Date.now();}catch(e){}
   const dup=f.rows.filter(r=>dnInvOf(r));
   if(dup.length){showToast('⚠ '+dup.length+' מהתעודות המסומנות כבר בחשבונית — בטל את הסימון שלהן','var(--red-txt)',6000);return;}
-  const vat=+(S.settings?.vatPct??18)||0,vatAmt=Math.round(f.amount*vat)/100,total=f.amount+vatAmt;
+  const vat=+(S.settings?.vatPct??18)||0;
   const _t=todayStr(),_pm=new Date(+_t.slice(0,4),+_t.slice(5,7)-2,1);
   const meta=await new Promise(res=>{
     const w=document.createElement('div');
     w.style.cssText='position:fixed;inset:0;background:rgba(0,0,0,.5);display:flex;align-items:center;justify-content:center;z-index:10001;padding:16px';
     w.innerHTML=`<div style="background:var(--card);border-radius:14px;padding:20px;max-width:400px;width:100%;box-shadow:0 10px 40px rgba(0,0,0,.3)">
       <div style="font-size:16px;font-weight:800;margin-bottom:8px">📒 חשבונית ידנית מהפנקס</div>
-      <div style="font-size:13px;line-height:1.7;margin-bottom:12px">ללקוח: <b>${esc(custs[0].name)}</b><br>${f.rows.length} תעודות · לפני מע"מ ${dnMoney(f.amount)} · כולל מע"מ ${dnMoney(total)}</div>
+      <div style="font-size:13px;line-height:1.7;margin-bottom:12px">ללקוח: <b>${esc(custs[0].name)}</b><br>${f.rows.length} תעודות · לפי המערכת: לפני מע"מ <b>${dnMoney(f.amount)}</b></div>
       <div style="display:grid;grid-template-columns:1fr 1fr;gap:8px">
         <div class="field" style="margin:0"><label>מספר החשבונית בפנקס</label><input id="mi-no" inputmode="numeric" style="font-size:14px"/></div>
         <div class="field" style="margin:0"><label>📅 חודש</label><input id="mi-month" type="month" value="${_pm.getFullYear()+'-'+pad2(_pm.getMonth()+1)}" style="font-size:14px"/></div>
+        <div class="field" style="margin:0;grid-column:1/-1"><label>סכום לפני מע"מ — כמו שכתוב בחשבונית</label><input id="mi-net" type="number" step="0.01" inputmode="decimal" value="${f.amount.toFixed(2)}" style="font-size:14px"/></div>
       </div>
+      <div id="mi-tot" style="font-size:12px;color:var(--txt3);margin-top:4px"></div>
       <label style="display:flex;align-items:center;gap:6px;margin-top:10px;font-size:13px;cursor:pointer"><input id="mi-paid" type="checkbox" style="width:auto"/> ✅ החשבונית כבר שולמה</label>
       <div style="font-size:11px;color:var(--txt3);margin-top:6px">לא מודפס דבר — רק מסמן שהתעודות כבר חויבו.</div>
       <div style="display:flex;gap:8px;margin-top:14px">
@@ -15492,11 +15498,16 @@ async function dnManualInvoice(){
       </div></div>`;
     document.body.appendChild(w);
     const done=v=>{w.remove();res(v);};
+    // הסכום בפנקס קובע (ממנו נגזרת היתרה מול השיקים); המערכת מציגה את שלה רק להשוואה
+    const net=()=>Math.round((parseFloat(w.querySelector('#mi-net').value)||0)*100)/100;
+    const tot=()=>{const n=net(),t=n+Math.round(n*vat)/100;w.querySelector('#mi-tot').innerHTML=`מע"מ ${vat}%: ${dnMoney(t-n)} · <b>סה"כ כולל מע"מ ${dnMoney(t)}</b>${Math.abs(n-f.amount)>0.009?' · <span style="color:var(--amber-txt)">שונה מהמערכת ב-'+dnMoney(n-f.amount)+'</span>':''}`;};
+    w.querySelector('#mi-net').oninput=tot;tot();
     w.querySelector('#mi-ok').onclick=()=>{
       const no=(w.querySelector('#mi-no').value||'').trim(),month=w.querySelector('#mi-month').value;
       if(!no){alert('יש להזין את מספר החשבונית');return;}
       if(!month){alert('יש לבחור חודש');return;}
-      done({no,month,paid:w.querySelector('#mi-paid').checked});
+      if(!(net()>0)){alert('יש להזין את הסכום');return;}
+      done({no,month,net:net(),paid:w.querySelector('#mi-paid').checked});
     };
     w.querySelector('#mi-cancel').onclick=()=>done(null);
   });
@@ -15504,7 +15515,7 @@ async function dnManualInvoice(){
   const id='manual_'+meta.no.replace(/[^\w-]/g,'')+'_'+Date.now().toString(36);
   const rec={manual:true,no:/^\d+$/.test(meta.no)?+meta.no:meta.no,month:meta.month,date:monthEnd(meta.month),
     cust:custs[0].code,custName:custs[0].name,notes:f.rows.map(r=>+r.s.no||0).filter(Boolean),keys:f.rows.filter(r=>!(+r.s.no)).map(dnKey),
-    net:f.amount,vatPct:vat,vat:vatAmt,total,paid:meta.paid,by:S.user?.name||'',byId:S.user?.id||'',at:Date.now(),issuedOn:todayStr()};
+    net:meta.net,sysNet:f.amount,vatPct:vat,vat:Math.round(meta.net*vat)/100,total:meta.net+Math.round(meta.net*vat)/100,paid:meta.paid,by:S.user?.name||'',byId:S.user?.id||'',at:Date.now(),issuedOn:todayStr()};
   try{await fbSet('proformaInvoices',id,rec);}
   catch(e){showToast('⚠ השמירה נכשלה: '+(e.message||''),'var(--red-txt)',6000);return;}
   _pfList.push({...rec,_id:id});
