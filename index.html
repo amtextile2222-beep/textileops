@@ -12078,7 +12078,7 @@ function pfPayCell(d){
 function openInvChecks(no){
   if(!_canPricing())return;
   const d=_pfList.find(x=>x._id===String(no));if(!d)return;
-  _chkNo=String(no);_chkImgs=[];_chkEdit=null;
+  _chkNo=String(no);_chkImgs=[];_chkEdit=null;_taxImgs=[];
   document.getElementById('chk-wrap')?.remove();
   const wrap=document.createElement('div');wrap.id='chk-wrap';
   wrap.style.cssText='position:fixed;inset:0;background:rgba(0,0,0,.5);display:flex;align-items:flex-start;justify-content:center;z-index:10002;padding:16px;overflow-y:auto;overscroll-behavior:contain;-webkit-overflow-scrolling:touch';
@@ -12176,7 +12176,8 @@ function renderTaxInvs(){
   const chkNo=id=>(d.checks||[]).find(c=>c.id===id)?.chk||'';
   const open=(d.checks||[]).filter(c=>!chkTaxOf(d,c));
   const inp='font-size:14px;padding:7px;border-radius:8px;border:1px solid var(--brd);background:var(--card);color:var(--txt);width:100%';
-  box.innerHTML=`<div class="sec" style="margin-top:16px;margin-bottom:6px">🧾 חשבוניות מס</div>
+  box.innerHTML=`<input id="tx-att" type="file" accept="image/*" multiple class="hidden" onchange="taxAttach(this)">
+    <div class="sec" style="margin-top:16px;margin-bottom:6px">🧾 חשבוניות מס</div>
     <div style="font-size:12px;margin-bottom:6px;color:${!list.length?'var(--txt3)':left<=0.009?'var(--green-txt,#16a34a)':'var(--amber-txt)'};font-weight:${list.length?700:400}">${!list.length?'עדיין לא נרשמה חשבונית מס':left<=0.009?'✅ הוצאה חשבונית מס על כל הסכום':'הוצאה על '+dnMoney(taxSum(d))+' · נשאר '+dnMoney(left)}</div>
     ${list.length?`<div class="tbl-wrap"><table>
       <thead><tr><th>מס'</th><th>תאריך</th><th style="text-align:center">לפני מע"מ</th><th style="text-align:center">מע"מ</th><th style="text-align:center">סה"כ</th><th>שיקים</th><th></th></tr></thead>
@@ -12187,7 +12188,11 @@ function renderTaxInvs(){
         <td style="text-align:center;white-space:nowrap">${dnMoney(t.vat)}</td>
         <td style="text-align:center;white-space:nowrap;font-weight:700">${dnMoney(t.total)}</td>
         <td style="font-size:12px">${(t.chkIds||[]).map(chkNo).filter(Boolean).map(esc).join(', ')||'—'}</td>
-        <td>${isMgr?`<button class="btn" style="font-size:11px;padding:4px 8px;color:var(--red-txt)" onclick="delTaxInv('${escj(t.id)}')">🗑</button>`:''}</td>
+        <td style="white-space:nowrap;text-align:left">
+          ${+t.imgs?`<button class="btn" style="font-size:11px;padding:4px 8px" onclick="chkShowImgs('${escj(t.id)}')">📷 ${+t.imgs}</button>`:''}
+          ${!d.void&&(+t.imgs||0)<CHK_IMG_MAX?`<button class="btn" style="font-size:11px;padding:4px 8px" title="צרף צילום של חשבונית המס" onclick="_taxAttId='${escj(t.id)}';document.getElementById('tx-att').click()">📎</button>`:''}
+          ${isMgr?`<button class="btn" style="font-size:11px;padding:4px 8px;color:var(--red-txt)" onclick="delTaxInv('${escj(t.id)}')">🗑</button>`:''}
+        </td>
       </tr>`).join('')}</tbody></table></div>`:''}
     ${d.void||left<=0.009?'':`<details style="margin-top:8px;border:1px dashed var(--brd);border-radius:8px;padding:6px 9px"${list.length?'':' open'}>
       <summary style="font-size:13px;font-weight:600;cursor:pointer">➕ רישום חשבונית מס מהפנקס</summary>
@@ -12199,8 +12204,53 @@ function renderTaxInvs(){
       ${open.length?`<div style="font-size:12px;font-weight:600;margin-top:8px">על אילו שיקים? <span style="font-weight:400;color:var(--txt3)">(סימון ממלא את הסכום)</span></div>
       ${open.map(c=>`<label style="display:flex;align-items:center;gap:6px;font-size:12px;margin-top:4px;cursor:pointer"><input type="checkbox" class="tx-chk" value="${esc(c.id)}" data-amt="${+c.amount||0}" onchange="txSyncTotal()" style="width:auto"/> שיק ${esc(c.chk)} · פירעון ${hd(c.due)} · ${dnMoney(c.amount)}</label>`).join('')}`:''}
       <div style="font-size:11px;color:var(--txt3);margin-top:6px">לא מודפס דבר — רק נרשם שחשבונית המס הוצאה. הסכום לפני מע"מ והמע"מ מחושבים מהסה"כ.</div>
+      <div style="display:flex;gap:8px;margin-top:8px;flex-wrap:wrap">
+        <button type="button" class="btn" style="font-size:12px" onclick="document.getElementById('tx-cam').click()">📷 צלם חשבונית</button>
+        <button type="button" class="btn" style="font-size:12px" onclick="document.getElementById('tx-file').click()">📁 העלה צילום</button>
+        <input id="tx-cam" type="file" accept="image/*" capture="environment" class="hidden" onchange="taxAddImgs(this)">
+        <input id="tx-file" type="file" accept="image/*" multiple class="hidden" onchange="taxAddImgs(this)">
+      </div>
+      <div id="tax-thumbs" style="display:flex;gap:8px;flex-wrap:wrap;margin-top:8px"></div>
       <button class="btn primary" style="width:100%;margin-top:8px" onclick="saveTaxInv()">💾 רשום חשבונית מס</button>
     </details>`}`;
+  renderTaxThumbs();
+}
+// 📷 צילום חשבונית המס — בטופס הרישום (_taxImgs), או 📎 לרשומה קיימת (_taxAttId)
+let _taxImgs=[],_taxAttId='';
+async function _taxReadImgs(input,max){
+  const out=[];
+  for(const file of input.files){
+    if(out.length>=max)break;
+    const raw=await new Promise(res=>{const r=new FileReader();r.onload=e=>res(e.target.result);r.readAsDataURL(file);});
+    out.push(await compressImage(raw,1600,1600,0.6));
+  }
+  input.value='';
+  return out;
+}
+function renderTaxThumbs(){
+  const el=document.getElementById('tax-thumbs');if(!el)return;
+  el.innerHTML=_taxImgs.map((s,i)=>`<div style="position:relative"><img src="${s}" style="height:80px;border-radius:6px;border:1px solid var(--brd)"/>
+    <button type="button" onclick="_taxImgs.splice(${i},1);renderTaxThumbs()" style="position:absolute;top:2px;left:2px;background:var(--red);color:#fff;border:none;border-radius:50%;width:22px;height:22px;cursor:pointer;font-size:12px">✕</button></div>`).join('');
+}
+async function taxAddImgs(input){
+  const room=CHK_IMG_MAX-_taxImgs.length;
+  if(room<=0){showToast('⚠ עד '+CHK_IMG_MAX+' צילומים','var(--amber-txt)');input.value='';return;}
+  _taxImgs=_taxImgs.concat(await _taxReadImgs(input,room));
+  renderTaxThumbs();
+}
+async function taxAttach(input){
+  const d=_chkD(),id=_taxAttId;const t=(d?.taxInvs||[]).find(x=>x.id===id);if(!t){input.value='';return;}
+  if(!db||!S.fbConnected){showToast('⚠ אין חיבור','var(--red-txt)');input.value='';return;}
+  let cur=[];
+  if(+t.imgs)try{const{doc,getDoc}=window._fb;const s=await getDoc(doc(db,'checkImages',_chkNo+'_'+id));cur=s.data()?.imgs||[];}catch(e){}
+  const add=await _taxReadImgs(input,CHK_IMG_MAX-cur.length);if(!add.length)return;
+  const imgs=cur.concat(add);
+  if(imgs.reduce((s,x)=>s+x.length,0)>CHK_IMG_BYTES){showToast('⚠ הצילומים גדולים מדי','var(--red-txt)');return;}
+  try{
+    await fbSet('checkImages',_chkNo+'_'+id,{imgs,invNo:_chkNo,taxNo:t.no,by:S.user?.name||'',at:Date.now()});
+    d.taxInvs=await _chkTx(arr=>arr.map(x=>x.id===id?{...x,imgs:imgs.length}:x),'taxInvs');
+    showToast('📷 הצילום נשמר');renderInvChecks();
+  }catch(e){showToast('⚠ השמירה נכשלה: '+(e.message||''),'var(--red-txt)');}
 }
 function txSyncTotal(){
   const s=[...document.querySelectorAll('.tx-chk:checked')].reduce((t,x)=>t+(+x.dataset.amt||0),0);
@@ -12219,9 +12269,15 @@ async function saveTaxInv(){
   if(total>left+0.009&&!confirm('הסכום ('+dnMoney(total)+') גבוה ממה שנשאר בלי חשבונית מס ('+dnMoney(Math.max(0,left))+'). לרשום בכל זאת?'))return;
   const vatPct=+(d.vatPct??S.settings?.vatPct??18)||0,net=Math.round(total/(1+vatPct/100)*100)/100;
   const rec={id:'t'+Date.now(),no,date,total,net, // המספר כמו שהוקלד — "0200" ולא 200, כמו בפנקסvat:Math.round((total-net)*100)/100,vatPct,
-    chkIds:[...document.querySelectorAll('.tx-chk:checked')].map(x=>x.value),by:S.user?.name||'',byId:S.user?.id||'',at:Date.now()};
-  try{d.taxInvs=await _chkTx(arr=>[...arr,rec],'taxInvs');}
+    chkIds:[...document.querySelectorAll('.tx-chk:checked')].map(x=>x.value),imgs:_taxImgs.length,by:S.user?.name||'',byId:S.user?.id||'',at:Date.now()};
+  if(_taxImgs.reduce((t,x)=>t+x.length,0)>CHK_IMG_BYTES){alert('הצילומים גדולים מדי — הסר צילום אחד ונסה שוב');return;}
+  try{
+    // 📷 באותו אוסף של צילומי השיקים (checkImages, canPricing) — המזהה {חשבונית}_{t...} לא מתנגש בשיקים (c...)
+    if(_taxImgs.length)await fbSet('checkImages',_chkNo+'_'+rec.id,{imgs:_taxImgs,invNo:_chkNo,taxNo:no,by:rec.by,at:rec.at});
+    d.taxInvs=await _chkTx(arr=>[...arr,rec],'taxInvs');
+  }
   catch(e){showToast('⚠ השמירה נכשלה: '+(e.message||''),'var(--red-txt)',6000);return;}
+  _taxImgs=[];
   showToast('🧾 חשבונית מס '+no+' נרשמה — '+dnMoney(total));
   renderInvChecks();renderProformaList();renderChecksReport();
 }
@@ -12229,7 +12285,7 @@ async function delTaxInv(id){
   if(S.user?.role!=='manager')return;
   const d=_chkD();const t=(d?.taxInvs||[]).find(x=>x.id===id);if(!t)return;
   if(!await showConfirm('מחיקת רישום','למחוק את רישום חשבונית מס '+t.no+' ('+dnMoney(t.total)+')?\nחשבונית המס עצמה בפנקס לא מושפעת.','מחק','חזור'))return;
-  try{d.taxInvs=await _chkTx(arr=>arr.filter(x=>x.id!==id),'taxInvs');renderInvChecks();renderProformaList();renderChecksReport();showToast('🗑 נמחק');}
+  try{d.taxInvs=await _chkTx(arr=>arr.filter(x=>x.id!==id),'taxInvs');if(+t.imgs)try{await fbDel('checkImages',_chkNo+'_'+id);}catch(e){}renderInvChecks();renderProformaList();renderChecksReport();showToast('🗑 נמחק');}
   catch(e){showToast('⚠ המחיקה נכשלה: '+(e.message||''),'var(--red-txt)');}
 }
 function renderChkThumbs(){
