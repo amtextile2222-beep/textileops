@@ -12065,6 +12065,8 @@ const _chkD=()=>_pfList.find(x=>x._id===_chkNo); // _chkEdit = מזהה השיק
 // 📒 חשבונית ידנית: עם שיקים — לפי השיקים כמו רגילה; בלי — לפי הסימון "שולם" של המנהל
 const pfPaid=d=>d?.manual&&!(d.checks||[]).length?(d.paid?+d.total||0:0):Math.round((d?.checks||[]).reduce((t,c)=>t+(+c.amount||0),0)*100)/100;
 const pfLeft=d=>Math.round(((+d?.total||0)-pfPaid(d))*100)/100;
+const chkPaid=d=>Math.round((d?.checks||[]).reduce((t,c)=>t+(+c.amount||0),0)*100)/100;
+const chkLeft=d=>Math.round(((+d?.total||0)-chkPaid(d))*100)/100;
 function pfPayCell(d){
   if(d.manual&&!(d.checks||[]).length)return d.paid?'<span style="color:var(--green-txt,#16a34a);font-weight:700">✅ שולם</span>':'<span style="color:var(--amber-txt)">לא שולם</span>';
   if(!(d.checks||[]).length)return '<span style="color:var(--txt3)">—</span>';
@@ -12087,7 +12089,8 @@ function openInvChecks(no){
 function renderInvChecks(){
   const box=document.getElementById('chk-box');if(!box)return;
   const d=_chkD();if(!d)return;
-  const isMgr=S.user?.role==='manager',list=d.checks||[],left=pfLeft(d);
+  // בחלון השיקים — תמיד לפי השיקים בלבד: בחשבונית ידנית שסומנה 'שולמה' pfLeft=0, והשיק הראשון קיבל אזהרת 'גבוה מהיתרה (₪0)'
+  const isMgr=S.user?.role==='manager',list=d.checks||[],left=chkLeft(d);
   const ed=_chkEdit?list.find(x=>x.id===_chkEdit)||null:null;
   const hd=x=>x?String(x).slice(8,10)+'/'+String(x).slice(5,7)+'/'+String(x).slice(0,4):'—';
   const inp='font-size:14px;padding:7px;border-radius:8px;border:1px solid var(--brd);background:var(--card);color:var(--txt);width:100%';
@@ -12097,7 +12100,7 @@ function renderInvChecks(){
     </div>
     <div style="font-size:13px;line-height:1.8;background:var(--bg);border-radius:8px;padding:8px 10px;margin-bottom:10px">
       ${esc(d.custName||S.customerNames?.[d.cust]||d.cust||'')} · תאריך ${hd(d.date)}<br>
-      סה"כ לתשלום <b>${dnMoney(d.total)}</b> · התקבל <b style="color:var(--green-txt,#16a34a)">${dnMoney(pfPaid(d))}</b> ·
+      סה"כ לתשלום <b>${dnMoney(d.total)}</b> · התקבל <b style="color:var(--green-txt,#16a34a)">${dnMoney(chkPaid(d))}</b> ·
       ${left>0.009?`יתרה <b style="color:var(--amber-txt)">${dnMoney(left)}</b>`:left<-0.009?`עודף <b>${dnMoney(-left)}</b>`:'<b style="color:var(--green-txt,#16a34a)">✅ שולם במלואו</b>'}
     </div>
     ${list.length?`<div class="tbl-wrap"><table>
@@ -12179,7 +12182,7 @@ async function saveInvCheck(){
   if(!c.due){alert('יש להזין תאריך פירעון');return;}
   if(_chkImgs.reduce((t,s)=>t+s.length,0)>CHK_IMG_BYTES){alert('הצילומים גדולים מדי — הסר צילום אחד ונסה שוב');return;}
   if((d.checks||[]).some(x=>x.id!==c.id&&x.chk===c.chk&&x.acct===c.acct)&&!confirm('שיק מספר '+c.chk+' כבר רשום בחשבונית הזו. לרשום אותו שוב?'))return;
-  const left=pfLeft(d)+(ed?+ed.amount||0:0); // בעריכה — הסכום הקודם של השיק חוזר ליתרה
+  const left=chkLeft(d)+(ed?+ed.amount||0:0); // בעריכה — הסכום הקודם של השיק חוזר ליתרה
   if(amount>left+0.009&&!confirm('הסכום ('+dnMoney(amount)+') גבוה מהיתרה בחשבונית ('+dnMoney(Math.max(0,left))+'). לרשום בכל זאת?'))return;
   const btn=document.getElementById('chk-save');if(btn){btn.disabled=true;btn.textContent='⏳ שומר…';}
   try{
