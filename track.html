@@ -8,6 +8,8 @@
 <meta name="theme-color" content="#185FA5"/>
 <title>מעקב הזמנות</title>
 <link rel="icon" href="icon-192.png"/>
+<link rel="apple-touch-icon" href="icon-180.png"/>
+<meta name="apple-mobile-web-app-title" content="מעקב הזמנות"/>
 <style>
 /* 📦 דף מעקב הזמנות ללקוח (10/10/2026). כניסה עם קישור במייל (Firebase Email Link), פעם אחת למכשיר.
    הנתונים מ-Cloud Function customerTrack, שבודקת שהמייל המאומת מורשה ללקוח — ראה functions/index.js */
@@ -65,6 +67,9 @@ const STAGES=['ההזמנה התקבלה','בספירה וגזירה','ממתי�
 const URL_FN='https://us-central1-textileops-aef4a.cloudfunctions.net/customerTrack';
 const PAGE=location.origin+location.pathname;
 const LS_MAIL='trk_email';
+// 📱 נפתח מאייקון במסך הבית. באייפון זו אפליקציה עם אחסון נפרד מ-Safari — לחיצה על הקישור במייל
+// מתחברת ב-Safari ולא כאן ⇒ במצב הזה מציעים להדביק את הקישור (signInWithEmailLink מקבל אותו ישירות)
+const STANDALONE=navigator.standalone===true||matchMedia('(display-mode: standalone)').matches;
 const esc=s=>String(s??'').replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;');
 const fmtD=d=>{const m=/^(\d{4})-(\d{2})-(\d{2})/.exec(d||'');return m?m[3]+'/'+m[2]+'/'+m[1]:'';};
 const ls={get:k=>{try{return localStorage.getItem(k)||''}catch(e){return''}},set:(k,v)=>{try{localStorage.setItem(k,v)}catch(e){}},del:k=>{try{localStorage.removeItem(k)}catch(e){}}};
@@ -106,7 +111,14 @@ function showLogin(msg,confirmMode){
       await sendSignInLinkToEmail(auth,em,{url:PAGE,handleCodeInApp:true});
       ls.set(LS_MAIL,em);
       appEl.innerHTML=`<div class="login"><p>📧 שלחנו קישור כניסה אל<br><b dir="ltr">${esc(em)}</b></p>
-        <p>פתחו את המייל ולחצו על הקישור. לא הגיע? בדקו בתיקיית הספאם.</p></div>`;
+        ${STANDALONE?`<p>פתחתם ממסך הבית? <b>אל תלחצו</b> על הקישור במייל — לחצו עליו לחיצה ארוכה ← <b>העתק</b>, והדביקו כאן:</p>
+        <form id="pf"><input id="pl" dir="ltr" placeholder="https://…" autocomplete="off"/><button>כניסה</button><div class="err" id="per"></div></form>`
+        :'<p>פתחו את המייל ולחצו על הקישור.</p>'}<p>לא הגיע? בדקו בתיקיית הספאם.</p></div>`;
+      if(STANDALONE)$('pf').onsubmit=async ev=>{
+        ev.preventDefault();const u=$('pl').value.trim();
+        if(!isSignInWithEmailLink(auth,u)){$('per').textContent='זה לא קישור הכניסה מהמייל';return;}
+        await finishLink(em,u);
+      };
     }catch(err){
       b.disabled=false;
       $('er').textContent=/invalid-email/.test(err.code)?'כתובת המייל אינה תקינה':
@@ -115,9 +127,9 @@ function showLogin(msg,confirmMode){
   };
 }
 // חזרה מהקישור שבמייל. במכשיר אחר אין את המייל השמור ⇒ מבקשים להקליד אותו שוב (דרישת Firebase)
-async function finishLink(em){
+async function finishLink(em,link){
   try{
-    await signInWithEmailLink(auth,em,location.href);
+    await signInWithEmailLink(auth,em,link||location.href);
     ls.set(LS_MAIL,em);
     history.replaceState(null,'',PAGE);
   }catch(err){
