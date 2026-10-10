@@ -1463,7 +1463,7 @@ exports.attendanceCloserNow = functions.https.onRequest(async (req, res) => {
 // הלקוח צריך לראות בדיוק את מה שהמנהל רואה ב"לוח מצב הזמנות". שינוי שם ⇒ שינוי כאן.
 const TRACK_LISTS = ['intake', 'countcut', 'ready_sew', 'sewing', 'ready_pack', 'packing', 'ready_ship', 'shipped'];
 const TRACK_SHIP_DAYS = 30;
-const _trackCache = new Map(); // קוד לקוח → {at, body} — מגן מפני רענון חוזר שקורא שוב את כל ההיסטוריה
+const _trackCache = new Map(); // קוד לקוח → {at, body}, 3 דק' — מגן מפני רענון חוזר שקורא שוב את כל ההיסטוריה
 function trackFamOfDept(d) {
   const s = String(d || '').toLowerCase();
   if (/استقبال|قص|קבל|חית|גזיר/.test(s)) return 'recv';
@@ -1592,7 +1592,9 @@ async function trackLogSignIn(tok, email, cust, req) {
   } catch (e) { console.error('trackLogSignIn error:', e); } // היומן לא מפיל את הצגת ההזמנות
 }
 
-exports.customerTrack = functions.https.onRequest(async (req, res) => {
+// ⚡ 1GB: בדור הראשון המעבד גדל עם הזיכרון — עיבוד אלפי משימות על ברירת המחדל (256MB) לקח 11 שנ'
+// (נמדד 10/10/2026). רק לפונקציה הזו; נקראת לעיתים רחוקות, כך שהעלות זניחה
+exports.customerTrack = functions.runWith({ memory: '1GB' }).https.onRequest(async (req, res) => {
   res.set('Access-Control-Allow-Origin', '*');
   res.set('Cache-Control', 'no-store');
   if (req.method === 'OPTIONS') {
@@ -1621,8 +1623,9 @@ exports.customerTrack = functions.https.onRequest(async (req, res) => {
     // ברענון טוקן). 2 דק' סובלנות לשעון של מחשב המנהל (at נחתם בלקוח). 401 ⇒ הדף מתנתק ומבקש קישור חדש
     if (ent.at && (Number(tok.auth_time) || 0) * 1000 < ent.at - 120000) { res.status(401).json({ error: 'reauth' }); return; }
     await trackLogSignIn(tok, email, cust, req);
+    const t0 = Date.now();
     const hit = _trackCache.get(cust);
-    if (hit && Date.now() - hit.at < 60000) { res.json(hit.body); return; }
+    if (hit && Date.now() - hit.at < 180000) { res.json(hit.body); return; }
     const [pS, aS, nS] = await Promise.all([
       db.collection('products').where('cust', '==', cust).get(),
       db.collection('activeTasks').where('cust', '==', cust).get(),
@@ -1645,6 +1648,7 @@ exports.customerTrack = functions.https.onRequest(async (req, res) => {
       .sort((a, b) => ((a.stage === 7) - (b.stage === 7)) ||
         (a.stage === 7 ? String(b.ship).localeCompare(String(a.ship)) : String(a.entry || '9999').localeCompare(String(b.entry || '9999'))));
     const body = { name: (nS.data() || {})[cust] || '', at: new Date().toISOString(), orders };
+    console.log(`customerTrack ${cust}: ${tasks.length} tasks, ${codes.length} models, ${Date.now() - t0} ms`);
     _trackCache.set(cust, { at: Date.now(), body });
     res.json(body);
   } catch (e) {
