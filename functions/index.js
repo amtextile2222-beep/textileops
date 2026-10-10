@@ -1623,15 +1623,22 @@ exports.customerTrack = functions.https.onRequest(async (req, res) => {
     await trackLogSignIn(tok, email, cust, req);
     const hit = _trackCache.get(cust);
     if (hit && Date.now() - hit.at < 60000) { res.json(hit.body); return; }
-    const [pS, aS, hS, nS] = await Promise.all([
+    const [pS, aS, nS] = await Promise.all([
       db.collection('products').where('cust', '==', cust).get(),
       db.collection('activeTasks').where('cust', '==', cust).get(),
-      db.collection('histTasks').where('cust', '==', cust).get(),
       db.doc('appSettings/customerNames').get()
     ]);
     const prods = pS.docs.map(d => ({ id: d.id, ...d.data() }));
-    const tasks = [...hS.docs, ...aS.docs].map(d => d.data());
     const from = new Date(Date.now() - TRACK_SHIP_DAYS * 86400000).toISOString().slice(0, 10);
+    // ⚡ היסטוריה רק של הדגמים שמוצגים (פתוחים / נשלחו ב-30 יום) — "נשלח" נקבע מהמוצר בלבד, ולכן
+    // הסינון לא משנה אף מצב שמוצג. כל ההיסטוריה של הלקוח לקחה 17-25 שנ' (נמדד 10/10/2026).
+    // where('prod','in') בלבד (בלי cust) — לא דורש אינדקס מורכב; הלקוח מסונן בזיכרון
+    const shipOf = p => ((p.stageLog || []).some(e => e.id === 'shipped') || +p.shippedQty > 0) ? (trackShipDate(p) || '0') : '';
+    const codes = [...new Set(prods.filter(p => { const s = shipOf(p); return !s || s >= from; }).map(p => p.prod))];
+    const chunks = [];
+    for (let i = 0; i < codes.length; i += 30) chunks.push(codes.slice(i, i + 30));
+    const hSs = await Promise.all(chunks.map(c => db.collection('histTasks').where('prod', 'in', c).get()));
+    const tasks = [...hSs.flatMap(s => s.docs), ...aS.docs].map(d => d.data()).filter(t => t.cust === cust);
     // פעילות לפי סדר כניסה (הוותיקה ראשונה), ואחריהן שנשלחו — החדשה ראשונה
     const orders = trackStates(prods, tasks)
       .filter(o => o.stage < 7 || (o.ship && o.ship >= from))
