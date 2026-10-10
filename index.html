@@ -3961,6 +3961,7 @@ function startDataListeners(){
         if(d.id==='costs'){S.costs={...S.costs,...d.data()};saveLS();}
         // 📧 מיילים מורשים למעקב הזמנות — בזיכרון בלבד, לא ב-localStorage
         if(d.id==='custLinks'){_custEmails=d.data()?.emails||{};_custLinkRefresh();}
+        if(d.id==='custTrackLog'){_custLog=d.data()?.entries||{};_custLinkRefresh();}
       });
       renderAll();
     });
@@ -13111,24 +13112,34 @@ function editCustomerInfo(code){
 }
 // ─── 📧 מעקב הזמנות ללקוח — מיילים מורשים (10/10/2026) — מנהל בלבד ─────────────
 // הלקוח נכנס ל-track.html עם קישור שנשלח למייל שלו (פעם אחת למכשיר). Cloud Function customerTrack
-// מחזירה את ההזמנות רק אם המייל המאומת מופיע כאן. נשמר ב-adminSettings/custLinks.emails = {קוד: [מיילים]}
+// מחזירה את ההזמנות רק אם המייל המאומת מופיע כאן. נשמר ב-adminSettings/custLinks.emails = {קוד: [{e,at}]}
 // (מנהל בלבד ב-Rules — לא בפרטי הלקוח, שכל עובד יכול לכתוב). הסרת מייל = חסימה מיידית.
-let _custEmails={};
+// 🔐 at = מתי נוסף: השרת דוחה כל מכשיר שנכנס **לפני** at ⇒ הוספה מחדש אחרי הסרה מנתקת את כולם.
+// 🕘 יומן הכניסות (adminSettings/custTrackLog) נכתב רק בשרת — כאן קריאה בלבד.
+let _custEmails={},_custLog={};
+const _custEnt=x=>typeof x==='string'?{e:x.toLowerCase(),at:0}:{e:String(x?.e||'').toLowerCase(),at:+x?.at||0};
+const _custList=code=>(_custEmails[code]||[]).map(_custEnt);
 const _trackUrl=()=>new URL('track.html',location.href).href.split('#')[0].split('?')[0];
 function _custLinkHtml(code){
-  const list=_custEmails[code]||[],url=_trackUrl();
+  const list=_custList(code),url=_trackUrl();
+  const fmt=ms=>{const d=new Date(ms);return pad2(d.getDate())+'/'+pad2(d.getMonth()+1)+' '+pad2(d.getHours())+':'+pad2(d.getMinutes());};
+  const log=Object.values(_custLog).filter(r=>r&&r.cust===code).sort((a,b)=>b.at-a.at).slice(0,8);
   return `<div style="font-size:12px;font-weight:600;color:var(--txt3);margin-bottom:4px">📧 מעקב הזמנות — מיילים מורשים</div>
     <div style="font-size:11px;color:var(--txt3);margin-bottom:8px">הלקוח נכנס עם קישור שנשלח למייל שלו ורואה את שלב הייצור של ההזמנות שלו בלבד — בלי מחירים ובלי עובדים.</div>
-    ${list.map(e=>`<div style="display:flex;align-items:center;gap:6px;margin-bottom:4px"><span dir="ltr" style="flex:1;font-size:12px;padding:5px 8px;background:var(--bg2);border-radius:8px;overflow:hidden;text-overflow:ellipsis">${esc(e)}</span>
-      <button class="btn" style="font-size:11px;padding:3px 8px;color:var(--red-txt)" title="הסר — המייל ייחסם מיד" onclick="custEmailDel('${escj(code)}','${escj(e)}')">✕</button></div>`).join('')}
+    ${list.map(x=>`<div style="display:flex;align-items:center;gap:6px;margin-bottom:4px"><span dir="ltr" style="flex:1;font-size:12px;padding:5px 8px;background:var(--bg2);border-radius:8px;overflow:hidden;text-overflow:ellipsis">${esc(x.e)}</span>
+      <button class="btn" style="font-size:11px;padding:3px 8px;color:var(--red-txt)" title="הסר — המייל ייחסם מיד בכל המכשירים" onclick="custEmailDel('${escj(code)}','${escj(x.e)}')">✕</button></div>`).join('')}
     <div style="display:flex;gap:6px;margin-top:4px">
       <input type="email" id="cinfo-tmail" dir="ltr" placeholder="name@example.com" style="flex:1;font-size:12px;padding:6px;border-radius:8px;border:1px solid var(--brd);background:var(--bg);color:var(--txt)" onkeydown="if(event.key==='Enter'){event.preventDefault();custEmailAdd('${escj(code)}')}"/>
       <button class="btn" style="font-size:12px" onclick="custEmailAdd('${escj(code)}')">➕ הוסף</button>
     </div>
     ${list.length?`<div style="display:flex;gap:6px;margin-top:8px">
       <button class="btn" style="flex:1;font-size:12px" onclick="custLinkCopy()">📋 העתק קישור</button>
-      <a class="btn" style="flex:1;font-size:12px;text-align:center;text-decoration:none" target="_blank" rel="noopener" href="https://wa.me/?text=${encodeURIComponent('מעקב אחר ההזמנות שלכם (כניסה עם המייל '+list[0]+'): '+url)}">💬 וואטסאפ</a>
-    </div>`:''}`;
+      <a class="btn" style="flex:1;font-size:12px;text-align:center;text-decoration:none" target="_blank" rel="noopener" href="https://wa.me/?text=${encodeURIComponent('מעקב אחר ההזמנות שלכם (כניסה עם המייל '+list[0].e+'. אם המייל לא הגיע — בדקו בספאם): '+url)}">💬 וואטסאפ</a>
+    </div>`:''}
+    <div style="font-size:12px;font-weight:600;color:var(--txt3);margin:12px 0 4px">🕘 כניסות אחרונות</div>
+    ${log.length?log.map(r=>`<div style="display:flex;gap:6px;font-size:11px;color:var(--txt2);padding:3px 0;border-bottom:1px solid var(--brd)">
+      <span style="white-space:nowrap">${fmt(r.at)}</span><span dir="ltr" style="flex:1;overflow:hidden;text-overflow:ellipsis;text-align:right">${esc(r.email)}</span><span style="white-space:nowrap;color:var(--txt3)">${esc(r.dev||'')}</span></div>`).join('')
+      :'<div style="font-size:11px;color:var(--txt3)">עדיין אין כניסות</div>'}`;
 }
 function _custLinkRefresh(){const el=document.getElementById('cinfo-link');if(el)el.innerHTML=_custLinkHtml(el.dataset.code);}
 // ⚠️ **בלי merge בכוונה** — מחיקת מפתח ב-setDoc(merge) לא מוחקת אותו בשרת (כמו customerInfo).
@@ -13142,14 +13153,14 @@ async function custEmailAdd(code){
   const v=(document.getElementById('cinfo-tmail')?.value||'').trim().toLowerCase();
   if(!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(v)){showToast('⚠️ כתובת מייל לא תקינה');return;}
   // מייל אחד = לקוח אחד: השרת מזהה את הלקוח לפי המייל
-  const other=Object.keys(_custEmails).find(c=>c!==code&&(_custEmails[c]||[]).includes(v));
+  const other=Object.keys(_custEmails).find(c=>c!==code&&_custList(c).some(x=>x.e===v));
   if(other){showToast('⚠️ המייל כבר משויך ללקוח '+(S.customerNames?.[other]||other));return;}
-  if((_custEmails[code]||[]).includes(v)){showToast('המייל כבר ברשימה');return;}
-  if(await _custEmailSave({..._custEmails,[code]:[...(_custEmails[code]||[]),v]}))showToast('✅ המייל נוסף');
+  if(_custList(code).some(x=>x.e===v)){showToast('המייל כבר ברשימה');return;}
+  if(await _custEmailSave({..._custEmails,[code]:[..._custList(code),{e:v,at:Date.now()}]}))showToast('✅ המייל נוסף');
 }
 async function custEmailDel(code,e){
-  if(!confirm('להסיר את '+e+'? הגישה למעקב תיחסם מיד, גם במכשירים שכבר מחוברים.'))return;
-  const m={..._custEmails},l=(m[code]||[]).filter(x=>x!==e);
+  if(!confirm('להסיר את '+e+'? הגישה למעקב תיחסם מיד בכל המכשירים. גם אם יתווסף שוב — כל מכשיר יצטרך להיכנס מחדש עם קישור חדש.'))return;
+  const m={..._custEmails},l=_custList(code).filter(x=>x.e!==e);
   if(l.length)m[code]=l;else delete m[code];
   if(await _custEmailSave(m))showToast('⛔ המייל הוסר');
 }

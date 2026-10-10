@@ -70,7 +70,7 @@ const fmtD=d=>{const m=/^(\d{4})-(\d{2})-(\d{2})/.exec(d||'');return m?m[3]+'/'+
 const ls={get:k=>{try{return localStorage.getItem(k)||''}catch(e){return''}},set:(k,v)=>{try{localStorage.setItem(k,v)}catch(e){}},del:k=>{try{localStorage.removeItem(k)}catch(e){}}};
 const $=id=>document.getElementById(id);
 const appEl=$('app'),ft=$('ft');
-let busy=false;
+let busy=false,reauthMsg=false; // reauth = המייל הוסר והוסף מחדש ⇒ כל המכשירים נדרשים לקישור חדש
 
 function card(o){
   const last=STAGES.length-1,done=o.stage===last;
@@ -92,6 +92,7 @@ const bindOut=()=>{const b=$('out');if(b)b.onclick=()=>signOut(auth);};
 // ── מסך כניסה: מייל ← קישור למייל ──
 function showLogin(msg,confirmMode){
   ft.textContent='';$('sub').textContent='';
+  if(!msg&&reauthMsg){msg='מטעמי אבטחה יש להיכנס מחדש.<br>הזינו את המייל ונשלח קישור כניסה חדש.';reauthMsg=false;}
   appEl.innerHTML=`<div class="login"><p>${msg||'הזינו את כתובת המייל שלכם ונשלח אליה קישור כניסה.<br>הכניסה נדרשת פעם אחת בכל מכשיר.'}</p>
     <form id="lf"><input type="email" id="em" dir="ltr" autocomplete="email" required placeholder="name@example.com" value="${esc(ls.get(LS_MAIL))}"/>
     <button id="lb">${confirmMode?'כניסה':'שלחו לי קישור כניסה'}</button><div class="err" id="er"></div></form></div>`;
@@ -131,7 +132,7 @@ async function load(){
   busy=true;
   try{
     const r=await fetch(URL_FN,{cache:'no-store',headers:{Authorization:'Bearer '+await u.getIdToken()}});
-    if(r.status===401){await signOut(auth);return;}
+    if(r.status===401){const j=await r.json().catch(()=>({}));if(j.error==='reauth')reauthMsg=true;await signOut(auth);return;}
     if(r.status===403){
       $('sub').textContent='';
       appEl.innerHTML=`<div class="msg">🔒 המייל <b dir="ltr">${esc(u.email)}</b> אינו מורשה לצפות בהזמנות.<br>פנו אלינו כדי להוסיף אותו.</div>`;

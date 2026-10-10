@@ -1549,6 +1549,48 @@ function trackStates(prods, tasks) {
       ship: shipped ? trackShipDate(p) : '', stage: st, sewPct, packPct };
   });
 }
+// רשומת מייל מורשה: {e, at} — at = מתי נוסף (ms). מחרוזת = רשומה מלפני 10/10/2026 בלי at
+const trackEmailEnt = x => typeof x === 'string' ? { e: x.toLowerCase(), at: 0 } : { e: String((x && x.e) || '').toLowerCase(), at: +(x && x.at) || 0 };
+function trackDevice(ua) {
+  ua = String(ua || '');
+  const os = /iPad/.test(ua) ? 'iPad' : /iPhone/.test(ua) ? 'iPhone' : /Android/.test(ua) ? 'Android'
+    : /Windows/.test(ua) ? 'Windows' : /Macintosh|Mac OS X/.test(ua) ? 'Mac' : /Linux/.test(ua) ? 'Linux' : 'לא ידוע';
+  const br = /Edg\//.test(ua) ? 'Edge' : /SamsungBrowser/.test(ua) ? 'Samsung' : /CriOS|Chrome\//.test(ua) ? 'Chrome'
+    : /FxiOS|Firefox\//.test(ua) ? 'Firefox' : /Safari\//.test(ua) ? 'Safari' : '';
+  return os + (br ? ' · ' + br : '');
+}
+const escTg = s => String(s || '').replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
+// 🕘 יומן כניסות + טלגרם. כניסה = session חדש (uid + auth_time) — רענונים של אותו מכשיר לא נרשמים.
+// adminSettings/custTrackLog.entries = {uid_authTime: {cust, email, at, dev, ip, ok}} — מנהל בלבד ב-Rules
+// (מסמך ב-adminSettings ⇒ אין שינוי ב-Rules). נשמרות 300 האחרונות. cust='' ⇒ מייל לא מורשה (ok:false).
+const _trackSeen = new Set();
+async function trackLogSignIn(tok, email, cust, req) {
+  const key = tok.uid + '_' + (Number(tok.auth_time) || 0);
+  if (_trackSeen.has(key)) return;
+  try {
+    const ref = db.doc('adminSettings/custTrackLog');
+    const rec = { cust, email, at: Date.now(), dev: trackDevice(req.get('user-agent')), ip: callerIp({ rawRequest: req }), ok: !!cust };
+    const isNew = await db.runTransaction(async tx => {
+      const s = await tx.get(ref);
+      const ent = (s.data() || {}).entries || {};
+      if (ent[key]) return false;
+      const upd = { ['entries.' + key]: rec };
+      const old = Object.keys(ent).sort((a, b) => (ent[a].at || 0) - (ent[b].at || 0));
+      for (const k of old.slice(0, Math.max(0, old.length - 299))) upd['entries.' + k] = FieldValue.delete();
+      if (s.exists) tx.update(ref, upd); else tx.set(ref, { entries: { [key]: rec } });
+      return true;
+    });
+    _trackSeen.add(key);
+    if (!isNew) return;
+    const { token: tgT, chatId: tgC } = tgCfg();
+    if (!tgT || !tgC) return;
+    const nm = cust ? (((await db.doc('appSettings/customerNames').get()).data() || {})[cust] || cust) : '';
+    const txt = cust
+      ? `🔐 <b>כניסה למעקב הזמנות</b>\nלקוח: ${escTg(nm)}\nמייל: ${escTg(email)}\nמכשיר: ${escTg(rec.dev)}\nשעה: ${ilTime()}`
+      : `⚠️ <b>ניסיון כניסה למעקב הזמנות — מייל לא מורשה</b>\nמייל: ${escTg(email)}\nמכשיר: ${escTg(rec.dev)}\nשעה: ${ilTime()}`;
+    await sendTelegram(tgT, tgC, txt).catch(() => {});
+  } catch (e) { console.error('trackLogSignIn error:', e); } // היומן לא מפיל את הצגת ההזמנות
+}
 
 exports.customerTrack = functions.https.onRequest(async (req, res) => {
   res.set('Access-Control-Allow-Origin', '*');
@@ -1560,17 +1602,25 @@ exports.customerTrack = functions.https.onRequest(async (req, res) => {
   }
   const m = /^Bearer (.+)$/.exec(String(req.get('Authorization') || ''));
   if (!m) { res.status(401).json({ error: 'auth' }); return; }
-  let email;
+  let email, tok;
   try {
-    const t = await admin.auth().verifyIdToken(m[1]);
-    if (!t.email || !t.email_verified) { res.status(401).json({ error: 'auth' }); return; }
-    email = String(t.email).toLowerCase();
+    tok = await admin.auth().verifyIdToken(m[1]);
+    if (!tok.email || !tok.email_verified) { res.status(401).json({ error: 'auth' }); return; }
+    email = String(tok.email).toLowerCase();
   } catch (e) { res.status(401).json({ error: 'auth' }); return; }
   try {
     // נקרא בכל בקשה (גם כשיש מטמון) — כך הסרת מייל חוסמת מיד
     const map = ((await db.doc('adminSettings/custLinks').get()).data() || {}).emails || {};
-    const cust = Object.keys(map).find(c => (map[c] || []).some(e => String(e).toLowerCase() === email));
-    if (!cust) { res.status(403).json({ error: 'denied', email }); return; }
+    let cust = '', ent = null;
+    for (const c of Object.keys(map)) {
+      const x = (map[c] || []).map(trackEmailEnt).find(x => x.e === email);
+      if (x) { cust = c; ent = x; break; }
+    }
+    if (!cust) { await trackLogSignIn(tok, email, '', req); res.status(403).json({ error: 'denied', email }); return; }
+    // 🔐 הוספה מחדש של מייל מנתקת כל מכשיר שנכנס לפניה: auth_time = רגע הכניסה עם הקישור (לא מתאפס
+    // ברענון טוקן). 2 דק' סובלנות לשעון של מחשב המנהל (at נחתם בלקוח). 401 ⇒ הדף מתנתק ומבקש קישור חדש
+    if (ent.at && (Number(tok.auth_time) || 0) * 1000 < ent.at - 120000) { res.status(401).json({ error: 'reauth' }); return; }
+    await trackLogSignIn(tok, email, cust, req);
     const hit = _trackCache.get(cust);
     if (hit && Date.now() - hit.at < 60000) { res.json(hit.body); return; }
     const [pS, aS, hS, nS] = await Promise.all([
