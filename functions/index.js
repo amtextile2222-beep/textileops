@@ -1478,7 +1478,13 @@ const trackOrderNoOf = raw => { const s = String(raw || ''); return s.length >= 
 const trackQty = p => (p.quantities || []).reduce((s, q) => s + (parseInt(q.qty) || 0), 0);
 const trackBc = t => t.bc || String(t.cust) + String(t.prod) + String(t.size || '0') + String(t.qty).padStart(3, '0') + String(t.col);
 const trackCoverKey = t => trackBc(t) + '|' + String(t.taskType || '').trim().toLowerCase() + (t.splitId ? '|' + t.splitId : '');
+// תאריך התעודה. היציאה עצמה — departedAt (סימון בלוח); ראה pipeDnDate/pipeShipDate ב-index.html
+const TRACK_DEPART_FROM = '2026-10-10';
 function trackShipDate(p) {
+  if (p.departedAt) return String(p.departedAt).slice(0, 10);
+  return trackDnDate(p);
+}
+function trackDnDate(p) {
   const s = (p.stageLog || []).find(e => e.id === 'shipped');
   if (s && s.date) return s.date;
   return p.shippedAt ? String(p.shippedAt).slice(0, 10) : '';
@@ -1529,8 +1535,11 @@ function trackStates(prods, tasks) {
     };
     const sew = fam('sew'), pack = fam('pack');
     const shipped = (p.stageLog || []).some(e => e.id === 'shipped') || +p.shippedQty > 0;
+    // 🚚 תעודה ⇒ "מוכן למשלוח"; "נשלח" רק אחרי סימון יציאה (תעודה לפני TRACK_DEPART_FROM = יצאה)
+    const departed = shipped && (!!p.departedAt || String(trackDnDate(p) || '9999') < TRACK_DEPART_FROM);
     let id;
-    if (shipped) id = 'shipped';
+    if (departed) id = 'shipped';
+    else if (shipped) id = 'ready_ship';
     else if (pack && pack.of > 0 && pack.full === pack.of) id = 'ready_ship';
     else if (scans.pack > 0) id = 'packing';
     else if (sew && sew.of > 0 && sew.full === sew.of) id = 'ready_pack';
@@ -1546,7 +1555,7 @@ function trackStates(prods, tasks) {
     const sewPct = st > 3 ? 100 : (st === 3 && sew ? sew.pct : null);
     const packPct = st > 5 ? 100 : (st === 5 && pack ? pack.pct : null);
     return { no: parseInt(p.orderNo, 10) || 0, prod: p.prod, name: p.name || '', qty, entry: trackEntryDate(p),
-      ship: shipped ? trackShipDate(p) : '', stage: st, sewPct, packPct };
+      ship: departed ? trackShipDate(p) : '', stage: st, sewPct, packPct };
   });
 }
 // רשומת מייל מורשה: {e, at} — at = מתי נוסף (ms). מחרוזת = רשומה מלפני 10/10/2026 בלי at
@@ -1636,7 +1645,8 @@ exports.customerTrack = functions.runWith({ memory: '1GB' }).https.onRequest(asy
     // ⚡ היסטוריה רק של הדגמים שמוצגים (פתוחים / נשלחו ב-30 יום) — "נשלח" נקבע מהמוצר בלבד, ולכן
     // הסינון לא משנה אף מצב שמוצג. כל ההיסטוריה של הלקוח לקחה 17-25 שנ' (נמדד 10/10/2026).
     // where('prod','in') בלבד (בלי cust) — לא דורש אינדקס מורכב; הלקוח מסונן בזיכרון
-    const shipOf = p => ((p.stageLog || []).some(e => e.id === 'shipped') || +p.shippedQty > 0) ? (trackShipDate(p) || '0') : '';
+    const shipOf = p => { const sh = (p.stageLog || []).some(e => e.id === 'shipped') || +p.shippedQty > 0;
+      return sh && (p.departedAt || String(trackDnDate(p) || '9999') < TRACK_DEPART_FROM) ? (trackShipDate(p) || '0') : ''; };
     const codes = [...new Set(prods.filter(p => { const s = shipOf(p); return !s || s >= from; }).map(p => p.prod))];
     const chunks = [];
     for (let i = 0; i < codes.length; i += 30) chunks.push(codes.slice(i, i + 30));

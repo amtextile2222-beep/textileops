@@ -3009,8 +3009,8 @@ const PIPE_LISTS=[
   {id:'sewing',    label:'🪡 בתפירה',        hint:'נסרק לפחות ברקוד אחד בתפירה'},
   {id:'ready_pack',label:'📦 מוכן לאריזה',   hint:'כל שלבי התפירה הגיעו לכמות המלאה'},
   {id:'packing',   label:'🧥 באריזה',        hint:'נסרק לפחות ברקוד אחד באריזה'},
-  {id:'ready_ship',label:'🚚 מוכן ליציאה',   hint:'כל שלבי האריזה הגיעו לכמות המלאה'},
-  {id:'shipped',   label:'✅ יצא ללקוח',     hint:'נסרק ברקוד "יצא ללקוח"'},
+  {id:'ready_ship',label:'🚚 מוכן ליציאה',   hint:'כל שלבי האריזה הגיעו לכמות המלאה, או שהופקה תעודת משלוח'},
+  {id:'shipped',   label:'✅ יצא ללקוח',     hint:'סומן "יצא ללקוח" (הסחורה יצאה מהמפעל)'},
 ];
 const PIPE_IDX=id=>PIPE_LISTS.findIndex(l=>l.id===id);
 // התווית בלי האמוג'י — לכפתור הדחיפה, שאחרת נשבר לשתי שורות בתוך כרטיס של 190px
@@ -3046,9 +3046,14 @@ function pipeStateOf(p,tasks){
   const fam=f=>{const ss=steps[f];if(!ss.length)return null;
     return{full:ss.filter(nm=>qty>0&&(done[nm]||0)>=qty).length,of:ss.length};};
   const sew=fam('sew'),pack=fam('pack');
+  // 🚚 הופקה תעודת משלוח ≠ הסחורה יצאה (10/10/2026): תעודה ⇒ "מוכן ליציאה"; "יצא ללקוח" רק אחרי
+  // סימון יציאה (`departedAt`, כפתור בלוח). תעודה מתאריך לפני PIPE_DEPART_FROM = יצאה (לא היה סימון עד אז).
+  // ⚠️ זהה ב-trackStates בשרת (functions/index.js) — דף המעקב של הלקוח
   const shipped=(p.stageLog||[]).some(e=>e.id==='shipped')||+p.shippedQty>0;
+  const departed=shipped&&(!!p.departedAt||String(pipeDnDate(p)||'9999')<PIPE_DEPART_FROM);
   let id;
-  if(shipped)                                    id='shipped';
+  if(departed)                                   id='shipped';
+  else if(shipped)                               id='ready_ship';
   else if(pack&&pack.of>0&&pack.full===pack.of)  id='ready_ship';
   else if(scans.pack>0)                          id='packing';
   else if(sew&&sew.of>0&&sew.full===sew.of)      id='ready_pack';
@@ -3061,7 +3066,14 @@ function pipeStateOf(p,tasks){
   const nat=id;
   const ov=p.pipeOverride&&PIPE_IDX(p.pipeOverride.list)>=0?p.pipeOverride:null;
   if(ov&&nat!=='shipped'&&PIPE_IDX(ov.list)>PIPE_IDX(nat))id=ov.list;
-  return{id,nat,ov:id===ov?.list?ov:null,qty,scans,steps,sew,pack,shipped,tasks:tasks.length};
+  return{id,nat,ov:id===ov?.list?ov:null,qty,scans,steps,sew,pack,shipped,departed,tasks:tasks.length};
+}
+const PIPE_DEPART_FROM='2026-10-10';
+// תאריך התעודה (רישום "shipped" בלוג, שנכתב בהפקת תעודה)
+function pipeDnDate(p){
+  const s=(p.stageLog||[]).find(e=>e.id==='shipped');
+  if(s?.date)return s.date;
+  return p.shippedAt?String(p.shippedAt).slice(0,10):'';
 }
 // תאריך הכניסה למפעל: מועד הקמת הכרטיס, ובהיעדרו תאריך "קבלת סחורה" מהלוג.
 function pipeEntryDate(p){
@@ -3069,10 +3081,9 @@ function pipeEntryDate(p){
   const r=(p.stageLog||[]).find(e=>e.id==='receive');
   return r?.date||'';
 }
+// תאריך היציאה: סימון היציאה בלוח, ובהיעדרו — תאריך התעודה (הזמנות מלפני PIPE_DEPART_FROM)
 function pipeShipDate(p){
-  const s=(p.stageLog||[]).find(e=>e.id==='shipped');
-  if(s?.date)return s.date;
-  return p.shippedAt?String(p.shippedAt).slice(0,10):'';
+  return p.departedAt?String(p.departedAt).slice(0,10):pipeDnDate(p);
 }
 
 // ─── שער התחנה: חובת סריקה + נעילת שלב לתחנה ──────────────────────
@@ -7834,9 +7845,13 @@ async function buildPipelineReport(){
           <span>${L.id==='shipped'?('יצא '+(r.ship||'—')):('נכנס '+(r.entry||'—'))}</span>
           <span>·</span><span>${st.qty?st.qty+" יח'":'<span style="color:var(--red-txt)">אין כמות</span>'}</span>
           ${prog(st.sew,'תפירה')}${prog(st.pack,'אריזה')}
+          ${L.id==='ready_ship'&&st.shipped?`<span class="badge blue" style="font-size:9px" title="${esc('הופקה תעודת משלוח '+(pipeDnDate(p)||'')+' — ממתין לסימון יציאה')}">🧾 תעודה הופקה</span>`:''}
         </div>
+        ${isMgr&&L.id==='shipped'&&p.departedAt?`<div style="margin-top:4px"><button class="btn" style="font-size:10px;padding:2px 6px" onclick="pipeDepart('${escj(p.id)}',false)" title="${esc('סומן ע״י '+(p.departedBy||'—'))}">↺ בטל יציאה</button></div>`:''}
         ${isMgr&&nxt&&L.id!=='shipped'?`<div style="margin-top:4px;display:flex;gap:4px">
-          <button class="btn" style="font-size:10px;padding:2px 6px;white-space:nowrap" onclick="pipePush('${escj(p.id)}','${nxt.id}')" title="${esc('העבר ידנית ל'+nxt.label+' — לשימוש כשהמונה נתקע')}">➜ ${esc(pipeShortLabel(nxt))}</button>
+          ${L.id==='ready_ship'&&st.shipped
+            ?`<button class="btn" style="font-size:10px;padding:2px 6px;white-space:nowrap" onclick="pipeDepart('${escj(p.id)}',true)" title="הסחורה יצאה פיזית מהמפעל">🚚 יצא ללקוח</button>`
+            :`<button class="btn" style="font-size:10px;padding:2px 6px;white-space:nowrap" onclick="pipePush('${escj(p.id)}','${nxt.id}')" title="${esc('העבר ידנית ל'+nxt.label+' — לשימוש כשהמונה נתקע')}">➜ ${esc(pipeShortLabel(nxt))}</button>`}
           ${st.ov?`<button class="btn" style="font-size:10px;padding:2px 6px" onclick="pipePush('${escj(p.id)}','')">↺ בטל</button>`:''}
         </div>`:''}
       </div>`;
@@ -7906,6 +7921,25 @@ async function pipePush(pid,list){
     catch(e){showToast('שמירה נכשלה: '+e.message,'var(--red-txt)',6000);return;}
   }
   showToast(list?('הועבר ל'+L.label):'ההעברה הידנית בוטלה','var(--green-txt)',3000);
+  await buildPipelineReport();
+}
+// 🚚 סימון יציאה פיזית מהמפעל (10/10/2026) — הפקת תעודה בלבד משאירה ב"מוכן ליציאה". on=false = ביטול.
+// ⚠️ null ולא מחיקה — אותו נימוק כמו ב-pipePush (fbSet ממזג)
+async function pipeDepart(pid,on){
+  if(S.user?.role!=='manager')return;
+  const p=(S.products||[]).find(x=>String(x.id)===String(pid));if(!p)return;
+  const ok=await showConfirm(on?'יצא ללקוח':'ביטול יציאה',
+    on?`לסמן ש-${p.cust}/${p.prod} ${p.name||''} יצא מהמפעל?\n\nהלקוח יראה "נשלח" בדף המעקב.`
+      :`לבטל את סימון היציאה של ${p.cust}/${p.prod}? ההזמנה תחזור ל"מוכן ליציאה".`);
+  if(!ok)return;
+  p.departedAt=on?new Date().toISOString():null;
+  p.departedBy=on?(S.user?.name||''):null;
+  saveLS();
+  if(S.fbConnected){
+    try{await fbSet('products',p.id,{departedAt:p.departedAt,departedBy:p.departedBy});}
+    catch(e){showToast('שמירה נכשלה: '+e.message,'var(--red-txt)',6000);return;}
+  }
+  showToast(on?'🚚 סומן: יצא ללקוח':'↺ סימון היציאה בוטל','var(--green-txt)',3000);
   await buildPipelineReport();
 }
 function buildStageReport(){
