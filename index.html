@@ -3959,8 +3959,8 @@ function startDataListeners(){
     _live('adminSettings',()=>collection(db,'adminSettings'),snap=>{
       snap.docs.forEach(d=>{
         if(d.id==='costs'){S.costs={...S.costs,...d.data()};saveLS();}
-        // 🔗 קישורי מעקב ללקוח — בזיכרון בלבד, לא ב-localStorage (הקישור הוא הסוד)
-        if(d.id==='custLinks'){_custLinks=d.data()?.tokens||{};_custLinkRefresh();}
+        // 📧 מיילים מורשים למעקב הזמנות — בזיכרון בלבד, לא ב-localStorage
+        if(d.id==='custLinks'){_custEmails=d.data()?.emails||{};_custLinkRefresh();}
       });
       renderAll();
     });
@@ -13109,44 +13109,52 @@ function editCustomerInfo(code){
   // גם להחליף אותו וגם להמשיך לכתוב בסופו
   setTimeout(()=>{const el=document.getElementById('cinfo-name');if(el){el.focus();el.select();}},50);
 }
-// ─── 🔗 קישור מעקב הזמנות ללקוח (10/10/2026) — מנהל בלבד ─────────────────
-// הטוקן נשמר ב-adminSettings/custLinks (קריאה/כתיבה מנהל ב-Rules); הדף track.html שולח אותו
-// ל-Cloud Function customerTrack, שמחזירה רק את ההזמנות של הלקוח הזה. ביטול/חידוש = הקישור הישן מת.
-let _custLinks={};
-const _custLinkUrl=tok=>new URL('track.html',location.href).href.split('#')[0]+'#t='+tok;
+// ─── 📧 מעקב הזמנות ללקוח — מיילים מורשים (10/10/2026) — מנהל בלבד ─────────────
+// הלקוח נכנס ל-track.html עם קישור שנשלח למייל שלו (פעם אחת למכשיר). Cloud Function customerTrack
+// מחזירה את ההזמנות רק אם המייל המאומת מופיע כאן. נשמר ב-adminSettings/custLinks.emails = {קוד: [מיילים]}
+// (מנהל בלבד ב-Rules — לא בפרטי הלקוח, שכל עובד יכול לכתוב). הסרת מייל = חסימה מיידית.
+let _custEmails={};
+const _trackUrl=()=>new URL('track.html',location.href).href.split('#')[0].split('?')[0];
 function _custLinkHtml(code){
-  const tok=_custLinks[code];
-  if(!tok)return `<div style="font-size:12px;font-weight:600;color:var(--txt3);margin-bottom:6px">🔗 קישור מעקב ללקוח</div>
-    <div style="font-size:11px;color:var(--txt3);margin-bottom:8px">הלקוח יראה את שלב הייצור של ההזמנות שלו בלבד — בלי מחירים ובלי עובדים.</div>
-    <button class="btn" style="width:100%;font-size:13px" onclick="custLinkCreate('${escj(code)}')">🔗 צור קישור מעקב</button>`;
-  const url=_custLinkUrl(tok);
-  return `<div style="font-size:12px;font-weight:600;color:var(--txt3);margin-bottom:6px">🔗 קישור מעקב ללקוח <span style="color:var(--green-txt,#16a34a)">● פעיל</span></div>
-    <input type="text" readonly value="${esc(url)}" onclick="this.select()" dir="ltr" style="width:100%;font-size:11px;padding:6px;border-radius:8px;border:1px solid var(--brd);background:var(--bg2);color:var(--txt2)"/>
-    <div style="display:flex;gap:6px;margin-top:6px;flex-wrap:wrap">
-      <button class="btn" style="flex:1;font-size:12px" onclick="custLinkCopy('${escj(code)}')">📋 העתק</button>
-      <a class="btn" style="flex:1;font-size:12px;text-align:center;text-decoration:none" target="_blank" rel="noopener" href="https://wa.me/?text=${encodeURIComponent('מעקב אחר ההזמנות שלכם: '+url)}">💬 וואטסאפ</a>
-      <button class="btn" style="flex:1;font-size:12px;color:var(--red-txt)" onclick="custLinkRevoke('${escj(code)}')">⛔ בטל</button>
-    </div>`;
+  const list=_custEmails[code]||[],url=_trackUrl();
+  return `<div style="font-size:12px;font-weight:600;color:var(--txt3);margin-bottom:4px">📧 מעקב הזמנות — מיילים מורשים</div>
+    <div style="font-size:11px;color:var(--txt3);margin-bottom:8px">הלקוח נכנס עם קישור שנשלח למייל שלו ורואה את שלב הייצור של ההזמנות שלו בלבד — בלי מחירים ובלי עובדים.</div>
+    ${list.map(e=>`<div style="display:flex;align-items:center;gap:6px;margin-bottom:4px"><span dir="ltr" style="flex:1;font-size:12px;padding:5px 8px;background:var(--bg2);border-radius:8px;overflow:hidden;text-overflow:ellipsis">${esc(e)}</span>
+      <button class="btn" style="font-size:11px;padding:3px 8px;color:var(--red-txt)" title="הסר — המייל ייחסם מיד" onclick="custEmailDel('${escj(code)}','${escj(e)}')">✕</button></div>`).join('')}
+    <div style="display:flex;gap:6px;margin-top:4px">
+      <input type="email" id="cinfo-tmail" dir="ltr" placeholder="name@example.com" style="flex:1;font-size:12px;padding:6px;border-radius:8px;border:1px solid var(--brd);background:var(--bg);color:var(--txt)" onkeydown="if(event.key==='Enter'){event.preventDefault();custEmailAdd('${escj(code)}')}"/>
+      <button class="btn" style="font-size:12px" onclick="custEmailAdd('${escj(code)}')">➕ הוסף</button>
+    </div>
+    ${list.length?`<div style="display:flex;gap:6px;margin-top:8px">
+      <button class="btn" style="flex:1;font-size:12px" onclick="custLinkCopy()">📋 העתק קישור</button>
+      <a class="btn" style="flex:1;font-size:12px;text-align:center;text-decoration:none" target="_blank" rel="noopener" href="https://wa.me/?text=${encodeURIComponent('מעקב אחר ההזמנות שלכם (כניסה עם המייל '+list[0]+'): '+url)}">💬 וואטסאפ</a>
+    </div>`:''}`;
 }
 function _custLinkRefresh(){const el=document.getElementById('cinfo-link');if(el)el.innerHTML=_custLinkHtml(el.dataset.code);}
-// ⚠️ **בלי merge בכוונה** — מחיקת מפתח ב-setDoc(merge) לא מוחקת אותו בשרת (כמו customerInfo)
-async function _custLinkSave(tokens){
+// ⚠️ **בלי merge בכוונה** — מחיקת מפתח ב-setDoc(merge) לא מוחקת אותו בשרת (כמו customerInfo).
+// השמירה הראשונה גם מוחקת את tokens של הקישורים הישנים (לפני האימות במייל)
+async function _custEmailSave(emails){
   if(!db||!S.fbConnected){showToast('⚠️ אין חיבור לשרת');return false;}
-  try{const{doc,setDoc}=window._fb;await setDoc(doc(db,'adminSettings','custLinks'),{tokens});_custLinks=tokens;_custLinkRefresh();return true;}
+  try{const{doc,setDoc}=window._fb;await setDoc(doc(db,'adminSettings','custLinks'),{emails});_custEmails=emails;_custLinkRefresh();return true;}
   catch(e){showToast('⚠️ השמירה נכשלה');return false;}
 }
-async function custLinkCreate(code){
-  const b=new Uint8Array(16);crypto.getRandomValues(b);
-  const tok=[...b].map(x=>x.toString(16).padStart(2,'0')).join('');
-  if(await _custLinkSave({..._custLinks,[code]:tok}))showToast('✅ נוצר קישור מעקב');
+async function custEmailAdd(code){
+  const v=(document.getElementById('cinfo-tmail')?.value||'').trim().toLowerCase();
+  if(!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(v)){showToast('⚠️ כתובת מייל לא תקינה');return;}
+  // מייל אחד = לקוח אחד: השרת מזהה את הלקוח לפי המייל
+  const other=Object.keys(_custEmails).find(c=>c!==code&&(_custEmails[c]||[]).includes(v));
+  if(other){showToast('⚠️ המייל כבר משויך ללקוח '+(S.customerNames?.[other]||other));return;}
+  if((_custEmails[code]||[]).includes(v)){showToast('המייל כבר ברשימה');return;}
+  if(await _custEmailSave({..._custEmails,[code]:[...(_custEmails[code]||[]),v]}))showToast('✅ המייל נוסף');
 }
-async function custLinkRevoke(code){
-  if(!confirm('לבטל את הקישור? הלקוח לא יוכל יותר לצפות בהזמנות (אפשר ליצור קישור חדש בכל עת).'))return;
-  const t={..._custLinks};delete t[code];
-  if(await _custLinkSave(t))showToast('⛔ הקישור בוטל');
+async function custEmailDel(code,e){
+  if(!confirm('להסיר את '+e+'? הגישה למעקב תיחסם מיד, גם במכשירים שכבר מחוברים.'))return;
+  const m={..._custEmails},l=(m[code]||[]).filter(x=>x!==e);
+  if(l.length)m[code]=l;else delete m[code];
+  if(await _custEmailSave(m))showToast('⛔ המייל הוסר');
 }
-function custLinkCopy(code){
-  const url=_custLinkUrl(_custLinks[code]||'');
+function custLinkCopy(){
+  const url=_trackUrl();
   (navigator.clipboard?.writeText(url)||Promise.reject()).then(()=>showToast('📋 הקישור הועתק')).catch(()=>prompt('העתק את הקישור:',url));
 }
 function saveCustomerInfo(code){

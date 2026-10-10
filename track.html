@@ -9,8 +9,8 @@
 <title>מעקב הזמנות</title>
 <link rel="icon" href="icon-192.png"/>
 <style>
-/* 📦 דף מעקב הזמנות ללקוח (10/10/2026). הנתונים מ-Cloud Function customerTrack — ראה functions/index.js.
-   הטוקן ב-# ולא ב-? — לא נשלח לשרת של GitHub Pages ולא נרשם בלוגים שלו */
+/* 📦 דף מעקב הזמנות ללקוח (10/10/2026). כניסה עם קישור במייל (Firebase Email Link), פעם אחת למכשיר.
+   הנתונים מ-Cloud Function customerTrack, שבודקת שהמייל המאומת מורשה ללקוח — ראה functions/index.js */
 :root{--bg:#f5f5f3;--card:#fff;--txt:#1c1c1a;--txt2:#555;--txt3:#888;--brd:rgba(0,0,0,.1);
   --blue:#185FA5;--blue-bg:#e6f0fa;--green:#16a34a;--green-bg:#dcfce7;--track:#e5e5e2}
 @media (prefers-color-scheme:dark){:root{--bg:#1c1c1a;--card:#252523;--txt:#f0f0ee;--txt2:#bbb;--txt3:#888;
@@ -38,6 +38,13 @@ h2{font-size:14px;color:var(--txt2);margin:20px 0 8px}
 .stage{font-size:12px;color:var(--txt2)}
 .msg{text-align:center;color:var(--txt3);padding:40px 10px;font-size:14px}
 footer{font-size:11px;color:var(--txt3);text-align:center;margin:20px 0 8px}
+footer button{background:none;border:0;color:var(--blue);font:inherit;cursor:pointer;text-decoration:underline;padding:0}
+.login{max-width:380px;margin:30px auto;text-align:center}
+.login p{font-size:14px;color:var(--txt2);margin:0 0 14px}
+.login input{width:100%;font-size:16px;padding:12px;border-radius:10px;border:1px solid var(--brd);background:var(--card);color:var(--txt);text-align:left}
+.login button{width:100%;margin-top:10px;font-size:16px;font-weight:700;padding:12px;border-radius:10px;border:0;background:var(--blue);color:#fff;cursor:pointer}
+.login button:disabled{opacity:.6}
+.login .err{color:#dc2626;font-size:13px;margin-top:8px;min-height:1em}
 </style>
 </head>
 <body>
@@ -46,14 +53,25 @@ footer{font-size:11px;color:var(--txt3);text-align:center;margin:20px 0 8px}
   <div id="app"><div class="msg">⏳ טוען…</div></div>
   <footer id="ft"></footer>
 </div>
-<script>
+<script type="module">
+import{initializeApp}from'https://www.gstatic.com/firebasejs/10.12.0/firebase-app.js';
+import{getAuth,onAuthStateChanged,sendSignInLinkToEmail,isSignInWithEmailLink,signInWithEmailLink,signOut}from'https://www.gstatic.com/firebasejs/10.12.0/firebase-auth.js';
+// אותו פרויקט כמו index.html. ⚠️ **שם אפליקציה נפרד ('track') בכוונה:** ההתחברות נשמרת לפי שם האפליקציה,
+// ובלעדיו כניסת לקוח באותו דפדפן הייתה דורסת את הכניסה של המנהל/עובד לאפליקציה (אותו origin)
+const app0=initializeApp({apiKey:"AIzaSyCN9AlUZFX6tODyClzopC9BrRi-Oj7oSv8",projectId:"textileops-aef4a",appId:"1:570030273525:web:ff4a7d125a40066a4826bc",authDomain:"textileops-aef4a.firebaseapp.com"},'track');
+const auth=getAuth(app0);auth.languageCode='he';
 // ⚠️ השמות והסדר חייבים להתאים ל-TRACK_LISTS ב-functions/index.js (= PIPE_LISTS בלוח מצב הזמנות)
 const STAGES=['ההזמנה התקבלה','בספירה וגזירה','ממתין לתפירה','בתפירה','התפירה הסתיימה','באריזה','מוכן למשלוח','נשלח'];
 const URL_FN='https://us-central1-textileops-aef4a.cloudfunctions.net/customerTrack';
+const PAGE=location.origin+location.pathname;
+const LS_MAIL='trk_email';
 const esc=s=>String(s??'').replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;');
 const fmtD=d=>{const m=/^(\d{4})-(\d{2})-(\d{2})/.exec(d||'');return m?m[3]+'/'+m[2]+'/'+m[1]:'';};
-const tok=(new URLSearchParams(location.hash.slice(1)).get('t')||'').toLowerCase();
-const app=document.getElementById('app');
+const ls={get:k=>{try{return localStorage.getItem(k)||''}catch(e){return''}},set:(k,v)=>{try{localStorage.setItem(k,v)}catch(e){}},del:k=>{try{localStorage.removeItem(k)}catch(e){}}};
+const $=id=>document.getElementById(id);
+const appEl=$('app'),ft=$('ft');
+let busy=false;
+
 function card(o){
   const last=STAGES.length-1,done=o.stage===last;
   const pct=o.stage===3?o.sewPct:o.stage===5?o.packPct:null;
@@ -68,25 +86,86 @@ function card(o){
     ${pct!=null?`<div class="pct" title="${pct}%"><b style="width:${Math.max(0,Math.min(100,pct))}%"></b></div>`:''}
   </div>`;
 }
-async function load(){
-  if(!/^[a-f0-9]{32}$/.test(tok)){app.innerHTML='<div class="msg">🔒 הקישור אינו תקין.<br>פנו אלינו לקבלת קישור מעודכן.</div>';return;}
+const outBtn=()=>'<button id="out">התנתקות</button>';
+const bindOut=()=>{const b=$('out');if(b)b.onclick=()=>signOut(auth);};
+
+// ── מסך כניסה: מייל ← קישור למייל ──
+function showLogin(msg,confirmMode){
+  ft.textContent='';$('sub').textContent='';
+  appEl.innerHTML=`<div class="login"><p>${msg||'הזינו את כתובת המייל שלכם ונשלח אליה קישור כניסה.<br>הכניסה נדרשת פעם אחת בכל מכשיר.'}</p>
+    <form id="lf"><input type="email" id="em" dir="ltr" autocomplete="email" required placeholder="name@example.com" value="${esc(ls.get(LS_MAIL))}"/>
+    <button id="lb">${confirmMode?'כניסה':'שלחו לי קישור כניסה'}</button><div class="err" id="er"></div></form></div>`;
+  $('lf').onsubmit=async e=>{
+    e.preventDefault();
+    const em=$('em').value.trim().toLowerCase(),b=$('lb');
+    if(!em)return;
+    b.disabled=true;$('er').textContent='';
+    try{
+      if(confirmMode){await finishLink(em);return;}
+      await sendSignInLinkToEmail(auth,em,{url:PAGE,handleCodeInApp:true});
+      ls.set(LS_MAIL,em);
+      appEl.innerHTML=`<div class="login"><p>📧 שלחנו קישור כניסה אל<br><b dir="ltr">${esc(em)}</b></p>
+        <p>פתחו את המייל ולחצו על הקישור. לא הגיע? בדקו בתיקיית הספאם.</p></div>`;
+    }catch(err){
+      b.disabled=false;
+      $('er').textContent=/invalid-email/.test(err.code)?'כתובת המייל אינה תקינה':
+        /too-many|quota/.test(err.code)?'יותר מדי ניסיונות. נסו שוב מאוחר יותר.':'השליחה נכשלה. נסו שוב.';
+    }
+  };
+}
+// חזרה מהקישור שבמייל. במכשיר אחר אין את המייל השמור ⇒ מבקשים להקליד אותו שוב (דרישת Firebase)
+async function finishLink(em){
   try{
-    const r=await fetch(URL_FN+'?t='+tok,{cache:'no-store'});
-    if(r.status===404){app.innerHTML='<div class="msg">🔒 הקישור אינו פעיל.<br>פנו אלינו לקבלת קישור מעודכן.</div>';return;}
+    await signInWithEmailLink(auth,em,location.href);
+    ls.set(LS_MAIL,em);
+    history.replaceState(null,'',PAGE);
+  }catch(err){
+    history.replaceState(null,'',PAGE);
+    showLogin(/invalid-email/.test(err.code)?'המייל שהוזן לא תואם לקישור. הזינו את המייל שאליו נשלח הקישור, או בקשו קישור חדש.':
+      'הקישור פג תוקף או כבר נוצל. בקשו קישור חדש.');
+  }
+}
+
+async function load(){
+  const u=auth.currentUser;if(!u||busy)return;
+  busy=true;
+  try{
+    const r=await fetch(URL_FN,{cache:'no-store',headers:{Authorization:'Bearer '+await u.getIdToken()}});
+    if(r.status===401){await signOut(auth);return;}
+    if(r.status===403){
+      $('sub').textContent='';
+      appEl.innerHTML=`<div class="msg">🔒 המייל <b dir="ltr">${esc(u.email)}</b> אינו מורשה לצפות בהזמנות.<br>פנו אלינו כדי להוסיף אותו.</div>`;
+      ft.innerHTML=outBtn();bindOut();return;
+    }
     if(!r.ok)throw new Error(r.status);
     const d=await r.json();
-    if(d.name){document.getElementById('sub').textContent=d.name;document.title='מעקב הזמנות — '+d.name;}
+    if(d.name){$('sub').textContent=d.name;document.title='מעקב הזמנות — '+d.name;}
     const act=d.orders.filter(o=>o.stage<STAGES.length-1),shp=d.orders.filter(o=>o.stage===STAGES.length-1);
-    app.innerHTML=!d.orders.length?'<div class="msg">אין כרגע הזמנות פעילות.</div>':
+    appEl.innerHTML=!d.orders.length?'<div class="msg">אין כרגע הזמנות פעילות.</div>':
       (act.length?`<h2>🏭 בייצור (${act.length})</h2>`+act.map(card).join(''):'')+
       (shp.length?`<h2>✅ נשלחו ב-30 הימים האחרונים (${shp.length})</h2>`+shp.map(card).join(''):'');
     const t=new Date(d.at);
-    document.getElementById('ft').textContent='עודכן '+t.toLocaleString('he-IL',{day:'2-digit',month:'2-digit',hour:'2-digit',minute:'2-digit'})+' · מתעדכן אוטומטית';
+    ft.innerHTML=esc(u.email)+' · עודכן '+t.toLocaleString('he-IL',{day:'2-digit',month:'2-digit',hour:'2-digit',minute:'2-digit'})+' · '+outBtn();
+    bindOut();
   }catch(e){
-    if(!app.querySelector('.card'))app.innerHTML='<div class="msg">⚠️ לא ניתן לטעון כרגע. נסו שוב בעוד רגע.</div>';
-  }
+    if(!appEl.querySelector('.card'))appEl.innerHTML='<div class="msg">⚠️ לא ניתן לטעון כרגע. נסו שוב בעוד רגע.</div>';
+  }finally{busy=false;}
 }
-load();
+
+let confirmPending=false; // מכשיר אחר — מחכים שהלקוח יקליד את המייל; האזנת ה-auth לא תדרוס את הטופס
+async function start(){
+  if(isSignInWithEmailLink(auth,location.href)){
+    appEl.innerHTML='<div class="msg">⏳ מתחבר…</div>';
+    const em=ls.get(LS_MAIL);
+    if(em)await finishLink(em);
+    else{confirmPending=true;showLogin('לאישור הכניסה, הזינו שוב את כתובת המייל שאליה נשלח הקישור.',true);}
+  }
+  onAuthStateChanged(auth,u=>{
+    if(u){confirmPending=false;appEl.innerHTML='<div class="msg">⏳ טוען…</div>';load();}
+    else if(!confirmPending&&!appEl.querySelector('.login'))showLogin();
+  });
+}
+start();
 setInterval(()=>{if(!document.hidden)load();},5*60000);
 document.addEventListener('visibilitychange',()=>{if(!document.hidden)load();});
 </script>

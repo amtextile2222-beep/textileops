@@ -1452,16 +1452,18 @@ exports.attendanceCloserNow = functions.https.onRequest(async (req, res) => {
 });
 
 // ─── 📦 מעקב הזמנות ללקוח (10/10/2026) ─────────────────────────────
-// דף ציבורי (track.html#t=<קוד>) — הלקוח רואה רק את ההזמנות שלו, בלי התחברות.
-// הקוד נוצר ע"י מנהל ונשמר ב-adminSettings/custLinks.tokens = {קוד לקוח: טוקן} — מסמך שלקוח
-// (ואפילו עובד) לא קורא ⇒ אין שינוי ב-Rules והלקוח לא נוגע במסד בכלל. ביטול = מחיקת המפתח.
+// דף track.html — הלקוח נכנס עם קישור במייל (Firebase Email Link, פעם אחת למכשיר) ורואה רק את ההזמנות שלו.
+// 🔐 הזיהוי = המייל המאומת שב-ID token. המיילים המורשים נשמרים ע"י מנהל ב-adminSettings/custLinks.emails =
+// {קוד לקוח: [מיילים]} — מסמך שעובד לא קורא ולא כותב (בפרטי הלקוח ב-appSettings כל עובד יכול לכתוב,
+// והיה מכניס את המייל של עצמו). הסרת מייל = חסימה מיידית, גם במכשיר שכבר מחובר (נבדק בכל בקשה).
+// משתמש מייל אין לו role ⇒ ה-Rules וכל ה-callables חוסמים אותו; הלקוח לא נוגע במסד בכלל.
 // מוחזרים **רק** שדות תצוגה: מס' הזמנה, שם, כמות, תאריכים, שלב ואחוזים. בלי מחירים/עובדים/ברקודים.
 //
 // ⚠️ חייב להישאר זהה ל-pipeStateOf / taskOrderStamp / taskUnits / coverKey ב-index.html —
 // הלקוח צריך לראות בדיוק את מה שהמנהל רואה ב"לוח מצב הזמנות". שינוי שם ⇒ שינוי כאן.
 const TRACK_LISTS = ['intake', 'countcut', 'ready_sew', 'sewing', 'ready_pack', 'packing', 'ready_ship', 'shipped'];
 const TRACK_SHIP_DAYS = 30;
-const _trackCache = new Map(); // טוקן → {at, body} — מגן מפני רענון חוזר שקורא שוב את כל ההיסטוריה
+const _trackCache = new Map(); // קוד לקוח → {at, body} — מגן מפני רענון חוזר שקורא שוב את כל ההיסטוריה
 function trackFamOfDept(d) {
   const s = String(d || '').toLowerCase();
   if (/استقبال|قص|קבל|חית|גזיר/.test(s)) return 'recv';
@@ -1551,15 +1553,26 @@ function trackStates(prods, tasks) {
 exports.customerTrack = functions.https.onRequest(async (req, res) => {
   res.set('Access-Control-Allow-Origin', '*');
   res.set('Cache-Control', 'no-store');
-  if (req.method === 'OPTIONS') { res.set('Access-Control-Allow-Methods', 'GET'); res.status(204).send(''); return; }
-  const tok = String(req.query.t || '');
-  if (!/^[a-f0-9]{32}$/.test(tok)) { res.status(404).json({ error: 'notfound' }); return; }
-  const hit = _trackCache.get(tok);
-  if (hit && Date.now() - hit.at < 60000) { res.json(hit.body); return; }
+  if (req.method === 'OPTIONS') {
+    res.set('Access-Control-Allow-Methods', 'GET');
+    res.set('Access-Control-Allow-Headers', 'Authorization');
+    res.status(204).send(''); return;
+  }
+  const m = /^Bearer (.+)$/.exec(String(req.get('Authorization') || ''));
+  if (!m) { res.status(401).json({ error: 'auth' }); return; }
+  let email;
   try {
-    const links = ((await db.doc('adminSettings/custLinks').get()).data() || {}).tokens || {};
-    const cust = Object.keys(links).find(c => links[c] === tok);
-    if (!cust) { _trackCache.delete(tok); res.status(404).json({ error: 'notfound' }); return; }
+    const t = await admin.auth().verifyIdToken(m[1]);
+    if (!t.email || !t.email_verified) { res.status(401).json({ error: 'auth' }); return; }
+    email = String(t.email).toLowerCase();
+  } catch (e) { res.status(401).json({ error: 'auth' }); return; }
+  try {
+    // נקרא בכל בקשה (גם כשיש מטמון) — כך הסרת מייל חוסמת מיד
+    const map = ((await db.doc('adminSettings/custLinks').get()).data() || {}).emails || {};
+    const cust = Object.keys(map).find(c => (map[c] || []).some(e => String(e).toLowerCase() === email));
+    if (!cust) { res.status(403).json({ error: 'denied', email }); return; }
+    const hit = _trackCache.get(cust);
+    if (hit && Date.now() - hit.at < 60000) { res.json(hit.body); return; }
     const [pS, aS, hS, nS] = await Promise.all([
       db.collection('products').where('cust', '==', cust).get(),
       db.collection('activeTasks').where('cust', '==', cust).get(),
@@ -1575,7 +1588,7 @@ exports.customerTrack = functions.https.onRequest(async (req, res) => {
       .sort((a, b) => ((a.stage === 7) - (b.stage === 7)) ||
         (a.stage === 7 ? String(b.ship).localeCompare(String(a.ship)) : String(a.entry || '9999').localeCompare(String(b.entry || '9999'))));
     const body = { name: (nS.data() || {})[cust] || '', at: new Date().toISOString(), orders };
-    _trackCache.set(tok, { at: Date.now(), body });
+    _trackCache.set(cust, { at: Date.now(), body });
     res.json(body);
   } catch (e) {
     console.error('customerTrack error:', e);
