@@ -16262,6 +16262,8 @@ function deliveryNoteHtml(p,sh,idx,count){
   // ולפי המצב **באותו משלוח** — כמו כל שאר המספרים על התעודה.
   const surplus=ordered?Math.max(0,upto-ordered):0;
   const dDate=(sh&&sh.date)||p.dnDate||(p.shippedAt?String(p.shippedAt).slice(0,10):'');
+  // 🕐 שעת ההפקה (10/10/2026) — מ-sh.at. בתעודה בדיעבד/משוחזרת at = רגע הרישום ולא שעת התעודה ⇒ בלי שעה
+  const dnTime=sh&&sh.at&&!sh.backdatedAt&&!sh.restoredAt?(()=>{const d=new Date(sh.at);return isNaN(d)?'':pad2(d.getHours())+':'+pad2(d.getMinutes());})():'';
   const heDate=d=>d?d.slice(8,10)+'/'+d.slice(5,7)+'/'+d.slice(0,4):'';
   const orderTxt=(parseInt(p.orderNo,10)||0)?'#'+String(p.orderNo).padStart(3,'0'):'—';
   const line=(lbl,val)=>val?`<div><span class="l">${esc(lbl)}</span> ${esc(val)}</div>`:'';
@@ -16341,7 +16343,8 @@ table.pk th.ttl{background:#eef2ff;font-size:12px;text-align:center}
     <h2>פרטי ההזמנה</h2>
     ${line('דגם:',p.name||p.prod)}
     ${line('הזמנה:',orderTxt)}
-    ${line('תאריך יציאה:',heDate(dDate))}
+    ${line('תאריך:',heDate(dDate))}
+    ${line('שעה:',dnTime)}
     ${ordered?line('כמות בהזמנה:',ordered+" יח'"):''}
     ${ordered?(surplus?line('עודף מעל ההזמנה:',surplus+" יח'"):line('יתרה להשלמה:',balance+" יח'")):''}
     ${packCount?line('חבילות:',packCount):''}
