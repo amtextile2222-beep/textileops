@@ -3959,6 +3959,8 @@ function startDataListeners(){
     _live('adminSettings',()=>collection(db,'adminSettings'),snap=>{
       snap.docs.forEach(d=>{
         if(d.id==='costs'){S.costs={...S.costs,...d.data()};saveLS();}
+        // 🔗 קישורי מעקב ללקוח — בזיכרון בלבד, לא ב-localStorage (הקישור הוא הסוד)
+        if(d.id==='custLinks'){_custLinks=d.data()?.tokens||{};_custLinkRefresh();}
       });
       renderAll();
     });
@@ -13096,6 +13098,7 @@ function editCustomerInfo(code){
     ${fld('cinfo-contact','איש קשר',ci.contact)}
     ${fld('cinfo-phone','טלפון',ci.phone)}
     ${fld('cinfo-taxid','ח.פ. / ע.מ.',ci.taxId)}
+    ${S.user?.role==='manager'?`<div id="cinfo-link" data-code="${esc(code)}" style="margin-top:14px;padding-top:12px;border-top:1px solid var(--brd)">${_custLinkHtml(code)}</div>`:''}
     <div style="display:flex;gap:8px;margin-top:16px">
       <button class="btn primary" style="flex:1;font-size:14px" onclick="saveCustomerInfo('${escj(code)}')">💾 שמור</button>
       <button class="btn" style="flex:1;font-size:14px" onclick="document.getElementById('cinfo-wrap').remove()">ביטול</button>
@@ -13105,6 +13108,46 @@ function editCustomerInfo(code){
   // המיקוד על השם: זו הסיבה הנפוצה לפתוח את החלון, והטקסט מסומן כדי שאפשר יהיה
   // גם להחליף אותו וגם להמשיך לכתוב בסופו
   setTimeout(()=>{const el=document.getElementById('cinfo-name');if(el){el.focus();el.select();}},50);
+}
+// ─── 🔗 קישור מעקב הזמנות ללקוח (10/10/2026) — מנהל בלבד ─────────────────
+// הטוקן נשמר ב-adminSettings/custLinks (קריאה/כתיבה מנהל ב-Rules); הדף track.html שולח אותו
+// ל-Cloud Function customerTrack, שמחזירה רק את ההזמנות של הלקוח הזה. ביטול/חידוש = הקישור הישן מת.
+let _custLinks={};
+const _custLinkUrl=tok=>new URL('track.html',location.href).href.split('#')[0]+'#t='+tok;
+function _custLinkHtml(code){
+  const tok=_custLinks[code];
+  if(!tok)return `<div style="font-size:12px;font-weight:600;color:var(--txt3);margin-bottom:6px">🔗 קישור מעקב ללקוח</div>
+    <div style="font-size:11px;color:var(--txt3);margin-bottom:8px">הלקוח יראה את שלב הייצור של ההזמנות שלו בלבד — בלי מחירים ובלי עובדים.</div>
+    <button class="btn" style="width:100%;font-size:13px" onclick="custLinkCreate('${escj(code)}')">🔗 צור קישור מעקב</button>`;
+  const url=_custLinkUrl(tok);
+  return `<div style="font-size:12px;font-weight:600;color:var(--txt3);margin-bottom:6px">🔗 קישור מעקב ללקוח <span style="color:var(--green-txt,#16a34a)">● פעיל</span></div>
+    <input type="text" readonly value="${esc(url)}" onclick="this.select()" dir="ltr" style="width:100%;font-size:11px;padding:6px;border-radius:8px;border:1px solid var(--brd);background:var(--bg2);color:var(--txt2)"/>
+    <div style="display:flex;gap:6px;margin-top:6px;flex-wrap:wrap">
+      <button class="btn" style="flex:1;font-size:12px" onclick="custLinkCopy('${escj(code)}')">📋 העתק</button>
+      <a class="btn" style="flex:1;font-size:12px;text-align:center;text-decoration:none" target="_blank" rel="noopener" href="https://wa.me/?text=${encodeURIComponent('מעקב אחר ההזמנות שלכם: '+url)}">💬 וואטסאפ</a>
+      <button class="btn" style="flex:1;font-size:12px;color:var(--red-txt)" onclick="custLinkRevoke('${escj(code)}')">⛔ בטל</button>
+    </div>`;
+}
+function _custLinkRefresh(){const el=document.getElementById('cinfo-link');if(el)el.innerHTML=_custLinkHtml(el.dataset.code);}
+// ⚠️ **בלי merge בכוונה** — מחיקת מפתח ב-setDoc(merge) לא מוחקת אותו בשרת (כמו customerInfo)
+async function _custLinkSave(tokens){
+  if(!db||!S.fbConnected){showToast('⚠️ אין חיבור לשרת');return false;}
+  try{const{doc,setDoc}=window._fb;await setDoc(doc(db,'adminSettings','custLinks'),{tokens});_custLinks=tokens;_custLinkRefresh();return true;}
+  catch(e){showToast('⚠️ השמירה נכשלה');return false;}
+}
+async function custLinkCreate(code){
+  const b=new Uint8Array(16);crypto.getRandomValues(b);
+  const tok=[...b].map(x=>x.toString(16).padStart(2,'0')).join('');
+  if(await _custLinkSave({..._custLinks,[code]:tok}))showToast('✅ נוצר קישור מעקב');
+}
+async function custLinkRevoke(code){
+  if(!confirm('לבטל את הקישור? הלקוח לא יוכל יותר לצפות בהזמנות (אפשר ליצור קישור חדש בכל עת).'))return;
+  const t={..._custLinks};delete t[code];
+  if(await _custLinkSave(t))showToast('⛔ הקישור בוטל');
+}
+function custLinkCopy(code){
+  const url=_custLinkUrl(_custLinks[code]||'');
+  (navigator.clipboard?.writeText(url)||Promise.reject()).then(()=>showToast('📋 הקישור הועתק')).catch(()=>prompt('העתק את הקישור:',url));
 }
 function saveCustomerInfo(code){
   const g=id=>(document.getElementById(id)?.value||'').trim();

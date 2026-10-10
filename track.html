@@ -1,0 +1,94 @@
+<!DOCTYPE html>
+<html lang="he" dir="rtl">
+<head>
+<meta charset="UTF-8"/>
+<meta name="viewport" content="width=device-width,initial-scale=1"/>
+<meta name="robots" content="noindex,nofollow"/>
+<meta name="referrer" content="no-referrer"/>
+<meta name="theme-color" content="#185FA5"/>
+<title>מעקב הזמנות</title>
+<link rel="icon" href="icon-192.png"/>
+<style>
+/* 📦 דף מעקב הזמנות ללקוח (10/10/2026). הנתונים מ-Cloud Function customerTrack — ראה functions/index.js.
+   הטוקן ב-# ולא ב-? — לא נשלח לשרת של GitHub Pages ולא נרשם בלוגים שלו */
+:root{--bg:#f5f5f3;--card:#fff;--txt:#1c1c1a;--txt2:#555;--txt3:#888;--brd:rgba(0,0,0,.1);
+  --blue:#185FA5;--blue-bg:#e6f0fa;--green:#16a34a;--green-bg:#dcfce7;--track:#e5e5e2}
+@media (prefers-color-scheme:dark){:root{--bg:#1c1c1a;--card:#252523;--txt:#f0f0ee;--txt2:#bbb;--txt3:#888;
+  --brd:rgba(255,255,255,.12);--blue:#6aa8e8;--blue-bg:#1d3047;--green:#4ade80;--green-bg:#173a24;--track:#3a3a37}}
+*{box-sizing:border-box}
+body{margin:0;background:var(--bg);color:var(--txt);font-family:system-ui,-apple-system,"Segoe UI",Arial,sans-serif;line-height:1.45}
+.wrap{max-width:720px;margin:0 auto;padding:16px}
+header{display:flex;align-items:center;gap:10px;margin:4px 0 14px}
+header .logo{font-size:28px}
+h1{font-size:20px;margin:0}
+.sub{font-size:13px;color:var(--txt3)}
+h2{font-size:14px;color:var(--txt2);margin:20px 0 8px}
+.card{background:var(--card);border:1px solid var(--brd);border-radius:12px;padding:12px 14px;margin-bottom:10px}
+.top{display:flex;justify-content:space-between;align-items:flex-start;gap:8px}
+.nm{font-weight:700;font-size:15px}
+.meta{font-size:12px;color:var(--txt3);margin-top:2px}
+.badge{flex:0 0 auto;font-size:12px;font-weight:700;padding:3px 10px;border-radius:999px;background:var(--blue-bg);color:var(--blue);white-space:nowrap}
+.badge.done{background:var(--green-bg);color:var(--green)}
+.bar{display:flex;gap:3px;margin:10px 0 4px}
+.bar i{flex:1;height:6px;border-radius:3px;background:var(--track)}
+.bar i.on{background:var(--blue)}
+.bar.done i{background:var(--green)}
+.pct{height:6px;border-radius:3px;background:var(--track);overflow:hidden;margin-top:6px}
+.pct b{display:block;height:100%;background:var(--blue)}
+.stage{font-size:12px;color:var(--txt2)}
+.msg{text-align:center;color:var(--txt3);padding:40px 10px;font-size:14px}
+footer{font-size:11px;color:var(--txt3);text-align:center;margin:20px 0 8px}
+</style>
+</head>
+<body>
+<div class="wrap">
+  <header><span class="logo">✂️</span><div><h1 id="ttl">מעקב הזמנות</h1><div class="sub" id="sub"></div></div></header>
+  <div id="app"><div class="msg">⏳ טוען…</div></div>
+  <footer id="ft"></footer>
+</div>
+<script>
+// ⚠️ השמות והסדר חייבים להתאים ל-TRACK_LISTS ב-functions/index.js (= PIPE_LISTS בלוח מצב הזמנות)
+const STAGES=['ההזמנה התקבלה','בספירה וגזירה','ממתין לתפירה','בתפירה','התפירה הסתיימה','באריזה','מוכן למשלוח','נשלח'];
+const URL_FN='https://us-central1-textileops-aef4a.cloudfunctions.net/customerTrack';
+const esc=s=>String(s??'').replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;');
+const fmtD=d=>{const m=/^(\d{4})-(\d{2})-(\d{2})/.exec(d||'');return m?m[3]+'/'+m[2]+'/'+m[1]:'';};
+const tok=(new URLSearchParams(location.hash.slice(1)).get('t')||'').toLowerCase();
+const app=document.getElementById('app');
+function card(o){
+  const last=STAGES.length-1,done=o.stage===last;
+  const pct=o.stage===3?o.sewPct:o.stage===5?o.packPct:null;
+  const no=o.no?'הזמנה #'+String(o.no).padStart(3,'0')+' · ':'';
+  const segs=STAGES.map((_,i)=>`<i class="${i<=o.stage?'on':''}"></i>`).join('');
+  return `<div class="card">
+    <div class="top"><div><div class="nm">${esc(o.name||('דגם '+o.prod))}</div>
+      <div class="meta">${no}${o.qty?o.qty+" יח' · ":''}${done?'נשלח '+fmtD(o.ship):'התקבל '+fmtD(o.entry)}</div></div>
+      <span class="badge ${done?'done':''}">${esc(STAGES[o.stage]||'')}${pct!=null?' '+pct+'%':''}</span></div>
+    <div class="bar ${done?'done':''}">${segs}</div>
+    <div class="stage">שלב ${o.stage+1} מתוך ${STAGES.length}</div>
+    ${pct!=null?`<div class="pct" title="${pct}%"><b style="width:${Math.max(0,Math.min(100,pct))}%"></b></div>`:''}
+  </div>`;
+}
+async function load(){
+  if(!/^[a-f0-9]{32}$/.test(tok)){app.innerHTML='<div class="msg">🔒 הקישור אינו תקין.<br>פנו אלינו לקבלת קישור מעודכן.</div>';return;}
+  try{
+    const r=await fetch(URL_FN+'?t='+tok,{cache:'no-store'});
+    if(r.status===404){app.innerHTML='<div class="msg">🔒 הקישור אינו פעיל.<br>פנו אלינו לקבלת קישור מעודכן.</div>';return;}
+    if(!r.ok)throw new Error(r.status);
+    const d=await r.json();
+    if(d.name){document.getElementById('sub').textContent=d.name;document.title='מעקב הזמנות — '+d.name;}
+    const act=d.orders.filter(o=>o.stage<STAGES.length-1),shp=d.orders.filter(o=>o.stage===STAGES.length-1);
+    app.innerHTML=!d.orders.length?'<div class="msg">אין כרגע הזמנות פעילות.</div>':
+      (act.length?`<h2>🏭 בייצור (${act.length})</h2>`+act.map(card).join(''):'')+
+      (shp.length?`<h2>✅ נשלחו ב-30 הימים האחרונים (${shp.length})</h2>`+shp.map(card).join(''):'');
+    const t=new Date(d.at);
+    document.getElementById('ft').textContent='עודכן '+t.toLocaleString('he-IL',{day:'2-digit',month:'2-digit',hour:'2-digit',minute:'2-digit'})+' · מתעדכן אוטומטית';
+  }catch(e){
+    if(!app.querySelector('.card'))app.innerHTML='<div class="msg">⚠️ לא ניתן לטעון כרגע. נסו שוב בעוד רגע.</div>';
+  }
+}
+load();
+setInterval(()=>{if(!document.hidden)load();},5*60000);
+document.addEventListener('visibilitychange',()=>{if(!document.hidden)load();});
+</script>
+</body>
+</html>

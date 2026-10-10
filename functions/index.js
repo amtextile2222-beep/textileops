@@ -1450,3 +1450,135 @@ exports.attendanceCloserNow = functions.https.onRequest(async (req, res) => {
     res.status(500).json({ error: String(e.message || e) });
   }
 });
+
+// ─── 📦 מעקב הזמנות ללקוח (10/10/2026) ─────────────────────────────
+// דף ציבורי (track.html#t=<קוד>) — הלקוח רואה רק את ההזמנות שלו, בלי התחברות.
+// הקוד נוצר ע"י מנהל ונשמר ב-adminSettings/custLinks.tokens = {קוד לקוח: טוקן} — מסמך שלקוח
+// (ואפילו עובד) לא קורא ⇒ אין שינוי ב-Rules והלקוח לא נוגע במסד בכלל. ביטול = מחיקת המפתח.
+// מוחזרים **רק** שדות תצוגה: מס' הזמנה, שם, כמות, תאריכים, שלב ואחוזים. בלי מחירים/עובדים/ברקודים.
+//
+// ⚠️ חייב להישאר זהה ל-pipeStateOf / taskOrderStamp / taskUnits / coverKey ב-index.html —
+// הלקוח צריך לראות בדיוק את מה שהמנהל רואה ב"לוח מצב הזמנות". שינוי שם ⇒ שינוי כאן.
+const TRACK_LISTS = ['intake', 'countcut', 'ready_sew', 'sewing', 'ready_pack', 'packing', 'ready_ship', 'shipped'];
+const TRACK_SHIP_DAYS = 30;
+const _trackCache = new Map(); // טוקן → {at, body} — מגן מפני רענון חוזר שקורא שוב את כל ההיסטוריה
+function trackFamOfDept(d) {
+  const s = String(d || '').toLowerCase();
+  if (/استقبال|قص|קבל|חית|גזיר/.test(s)) return 'recv';
+  if (/خياط|خيط|תפיר/.test(s)) return 'sew';
+  if (/اريز|تغليف|كوي|فحص|אריז|גיהו|ניקו|ביקור/.test(s)) return 'pack';
+  return '';
+}
+const trackStepName = s => typeof s === 'string' ? s : (s && s.name) || '';
+const trackStepStation = s => (s && typeof s === 'object' && s.station) ? s.station : '';
+const trackStamp = p => +p.createdAt || parseInt(String(p.id).replace(/\D/g, '')) || 0;
+const trackOrderNoOf = raw => { const s = String(raw || ''); return s.length >= 16 ? (parseInt(s.slice(13, 16), 10) || 0) : 0; };
+const trackQty = p => (p.quantities || []).reduce((s, q) => s + (parseInt(q.qty) || 0), 0);
+const trackBc = t => t.bc || String(t.cust) + String(t.prod) + String(t.size || '0') + String(t.qty).padStart(3, '0') + String(t.col);
+const trackCoverKey = t => trackBc(t) + '|' + String(t.taskType || '').trim().toLowerCase() + (t.splitId ? '|' + t.splitId : '');
+function trackShipDate(p) {
+  const s = (p.stageLog || []).find(e => e.id === 'shipped');
+  if (s && s.date) return s.date;
+  return p.shippedAt ? String(p.shippedAt).slice(0, 10) : '';
+}
+function trackEntryDate(p) {
+  if (+p.createdAt) return new Date(+p.createdAt).toISOString().slice(0, 10);
+  const r = (p.stageLog || []).find(e => e.id === 'receive');
+  return (r && r.date) || '';
+}
+// prods = כל רשומות המוצר של הלקוח (prodByOrderNo/findProd/prodStampOldest מסננים ממילא לפי לקוח)
+function trackStates(prods, tasks) {
+  const byNo = (prod, no) => no ? prods.find(p => p.prod === prod && (parseInt(p.orderNo, 10) || 0) === no) || null : null;
+  const newest = prod => { let b = null, mx = -1; for (const p of prods) { if (p.prod !== prod) continue; const c = trackStamp(p); if (c > mx) { mx = c; b = p; } } return b; };
+  const oldest = prod => { let mn = Infinity; for (const p of prods) { if (p.prod !== prod) continue; const c = trackStamp(p); if (c < mn) mn = c; } return isFinite(mn) ? mn : 0; };
+  const orderStamp = t => {
+    const no = trackOrderNoOf(t.bc);
+    if (no) { const r = byNo(t.prod, no); if (r) return trackStamp(r); }
+    if (t.prodStamp != null) return t.prodStamp;
+    return oldest(t.prod);
+  };
+  const units = t => {
+    const q = +t.qty || 0;
+    if (q > 0) return q;
+    if (!t.isTotal) return 0;
+    const r = byNo(t.prod, trackOrderNoOf(t.bc)) || newest(t.prod);
+    return r ? trackQty(r) : 0;
+  };
+  const byOrder = {};
+  for (const t of tasks) { const k = t.prod + '|' + orderStamp(t); (byOrder[k] || (byOrder[k] = [])).push(t); }
+  return prods.map(p => {
+    const ts = byOrder[p.prod + '|' + trackStamp(p)] || [];
+    const qty = trackQty(p);
+    const scans = { recv: 0, sew: 0, pack: 0 };
+    for (const t of ts) { const f = trackFamOfDept(t.dept); if (f) scans[f]++; }
+    const steps = { recv: [], sew: [], pack: [], none: [] };
+    for (const s of (p.workSteps || [])) { const nm = trackStepName(s); if (!nm) continue; steps[trackFamOfDept(String(trackStepStation(s)).split('::')[0]) || 'none'].push(nm); }
+    const seen = new Set(), done = {};
+    for (const t of ts) {
+      if (!(t.duration > 0)) continue;
+      const k = trackCoverKey(t); if (seen.has(k)) continue; seen.add(k);
+      const nm = String(t.taskType || '').trim(); done[nm] = (done[nm] || 0) + units(t);
+    }
+    // full/of כמו בלוח (קובע את המצב) + pct = יחידות שבוצעו מתוך כמות×שלבים (לתצוגת הלקוח בלבד)
+    const fam = f => {
+      const ss = steps[f]; if (!ss.length) return null;
+      return { full: ss.filter(nm => qty > 0 && (done[nm] || 0) >= qty).length, of: ss.length,
+        pct: qty > 0 ? Math.round(100 * ss.reduce((s, nm) => s + Math.min(done[nm] || 0, qty), 0) / (qty * ss.length)) : 0 };
+    };
+    const sew = fam('sew'), pack = fam('pack');
+    const shipped = (p.stageLog || []).some(e => e.id === 'shipped') || +p.shippedQty > 0;
+    let id;
+    if (shipped) id = 'shipped';
+    else if (pack && pack.of > 0 && pack.full === pack.of) id = 'ready_ship';
+    else if (scans.pack > 0) id = 'packing';
+    else if (sew && sew.of > 0 && sew.full === sew.of) id = 'ready_pack';
+    else if (scans.sew > 0) id = 'sewing';
+    else if (qty > 0 && scans.recv > 0) id = 'ready_sew';
+    else if (scans.recv > 0) id = 'countcut';
+    else id = 'intake';
+    // דחיפה ידנית של מנהל — קדימה בלבד, כמו בלוח
+    const ov = p.pipeOverride && TRACK_LISTS.indexOf(p.pipeOverride.list) >= 0 ? p.pipeOverride.list : null;
+    if (ov && id !== 'shipped' && TRACK_LISTS.indexOf(ov) > TRACK_LISTS.indexOf(id)) id = ov;
+    const st = TRACK_LISTS.indexOf(id);
+    // אחוז בשלב הנוכחי בלבד; שלב שכבר עבר = 100
+    const sewPct = st > 3 ? 100 : (st === 3 && sew ? sew.pct : null);
+    const packPct = st > 5 ? 100 : (st === 5 && pack ? pack.pct : null);
+    return { no: parseInt(p.orderNo, 10) || 0, prod: p.prod, name: p.name || '', qty, entry: trackEntryDate(p),
+      ship: shipped ? trackShipDate(p) : '', stage: st, sewPct, packPct };
+  });
+}
+
+exports.customerTrack = functions.https.onRequest(async (req, res) => {
+  res.set('Access-Control-Allow-Origin', '*');
+  res.set('Cache-Control', 'no-store');
+  if (req.method === 'OPTIONS') { res.set('Access-Control-Allow-Methods', 'GET'); res.status(204).send(''); return; }
+  const tok = String(req.query.t || '');
+  if (!/^[a-f0-9]{32}$/.test(tok)) { res.status(404).json({ error: 'notfound' }); return; }
+  const hit = _trackCache.get(tok);
+  if (hit && Date.now() - hit.at < 60000) { res.json(hit.body); return; }
+  try {
+    const links = ((await db.doc('adminSettings/custLinks').get()).data() || {}).tokens || {};
+    const cust = Object.keys(links).find(c => links[c] === tok);
+    if (!cust) { _trackCache.delete(tok); res.status(404).json({ error: 'notfound' }); return; }
+    const [pS, aS, hS, nS] = await Promise.all([
+      db.collection('products').where('cust', '==', cust).get(),
+      db.collection('activeTasks').where('cust', '==', cust).get(),
+      db.collection('histTasks').where('cust', '==', cust).get(),
+      db.doc('appSettings/customerNames').get()
+    ]);
+    const prods = pS.docs.map(d => ({ id: d.id, ...d.data() }));
+    const tasks = [...hS.docs, ...aS.docs].map(d => d.data());
+    const from = new Date(Date.now() - TRACK_SHIP_DAYS * 86400000).toISOString().slice(0, 10);
+    // פעילות לפי סדר כניסה (הוותיקה ראשונה), ואחריהן שנשלחו — החדשה ראשונה
+    const orders = trackStates(prods, tasks)
+      .filter(o => o.stage < 7 || (o.ship && o.ship >= from))
+      .sort((a, b) => ((a.stage === 7) - (b.stage === 7)) ||
+        (a.stage === 7 ? String(b.ship).localeCompare(String(a.ship)) : String(a.entry || '9999').localeCompare(String(b.entry || '9999'))));
+    const body = { name: (nS.data() || {})[cust] || '', at: new Date().toISOString(), orders };
+    _trackCache.set(tok, { at: Date.now(), body });
+    res.json(body);
+  } catch (e) {
+    console.error('customerTrack error:', e);
+    res.status(500).json({ error: 'server' });
+  }
+});
