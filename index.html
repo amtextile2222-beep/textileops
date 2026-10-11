@@ -14779,17 +14779,33 @@ function renderCostTab(){
       const dailyRate=wRate(r.id,to);
       const hours=r.netMs/3600000;
       const salary=Math.round(r.pay||0);
-      return{...r,dailyRate,hours,salary};
+      return{...r,key:r.id,dailyRate,hours,salary};
     }).sort((a,b)=>b.salary-a.salary);
+    // 💵 מפרעות + שורות ידניות — נשמרים לפי חודש ה-"מ-" (adminSettings/payroll_YYYY-MM, מנהל בלבד)
+    const pm=_payKey(from),pd=_payData[pm];
+    if(pm&&!pd){el.innerHTML='<div style="color:var(--txt3);font-size:13px;padding:12px">⏳ טוען מפרעות…</div>';_payLoad(pm).then(()=>{if(S.costTab==='payroll')renderCostTab();});return;}
+    (pd?.manual||[]).forEach(x=>rows.push({key:'m_'+x.id,mid:x.id,name:x.name,note:x.note||'',manual:true,days:'',hours:null,dailyRate:0,salary:Math.round(+x.a||0)}));
+    const advOf=k=>(pd?.adv?.[k]||[]).slice().sort((a,b)=>String(a.d).localeCompare(String(b.d)));
+    rows.forEach(r=>{r.adv=advOf(r.key);r.advSum=r.adv.reduce((s,x)=>s+(+x.a||0),0);r.remain=Math.round((r.salary-r.advSum)*100)/100;});
     const totalSalary=rows.reduce((s,r)=>s+r.salary,0);
+    const totalAdv=rows.reduce((s,r)=>s+r.advSum,0);
+    const totalRemain=Math.round((totalSalary-totalAdv)*100)/100;
+    const dm=d=>String(d).slice(8,10)+'/'+String(d).slice(5,7);
+    const byDate={};rows.forEach(r=>r.adv.forEach(x=>{byDate[x.d]=(byDate[x.d]||0)+(+x.a||0);}));
+    const multiMonth=from&&to&&from.slice(0,7)!==to.slice(0,7);
+    _payRowsCur=rows.map(r=>({key:r.key,name:r.name}));
     el.innerHTML=`<div>
       <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:10px;flex-wrap:wrap;gap:8px">
         <div style="font-size:13px;font-weight:700;color:var(--txt)">💰 תשלום משכורות — ${from||'—'} עד ${to||'—'}</div>
-        <div style="display:flex;gap:8px">
-          <div style="background:var(--green);color:#fff;padding:6px 14px;border-radius:10px;font-size:14px;font-weight:700">סה"כ לתשלום: ₪${totalSalary.toLocaleString()}</div>
+        <div style="display:flex;gap:8px;flex-wrap:wrap">
+          <div style="background:var(--green);color:#fff;padding:6px 14px;border-radius:10px;font-size:14px;font-weight:700">נשאר לתשלום: ₪${totalRemain.toLocaleString()}</div>
+          <button class="btn" onclick="payAdvModal('')" style="font-size:12px">➕ מפרעות</button>
+          <button class="btn" onclick="payManualModal('')" style="font-size:12px">➕ שורה ידנית</button>
           <button class="btn" onclick="printPayroll()" style="font-size:12px">🖨 הדפס</button>
         </div>
       </div>
+      ${multiMonth?`<div style="font-size:12px;color:var(--amber-txt);margin-bottom:8px">⚠️ הטווח חוצה חודשים — המפרעות והשורות הידניות שייכות לחודש ${pm}</div>`:''}
+      ${Object.keys(byDate).length?`<div style="font-size:12px;color:var(--txt2);margin-bottom:8px">💵 מפרעות לפי תאריך: ${Object.keys(byDate).sort().map(d=>`<b>${dm(d)}</b> ₪${byDate[d].toLocaleString()}`).join(' · ')}</div>`:''}
       <div style="overflow-x:auto">
       <table style="width:100%;border-collapse:collapse;font-size:13px" id="payroll-table">
       <thead><tr style="border-bottom:1.5px solid var(--b);text-align:right;background:var(--bg2)">
@@ -14798,27 +14814,127 @@ function renderCostTab(){
         <th style="padding:9px 8px">ימי נוכחות</th>
         <th style="padding:9px 8px">שעות נטו</th>
         <th style="padding:9px 8px">תעריף יומי</th>
-        <th style="padding:9px 8px;color:var(--green-txt)">לתשלום</th>
+        <th style="padding:9px 8px">שכר</th>
+        <th style="padding:9px 8px">מפרעות</th>
+        <th style="padding:9px 8px;color:var(--green-txt)">נשאר לתשלום</th>
         <th style="padding:9px 8px">אישור תשלום</th>
       </tr></thead>
-      <tbody>${rows.map(r=>`<tr style="border-bottom:0.5px solid var(--b)">
-        <td style="padding:8px 8px;font-weight:600">${esc(r.name)}</td>
-        <td style="padding:8px 8px;color:var(--txt3)">${roleLabel2(r.id)}</td>
+      <tbody>${rows.map((r,i)=>`<tr style="border-bottom:0.5px solid var(--b)${r.manual?';background:var(--bg2)':''}">
+        <td style="padding:8px 8px;font-weight:600">${esc(r.name)}${r.manual&&r.note?`<div style="font-size:10px;color:var(--txt3);font-weight:400">${esc(r.note)}</div>`:''}</td>
+        <td style="padding:8px 8px;color:var(--txt3)">${r.manual?`✍ ידני <a href="#" class="np" onclick="payManualModal('${escj(r.mid)}');return false" style="font-size:11px">✏️</a>`:roleLabel2(r.id)}</td>
         <td style="padding:8px 8px;text-align:center">${r.days}</td>
-        <td style="padding:8px 8px;text-align:center">${r.hours.toFixed(1)}</td>
+        <td style="padding:8px 8px;text-align:center">${r.hours==null?'':r.hours.toFixed(1)}</td>
         <td style="padding:8px 8px;color:var(--txt3)">${r.dailyRate?'₪'+r.dailyRate.toLocaleString():'—'}</td>
-        <td style="padding:8px 8px;font-weight:700;color:var(--green-txt);font-size:15px">₪${r.salary.toLocaleString()}</td>
+        <td style="padding:8px 8px;font-weight:600">₪${r.salary.toLocaleString()}</td>
+        <td style="padding:6px 8px;font-size:12px">${r.adv.map(x=>`<div style="white-space:nowrap">${dm(x.d)} · ₪${(+x.a).toLocaleString()} <a href="#" class="np" title="מחק מפרעה" onclick="payAdvDel(${i},'${escj(x.id)}');return false" style="color:var(--red-txt);text-decoration:none">✕</a></div>`).join('')}<a href="#" class="np" onclick="payAdvModal(${i});return false" style="font-size:11px">➕</a></td>
+        <td style="padding:8px 8px;font-weight:700;font-size:15px;color:${r.remain<0?'var(--red-txt)':'var(--green-txt)'}">₪${r.remain.toLocaleString()}</td>
         <td style="padding:8px 8px"><label style="display:flex;align-items:center;gap:5px;cursor:pointer"><input type="checkbox" style="width:16px;height:16px"> שולם</label></td>
       </tr>`).join('')}
       <tr style="border-top:2px solid var(--b);background:var(--bg2)">
         <td colspan="5" style="padding:9px 8px;font-weight:700">סה"כ</td>
-        <td style="padding:9px 8px;font-weight:700;color:var(--green-txt);font-size:16px">₪${totalSalary.toLocaleString()}</td>
+        <td style="padding:9px 8px;font-weight:700">₪${totalSalary.toLocaleString()}</td>
+        <td style="padding:9px 8px;font-weight:700">₪${totalAdv.toLocaleString()}</td>
+        <td style="padding:9px 8px;font-weight:700;color:var(--green-txt);font-size:16px">₪${totalRemain.toLocaleString()}</td>
         <td></td>
       </tr></tbody>
       </table></div>
-      <div style="font-size:11px;color:var(--txt3);margin-top:8px">⚡ חישוב: שעות נוכחות נטו × (תעריף יומי ÷ 8)</div>
+      <div style="font-size:11px;color:var(--txt3);margin-top:8px">⚡ שכר: שעות נוכחות נטו × (תעריף יומי ÷ 8) · נשאר לתשלום = שכר פחות מפרעות</div>
     </div>`;
   }
+}
+
+// ─── 💵 מפרעות ושורות ידניות בתשלום משכורות (11/10/2026) — מנהל בלבד ─────────
+// adminSettings/payroll_YYYY-MM = {adv:{key:[{id,d,a}]}, manual:[{id,name,a,note}]} — key = מזהה עובד
+// או 'm_'+id לשורה ידנית. החודש = חודש תאריך ה-"מ-" בדוח. נטען לפי דרישה (לא במאזין) וכל כתיבה
+// קוראת קודם מהשרת ⇒ שני מכשירי מנהל לא דורסים זה את זה. setDoc מלא — מחיקה אמיתית של מפרעה.
+let _payData={},_payRowsCur=[];
+const _payKey=from=>String(from||'').slice(0,7);
+async function _payLoad(m,force){
+  if(!m)return null;
+  if(_payData[m]&&!force)return _payData[m];
+  const d={adv:{},manual:[]};
+  if(db&&S.fbConnected){
+    try{const{doc,getDoc}=window._fb;const s=await getDoc(doc(db,'adminSettings','payroll_'+m));
+      if(s.exists()){const x=s.data();d.adv=x.adv||{};d.manual=x.manual||[];}}
+    catch(e){showToast('⚠️ טעינת המפרעות נכשלה','var(--red-txt)');}
+  }
+  _payData[m]=d;return d;
+}
+async function _payMutate(fn){
+  if(S.user?.role!=='manager')return false;
+  if(!db||!S.fbConnected){showToast('⚠️ אין חיבור לשרת','var(--red-txt)');return false;}
+  const m=_payKey(document.getElementById('cost-from')?.value);if(!m)return false;
+  const d=await _payLoad(m,true);fn(d);
+  try{const{doc,setDoc}=window._fb;
+    await setDoc(doc(db,'adminSettings','payroll_'+m),{adv:d.adv,manual:d.manual,updatedAt:new Date().toISOString(),updatedBy:S.user?.name||''});}
+  catch(e){showToast('⚠️ השמירה נכשלה: '+e.message,'var(--red-txt)',6000);delete _payData[m];renderCostTab();return false;}
+  renderCostTab();return true;
+}
+const _payId=()=>Date.now().toString(36)+Math.random().toString(36).slice(2,6);
+// i = אינדקס שורה בדוח שמוצג; '' = מפרעה לכולם באותו תאריך (כמו בעמודות ה-XL)
+function payAdvModal(i){
+  const list=i===''?_payRowsCur:[_payRowsCur[i]].filter(Boolean);
+  if(!list.length)return;
+  document.getElementById('padv-wrap')?.remove();
+  const t=todayStr();
+  const wrap=document.createElement('div');wrap.id='padv-wrap';
+  wrap.style.cssText='position:fixed;inset:0;background:rgba(0,0,0,.5);display:flex;align-items:flex-start;justify-content:center;z-index:10000;padding:16px;overflow-y:auto';
+  wrap.onclick=e=>{if(e.target===wrap)wrap.remove();};
+  wrap.innerHTML=`<div style="background:var(--card);border-radius:14px;padding:18px;max-width:420px;width:100%;margin:auto;box-shadow:0 10px 40px rgba(0,0,0,.3)">
+    <div style="font-size:16px;font-weight:800;margin-bottom:8px">💵 ${i===''?'מפרעות לכולם':'מפרעה — '+esc(list[0].name)}</div>
+    <label style="font-size:12px;color:var(--txt3)">תאריך התשלום <span id="padv-dlbl" style="font-weight:700;color:var(--txt)"></span></label>
+    <input type="date" id="padv-date" value="${t}" max="${t}" style="width:100%;font-size:14px;margin:4px 0 10px"/>
+    <div style="max-height:55vh;overflow-y:auto">${list.map((r,j)=>`<div style="display:flex;align-items:center;gap:8px;margin-bottom:6px">
+      <span style="flex:1;font-size:13px">${esc(r.name)}</span>
+      <input type="number" min="0" step="any" inputmode="decimal" data-j="${j}" class="padv-a" placeholder="₪" style="width:110px;font-size:14px;padding:6px"/></div>`).join('')}</div>
+    <div style="font-size:11px;color:var(--txt3);margin:4px 0 10px">שדה ריק = בלי מפרעה. סכום חדש מתווסף למפרעות הקיימות.</div>
+    <div style="display:flex;gap:8px"><button class="btn primary" style="flex:1" id="padv-ok">💾 שמור</button>
+      <button class="btn" style="flex:1" onclick="document.getElementById('padv-wrap').remove()">ביטול</button></div></div>`;
+  document.body.appendChild(wrap);
+  // התאריך גם בפורמט ישראלי — שדה התאריך של הדפדפן מוצג אצל המשתמש כ-mm/dd/yyyy
+  const di=document.getElementById('padv-date'),dl=()=>{document.getElementById('padv-dlbl').textContent=di.value?'('+di.value.slice(8,10)+'/'+di.value.slice(5,7)+'/'+di.value.slice(0,4)+')':'';};
+  di.oninput=dl;dl();
+  setTimeout(()=>wrap.querySelector('.padv-a')?.focus(),50);
+  document.getElementById('padv-ok').onclick=async()=>{
+    const d=di.value;if(!d||d>t){alert('בחר תאריך עד היום');return;}
+    const items=[...wrap.querySelectorAll('.padv-a')].map(x=>({k:list[+x.dataset.j].key,a:+x.value||0})).filter(x=>x.a>0);
+    if(!items.length){alert('לא הוזן אף סכום');return;}
+    if(await _payMutate(pd=>{items.forEach(x=>{(pd.adv[x.k]||(pd.adv[x.k]=[])).push({id:_payId(),d,a:x.a});});})){
+      wrap.remove();showToast('✅ נרשמו '+items.length+' מפרעות');}
+  };
+}
+async function payAdvDel(i,id){
+  const key=_payRowsCur[i]?.key;if(!key)return;
+  if(!await showConfirm('מחיקת מפרעה','למחוק את המפרעה?','מחק','ביטול'))return;
+  await _payMutate(pd=>{const l=(pd.adv[key]||[]).filter(x=>x.id!==id);if(l.length)pd.adv[key]=l;else delete pd.adv[key];});
+}
+// שורה ידנית — מי שלא בנוכחות (נהגים וכו'). mid ריק = חדשה
+function payManualModal(mid){
+  const m=_payKey(document.getElementById('cost-from')?.value);
+  if(!m)return;
+  const cur=mid?(_payData[m]?.manual||[]).find(x=>x.id===mid):null;
+  document.getElementById('pman-wrap')?.remove();
+  const wrap=document.createElement('div');wrap.id='pman-wrap';
+  wrap.style.cssText='position:fixed;inset:0;background:rgba(0,0,0,.5);display:flex;align-items:center;justify-content:center;z-index:10000;padding:16px';
+  wrap.onclick=e=>{if(e.target===wrap)wrap.remove();};
+  const f=(id,ph,v,type)=>`<input type="${type||'text'}" id="${id}" placeholder="${esc(ph)}" value="${esc(v??'')}" style="width:100%;font-size:14px;padding:8px;margin-top:6px"/>`;
+  wrap.innerHTML=`<div style="background:var(--card);border-radius:14px;padding:18px;max-width:360px;width:100%;box-shadow:0 10px 40px rgba(0,0,0,.3)">
+    <div style="font-size:16px;font-weight:800;margin-bottom:4px">✍ ${cur?'עריכת שורה ידנית':'שורה ידנית'} — ${esc(m)}</div>
+    ${f('pman-name','שם',cur?.name)}${f('pman-a','סכום לתשלום ₪',cur?.a,'number')}${f('pman-note','הערה (לא חובה)',cur?.note)}
+    <div style="display:flex;gap:8px;margin-top:14px"><button class="btn primary" style="flex:1" id="pman-ok">💾 שמור</button>
+      ${cur?`<button class="btn" style="color:var(--red-txt)" id="pman-del">🗑</button>`:''}
+      <button class="btn" style="flex:1" onclick="document.getElementById('pman-wrap').remove()">ביטול</button></div></div>`;
+  document.body.appendChild(wrap);
+  setTimeout(()=>document.getElementById('pman-name')?.focus(),50);
+  document.getElementById('pman-ok').onclick=async()=>{
+    const name=document.getElementById('pman-name').value.trim(),a=+document.getElementById('pman-a').value||0,note=document.getElementById('pman-note').value.trim();
+    if(!name){alert('חסר שם');return;}
+    if(await _payMutate(pd=>{if(cur){const x=pd.manual.find(y=>y.id===cur.id);if(x)Object.assign(x,{name,a,note});}else pd.manual.push({id:_payId(),name,a,note});}))wrap.remove();
+  };
+  if(cur)document.getElementById('pman-del').onclick=async()=>{
+    if(!await showConfirm('מחיקת שורה','למחוק את "'+cur.name+'" ואת המפרעות שלה?','מחק','ביטול'))return;
+    if(await _payMutate(pd=>{pd.manual=pd.manual.filter(y=>y.id!==cur.id);delete pd.adv['m_'+cur.id];}))wrap.remove();
+  };
 }
 
 function printPayroll(){
@@ -14836,6 +14952,7 @@ function printPayroll(){
       table{width:100%;border-collapse:collapse;font-size:13px}
       th{background:#f5f5f5;padding:8px;text-align:right;border-bottom:2px solid #ccc;font-weight:700}
       td{padding:7px 8px;border-bottom:1px solid #eee}
+      .np{display:none!important}
       @media print{body{padding:10px}}
     </style>
   </head><body>
