@@ -14797,7 +14797,7 @@ function renderCostTab(){
     const dm=d=>String(d).slice(8,10)+'/'+String(d).slice(5,7);
     const byDate={};rows.forEach(r=>r.adv.forEach(x=>{byDate[x.d]=(byDate[x.d]||0)+(+x.a||0);}));
     const multiMonth=from&&to&&from.slice(0,7)!==to.slice(0,7);
-    _payRowsCur=rows.map(r=>({key:r.key,name:r.name}));
+    _payRowsCur=rows.map(r=>({key:r.key,name:r.name,salary:r.salary,addSum:r.addSum,advSum:r.advSum,remain:r.remain}));
     el.innerHTML=`<div>
       <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:10px;flex-wrap:wrap;gap:8px">
         <div style="font-size:13px;font-weight:700;color:var(--txt)">💰 תשלום משכורות — ${from||'—'} עד ${to||'—'}</div>
@@ -14806,6 +14806,7 @@ function renderCostTab(){
           <button class="btn" onclick="payAdvModal('')" style="font-size:12px">➕ מפרעות</button>
           <button class="btn" onclick="payManualModal('')" style="font-size:12px">➕ שורה ידנית</button>
           <button class="btn" onclick="printPayroll()" style="font-size:12px">🖨 הדפס</button>
+          <button class="btn" onclick="payLabelsModal()" style="font-size:12px">🏷 מדבקות</button>
         </div>
       </div>
       ${multiMonth?`<div style="font-size:12px;color:var(--amber-txt);margin-bottom:8px">⚠️ הטווח חוצה חודשים — המפרעות והשורות הידניות שייכות לחודש ${pm}</div>`:''}
@@ -14942,6 +14943,68 @@ async function payAddDel(i,id){
   const key=_payRowsCur[i]?.key;if(!key)return;
   if(!await showConfirm('מחיקת תוספת','למחוק את התוספת?','מחק','ביטול'))return;
   await _payMutate(pd=>{const l=(pd.add?.[key]||[]).filter(x=>x.id!==id);if(l.length)pd.add[key]=l;else if(pd.add)delete pd.add[key];});
+}
+// 🏷 מדבקות משכורת (11/10/2026) — דף A4 עם 32 מדבקות 52.5×35 מ"מ (4×8). שתי אפשרויות:
+// שמות בלבד · חשבון: שם + "شهر 9/2026" + "حساب 3391+250-2191=1450" (שכר + תוספות − מפרעות = נשאר).
+// "דלג על" = מדבקות שכבר נוצלו בדף — ההדפסה מתחילה מהמקום הפנוי הבא (מימין לשמאל, שורה אחרי שורה).
+// השם מודפס כפי שהוא שמור (שמות העובדים במערכת בערבית; בשורה ידנית — כפי שהוקלד).
+function payLabelsModal(){
+  const rows=_payRowsCur.filter(r=>r.salary||r.addSum||r.advSum);
+  if(!rows.length){showToast('אין עובדים להדפסה','var(--red-txt)');return;}
+  document.getElementById('plbl-wrap')?.remove();
+  const wrap=document.createElement('div');wrap.id='plbl-wrap';
+  wrap.style.cssText='position:fixed;inset:0;background:rgba(0,0,0,.5);display:flex;align-items:flex-start;justify-content:center;z-index:10000;padding:16px;overflow-y:auto';
+  wrap.onclick=e=>{if(e.target===wrap)wrap.remove();};
+  wrap.innerHTML=`<div style="background:var(--card);border-radius:14px;padding:18px;max-width:420px;width:100%;margin:auto;box-shadow:0 10px 40px rgba(0,0,0,.3)">
+    <div style="font-size:16px;font-weight:800;margin-bottom:4px">🏷 מדבקות — A4 · 32 מדבקות 52.5×35</div>
+    <div style="display:flex;gap:14px;margin:8px 0;font-size:13px">
+      <label style="display:flex;gap:5px;align-items:center;cursor:pointer"><input type="radio" name="plbl-mode" value="calc" checked style="width:auto"> חשבון משכורת</label>
+      <label style="display:flex;gap:5px;align-items:center;cursor:pointer"><input type="radio" name="plbl-mode" value="name" style="width:auto"> שמות בלבד</label>
+    </div>
+    <label style="font-size:12px;color:var(--txt3)">לדלג על מדבקות שכבר נוצלו בדף</label>
+    <input type="number" id="plbl-skip" min="0" max="31" value="0" style="width:100%;font-size:14px;margin:4px 0 8px"/>
+    <div style="display:flex;justify-content:space-between;font-size:12px;margin-bottom:4px"><b>עובדים</b>
+      <span><a href="#" onclick="document.querySelectorAll('.plbl-w').forEach(x=>x.checked=true);return false">הכל</a> · <a href="#" onclick="document.querySelectorAll('.plbl-w').forEach(x=>x.checked=false);return false">אף אחד</a></span></div>
+    <div style="max-height:40vh;overflow-y:auto;border:1px solid var(--brd);border-radius:8px;padding:6px">${rows.map(r=>`<label style="display:flex;gap:6px;align-items:center;font-size:13px;padding:2px 0;cursor:pointer">
+      <input type="checkbox" class="plbl-w" data-k="${esc(r.key)}" checked style="width:auto"> <span style="flex:1">${esc(r.name)}</span><span style="color:var(--txt3)">₪${(+r.remain).toLocaleString()}</span></label>`).join('')}</div>
+    <div style="display:flex;gap:8px;margin-top:14px"><button class="btn primary" style="flex:1" id="plbl-ok">🖨 הדפס</button>
+      <button class="btn" style="flex:1" onclick="document.getElementById('plbl-wrap').remove()">ביטול</button></div></div>`;
+  document.body.appendChild(wrap);
+  document.getElementById('plbl-ok').onclick=()=>{
+    const mode=wrap.querySelector('input[name="plbl-mode"]:checked')?.value||'calc';
+    const skip=Math.max(0,Math.min(31,parseInt(document.getElementById('plbl-skip').value,10)||0));
+    const keys=new Set([...wrap.querySelectorAll('.plbl-w:checked')].map(x=>x.dataset.k));
+    const sel=rows.filter(r=>keys.has(r.key));
+    if(!sel.length){alert('לא נבחר אף עובד');return;}
+    wrap.remove();printPayLabels(sel,mode,skip);
+  };
+}
+function printPayLabels(sel,mode,skip){
+  const m=_payKey(document.getElementById('cost-from')?.value);
+  const mon=m?(parseInt(m.slice(5,7),10)+'/'+m.slice(0,4)):'';
+  const n=v=>{const x=Math.round((+v||0)*100)/100;return String(x);};
+  const calc=r=>n(r.salary)+(r.addSum?'+'+n(r.addSum):'')+(r.advSum?'-'+n(r.advSum):'')+((r.addSum||r.advSum)?'='+n(r.remain):'');
+  // שם ארוך מוקטן כדי שלא יישבר לשתי שורות ברוחב 52.5 מ"מ
+  const fs=(s,big)=>{const l=String(s).length;return big?(l>14?11:l>10?14:17):(l>16?9:l>12?11:13);};
+  const cell=r=>mode==='name'
+    ?`<div class="lb"><div class="nm" style="font-size:${fs(r.name,true)}pt">${esc(r.name)}</div></div>`
+    :`<div class="lb"><div class="nm" style="font-size:${fs(r.name,false)}pt">${esc(r.name)}</div>
+       <div class="ln">شهر <span dir="ltr">${esc(mon)}</span></div>
+       <div class="ln">حساب <span dir="ltr" class="num">${esc(calc(r))}</span></div></div>`;
+  const cells=[...Array(skip).fill('<div class="lb"></div>'),...sel.map(cell)];
+  const pages=[];for(let i=0;i<cells.length;i+=32)pages.push(cells.slice(i,i+32));
+  printViaIframe(`<!DOCTYPE html><html dir="rtl" lang="ar"><head><meta charset="UTF-8"><title>מדבקות משכורת ${esc(mon)}</title>
+  <style>
+    *{box-sizing:border-box;margin:0;padding:0}
+    body{font-family:Arial,Tahoma,sans-serif;background:#fff;color:#000}
+    .pg{display:grid;grid-template-columns:repeat(4,52.5mm);grid-auto-rows:35mm;width:210mm;page-break-after:always;break-after:page}
+    .pg:last-child{page-break-after:auto;break-after:auto}
+    .lb{width:52.5mm;height:35mm;overflow:hidden;display:flex;flex-direction:column;align-items:center;justify-content:center;text-align:center;padding:2mm 3mm;gap:1.2mm}
+    .nm{font-weight:800;line-height:1.15;white-space:nowrap;max-width:100%;overflow:hidden}
+    .ln{font-size:11pt;line-height:1.2;white-space:nowrap}
+    .num{font-weight:700;font-size:11pt}
+    @media print{@page{size:A4 portrait;margin:8.5mm 0}}
+  </style></head><body>${pages.map(p=>`<div class="pg">${p.join('')}</div>`).join('')}</body></html>`);
 }
 // שורה ידנית — מי שלא בנוכחות (נהגים וכו'). mid ריק = חדשה
 function payManualModal(mid){
