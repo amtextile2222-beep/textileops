@@ -15636,7 +15636,11 @@ function dnMatrix(rows){
 // טבלה ולא grid בכוונה: כרום מתעלם מ-break-inside:avoid על פריטי grid וחותך
 // את השורה האחרונה בדף (ראה gotcha_print_grid_pagebreak); ל-thead יש חזרה מובנית.
 // idx = איזה משלוח להדפיס (ברירת מחדל: האחרון). כל משלוח = תעודה עם מספר משלו.
+// 🍎 אייפון/אייפד: Safari מתעלם מ-@page margin:0 — מוסיף כתובת/תאריך ומפצל לשני עמודים (נצפה 13/10).
+// שם ההדפסה עוברת דרך אותו PDF של וואטסאפ (עמוד אחד, נקי) ⇒ חלון השיתוף ⇒ "הדפסה".
+const _isIOS=()=>/iPhone|iPad|iPod/i.test(navigator.userAgent)||(navigator.platform==='MacIntel'&&navigator.maxTouchPoints>1);
 async function printDeliveryNote(pid,idx){
+  if(_isIOS()){await shareDeliveryNote(pid,idx,true);return;}
   const r=await dnEnsureNo(pid,idx);
   if(r)printViaIframe(deliveryNoteHtml(r.p,r.list[r.i],r.i,r.list.length));
 }
@@ -15685,7 +15689,7 @@ async function _dnPdfBlob(html){
     return doc.output('blob');
   }finally{fr.remove();}
 }
-async function shareDeliveryNote(pid,idx){
+async function shareDeliveryNote(pid,idx,forPrint){
   const r=await dnEnsureNo(pid,idx);if(!r)return;
   const p=r.p,sh=r.list[r.i];
   let html=deliveryNoteHtml(p,sh,r.i,r.list.length);
@@ -15705,6 +15709,12 @@ async function shareDeliveryNote(pid,idx){
   const file=new File([blob],name,{type:'application/pdf'});
   const canShare=!!(navigator.canShare&&navigator.canShare({files:[file]}));
   const ph=_waPhone((S.customerInfo||{})[p.cust]?.phone);
+  if(forPrint){ // 🍎 הדפסה באייפון — PDF ⇒ חלון השיתוף ⇒ "הדפסה"; בלי שיתוף — פותחים את ה-PDF בלשונית
+    if(!await showConfirm('🖨 '+esc(name),canShare?'ה-PDF מוכן. בחלון השיתוף בחר "הדפסה".':'ה-PDF ייפתח בלשונית חדשה — הדפס משם.','🖨 הדפס','ביטול'))return;
+    if(canShare){try{await navigator.share({files:[file]});return;}catch(e){if(e?.name==='AbortError')return;}}
+    const u=URL.createObjectURL(blob);window.open(u,'_blank');setTimeout(()=>URL.revokeObjectURL(u),120000);
+    return;
+  }
   if(!await showConfirm('💬 '+esc(name),canShare?'ה-PDF מוכן. בחלון השיתוף בחר וואטסאפ ואת הלקוח.'
       :'ה-PDF יירד למחשב ותיפתח שיחת וואטסאפ'+(ph?' עם הלקוח':'')+' — גרור את הקובץ לשיחה.','💬 שלח','ביטול'))return;
   if(canShare){
