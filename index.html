@@ -15640,6 +15640,73 @@ async function printDeliveryNote(pid,idx){
   const r=await dnEnsureNo(pid,idx);
   if(r)printViaIframe(deliveryNoteHtml(r.p,r.list[r.i],r.i,r.list.length));
 }
+// ─── 💬 תעודת משלוח בוואטסאפ (13/10/2026) ─────────────────────────
+// אותו HTML בדיוק כמו בהדפסה (deliveryNoteHtml) ⇒ צילום ב-html2canvas ⇒ PDF ב-jsPDF.
+// טלפון/מחשב עם Web Share (קבצים) — חלון השיתוף של המערכת ⇒ וואטסאפ. אחרת: ה-PDF יורד
+// ונפתח wa.me לטלפון הלקוח (פרטי לקוח) עם הודעה מוכנה — את הקובץ גוררים לשיחה.
+// ⚠️ navigator.share דורש לחיצה "טרייה": הצילום לוקח שניות, ולכן השיתוף יוצא מכפתור
+// בחלון אישור **אחרי** שה-PDF מוכן ולא מהלחיצה הראשונה (בלי זה אייפון דוחה בשקט).
+let _h2cP=null;
+function _loadH2C(){
+  if(window.html2canvas)return Promise.resolve();
+  return _h2cP=_h2cP||new Promise((ok,no)=>{const sc=document.createElement('script');
+    sc.src='https://cdnjs.cloudflare.com/ajax/libs/html2canvas/1.4.1/html2canvas.min.js';
+    sc.onload=ok;sc.onerror=()=>{_h2cP=null;no(new Error('html2canvas לא נטען'));};document.head.appendChild(sc);});
+}
+const _waPhone=ph=>{let d=String(ph||'').replace(/\D/g,'');if(d.startsWith('0'))d='972'+d.slice(1);return d.length>=11?d:'';};
+async function _dnPdfBlob(html){
+  await _loadH2C();
+  const J=window.jspdf&&window.jspdf.jsPDF;if(!J)throw new Error('ספריית PDF עדיין נטענת — נסה שוב עוד רגע');
+  const fr=document.createElement('iframe');
+  fr.style.cssText='position:fixed;left:-10000px;top:0;width:794px;height:1123px;border:0';
+  document.body.appendChild(fr);
+  try{
+    const d=fr.contentWindow.document;d.open();d.write(html);d.close();
+    await new Promise(ok=>setTimeout(ok,500));
+    d.body.style.padding='10mm'; // כמו בהדפסה (@media print)
+    const cv=await html2canvas(d.body,{scale:2,backgroundColor:'#ffffff',windowWidth:794,useCORS:true});
+    const doc=new J({unit:'mm',format:'a4',orientation:'portrait'});
+    const pagePx=Math.floor(cv.width*297/210); // גובה עמוד A4 בפיקסלים של הצילום
+    for(let y=0,pg=0;y<cv.height;y+=pagePx,pg++){
+      const h=Math.min(pagePx,cv.height-y);
+      const c=document.createElement('canvas');c.width=cv.width;c.height=h;
+      const x=c.getContext('2d');x.fillStyle='#fff';x.fillRect(0,0,c.width,h);x.drawImage(cv,0,y,cv.width,h,0,0,cv.width,h);
+      if(pg)doc.addPage();
+      doc.addImage(c.toDataURL('image/jpeg',0.92),'JPEG',0,0,210,h*210/cv.width);
+    }
+    return doc.output('blob');
+  }finally{fr.remove();}
+}
+async function shareDeliveryNote(pid,idx){
+  const r=await dnEnsureNo(pid,idx);if(!r)return;
+  const p=r.p,sh=r.list[r.i];
+  let html=deliveryNoteHtml(p,sh,r.i,r.list.length);
+  const slot='<span class="sig-slot"></span>';
+  if(html.includes(slot)){ // ✍ חתימת העסק — אותה שאלה כמו בהדפסה (_sigPrint)
+    let img=null;
+    try{const sig=await bizSigGet();if(sig&&await showConfirm('✍ חתימה','להפיק את המסמך עם חתימת העסק?','✍ עם חתימה','בלי חתימה'))img=sig;}catch(e){}
+    html=html.split(slot).join(img?`<img src="${img}" alt="" style="display:block;max-height:58px;max-width:180px;margin:-6px 0 -20px"/>`:'');
+  }
+  showToast('⏳ מכין PDF…','var(--txt3)',4000);
+  let blob;
+  try{blob=await _dnPdfBlob(html);}catch(e){alert('הכנת ה-PDF נכשלה: '+(e?.message||e));return;}
+  const no=String(sh.no||0).padStart(4,'0');
+  const name='תעודת_משלוח_'+no+'.pdf';
+  const text='תעודת משלוח '+no+' · '+(p.name||p.prod)+' · '+(+sh.total||0)+" יח'";
+  const file=new File([blob],name,{type:'application/pdf'});
+  const canShare=!!(navigator.canShare&&navigator.canShare({files:[file]}));
+  const ph=_waPhone((S.customerInfo||{})[p.cust]?.phone);
+  if(!await showConfirm('💬 '+esc(name),canShare?'ה-PDF מוכן. בחלון השיתוף בחר וואטסאפ ואת הלקוח.'
+      :'ה-PDF יירד למחשב ותיפתח שיחת וואטסאפ'+(ph?' עם הלקוח':'')+' — גרור את הקובץ לשיחה.','💬 שלח','ביטול'))return;
+  if(canShare){
+    try{await navigator.share({files:[file],text});return;}
+    catch(e){if(e?.name==='AbortError')return;} // נכשל ⇒ נופלים להורדה
+  }
+  const a=document.createElement('a');a.href=URL.createObjectURL(blob);a.download=name;
+  document.body.appendChild(a);a.click();a.remove();setTimeout(()=>URL.revokeObjectURL(a.href),60000);
+  window.open('https://wa.me/'+ph+'?text='+encodeURIComponent(text),'_blank','noopener');
+  showToast('📎 ה-PDF ירד — גרור אותו לשיחת הוואטסאפ','var(--green-txt)',8000);
+}
 // מחזיר {p,list,i} של משלוח מוכן להדפסה — ואם אין לו עדיין מספר, מקצה ושומר.
 async function dnEnsureNo(pid,idx){
   const p=(S.products||[]).find(x=>x.id===pid);
@@ -16013,6 +16080,7 @@ function showShipments(pid){
       <button class="btn" style="font-size:11px;padding:4px 8px" title="עריכת כמויות, אריזה והערה — המספר והתאריך לא משתנים" onclick="editShipment('${escj(pid)}',${i})">✏️</button>
       <button class="btn" style="font-size:11px;padding:4px 8px" title="עריכת חומר אריזה (קולב/ניילון/צלופן)" onclick="editShipMats('${escj(pid)}',${i})">📦</button>
       <button class="btn" style="font-size:11px;padding:4px 9px" onclick="printDeliveryNote('${escj(pid)}',${i})">📄 הדפס</button>
+      <button class="btn" style="font-size:11px;padding:4px 8px" title="שלח את התעודה כ-PDF בוואטסאפ" onclick="shareDeliveryNote('${escj(pid)}',${i})">💬</button>
       <button class="btn danger" style="font-size:11px;padding:4px 8px" onclick="document.getElementById('shl-wrap').remove();delShipment('${escj(pid)}',${i})">🗑</button>
     </div>`).join('')}
     <button class="btn" style="width:100%;margin-top:12px;font-size:13px" onclick="document.getElementById('shl-wrap').remove()">סגור</button>
@@ -16400,6 +16468,7 @@ function renderDNotes(){
           <button class="btn" style="font-size:11px;padding:4px 8px" title="עריכת כמויות, אריזה והערה — המספר והתאריך לא משתנים" onclick="editShipment('${escj(r.p.id)}',${r.i})">✏️</button>
           <button class="btn" style="font-size:11px;padding:4px 8px" title="עריכת חומר אריזה (קולב/ניילון/צלופן)" onclick="editShipMats('${escj(r.p.id)}',${r.i})">📦</button>
           <button class="btn" style="font-size:11px;padding:4px 9px" onclick="printDeliveryNote('${escj(r.p.id)}',${r.i})">📄 הדפס</button>
+          <button class="btn" style="font-size:11px;padding:4px 8px" title="שלח את התעודה כ-PDF בוואטסאפ" onclick="shareDeliveryNote('${escj(r.p.id)}',${r.i})">💬</button>
           <button class="btn" style="font-size:11px;padding:4px 9px" onclick="showShipments('${escj(r.p.id)}')">🚚 משלוחים</button>
           ${S.user?.role==='manager'&&prodMatches(r.p.cust,r.p.prod).length>1?`<button class="btn" style="font-size:11px;padding:4px 8px" title="העבר את התעודה להזמנה אחרת של אותו דגם" onclick="moveShipment('${escj(r.p.id)}',${r.i})">↔</button>`:''}
         </td>
