@@ -11599,7 +11599,7 @@ function shipRowsHtml(p,editSh){
   const initU=rows.reduce((s,q)=>s+val(q,GRADE_U),0);
   // data-max = **היתרה** ולא הכמות בהזמנה: אחרי משלוח של 12 מתוך 20, שליחת 10
   // נוספות היא חריגה אמיתית (22 מתוך 20) וצריכה להסתמן ככזו
-  const cell=(q,g)=>`<input class="ship-row-inp${g===GRADE_B?' ship-b':g===GRADE_U?' ship-u':' ship-a'}" data-size="${esc(q.size)}" data-color="${esc(q.color)}" data-grade="${esc(g)}" data-max="${Math.max(0,(parseInt(q.qty)||0)-already(q))}" type="number" inputmode="numeric" min="0" value="${val(q,g)}" oninput="${g===GRADE_A?'shipGradeAEdit(this)':'shipGradeBEdit(this)'}" style="width:100%;font-size:14px;padding:5px;border-radius:6px;border:1px solid var(--brd);background:var(--bg);color:var(--txt)"/>`;
+  const cell=(q,g)=>`<input class="ship-row-inp${g===GRADE_B?' ship-b':g===GRADE_U?' ship-u':' ship-a'}" data-size="${esc(q.size)}" data-color="${esc(q.color)}" data-grade="${esc(g)}" data-max="${Math.max(0,(parseInt(q.qty)||0)-already(q))}" type="number" inputmode="numeric" min="0" value="${val(q,g)}" oninput="${g===GRADE_A?'shipGradeAEdit(this)':g===GRADE_U?'shipUnsewnEdit(this)':'shipGradeBEdit(this)'}" style="width:100%;font-size:14px;padding:5px;border-radius:6px;border:1px solid var(--brd);background:var(--bg);color:var(--txt)"/>`;
   const banner=editSh
     ?`<div style="font-size:11px;color:var(--blue-txt,#1e40af);background:var(--blue-bg,#dbeafe);padding:6px 8px;border-radius:8px;margin-bottom:6px">✏️ הכמויות שלמטה הן של <b>התעודה הזו בלבד</b>. עמודת "כבר יצא" סופרת את שאר המשלוחים, בלי התעודה שנערכת.</div>`
     :(anyPrev?`<div style="font-size:11px;color:var(--blue-txt,#1e40af);background:var(--blue-bg,#dbeafe);padding:6px 8px;border-radius:8px;margin-bottom:6px">🚚 יצאו כבר ${shipmentsTotal(p)} יח' ב-${prodShipments(p).length} משלוחים. הטבלה מציגה את <b>היתרה</b> — זהו משלוח חדש עם תעודה נפרדת.</div>`:'');
@@ -11650,9 +11650,22 @@ function shipGradeBEdit(el){
   if(tr){
     const a=tr.querySelector('.ship-a');
     const tot=Math.max(0,parseInt(tr.dataset.rowtotal)||0);
-    // סוג ב **וגם** לא תפור גורעים מסוג א — סך השורה (כמה יחידות פיזיות יוצאות) קבוע
     const bq=[...tr.querySelectorAll('.ship-b,.ship-u')].reduce((t,i)=>t+Math.max(0,parseInt(i.value)||0),0);
     if(a)a.value=Math.max(0,tot-bq);
+  }
+  shipRowsTotal();
+}
+// ✂ לא תפור גורע מסוג א **רק מה שחורג מהיתרה** (data-max): במשלוח חדש 20 סוג א + 1 ⇒ 19+1.
+// בעריכה של תעודה שבה כבר חסרה היחידה (18 א + 1 ב מתוך 20) ⇒ סוג א נשאר 18 והשורה מגיעה ל-20.
+// (13/10: גריעה מלאה כמו בסוג ב הורידה את 0698 ל-17 א — יחידה תפורה נעלמה מהחיוב)
+function shipUnsewnEdit(el){
+  const tr=el.closest('tr');
+  if(tr){
+    const a=tr.querySelector('.ship-a'),b=tr.querySelector('.ship-b');
+    const v=i=>Math.max(0,parseInt(i?.value)||0);
+    const max=Math.max(0,parseInt(el.dataset.max)||0);
+    if(a&&max)a.value=Math.min(v(a),Math.max(0,max-v(b)-v(el)));
+    tr.dataset.rowtotal=v(a)+v(b)+v(el);
   }
   shipRowsTotal();
 }
@@ -16681,7 +16694,7 @@ ${packs.length?`<table class="pk">
   <tbody>${packs.map(x=>`<tr><td class="c">${+x.n}</td><td class="c">${+x.per}</td><td class="n">${(+x.n)*(+x.per)}</td></tr>`).join('')}</tbody>
   <tfoot><tr><td class="c">${packCount} חבילות</td><td class="c">—</td><td class="n">${packUnits}</td></tr></tfoot>
 </table>
-${packUnits!==total?`<div class="warn">⚠ סכום האריזה (${packUnits}) שונה מהכמות שיצאה במשלוח (${total}).</div>`:''}`:''}
+${packUnits!==total&&packUnits!==total+unsewn?`<div class="warn">⚠ סכום האריזה (${packUnits}) שונה מהכמות שיצאה במשלוח (${total}).</div>`:''}`:''}
 ${dnote?`<div class="note"><b>הערות:</b> ${esc(dnote)}</div>`:''}
 <div class="sign">
   <div><b>שם וחתימת המוסר</b><span class="sig-slot"></span>____________________</div>
