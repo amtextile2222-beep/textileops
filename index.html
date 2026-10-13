@@ -11516,6 +11516,11 @@ function _prodQty(p){return (p.quantities||[]).reduce((s,q)=>s+(parseInt(q.qty)|
 // הידנית מחזיקה שתי שורות לכל צבע. ברירת המחדל היא סוג א; רשומה ישנה בלי
 // שדה grade נחשבת סוג א, ולכן הפיצ'ר לא משנה שום נתון קיים.
 const GRADE_A='א',GRADE_B='ב';
+// ✂ לא תפור (13/10/2026): יחידה שחוזרת ללקוח בלי תפירה (חסר חלק / חלק פגום). נרשמת בשורות
+// התעודה (נספרת כ"יצא" — יתרה, סגירת ברקוד) אבל **לא ב-total** ⇒ לא בהתחשבנות, לא ב-shippedQty.
+const GRADE_U='לא תפור';
+const isUnsewn=r=>(r&&r.grade)===GRADE_U;
+const shUnsewn=sh=>((sh&&sh.rows)||[]).reduce((t,r)=>t+(isUnsewn(r)?(parseInt(r.qty)||0):0),0);
 // ─── 🚚 מאגר משלוחים ─────────────────────────────────────────
 // הזמנה יוצאת ללקוח **בכמה פעימות**: 100 היום, היתרה בשבוע הבא. לכל פעימה תעודה
 // ומספר משלה. לפני זה נשמר משלוח אחד בלבד ⇒ הסריקה השנייה דרסה את הראשונה
@@ -11590,10 +11595,11 @@ function shipRowsHtml(p,editSh){
   const anyPrev=done.size>0;
   // הסכום ההתחלתי מחושב כאן ולא מושאר 0 עד ש-shipRowsTotal יורה ב-setTimeout —
   // אחרת נראה רגע של "סה"כ יוצא 0" בזמן שהשדות כבר מלאים
-  const initSum=rows.reduce((s,q)=>s+val(q,GRADE_A)+val(q,GRADE_B),0);
+  const initSum=rows.reduce((s,q)=>s+val(q,GRADE_A)+val(q,GRADE_B),0); // ✂ לא תפור — מחוץ לסכום (לא לחיוב)
+  const initU=rows.reduce((s,q)=>s+val(q,GRADE_U),0);
   // data-max = **היתרה** ולא הכמות בהזמנה: אחרי משלוח של 12 מתוך 20, שליחת 10
   // נוספות היא חריגה אמיתית (22 מתוך 20) וצריכה להסתמן ככזו
-  const cell=(q,g)=>`<input class="ship-row-inp${g===GRADE_B?' ship-b':' ship-a'}" data-size="${esc(q.size)}" data-color="${esc(q.color)}" data-grade="${esc(g)}" data-max="${Math.max(0,(parseInt(q.qty)||0)-already(q))}" type="number" inputmode="numeric" min="0" value="${val(q,g)}" oninput="${g===GRADE_B?'shipGradeBEdit(this)':'shipGradeAEdit(this)'}" style="width:100%;font-size:14px;padding:5px;border-radius:6px;border:1px solid var(--brd);background:var(--bg);color:var(--txt)"/>`;
+  const cell=(q,g)=>`<input class="ship-row-inp${g===GRADE_B?' ship-b':g===GRADE_U?' ship-u':' ship-a'}" data-size="${esc(q.size)}" data-color="${esc(q.color)}" data-grade="${esc(g)}" data-max="${Math.max(0,(parseInt(q.qty)||0)-already(q))}" type="number" inputmode="numeric" min="0" value="${val(q,g)}" oninput="${g===GRADE_A?'shipGradeAEdit(this)':'shipGradeBEdit(this)'}" style="width:100%;font-size:14px;padding:5px;border-radius:6px;border:1px solid var(--brd);background:var(--bg);color:var(--txt)"/>`;
   const banner=editSh
     ?`<div style="font-size:11px;color:var(--blue-txt,#1e40af);background:var(--blue-bg,#dbeafe);padding:6px 8px;border-radius:8px;margin-bottom:6px">✏️ הכמויות שלמטה הן של <b>התעודה הזו בלבד</b>. עמודת "כבר יצא" סופרת את שאר המשלוחים, בלי התעודה שנערכת.</div>`
     :(anyPrev?`<div style="font-size:11px;color:var(--blue-txt,#1e40af);background:var(--blue-bg,#dbeafe);padding:6px 8px;border-radius:8px;margin-bottom:6px">🚚 יצאו כבר ${shipmentsTotal(p)} יח' ב-${prodShipments(p).length} משלוחים. הטבלה מציגה את <b>היתרה</b> — זהו משלוח חדש עם תעודה נפרדת.</div>`:'');
@@ -11606,20 +11612,24 @@ function shipRowsHtml(p,editSh){
       ${anyPrev?'<th style="text-align:left;padding:2px 4px">כבר יצא</th>':''}
       <th style="text-align:center;padding:2px 4px;width:66px">סוג א</th>
       <th style="text-align:center;padding:2px 4px;width:66px">סוג ב</th>
+      <th style="text-align:center;padding:2px 4px;width:66px" title="יחידה שחוזרת בלי תפירה — לא נכנסת להתחשבנות">✂ לא תפור</th>
     </tr>
-    ${rows.map(q=>`<tr data-rowtotal="${val(q,GRADE_A)+val(q,GRADE_B)}">
+    ${rows.map(q=>`<tr data-rowtotal="${val(q,GRADE_A)+val(q,GRADE_B)+val(q,GRADE_U)}">
         <td style="padding:2px 4px">${esc(q.size)}</td>
         <td style="padding:2px 4px">${esc(COLORS[q.color]||q.color)}</td>
         <td style="padding:2px 4px;text-align:left;color:var(--txt3)">${q._extra?'<span title="המידה/צבע כבר לא ברשימת הכמויות של המוצר">—</span>':(parseInt(q.qty)||0)}</td>
         ${anyPrev?`<td style="padding:2px 4px;text-align:left;color:var(--blue-txt,#1e40af);font-weight:600">${already(q)||''}</td>`:''}
         <td style="padding:2px 4px">${cell(q,GRADE_A)}</td>
         <td style="padding:2px 4px">${cell(q,GRADE_B)}</td>
+        <td style="padding:2px 4px">${cell(q,GRADE_U)}</td>
       </tr>`).join('')}
     <tr style="border-top:1px solid var(--brd)">
       <td colspan="${anyPrev?4:3}" style="padding:6px 4px;font-weight:700">סה"כ במשלוח הזה</td>
       <td id="ship-total" colspan="2" style="padding:6px 4px;font-weight:800;text-align:center;color:var(--green-txt,#16a34a)">${initSum}</td>
+      <td id="ship-unsewn" style="padding:6px 4px;font-weight:700;text-align:center;color:var(--amber-txt)">${initU||''}</td>
     </tr>
   </table>
+  <div style="font-size:11px;color:var(--txt3);margin-top:4px">✂ לא תפור — חוזר ללקוח בלי תפירה: מודפס בתעודה בשורה נפרדת, לא נכנס לסה"כ ולהתחשבנות</div>
   <div id="ship-over" style="display:none;font-size:11px;font-weight:700;color:var(--amber-txt);background:var(--amber-bg);padding:6px 8px;border-radius:8px;margin-top:6px"></div>`;
 }
 // ✏️ עריכה ידנית של סוג א = קביעת הכמות שיוצאת בשורה הזו (משלוח חלקי).
@@ -11628,8 +11638,8 @@ function shipRowsHtml(p,editSh){
 function shipGradeAEdit(el){
   const tr=el.closest('tr');
   if(tr){
-    const b=tr.querySelector('.ship-b');
-    tr.dataset.rowtotal=Math.max(0,parseInt(el.value)||0)+Math.max(0,parseInt(b?.value)||0);
+    const b=tr.querySelector('.ship-b'),u=tr.querySelector('.ship-u');
+    tr.dataset.rowtotal=Math.max(0,parseInt(el.value)||0)+Math.max(0,parseInt(b?.value)||0)+Math.max(0,parseInt(u?.value)||0);
   }
   shipRowsTotal();
 }
@@ -11640,7 +11650,8 @@ function shipGradeBEdit(el){
   if(tr){
     const a=tr.querySelector('.ship-a');
     const tot=Math.max(0,parseInt(tr.dataset.rowtotal)||0);
-    const bq=Math.max(0,parseInt(el.value)||0);
+    // סוג ב **וגם** לא תפור גורעים מסוג א — סך השורה (כמה יחידות פיזיות יוצאות) קבוע
+    const bq=[...tr.querySelectorAll('.ship-b,.ship-u')].reduce((t,i)=>t+Math.max(0,parseInt(i.value)||0),0);
     if(a)a.value=Math.max(0,tot-bq);
   }
   shipRowsTotal();
@@ -11648,8 +11659,17 @@ function shipGradeBEdit(el){
 function _shipQtySum(){
   const inps=[...document.querySelectorAll('.ship-row-inp')];
   if(!inps.length)return Math.max(0,parseInt(document.getElementById('ship-qty-inp')?.value)||0);
-  return inps.reduce((s,i)=>s+Math.max(0,parseInt(i.value)||0),0);
+  return inps.filter(i=>!i.classList.contains('ship-u')).reduce((s,i)=>s+Math.max(0,parseInt(i.value)||0),0); // ✂ לא תפור — לא לחיוב
 }
+function _shipUnsewnSum(){return [...document.querySelectorAll('.ship-row-inp.ship-u')].reduce((s,i)=>s+Math.max(0,parseInt(i.value)||0),0);}
+// אריזה תואמת = שווה ליחידות לחיוב, או לכולל ה"לא תפור" (שגם הוא נארז לפעמים)
+const _packsMatch=(u,q)=>u===q||u===q+_shipUnsewnSum();
+// 👕 דגם מקורי של הלקוח שחוזר עם הסחורה — מודפס בתעודה בלבד, לא ביחידות ולא בהתחשבנות
+const _shipOrigVal=()=>Math.max(0,parseInt(document.getElementById('ship-orig')?.value)||0);
+const shipOrigHtml=v=>`<div style="margin-top:9px;display:flex;align-items:center;gap:8px">
+      <label style="font-size:12px;font-weight:600;flex:1">👕 דגם מקורי שחוזר ללקוח <span style="font-size:10px;font-weight:400;color:var(--txt3)">(מודפס בתעודה, לא בהתחשבנות)</span></label>
+      <input id="ship-orig" type="number" inputmode="numeric" min="0" value="${v||''}" placeholder="0" style="width:70px;font-size:13px;padding:6px;border-radius:8px;border:1px solid var(--brd);background:var(--bg);color:var(--txt)"/>
+    </div>`;
 function _shipRowsCollect(){
   return [...document.querySelectorAll('.ship-row-inp')]
     .map(i=>({size:i.dataset.size,color:i.dataset.color,grade:i.dataset.grade||GRADE_A,qty:Math.max(0,parseInt(i.value)||0)}))
@@ -11710,8 +11730,8 @@ function shipPackTotal(){
   const packs=_shipPacksCollect();
   if(!packs.length){el.textContent='לא הוזנה';el.style.color='var(--txt3)';return;}
   const u=packsUnits(packs),q=_shipQtySum();
-  el.textContent=packsCount(packs)+' חבילות · '+u+" יח'"+(u!==q?' ⚠ במשלוח '+q:'');
-  el.style.color=(u!==q)?'var(--amber-txt)':'var(--green-txt,#16a34a)';
+  el.textContent=packsCount(packs)+' חבילות · '+u+" יח'"+(!_packsMatch(u,q)?' ⚠ במשלוח '+q:'');
+  el.style.color=!_packsMatch(u,q)?'var(--amber-txt)':'var(--green-txt,#16a34a)';
 }
 // 📦 שלושת החומרים מוצגים תמיד — המצב נגזר ממה שמולא, ולא נבחר מראש.
 function shipMatRowsHtml(){
@@ -11764,6 +11784,7 @@ function shipMatTotal(){
 }
 function shipRowsTotal(){
   const t=_shipQtySum(),el=document.getElementById('ship-total');
+  {const ue=document.getElementById('ship-unsewn');if(ue)ue.textContent=_shipUnsewnSum()||'';}
   if(el){
     el.textContent=t;
     // חריגה מהכמות שבהזמנה **מסומנת ולא נחסמת** — לפעמים באמת יוצא יותר ממה שתוכנן.
@@ -11888,6 +11909,7 @@ function openShipModal(cust,prod,orderNo){
       <label style="font-size:12px;font-weight:600">📝 הערה לתעודה</label>
       <input id="ship-note" type="text" maxlength="140" placeholder="לא חובה — תודפס בתעודה" style="width:100%;margin-top:4px;font-size:13px;padding:7px;border-radius:8px;border:1px solid var(--brd);background:var(--bg);color:var(--txt)"/>
     </div>
+    ${shipOrigHtml(0)}
     <label style="display:flex;align-items:center;gap:7px;font-size:12px;font-weight:600;margin-top:10px;cursor:pointer">
       <input type="checkbox" id="ship-autoprint"${S.settings?.dnAutoPrint===false?'':' checked'} style="width:16px;height:16px"/>
       🖨 הדפס את התעודה מיד אחרי האישור
@@ -12670,6 +12692,8 @@ function shipPickChanged(){
   if(pw)pw.innerHTML=shipPackRowsHtml([]);
   const nt=document.getElementById('ship-note');
   if(nt)nt.value='';
+  const og=document.getElementById('ship-orig');
+  if(og)og.value='';
   shipPackTotal();
 }
 async function confirmShip(){
@@ -12682,6 +12706,7 @@ async function confirmShip(){
   const mats=_shipMatsCollect();
   const packMode=packModeOf(mats);
   const dnote=(document.getElementById('ship-note')?.value||'').trim();
+  const orig=_shipOrigVal();
   const autoPrint=!!document.getElementById('ship-autoprint')?.checked;
   // ♻ שחזור: המספר והתאריך המקוריים · 📅 בדיעבד (09/10, מנהל): תאריך שנבחר, ומספר — הבא בתור או בלי
   let rs=_shipRestore?{..._shipRestore,restore:true}:null;
@@ -12701,7 +12726,7 @@ async function confirmShip(){
   }
   // 📦 פער בין האריזה לכמות שיוצאת **מסומן ולא נחסם** — אבל נשאלת שאלה, כי
   // בדרך כלל זו טעות הקלדה בגודל חבילה ולא אריזה חלקית אמיתית
-  if(packs.length&&packsUnits(packs)!==qty){
+  if(packs.length&&!_packsMatch(packsUnits(packs),qty)){
     if(!await showConfirm('אריזה לא תואמת','באריזה '+packsUnits(packs)+" יח' ובמשלוח "+qty+" יח'. לרשום בכל זאת?",'רשום','חזור'))return;
   }
   // 📦 חומר האריזה מחויב ללקוח ⇒ משלוח בלי חומר מגיע לדוח בלי החיוב הזה.
@@ -12715,9 +12740,9 @@ async function confirmShip(){
   // מוחקת בשקט את האריזה וההערה של כל תעודה שכבר נמסרה ללקוח
   // 📦 packMode ו-mats נגררים כאן מאותה סיבה כמו packs ו-note: בנייה מחדש של
   // הרשימה בלעדיהם הייתה מוחקת בשקט את חיוב האריזה של כל תעודה קודמת.
-  const list=prodShipments(p).map(s=>({no:+s.no||0,date:s.date||'',at:s.at||'',rows:s.rows||[],total:+s.total||0,packs:Array.isArray(s.packs)?s.packs:[],note:s.note||'',packMode:s.packMode||'',mats:Array.isArray(s.mats)?s.mats:[]}));
+  const list=prodShipments(p).map(s=>({...s,no:+s.no||0,date:s.date||'',at:s.at||'',rows:s.rows||[],total:+s.total||0,packs:Array.isArray(s.packs)?s.packs:[],note:s.note||'',packMode:s.packMode||'',mats:Array.isArray(s.mats)?s.mats:[]}));
   const no=rs&&rs.no!=null?rs.no:await nextDeliveryNoteNo();
-  list.push({no:no||0,date,at:now.toISOString(),rows,total:qty,packs,note:dnote,packMode,mats,
+  list.push({no:no||0,date,at:now.toISOString(),rows,total:qty,packs,note:dnote,packMode,mats,...(orig?{orig}:{}),
     ...(rs?.restore?{restoredAt:now.toISOString(),restoredBy:S.user?.name||''}:{}),
     ...(rs?.past?{backdatedAt:now.toISOString(),backdatedBy:S.user?.name||''}:{})});
   p.shipments=list;
@@ -15579,11 +15604,17 @@ function dnMatrix(rows){
       colorRows.push({color:c,grade:g,label:(COLORS[c]||c||'—')+' סוג '+g,cells,total});
     });
   });
+  // ✂ לא תפור — שורות בסוף, **מחוץ לסה"כ** (הסה"כ = מה שמחויב)
+  colors.forEach(c=>{
+    const cells=sizes.map(s=>cell(c,GRADE_U,s)),total=cells.reduce((t,v)=>t+v,0);
+    if(total)colorRows.push({color:c,grade:GRADE_U,u:true,label:(COLORS[c]||c||'—')+' — ✂ לא תפור',cells,total});
+  });
+  const billed=colorRows.filter(r=>!r.u);
   return{
     sizes,
     colorRows,
-    sizeTotals:sizes.map((s,i)=>colorRows.reduce((t,r)=>t+r.cells[i],0)),
-    grand:colorRows.reduce((t,r)=>t+r.total,0)
+    sizeTotals:sizes.map((s,i)=>billed.reduce((t,r)=>t+r.cells[i],0)),
+    grand:billed.reduce((t,r)=>t+r.total,0)
   };
 }
 // נבנית מ-shippedRows (מה ש**באמת** יצא). מוצר שסומן כיצא לפני שהפיצול לשורות
@@ -15792,6 +15823,7 @@ function editShipment(pid,idx){
       <label style="font-size:12px;font-weight:600">📝 הערה לתעודה</label>
       <input id="ship-note" type="text" maxlength="140" value="${esc(s.note||'')}" placeholder="לא חובה — תודפס בתעודה" style="width:100%;margin-top:4px;font-size:13px;padding:7px;border-radius:8px;border:1px solid var(--brd);background:var(--bg);color:var(--txt)"/>
     </div>
+    ${shipOrigHtml(+s.orig||0)}
     <label style="display:flex;align-items:center;gap:7px;font-size:12px;font-weight:600;margin-top:10px;cursor:pointer">
       <input type="checkbox" id="esh-print" checked style="width:16px;height:16px"/>
       🖨 הדפס את התעודה המתוקנת אחרי השמירה
@@ -15814,11 +15846,12 @@ async function saveShipEdit(pid,idx){
   const qty=_shipQtySum();
   const packs=_shipPacksCollect();
   const note=(document.getElementById('ship-note')?.value||'').trim();
+  const orig=_shipOrigVal();
   const doPrint=!!document.getElementById('esh-print')?.checked;
   const prev=+old.total||0;
   if(!qty&&!await showConfirm('תעודה ריקה','לא נותרה שום כמות בתעודה. לשמור בכל זאת?','שמור','חזור'))return;
   // 📦 אותה אזהרה כמו באישור המשלוח — פער בין האריזה לכמות **מסומן ולא נחסם**
-  if(packs.length&&packsUnits(packs)!==qty
+  if(packs.length&&!_packsMatch(packsUnits(packs),qty)
     &&!await showConfirm('אריזה לא תואמת','סכום החבילות '+packsUnits(packs)+" יח' אבל בתעודה "+qty+" יח'. לשמור בכל זאת?",'שמור','חזור'))return;
   const after=cur.length-1-idx;
   if(prev!==qty&&after
@@ -15826,12 +15859,12 @@ async function saveShipEdit(pid,idx){
   // 🛑 בנייה מחדש של הרשימה **חייבת לגרור** at/packMode/mats — בדיוק כמו ב-confirmShip.
   // בלי זה תיקון של כמות היה מוחק בשקט את חיוב האריזה של אותה תעודה.
   const list=cur.map((x,k)=>{
-    const base={no:+x.no||0,date:x.date||'',at:x.at||'',rows:x.rows||[],total:+x.total||0,
+    const base={...x,no:+x.no||0,date:x.date||'',at:x.at||'',rows:x.rows||[],total:+x.total||0,
       packs:Array.isArray(x.packs)?x.packs:[],note:x.note||'',packMode:x.packMode||'',
       mats:Array.isArray(x.mats)?x.mats:[],edits:Array.isArray(x.edits)?x.edits:[]};
     if(k!==idx)return base;
     // 🔒 no/date/at לא נגזרים מחדש — הם מזהים את הנייר שאצל הלקוח
-    return {...base,rows,total:qty,packs,note,
+    return {...base,rows,total:qty,packs,note,orig,
       edits:base.edits.concat([{at:new Date().toISOString(),by:S.user?.id||'',
         byName:S.user?.name||S.user?.user||'',prevTotal:prev,newTotal:qty}]).slice(-20)};
   });
@@ -16516,12 +16549,13 @@ function deliveryNoteHtml(p,sh,idx,count){
   const cname=S.customerNames?.[p.cust]||'';
   const detailed=!!(sh&&Array.isArray(sh.rows)&&sh.rows.length);
   const rows=detailed?sh.rows:(p.quantities||[]).filter(q=>parseInt(q.qty)>0);
-  const rowSum=rows.reduce((s,r)=>s+(parseInt(r.qty)||0),0);
+  const rowSum=rows.reduce((s,r)=>s+(isUnsewn(r)?0:(parseInt(r.qty)||0)),0);
   const total=sh?(+sh.total||0):rowSum;
+  const unsewn=detailed?shUnsewn(sh):0;
   // מאזן ההזמנה **עד המשלוח הזה כולל** — תעודה ישנה חייבת להראות את המצב בזמנה
   // ולא את המצב היום, אחרת הדפסה חוזרת של תעודה מלפני חודש תסתור את מה שנמסר
   const ordered=_prodQty(p)||0;
-  const upto=list.slice(0,idx+1).reduce((t,s)=>t+(+s.total||0),0);
+  const upto=list.slice(0,idx+1).reduce((t,s)=>t+(+s.total||0)+shUnsewn(s),0); // ✂ לא תפור יצא — לא "יתרה להשלמה"
   const balance=ordered?Math.max(0,ordered-upto):0;
   // יצא יותר ממה שהוזמן: "יתרה להשלמה: 0" הסתיר את העובדה. העודף מוצג במפורש,
   // ולפי המצב **באותו משלוח** — כמו כל שאר המספרים על התעודה.
@@ -16612,6 +16646,8 @@ table.pk th.ttl{background:#eef2ff;font-size:12px;text-align:center}
     ${line('שעה:',dnTime)}
     ${ordered?line('כמות בהזמנה:',ordered+" יח'"):''}
     ${ordered?(surplus?line('עודף מעל ההזמנה:',surplus+" יח'"):line('יתרה להשלמה:',balance+" יח'")):''}
+    ${unsewn?line('לא תפור:',unsewn+" יח' (לא לחיוב)"):''}
+    ${+sh?.orig?line('דגם מקורי:',(+sh.orig)+" יח' הוחזר"):''}
     ${packCount?line('חבילות:',packCount):''}
     ${line('סוג אריזה:',packModeName(sh&&sh.packMode))}
   </div>
@@ -16627,7 +16663,7 @@ ${mtx.colorRows.length?`<table>
     </tr>
     <tr>${mtx.sizes.map(s=>`<th class="c sz">${esc(s)||'—'}</th>`).join('')}</tr>
   </thead>
-  <tbody>${mtx.colorRows.map(r=>`<tr>
+  <tbody>${mtx.colorRows.map(r=>`<tr${r.u?' style="font-style:italic;color:#92400e"':''}>
       <td class="hd">${esc(r.label)}</td>
       ${r.cells.map(v=>`<td class="c${v?'':' z'}">${v||''}</td>`).join('')}
       <td class="n">${r.total}</td>
