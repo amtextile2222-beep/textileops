@@ -15667,8 +15667,16 @@ async function _dnPdfBlob(html){
     const cv=await html2canvas(d.body,{scale:2,backgroundColor:'#ffffff',windowWidth:794,useCORS:true});
     const doc=new J({unit:'mm',format:'a4',orientation:'portrait'});
     const pagePx=Math.floor(cv.width*297/210); // גובה עמוד A4 בפיקסלים של הצילום
+    // 📱 באייפון הצילום יוצא מעט גבוה מעמוד (גובה ה-iframe/ריפוד) ⇒ נוצר עמוד 2 ריק (נצפה 13/10 ב-0698).
+    // עד 15% מעל עמוד — מכווצים לעמוד אחד; פרוסה אחרונה של פחות מ-8% (שוליים לבנים) — מדלגים.
+    if(cv.height<=pagePx*1.15){
+      const w=Math.min(210,297*cv.width/cv.height);
+      doc.addImage(cv.toDataURL('image/jpeg',0.92),'JPEG',(210-w)/2,0,w,w*cv.height/cv.width);
+      return doc.output('blob');
+    }
     for(let y=0,pg=0;y<cv.height;y+=pagePx,pg++){
       const h=Math.min(pagePx,cv.height-y);
+      if(pg&&h<pagePx*0.08)break;
       const c=document.createElement('canvas');c.width=cv.width;c.height=h;
       const x=c.getContext('2d');x.fillStyle='#fff';x.fillRect(0,0,c.width,h);x.drawImage(cv,0,y,cv.width,h,0,0,cv.width,h);
       if(pg)doc.addPage();
