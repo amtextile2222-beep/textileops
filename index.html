@@ -1624,6 +1624,9 @@ const LANGS={
     scan_dup_in_cart:'כבר בסל',
     scan_dup_active:'פעיל כעת',
     scan_dup_done:'כבר בוצע',
+    bc_ret_cut:'🔒 ברקוד ספירה/גזירה סגור — הכמויות כבר הוזנו. סרוק את ברקוד המידה',
+    bc_ret_ship:'🔒 ברקוד סגור — כל הכמות של המידה והצבע האלה כבר יצאה בתעודת משלוח',
+    bc_ret_ovr:'לפתוח משימה בכל זאת?',
     smp_label:'👕 דגם ראשון',
     smp_hint:'בלי שלבים · פתוח לכל המחלקות והתחנות · אפשר לצרף לסל עוד דגם',
     scan_dup_total:'כבר נסרק "כל הכמות" לשלב הזה',
@@ -1901,6 +1904,9 @@ const LANGS={
     scan_dup_in_cart:'موجود في السلة',
     scan_dup_active:'قيد التنفيذ حالياً',
     scan_dup_done:'تم تنفيذه مسبقاً',
+    bc_ret_cut:'🔒 باركود العدّ/القص مُغلق — تم إدخال الكميات. امسح باركود المقاس',
+    bc_ret_ship:'🔒 باركود مُغلق — كل كمية هذا المقاس واللون خرجت في إرسالية',
+    bc_ret_ovr:'فتح المهمة رغم ذلك؟',
     smp_label:'👕 عينة أولى',
     smp_hint:'بدون مراحل · مفتوح لكل الأقسام والمحطات · يمكن إضافة عينة أخرى إلى السلة',
     scan_dup_total:'تم مسح "كل الكمية" لهذه المرحلة مسبقاً',
@@ -2178,6 +2184,9 @@ const LANGS={
     scan_dup_in_cart:'Already in cart',
     scan_dup_active:'Currently active',
     scan_dup_done:'Already done',
+    bc_ret_cut:'🔒 Count/cut barcode closed — quantities already entered. Scan the size barcode',
+    bc_ret_ship:'🔒 Barcode closed — all of this size+color already shipped on a delivery note',
+    bc_ret_ovr:'Start the task anyway?',
     smp_label:'👕 First sample',
     smp_hint:'No steps · open to all departments and stations · you can add another sample to the cart',
     scan_dup_total:'"All quantity" already scanned for this step',
@@ -2681,6 +2690,39 @@ function showSampleMode(prefix){
   ['-tasktype-wrap','-steps-wrap'].forEach(s=>{const e=document.getElementById(prefix+s);if(e)e.style.display='none';});
   clearStepChecks(prefix);
   ['-expected','-recs'].forEach(s=>{const e=document.getElementById(prefix+s);if(e)e.innerHTML='';});
+}
+// 🔒 ברקוד שסיים את תפקידו (13/10/2026, החלטת המשתמש) — שלא ייסרק בטעות על הזמנה שנגמרה:
+//   • ספירה/גזירה (= "כל הכמות", מידה 9 צבע 00) — נסגר ברגע שהוזנו כמויות בהזמנה **שבברקוד**.
+//     ⚠️ זה אותו קוד בדיוק כמו כרטיס "📦 כל הכמות" בדף המידות — גם הוא נסגר (אושר).
+//   • מידה+צבע — נסגר כשכל הכמות שלו בהזמנה יצאה בתעודות (shippedCellMap). משלוח חלקי — פתוח.
+// דגם / "יצא ללקוח" / הזמנה לא מוכרת ⇒ '' (פתוח). משימה שכבר רצה לא נעצרת — נבדקות רק פתיחות.
+// עובד/אחראי נחסם; מנהל מקבל שאלה (passRetiredGate).
+function bcRetiredWhy(raw){
+  raw=String(raw||'');
+  if(!isBcLen(raw.length)||isShipBc(raw)||isSampleScan(raw))return '';
+  const p=bcOrderProd(raw);if(!p)return '';
+  if(isTotalBc(raw))return _prodQty(p)>0?'cut':'';
+  const sz=raw.slice(7,8),col=raw.slice(11,13);
+  const ord=(p.quantities||[]).filter(q=>String(q.size)===sz&&String(q.color)===col).reduce((t,q)=>t+(parseInt(q.qty)||0),0);
+  if(!(ord>0))return '';
+  return (shippedCellMap(p).get(sz+'|'+col)||0)>=ord?'ship':'';
+}
+const bcRetiredMsg=why=>{const T=LANGS[currentLang];return why==='cut'?T.bc_ret_cut:T.bc_ret_ship;};
+// שורה אדומה בתצוגה המקדימה של שלושת הסורקים — העובד רואה מיד, לא רק בלחיצה על "התחל"
+const bcRetiredHtml=v=>{const w=bcRetiredWhy(v);return w?`<div style="margin-top:6px;padding:8px;border-radius:8px;background:var(--red-bg,#fee2e2);color:var(--red-txt);font-size:13px;font-weight:700">${esc(bcRetiredMsg(w))}</div>`:'';};
+// שער לפני פתיחת משימה. raws = כל הברקודים שנפתחים (סל שלם = שאלה אחת למנהל).
+// early = בדיקה בזמן ההוספה לסל: עובד נחסם כבר כאן; מנהל נשאל רק פעם אחת — ב-passBatchGates.
+async function passRetiredGate(raws,early){
+  if(early&&S.user?.role==='manager')return true;
+  const bad=[...new Set((raws||[]).filter(Boolean))].map(r=>({r,w:bcRetiredWhy(r)})).filter(x=>x.w);
+  if(!bad.length)return true;
+  const T=LANGS[currentLang];
+  const msg=[...new Set(bad.map(x=>bcRetiredMsg(x.w)))].join('\n')+'\n'+bad.map(x=>x.r).join(', ');
+  const info={cust:bad[0].r.slice(0,2),prod:bad[0].r.slice(2,7),bc:bad.map(x=>x.r).join(','),blocked:[{step:'🔒',need:bad.map(x=>x.w==='cut'?'ספירה/גזירה':'יצא בתעודה')}]};
+  if(S.user?.role!=='manager'){logGateEvent('retired','blocked',info);showToast(msg,'var(--red-txt)',8000);return false;}
+  const ok=await showConfirm('🔒',esc(msg+'\n\n'+(T.bc_ret_ovr||'לפתוח משימה בכל זאת?')),T.st_override_ok||'התחל בכל זאת',T.cancel||'ביטול');
+  logGateEvent('retired',ok?'override':'cancel',info);
+  return ok;
 }
 function productHasDefinedQty(cust,prod){
   const p=findProd(cust,prod);
@@ -3327,6 +3369,7 @@ async function passMergeGate(cust,prod,bc,stepNames,workerId){
 async function passBatchGates(w,batch){
   const items=(batch||[]).filter(b=>b&&!b.isSample);
   if(!items.length)return true;
+  if(!await passRetiredGate(items.map(b=>b.raw)))return false; // 🔒 ברקוד שסיים את תפקידו
   // 🔢 קיבוץ לפי **רשומת ההזמנה** ולא לפי לקוח+מוצר: לשתי הזמנות של אותו מוצר
   // יכולים להיות שלבים ותחנות שונים לגמרי, ואיחודן היה בודק אותן מול רשומה אחת.
   // עדיין אישור אחד לכל רשומה, ולא חמישה על אותה חריגה.
@@ -6550,6 +6593,7 @@ function parseBc(v){
         <span class="bc-seg bc-q">כמות: ${q.padEnd(3,'_')}</span>
         <span class="bc-seg bc-col">צבע: ${COLORS[col]||col||'__'}</span>
       </div>`;
+  if(isBcLen(v.length))el.innerHTML+=bcRetiredHtml(v); // 🔒 ברקוד שסיים את תפקידו
   if(isBcLen(v.length)){
     // 🔢 לפי **ההזמנה שבברקוד** ולא לפי הרשומה העדכנית: למוצר יכולות להיות כמה
     // הזמנות עם שלבים שונים, ו-findProd היה מחזיר תמיד את האחרונה (ראה gotcha_duplicate_prod_records).
@@ -6607,6 +6651,7 @@ async function submitBc(){
   if(bcUseSteps&&!bcCheckedSteps.length){showToast(T.err_sel_step||'⚠ בחר לפחות שלב עבודה אחד','var(--red-txt)');return;}
   // 🔒 שער התחנה — חובת סריקת תחנה + שלב נעול למשפחת התחנה שלו. הסורק האישי מופעל
   // ע"י העובד עצמו ולכן זו חסימה מוחלטת (העקיפה שמורה למנהל/אחראי בסורקי המשימות).
+  if(!await passRetiredGate([raw],true))return; // 🔒 ספירה/גזירה אחרי הזנת כמויות · מידה שיצאה כולה
   if(!await passStationGate(wu,cust,prod,bcUseSteps?bcCheckedSteps:[],raw))return;
   // 🔗 שער סדר השלבים — כל השלבים שסומנו בסריקה הזו נחשבים "אותה סריקה"
   if(!await passMergeGate(cust,prod,raw,bcUseSteps?bcCheckedSteps:[taskType],u.id))return;
@@ -9187,6 +9232,7 @@ function parseMgrBc(v){
         <span class="bc-seg bc-c">לקוח: ${c||'__'}</span><span class="bc-seg bc-p">מוצר: ${p.padEnd(5,'_')}</span>${bcOrderChip(v)}
         <span class="bc-seg" style="background:var(--amber-bg);color:var(--amber-txt)">מידה: ${sz||'_'}</span>
         <span class="bc-seg bc-q">כמות: ${q.padEnd(3,'_')}</span><span class="bc-seg bc-col">צבע: ${COLORS[col]||col||'__'}</span></div>`;
+  if(isBcLen(v.length))el.innerHTML+=bcRetiredHtml(v); // 🔒 ברקוד שסיים את תפקידו
   if(isBcLen(v.length)){
     // 🔢 לפי **ההזמנה שבברקוד** ולא לפי הרשומה העדכנית: למוצר יכולות להיות כמה
     // הזמנות עם שלבים שונים, ו-findProd היה מחזיר תמיד את האחרונה (ראה gotcha_duplicate_prod_records).
@@ -9836,7 +9882,7 @@ async function renderGateLog(){
                  :r.result==='blocked'?'<span style="color:var(--red-txt);font-weight:700">⛔ נחסם</span>'
                  :'<span style="color:var(--txt3)">↩ ביטל</span>';
         return `<div style="padding:6px 8px;border-bottom:1px solid var(--brd);font-size:12px">
-          <span style="font-weight:700">${r.kind==='order'?'🔗':'🔒'} ${esc(r.workerName||'')}</span>
+          <span style="font-weight:700">${r.kind==='order'?'🔗':r.kind==='retired'?'📦':'🔒'} ${esc(r.workerName||'')}</span>
           <span style="color:var(--txt3)"> · ${esc(r.role||'')}${r.station?' · '+esc(r.station):''} · ${pad2(d.getDate())}/${pad2(d.getMonth()+1)} ${pad2(d.getHours())}:${pad2(d.getMinutes())}</span>
           ${tag}
           <div style="margin-top:2px;color:var(--txt2)">${esc(r.cust||'')}/${esc(r.prod||'')}${r.bc?' · '+esc(r.bc):''} · ${esc(r.steps||'')}</div>
@@ -10053,6 +10099,7 @@ function tsParseBc(v){
         <span class="bc-seg bc-c">לקוח: ${c||'__'}</span><span class="bc-seg bc-p">מוצר: ${p.padEnd(5,'_')}</span>${bcOrderChip(v)}
         <span class="bc-seg" style="background:var(--amber-bg);color:var(--amber-txt)">מידה: ${sz||'_'}</span>
         <span class="bc-seg bc-q">כמות: ${q.padEnd(3,'_')}</span><span class="bc-seg bc-col">צבע: ${COLORS[col]||col||'__'}</span></div>`;
+  if(isBcLen(v.length))el.innerHTML+=bcRetiredHtml(v); // 🔒 ברקוד שסיים את תפקידו
   // אם המוצר מוגדר עם שלבי עבודה — הצג checkboxes
   if(isBcLen(v.length)){
     // 🔢 לפי **ההזמנה שבברקוד** ולא לפי הרשומה העדכנית: למוצר יכולות להיות כמה
@@ -10223,6 +10270,7 @@ async function tsStartTask(){
     const checkedSteps=useSteps?[...document.querySelectorAll('#ts-steps-list input[type="checkbox"]:checked')].map(cb=>cb.dataset.step):[];
     if(useSteps&&!checkedSteps.length){showToast(T.err_sel_step||'⚠ בחר לפחות שלב עבודה אחד','var(--red-txt)');return;}
     // 🔒 שער התחנה (w = העובד שהמשימה נפתחת עבורו; העקיפה נקבעת לפי מי שמפעיל את הסורק)
+    if(!await passRetiredGate([raw],true))return; // 🔒 ברקוד שסיים את תפקידו
     if(!await passStationGate(w,cust,prod,useSteps?checkedSteps:[],raw))return;
     // 🔗 שער סדר השלבים — נבדק על הברקוד שנסרק, לפני ההוספה לסל
     if(!await passMergeGate(cust,prod,raw,useSteps?checkedSteps:[(document.getElementById('ts-tasktype').value||'').trim()],w.id))return;
@@ -10568,6 +10616,7 @@ async function mgrStartTask(){
     const mgrCheckedSteps=mgrUseSteps?[...document.querySelectorAll('#mgr-steps-list input[type="checkbox"]:checked')].map(cb=>cb.dataset.step):[];
     if(mgrUseSteps&&!mgrCheckedSteps.length){showToast(T.err_sel_step||'⚠ בחר לפחות שלב עבודה אחד','var(--red-txt)');return;}
     // 🔒 שער התחנה (w = העובד שהמשימה נפתחת עבורו; העקיפה נקבעת לפי מי שמפעיל את הסורק)
+    if(!await passRetiredGate([raw],true))return; // 🔒 ברקוד שסיים את תפקידו
     if(!await passStationGate(w,cust,prod,mgrUseSteps?mgrCheckedSteps:[],raw))return;
     // 🔗 שער סדר השלבים — נבדק על הברקוד שנסרק, לפני ההוספה לסל
     if(!await passMergeGate(cust,prod,raw,mgrUseSteps?mgrCheckedSteps:[(document.getElementById('mgr-tasktype').value||'').trim()],w.id))return;
