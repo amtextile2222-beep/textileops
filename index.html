@@ -15699,7 +15699,8 @@ async function shareDeliveryNote(pid,idx){
   let blob;
   try{blob=await _dnPdfBlob(html);}catch(e){alert('הכנת ה-PDF נכשלה: '+(e?.message||e));return;}
   const no=String(sh.no||0).padStart(4,'0');
-  const name='תעודת_משלוח_'+no+'.pdf';
+  // שם קובץ באנגלית בלבד: וואטסאפ במחשב הציג שם עברי כג'יבריש (×ª×¢...) — נצפה 13/10
+  const name='delivery-note-'+no+'.pdf';
   const text='תעודת משלוח '+no+' · '+(p.name||p.prod)+' · '+(+sh.total||0)+" יח'";
   const file=new File([blob],name,{type:'application/pdf'});
   const canShare=!!(navigator.canShare&&navigator.canShare({files:[file]}));
