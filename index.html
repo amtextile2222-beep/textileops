@@ -16622,7 +16622,8 @@ table.pk{width:auto;min-width:54%;margin-top:14px}
 table.pk th.ttl{background:#eef2ff;font-size:12px;text-align:center}
 .note{margin-top:14px;border:1px solid #bbb;border-radius:6px;padding:8px 10px;font-size:12px;line-height:1.6}
 .note b{color:#185FA5}
-@media print{body{padding:10mm}}
+/* @page margin:0 ⇒ Chrome לא מדפיס כותרת/כתובת/מספר עמוד (13/10/2026). השוליים — ב-padding */
+@media print{@page{size:A4 portrait;margin:0}body{padding:10mm}}
 </style></head><body>
 <div class="top">
   <div>
