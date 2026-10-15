@@ -14884,7 +14884,7 @@ function renderCostTab(){
     const dm=d=>String(d).slice(8,10)+'/'+String(d).slice(5,7);
     const byDate={};rows.forEach(r=>r.adv.forEach(x=>{byDate[x.d]=(byDate[x.d]||0)+(+x.a||0);}));
     const multiMonth=from&&to&&from.slice(0,7)!==to.slice(0,7);
-    _payRowsCur=rows.map(r=>({key:r.key,name:r.name,salary:r.salary,addSum:r.addSum,advSum:r.advSum,remain:r.remain}));
+    _payRowsCur=rows.map(r=>({key:r.key,name:r.name,salary:r.salary,addSum:r.addSum,advSum:r.advSum,remain:r.remain,adv:r.adv}));
     el.innerHTML=`<div>
       <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:10px;flex-wrap:wrap;gap:8px">
         <div style="font-size:13px;font-weight:700;color:var(--txt)">💰 תשלום משכורות — ${from||'—'} עד ${to||'—'}</div>
@@ -15032,7 +15032,8 @@ async function payAddDel(i,id){
   await _payMutate(pd=>{const l=(pd.add?.[key]||[]).filter(x=>x.id!==id);if(l.length)pd.add[key]=l;else if(pd.add)delete pd.add[key];});
 }
 // 🏷 מדבקות משכורת (11/10/2026) — דף A4 עם 32 מדבקות 52.5×35 מ"מ (4×8). שתי אפשרויות:
-// שמות בלבד · חשבון: שם + "شهر 9/2026" + "حساب 3391+250-2191=1450" (שכר + תוספות − מפרעות = נשאר).
+// שמות בלבד · חשבון (15/10/2026): שם + "حساب 3391+250" (שכר + תוספות) + "من 1/10/2026 - 10/10/2026" (טווח הדוח)
+// + שורה לכל מפרעה "سلفة 2191 · 15/10/2026" + "الباقي 1450" (רק כשיש מפרעות/תוספות).
 // "דלג על" = מדבקות שכבר נוצלו בדף — ההדפסה מתחילה מהמקום הפנוי הבא (מימין לשמאל, שורה אחרי שורה).
 // השם מודפס כפי שהוא שמור (שמות העובדים במערכת בערבית; בשורה ידנית — כפי שהוקלד).
 function payLabelsModal(){
@@ -15067,17 +15068,21 @@ function payLabelsModal(){
   };
 }
 function printPayLabels(sel,mode,skip){
-  const m=_payKey(document.getElementById('cost-from')?.value);
-  const mon=m?(parseInt(m.slice(5,7),10)+'/'+m.slice(0,4)):'';
+  const from=document.getElementById('cost-from')?.value||'',to=document.getElementById('cost-to')?.value||'';
+  const dmy=d=>d?(parseInt(d.slice(8,10),10)+'/'+parseInt(d.slice(5,7),10)+'/'+d.slice(0,4)):'';
+  const mon=from?(parseInt(from.slice(5,7),10)+'/'+from.slice(0,4)):'';
+  const rng=from?dmy(from)+' - '+dmy(to||from):'';
   const n=v=>{const x=Math.round((+v||0)*100)/100;return String(x);};
-  const calc=r=>n(r.salary)+(r.addSum?'+'+n(r.addSum):'')+(r.advSum?'-'+n(r.advSum):'')+((r.addSum||r.advSum)?'='+n(r.remain):'');
+  const sal=r=>n(r.salary)+(r.addSum?'+'+n(r.addSum):'');
   // שם ארוך מוקטן כדי שלא יישבר לשתי שורות ברוחב 52.5 מ"מ
   const fs=(s,big)=>{const l=String(s).length;return big?(l>14?11:l>10?14:17):(l>16?9:l>12?11:13);};
   const cell=r=>mode==='name'
     ?`<div class="lb"><div class="nm" style="font-size:${fs(r.name,true)}pt">${esc(r.name)}</div></div>`
     :`<div class="lb"><div class="nm" style="font-size:${fs(r.name,false)}pt">${esc(r.name)}</div>
-       <div class="ln">شهر <span dir="ltr">${esc(mon)}</span></div>
-       <div class="ln">حساب <span dir="ltr" class="num">${esc(calc(r))}</span></div></div>`;
+       <div class="ln">حساب <span dir="ltr" class="num">${esc(sal(r))}</span></div>
+       ${rng?`<div class="ln sm">من <span dir="ltr">${esc(rng)}</span></div>`:''}
+       ${(r.adv||[]).map(x=>`<div class="ln sm">سلفة <span dir="ltr" class="num">${esc(n(x.a))}</span> · <span dir="ltr">${esc(dmy(x.d))}</span></div>`).join('')}
+       ${(r.addSum||r.advSum)?`<div class="ln">الباقي <span dir="ltr" class="num">${esc(n(r.remain))}</span></div>`:''}</div>`;
   const cells=[...Array(skip).fill('<div class="lb"></div>'),...sel.map(cell)];
   const pages=[];for(let i=0;i<cells.length;i+=32)pages.push(cells.slice(i,i+32));
   printViaIframe(`<!DOCTYPE html><html dir="rtl" lang="ar"><head><meta charset="UTF-8"><title>מדבקות משכורת ${esc(mon)}</title>
@@ -15087,10 +15092,11 @@ function printPayLabels(sel,mode,skip){
     /* @page margin:0 ⇒ Chrome לא מדפיס כותרת/כתובת/מספר עמוד על רצועת הדף. השוליים העליונים (8.5 מ"מ) כאן */
     .pg{display:grid;grid-template-columns:repeat(4,52.5mm);grid-auto-rows:35mm;width:210mm;padding-top:8.5mm;page-break-after:always;break-after:page}
     .pg:last-child{page-break-after:auto;break-after:auto}
-    .lb{width:52.5mm;height:35mm;overflow:hidden;display:flex;flex-direction:column;align-items:center;justify-content:center;text-align:center;padding:2mm 3mm;gap:1.2mm}
+    .lb{width:52.5mm;height:35mm;overflow:hidden;display:flex;flex-direction:column;align-items:center;justify-content:center;text-align:center;padding:2mm 2mm;gap:.8mm}
     .nm{font-weight:800;line-height:1.15;white-space:nowrap;max-width:100%;overflow:hidden}
     .ln{font-size:11pt;line-height:1.2;white-space:nowrap}
     .num{font-weight:700;font-size:11pt}
+    .sm,.sm .num{font-size:8.5pt}
     @media print{@page{size:A4 portrait;margin:0}}
   </style></head><body>${pages.map(p=>`<div class="pg">${p.join('')}</div>`).join('')}</body></html>`);
 }
