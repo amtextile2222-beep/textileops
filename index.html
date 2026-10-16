@@ -4016,6 +4016,7 @@ function startDataListeners(){
         // 📧 מיילים מורשים למעקב הזמנות — בזיכרון בלבד, לא ב-localStorage
         if(d.id==='custLinks'){_custEmails=d.data()?.emails||{};_custLinkRefresh();}
         if(d.id==='custTrackLog'){_custLog=d.data()?.entries||{};_custLinkRefresh();}
+        if(d.id==='custDevices'){_custDevs=d.data()?.entries||{};_custLinkRefresh();}
       });
       renderAll();
     });
@@ -13237,8 +13238,52 @@ function editCustomerInfo(code){
 // (מנהל בלבד ב-Rules — לא בפרטי הלקוח, שכל עובד יכול לכתוב). הסרת מייל = חסימה מיידית.
 // 🔐 at = מתי נוסף: השרת דוחה כל מכשיר שנכנס **לפני** at ⇒ הוספה מחדש אחרי הסרה מנתקת את כולם.
 // 🕘 יומן הכניסות (adminSettings/custTrackLog) נכתב רק בשרת — כאן קריאה בלבד.
-let _custEmails={},_custLog={};
-const _custEnt=x=>typeof x==='string'?{e:x.toLowerCase(),at:0}:{e:String(x?.e||'').toLowerCase(),at:+x?.at||0};
+// 📱 מכשירים (16/10/2026): max ברשומת המייל (0 = ללא הגבלה). adminSettings/custDevices.entries =
+// {devId:{e,cust,dev,at,seen,st}} — השרת (trackDeviceGate) רושם; כאן המנהל מאשר/חוסם/מוחק.
+// st: ok | pending (מעל ההגבלה — ממתין לאישור) | blocked. רשומה מלפני הוספת המייל (at) — לא בתוקף.
+let _custEmails={},_custLog={},_custDevs={};
+const _custEnt=x=>typeof x==='string'?{e:x.toLowerCase(),at:0,max:0}:{e:String(x?.e||'').toLowerCase(),at:+x?.at||0,max:Math.max(0,parseInt(x?.max,10)||0)};
+const _custDevsOf=x=>Object.entries(_custDevs).filter(([,d])=>d&&d.e===x.e&&(+d.at||0)>=x.at-120000).sort((a,b)=>(b[1].seen||0)-(a[1].seen||0));
+function _custDevHtml(code,x){
+  const fmt=ms=>{const d=new Date(ms);return pad2(d.getDate())+'/'+pad2(d.getMonth()+1)+'/'+String(d.getFullYear()).slice(2);};
+  const devs=_custDevsOf(x),ok=devs.filter(([,d])=>d.st==='ok').length;
+  const lbl={ok:['✅','var(--green-txt)','מאושר'],pending:['⏳','var(--amber-txt,#b45309)','ממתין לאישור'],blocked:['⛔','var(--red-txt)','חסום']};
+  const b=(t,ti,fn,c)=>`<button class="btn" style="font-size:10px;padding:2px 6px${c?';color:'+c:''}" title="${ti}" onclick="${fn}">${t}</button>`;
+  return `<div style="margin:0 8px 8px;padding:6px 8px;border-right:2px solid var(--brd)">
+    <div style="display:flex;align-items:center;gap:6px;font-size:11px;color:var(--txt3)">📱 מכשירים
+      <select style="font-size:11px;padding:1px 4px;width:auto" onchange="custEmailMax('${escj(code)}','${escj(x.e)}',this.value)">
+        ${[0,1,2,3,5].map(n=>`<option value="${n}" ${n===x.max?'selected':''}>${n?'עד '+n:'ללא הגבלה'}</option>`).join('')}</select>
+      <span>${ok} מאושרים${x.max?' מתוך '+x.max:''}</span></div>
+    ${devs.length?devs.map(([id,d])=>{const L=lbl[d.st]||lbl.ok;return `<div style="display:flex;align-items:center;gap:5px;font-size:11px;padding:2px 0">
+      <span title="${L[2]}">${L[0]}</span><span style="flex:1;color:${d.st==='ok'?'var(--txt2)':L[1]}">${esc(d.dev||'')} · נרשם ${fmt(d.at)}${d.seen?' · נראה '+fmt(d.seen):''}${d.st==='pending'?' · <b>ממתין לאישור</b>':''}</span>
+      ${d.st!=='ok'?b('✅ אשר','אשר את המכשיר',`custDevSet('${escj(code)}','${escj(x.e)}','${escj(id)}','ok')`,'var(--green-txt)'):''}
+      ${d.st!=='blocked'?b('⛔','חסום את המכשיר — לא יוכל לראות את ההזמנות',`custDevSet('${escj(code)}','${escj(x.e)}','${escj(id)}','blocked')`,'var(--red-txt)')
+        :b('🗑','מחק מהרשימה — בכניסה הבאה ייחשב מכשיר חדש',`custDevSet('${escj(code)}','${escj(x.e)}','${escj(id)}','del')`)}</div>`;}).join('')
+      :'<div style="font-size:11px;color:var(--txt3)">עדיין לא נכנסו מאף מכשיר</div>'}</div>`;
+}
+async function custEmailMax(code,e,v){
+  const m={..._custEmails,[code]:_custList(code).map(x=>x.e===e?{...x,max:+v||0}:x)};
+  if(await _custEmailSave(m))showToast('✅ נשמר');
+}
+async function custDevSet(code,e,id,st){
+  if(!db||!S.fbConnected){showToast('⚠️ אין חיבור לשרת');return;}
+  const x=_custList(code).find(y=>y.e===e);if(!x)return;
+  const upd={};
+  if(st==='del'){if(!confirm('למחוק את המכשיר מהרשימה? אם ייכנס שוב — ייחשב מכשיר חדש.'))return;upd['entries.'+id]=window._fb.deleteField();}
+  else if(st==='blocked'){if(!confirm('לחסום את המכשיר? הוא לא יוכל לראות את ההזמנות עד שתאשר אותו שוב.'))return;upd['entries.'+id+'.st']='blocked';}
+  else{
+    upd['entries.'+id+'.st']='ok';
+    // מעל ההגבלה ⇒ המכשיר המאושר שלא נראה הכי הרבה זמן נחסם (החלפת טלפון)
+    const ok=_custDevsOf(x).filter(([k,d])=>k!==id&&d.st==='ok');
+    if(x.max&&ok.length>=x.max){
+      const drop=ok.slice(x.max-1);
+      if(!confirm('מותרים '+x.max+' מכשירים וכולם בשימוש.\nאישור יחסום את: '+drop.map(([,d])=>d.dev).join(', ')+'.\nלהמשיך?'))return;
+      drop.forEach(([k])=>{upd['entries.'+k+'.st']='blocked';});
+    }
+  }
+  try{const{doc,updateDoc}=window._fb;await updateDoc(doc(db,'adminSettings','custDevices'),upd);showToast(st==='ok'?'✅ המכשיר אושר':st==='blocked'?'⛔ המכשיר נחסם':'🗑 נמחק');}
+  catch(err){showToast('⚠️ השמירה נכשלה');}
+}
 const _custList=code=>(_custEmails[code]||[]).map(_custEnt);
 const _trackUrl=()=>new URL('track.html',location.href).href.split('#')[0].split('?')[0];
 function _custLinkHtml(code){
@@ -13249,7 +13294,7 @@ function _custLinkHtml(code){
     <div style="font-size:11px;color:var(--txt3);margin-bottom:8px">הלקוח נכנס עם קישור שנשלח למייל שלו ורואה את שלב הייצור של ההזמנות שלו בלבד — בלי מחירים ובלי עובדים.</div>
     ${list.map(x=>`<div style="display:flex;align-items:center;gap:6px;margin-bottom:4px"><span dir="ltr" style="flex:1;font-size:12px;padding:5px 8px;background:var(--bg2);border-radius:8px;overflow:hidden;text-overflow:ellipsis">${esc(x.e)}</span>
       <a class="btn" style="font-size:11px;padding:3px 8px;text-decoration:none" target="_blank" rel="noopener" title="שלח בוואטסאפ קישור + המייל הזה" href="https://wa.me/?text=${encodeURIComponent('מעקב אחר ההזמנות שלכם (כניסה עם המייל '+x.e+'. אם המייל לא הגיע — בדקו בספאם): '+url)}">💬</a>
-      <button class="btn" style="font-size:11px;padding:3px 8px;color:var(--red-txt)" title="הסר — המייל ייחסם מיד בכל המכשירים" onclick="custEmailDel('${escj(code)}','${escj(x.e)}')">✕</button></div>`).join('')}
+      <button class="btn" style="font-size:11px;padding:3px 8px;color:var(--red-txt)" title="הסר — המייל ייחסם מיד בכל המכשירים" onclick="custEmailDel('${escj(code)}','${escj(x.e)}')">✕</button></div>${_custDevHtml(code,x)}`).join('')}
     <div style="display:flex;gap:6px;margin-top:4px">
       <input type="email" id="cinfo-tmail" dir="ltr" placeholder="name@example.com" style="flex:1;font-size:12px;padding:6px;border-radius:8px;border:1px solid var(--brd);background:var(--bg);color:var(--txt)" onkeydown="if(event.key==='Enter'){event.preventDefault();custEmailAdd('${escj(code)}')}"/>
       <button class="btn" style="font-size:12px" onclick="custEmailAdd('${escj(code)}')">➕ הוסף</button>

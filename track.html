@@ -73,9 +73,12 @@ const STANDALONE=navigator.standalone===true||matchMedia('(display-mode: standal
 const esc=s=>String(s??'').replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;');
 const fmtD=d=>{const m=/^(\d{4})-(\d{2})-(\d{2})/.exec(d||'');return m?m[3]+'/'+m[2]+'/'+m[1]:'';};
 const ls={get:k=>{try{return localStorage.getItem(k)||''}catch(e){return''}},set:(k,v)=>{try{localStorage.setItem(k,v)}catch(e){}},del:k=>{try{localStorage.removeItem(k)}catch(e){}}};
+// 📱 מזהה מכשיר (16/10/2026) — השרת מגביל מכשירים לכל מייל; מכשיר חדש מעל ההגבלה ממתין לאישור המפעל.
+// localStorage בלבד: מחיקת נתוני הדפדפן (או ספארי אחרי 7 ימים בלי ביקור) = מכשיר חדש
+const devId=()=>{let d=ls.get('trk_dev');if(!/^[A-Za-z0-9-]{8,64}$/.test(d)){d=crypto.randomUUID?crypto.randomUUID():(Date.now().toString(36)+'-'+Math.random().toString(36).slice(2,12));ls.set('trk_dev',d);}return d;};
 const $=id=>document.getElementById(id);
 const appEl=$('app'),ft=$('ft');
-let busy=false,reauthMsg=false; // reauth = המייל הוסר והוסף מחדש ⇒ כל המכשירים נדרשים לקישור חדש
+let busy=false,reauthMsg=false,pendT=0; // reauth = המייל הוסר והוסף מחדש ⇒ כל המכשירים נדרשים לקישור חדש
 
 function card(o){
   const last=STAGES.length-1,done=o.stage===last;
@@ -143,11 +146,17 @@ async function load(){
   const u=auth.currentUser;if(!u||busy)return;
   busy=true;
   try{
-    const r=await fetch(URL_FN,{cache:'no-store',headers:{Authorization:'Bearer '+await u.getIdToken()}});
+    const r=await fetch(URL_FN,{cache:'no-store',headers:{Authorization:'Bearer '+await u.getIdToken(),'X-Dev':devId()}});
     if(r.status===401){const j=await r.json().catch(()=>({}));if(j.error==='reauth')reauthMsg=true;await signOut(auth);return;}
     if(r.status===403){
+      const j=await r.json().catch(()=>({}));
       $('sub').textContent='';
-      appEl.innerHTML=`<div class="msg">🔒 המייל <b dir="ltr">${esc(u.email)}</b> אינו מורשה לצפות בהזמנות.<br>פנו אלינו כדי להוסיף אותו.</div>`;
+      appEl.innerHTML=j.error==='pending'?`<div class="msg">⏳ המכשיר הזה עדיין לא אושר לצפייה בהזמנות.<br>שלחנו בקשת אישור למפעל — הדף יתעדכן לבד אחרי האישור.<br><br><button id="rt" style="font-size:14px;padding:8px 16px;border-radius:10px;border:0;background:var(--blue);color:#fff;cursor:pointer">🔄 בדיקה שוב</button></div>`
+        :j.error==='blocked'?`<div class="msg">⛔ הגישה מהמכשיר הזה נחסמה.<br>פנו אלינו לפרטים.</div>`
+        :`<div class="msg">🔒 המייל <b dir="ltr">${esc(u.email)}</b> אינו מורשה לצפות בהזמנות.<br>פנו אלינו כדי להוסיף אותו.</div>`;
+      const rt=$('rt');if(rt)rt.onclick=()=>{appEl.innerHTML='<div class="msg">⏳ בודק…</div>';load();};
+      // ממתין לאישור ⇒ בדיקה כל 30 שנ' (ולא כל 5 דק') כדי שהאישור ייראה מיד
+      if(j.error==='pending'&&!pendT)pendT=setTimeout(()=>{pendT=0;if(!document.hidden)load();},30000);
       ft.innerHTML=outBtn();bindOut();return;
     }
     if(!r.ok)throw new Error(r.status);

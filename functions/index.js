@@ -1558,8 +1558,55 @@ function trackStates(prods, tasks) {
       ship: departed ? trackShipDate(p) : '', stage: st, sewPct, packPct };
   });
 }
-// רשומת מייל מורשה: {e, at} — at = מתי נוסף (ms). מחרוזת = רשומה מלפני 10/10/2026 בלי at
-const trackEmailEnt = x => typeof x === 'string' ? { e: x.toLowerCase(), at: 0 } : { e: String((x && x.e) || '').toLowerCase(), at: +(x && x.at) || 0 };
+// רשומת מייל מורשה: {e, at, max} — at = מתי נוסף (ms), max = מכשירים מותרים (0/חסר = ללא הגבלה).
+// מחרוזת = רשומה מלפני 10/10/2026 בלי at
+const trackEmailEnt = x => typeof x === 'string' ? { e: x.toLowerCase(), at: 0, max: 0 }
+  : { e: String((x && x.e) || '').toLowerCase(), at: +(x && x.at) || 0, max: Math.max(0, parseInt(x && x.max, 10) || 0) };
+
+// 📱 מכשירים מורשים למעקב (16/10/2026). adminSettings/custDevices.entries = {devId: {e, cust, dev, at, seen, st}}
+// devId = UUID שהדף יוצר ושומר ב-localStorage (כותרת X-Dev). st: ok | pending (ממתין לאישור מנהל) | blocked.
+// מכשיר חדש: יש מקום (max) ⇒ ok אוטומטית; אין ⇒ pending + טלגרם, והמנהל מאשר/חוסם בחלון "פרטי לקוח".
+// רשומה מלפני הוספת המייל מחדש (at < ent.at) לא נחשבת — הוספה מחדש מאפסת גם את המכשירים.
+// השרת כותב רק רשומות חדשות/שינוי מצב, ו-seen לכל היותר פעם ב-6 שעות (כדי לא לרענן את חלון המנהל בכל טעינה).
+const TRACK_DEV_RE = /^[A-Za-z0-9-]{8,64}$/;
+async function trackDeviceGate(email, cust, ent, devId, req) {
+  if (!TRACK_DEV_RE.test(devId)) return ent.max ? 'pending' : 'ok'; // דף ישן בלי מזהה — חוסם רק כשיש הגבלה
+  const ref = db.doc('adminSettings/custDevices');
+  const now = Date.now();
+  const res = await db.runTransaction(async tx => {
+    const s = await tx.get(ref);
+    const all = (s.data() || {}).entries || {};
+    const cur = all[devId];
+    const valid = cur && cur.e === email && (+cur.at || 0) >= ent.at - 120000;
+    if (valid && cur.st === 'ok') {
+      if (now - (+cur.seen || 0) > 6 * 3600000) tx.update(ref, { ['entries.' + devId + '.seen']: now });
+      return { st: 'ok' };
+    }
+    if (valid && cur.st === 'blocked') return { st: 'blocked' };
+    const okCnt = Object.entries(all).filter(([k, x]) => k !== devId && x && x.e === email && x.st === 'ok' && (+x.at || 0) >= ent.at - 120000).length;
+    const st = !ent.max || okCnt < ent.max ? 'ok' : 'pending';
+    if (valid && cur.st === 'pending' && st === 'pending') return { st };
+    const rec = { e: email, cust, dev: trackDevice(req.get('user-agent')), at: now, seen: now, st };
+    if (!s.exists) tx.set(ref, { entries: { [devId]: rec } });
+    else {
+      const upd = { ['entries.' + devId]: rec };
+      // גיזום: 300 רשומות לכל היותר — קודם חסומות/ממתינות, אחר כך הכי פחות נראו
+      const keys = Object.keys(all).filter(k => k !== devId);
+      if (keys.length >= 300) keys.sort((a, b) => ((all[a].st === 'ok') - (all[b].st === 'ok')) || ((+all[a].seen || 0) - (+all[b].seen || 0)))
+        .slice(0, keys.length - 299).forEach(k => { upd['entries.' + k] = FieldValue.delete(); });
+      tx.update(ref, upd);
+    }
+    return { st, isNew: true, rec };
+  });
+  if (res.isNew && res.st === 'pending') {
+    const { token: tgT, chatId: tgC } = tgCfg();
+    if (tgT && tgC) {
+      const nm = (((await db.doc('appSettings/customerNames').get()).data() || {})[cust]) || cust;
+      await sendTelegram(tgT, tgC, `⏳ <b>מעקב הזמנות — מכשיר חדש ממתין לאישור</b>\nלקוח: ${escTg(nm)}\nמייל: ${escTg(email)}\nמכשיר: ${escTg(res.rec.dev)}\nמותר: ${ent.max} מכשירים — כולם בשימוש.\nלאישור: ניהול ← פרטי לקוח ← מכשירים.\nשעה: ${ilTime()}`).catch(() => {});
+    }
+  }
+  return res.st;
+}
 function trackDevice(ua) {
   ua = String(ua || '');
   const os = /iPad/.test(ua) ? 'iPad' : /iPhone/.test(ua) ? 'iPhone' : /Android/.test(ua) ? 'Android'
@@ -1608,7 +1655,7 @@ exports.customerTrack = functions.runWith({ memory: '1GB' }).https.onRequest(asy
   res.set('Cache-Control', 'no-store');
   if (req.method === 'OPTIONS') {
     res.set('Access-Control-Allow-Methods', 'GET');
-    res.set('Access-Control-Allow-Headers', 'Authorization');
+    res.set('Access-Control-Allow-Headers', 'Authorization, X-Dev');
     res.status(204).send(''); return;
   }
   const m = /^Bearer (.+)$/.exec(String(req.get('Authorization') || ''));
@@ -1632,6 +1679,8 @@ exports.customerTrack = functions.runWith({ memory: '1GB' }).https.onRequest(asy
     // ברענון טוקן). 2 דק' סובלנות לשעון של מחשב המנהל (at נחתם בלקוח). 401 ⇒ הדף מתנתק ומבקש קישור חדש
     if (ent.at && (Number(tok.auth_time) || 0) * 1000 < ent.at - 120000) { res.status(401).json({ error: 'reauth' }); return; }
     await trackLogSignIn(tok, email, cust, req);
+    const dst = await trackDeviceGate(email, cust, ent, String(req.get('x-dev') || ''), req);
+    if (dst !== 'ok') { res.status(403).json({ error: dst }); return; } // pending | blocked
     const t0 = Date.now();
     const hit = _trackCache.get(cust);
     if (hit && Date.now() - hit.at < 180000) { res.json(hit.body); return; }
