@@ -84,13 +84,16 @@ function card(o){
   const last=STAGES.length-1,done=o.stage===last;
   const pct=o.stage===3?o.sewPct:o.stage===5?o.packPct:null;
   const no=o.no?'הזמנה #'+String(o.no).padStart(3,'0')+' · ':'';
-  const segs=STAGES.map((_,i)=>`<i class="${i<=o.stage?'on':''}"></i>`).join('');
+  // ✂️ פיצול: חלק באריזה והתפירה עוד לא הסתיימה ⇒ "התפירה הסתיימה" לא מסומן, ושורת אחוז נוספת לתפירה
+  const sp=!!o.split&&o.sewPct!=null;
+  const segs=STAGES.map((_,i)=>`<i class="${i<=o.stage&&!(sp&&i===4)?'on':''}"></i>`).join('');
   return `<div class="card">
     <div class="top"><div><div class="nm">${esc(o.name||('דגם '+o.prod))}</div>
       <div class="meta">${no}${o.qty?o.qty+" יח' · ":''}${done?'נשלח '+fmtD(o.ship):'התקבל '+fmtD(o.entry)}</div></div>
       <span class="badge ${done?'done':''}">${esc(STAGES[o.stage]||'')}${pct!=null?' '+pct+'%':''}</span></div>
     <div class="bar ${done?'done':''}">${segs}</div>
     <div class="stage">שלב ${o.stage+1} מתוך ${STAGES.length}</div>
+    ${sp?`<div class="stage">בתפירה ${o.sewPct}%</div><div class="pct" title="${o.sewPct}%"><b style="width:${Math.max(0,Math.min(100,o.sewPct))}%"></b></div><div class="stage">באריזה ${pct??0}%</div>`:''}
     ${pct!=null?`<div class="pct" title="${pct}%"><b style="width:${Math.max(0,Math.min(100,pct))}%"></b></div>`:''}
   </div>`;
 }

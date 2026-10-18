@@ -1548,14 +1548,17 @@ function trackStates(prods, tasks) {
     else if (scans.recv > 0) id = 'countcut';
     else id = 'intake';
     // דחיפה ידנית של מנהל — קדימה בלבד, כמו בלוח
+    const nat = id;
     const ov = p.pipeOverride && TRACK_LISTS.indexOf(p.pipeOverride.list) >= 0 ? p.pipeOverride.list : null;
     if (ov && id !== 'shipped' && TRACK_LISTS.indexOf(ov) > TRACK_LISTS.indexOf(id)) id = ov;
     const st = TRACK_LISTS.indexOf(id);
-    // אחוז בשלב הנוכחי בלבד; שלב שכבר עבר = 100
-    const sewPct = st > 3 ? 100 : (st === 3 && sew ? sew.pct : null);
+    // ✂️ פיצול (18/10/2026): חלק באריזה והתפירה עוד לא הסתיימה ⇒ הלקוח רואה את שני האחוזים. כמו split בלוח
+    const split = id === 'packing' && nat === 'packing' && !!sew && sew.full < sew.of;
+    // אחוז בשלב הנוכחי בלבד; שלב שכבר עבר = 100 (חוץ מתפירה בפיצול)
+    const sewPct = split ? sew.pct : st > 3 ? 100 : (st === 3 && sew ? sew.pct : null);
     const packPct = st > 5 ? 100 : (st === 5 && pack ? pack.pct : null);
     return { no: parseInt(p.orderNo, 10) || 0, prod: p.prod, name: p.name || '', qty, entry: trackEntryDate(p),
-      ship: departed ? trackShipDate(p) : '', stage: st, sewPct, packPct };
+      ship: departed ? trackShipDate(p) : '', stage: st, sewPct, packPct, split };
   });
 }
 // רשומת מייל מורשה: {e, at, max} — at = מתי נוסף (ms), max = מכשירים מותרים (0/חסר = ללא הגבלה).
