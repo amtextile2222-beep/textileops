@@ -3090,6 +3090,9 @@ function pipeStateOf(p,tasks){
   const fam=f=>{const ss=steps[f];if(!ss.length)return null;
     return{full:ss.filter(nm=>qty>0&&(done[nm]||0)>=qty).length,of:ss.length};};
   const sew=fam('sew'),pack=fam('pack');
+  // שלבים שלא הגיעו לכמות — לטולטיפ בכרטיס (כדי לראות מי עוצר את ההזמנה)
+  const lowOf=f=>steps[f].filter(nm=>!(qty>0&&(done[nm]||0)>=qty)).map(nm=>nm+' '+Math.min(done[nm]||0,qty)+'/'+qty);
+  if(sew)sew.low=lowOf('sew');if(pack)pack.low=lowOf('pack');
   // 🚚 הופקה תעודת משלוח ≠ הסחורה יצאה (10/10/2026): תעודה ⇒ "מוכן ליציאה"; "יצא ללקוח" רק אחרי
   // סימון יציאה (`departedAt`, כפתור בלוח). תעודה מתאריך לפני PIPE_DEPART_FROM = יצאה (לא היה סימון עד אז).
   // ⚠️ זהה ב-trackStates בשרת (functions/index.js) — דף המעקב של הלקוח
@@ -7883,7 +7886,7 @@ async function buildPipelineReport(){
   const sFrom=_pipeShip.from||'',sTo=_pipeShip.to||'';
   const isMgr=S.user?.role==='manager';
   const B=(v,c)=>`<span class="badge ${c}">${v}</span>`;
-  const prog=(f,lbl)=>!f?'':`<span class="badge ${f.full===f.of?'green':'gray'}" style="font-size:9px" title="${esc(lbl+': '+f.full+' מתוך '+f.of+' שלבים הגיעו לכמות המלאה')}">${lbl} ${f.full}/${f.of}</span>`;
+  const prog=(f,lbl)=>!f?'':`<span class="badge ${f.full===f.of?'green':'gray'}" style="font-size:9px" title="${esc(lbl+': '+f.full+' מתוך '+f.of+' שלבים הגיעו לכמות המלאה'+(f.low&&f.low.length?'\nחסר: '+f.low.join(' · '):''))}">${lbl} ${f.full}/${f.of}</span>`;
 
   let hidden=0;
   const cols=PIPE_LISTS.map((L,li)=>{
