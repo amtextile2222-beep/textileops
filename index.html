@@ -3118,7 +3118,8 @@ function pipeStateOf(p,tasks){
     for(const t of tasks){if(pipeFamOfDept(t.dept)!=='pack')continue;const k=coverKey(t);if(sn.has(k))continue;sn.add(k);
       const nm=String(t.taskType||'').trim();inn[nm]=(inn[nm]||0)+taskUnits(t);}
     const packIn=Math.min(qty,Math.max(0,...Object.values(inn)));
-    split={pack:packIn,sew:Math.max(0,qty-packIn)};
+    // כל הכמות כבר הגיעה לאריזה ⇒ התפירה הסתיימה בפועל (שלב שלא נסרק עד הסוף) — בלי פיצול
+    if(packIn<qty)split={pack:packIn,sew:qty-packIn};
   }
   return{id,nat,ov:id===ov?.list?ov:null,qty,scans,steps,sew,pack,shipped,departed,split,tasks:tasks.length};
 }
