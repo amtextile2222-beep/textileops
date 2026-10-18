@@ -1527,6 +1527,8 @@ function trackStates(prods, tasks) {
       const k = trackCoverKey(t); if (seen.has(k)) continue; seen.add(k);
       const nm = String(t.taskType || '').trim(); done[nm] = (done[nm] || 0) + units(t);
     }
+    // ✔ שלב שסומן ידנית כגמור (products.stepMarks) = כל הכמות — כמו pipeStateOf
+    for (const m of (p.stepMarks || [])) if (m && m.n) done[m.n] = Math.max(done[m.n] || 0, qty);
     // full/of כמו בלוח (קובע את המצב) + pct = יחידות שבוצעו מתוך כמות×שלבים (לתצוגת הלקוח בלבד)
     const fam = f => {
       const ss = steps[f]; if (!ss.length) return null;
@@ -1553,13 +1555,14 @@ function trackStates(prods, tasks) {
     if (ov && id !== 'shipped' && TRACK_LISTS.indexOf(ov) > TRACK_LISTS.indexOf(id)) id = ov;
     const st = TRACK_LISTS.indexOf(id);
     // ✂️ פיצול (18/10/2026): חלק באריזה והתפירה עוד לא הסתיימה ⇒ הלקוח רואה את שני האחוזים. כמו split בלוח
-    // packIn = יחידות שנסרקו באריזה (כולל רצות), השלב עם הכי הרבה; כל הכמות באריזה ⇒ אין פיצול
-    let split = id === 'packing' && nat === 'packing' && !!sew && sew.full < sew.of;
+    // יחידות שעוד בתפירה = qty − max(sewDone = השלב הנמוך בתפירה, packIn = השלב הגבוה באריזה כולל רצות)
+    let split = id === 'packing' && nat === 'packing' && !!sew && sew.full < sew.of && qty > 0;
     if (split) {
+      const sewDone = Math.min(...steps.sew.map(nm => Math.min(done[nm] || 0, qty)));
       const inn = {}, sn = new Set();
       for (const t of ts) { if (trackFamOfDept(t.dept) !== 'pack') continue; const k = trackCoverKey(t); if (sn.has(k)) continue; sn.add(k);
         const nm = String(t.taskType || '').trim(); inn[nm] = (inn[nm] || 0) + units(t); }
-      split = Math.max(0, ...Object.values(inn)) < qty;
+      split = Math.max(sewDone, Math.min(qty, Math.max(0, ...Object.values(inn)))) < qty;
     }
     // אחוז בשלב הנוכחי בלבד; שלב שכבר עבר = 100 (חוץ מתפירה בפיצול)
     const sewPct = split ? sew.pct : st > 3 ? 100 : (st === 3 && sew ? sew.pct : null);

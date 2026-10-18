@@ -3085,6 +3085,8 @@ function pipeStateOf(p,tasks){
     const k=coverKey(t);if(seen.has(k))continue;seen.add(k);
     done[String(t.taskType||'').trim()]=(done[String(t.taskType||'').trim()]||0)+taskUnits(t);
   }
+  // ✔ שלב שסומן ידנית כגמור (לא כל הברקודים נסרקו) = כל הכמות. ⚠️ זהה ב-trackStates בשרת
+  for(const m of (p.stepMarks||[]))if(m&&m.n)done[m.n]=Math.max(done[m.n]||0,qty);
   const fam=f=>{const ss=steps[f];if(!ss.length)return null;
     return{full:ss.filter(nm=>qty>0&&(done[nm]||0)>=qty).length,of:ss.length};};
   const sew=fam('sew'),pack=fam('pack');
@@ -3108,18 +3110,23 @@ function pipeStateOf(p,tasks){
   const nat=id;
   const ov=p.pipeOverride&&PIPE_IDX(p.pipeOverride.list)>=0?p.pipeOverride:null;
   if(ov&&nat!=='shipped'&&PIPE_IDX(ov.list)>PIPE_IDX(nat))id=ov.list;
-  // ✂️ פיצול (18/10/2026): חלק מההזמנה כבר באריזה והתפירה עוד לא הגיעה לכמות המלאה ⇒ הכרטיס
-  // מוצג גם ב"בתפירה" וגם ב"באריזה". packIn = יחידות שנסרקו באריזה (כולל משימות רצות) — השלב
-  // עם הכי הרבה; השאר נחשב בתפירה. לא בדחיפה ידנית (המנהל קבע שהתפירה הסתיימה).
+  // ✂️ פיצול (18/10/2026): ההזמנה מחולקת בין "בתפירה" / "מוכן לאריזה" / "באריזה" לפי יחידות:
+  //   sewDone = יחידות שסיימו את **כל** שלבי התפירה = השלב הנמוך ביותר (צוואר הבקבוק)
+  //   packIn  = יחידות שנסרקו באריזה (כולל משימות רצות) — השלב עם הכי הרבה
+  //   באריזה = packIn · מוכן לאריזה = max(sewDone,packIn)−packIn · בתפירה = השאר.
+  // הכרטיס מוצג בכל עמודה שיש בה יחידות (רק כשיותר מאחת). לא בדחיפה ידנית (המנהל קבע את המצב).
   // ⚠️ זהה ב-trackStates בשרת (split + sewPct)
   let split=null;
-  if(id==='packing'&&nat==='packing'&&sew&&sew.full<sew.of){
+  if(id===nat&&sew&&qty>0&&['sewing','ready_pack','packing'].includes(nat)){
+    const sewDone=Math.min(...steps.sew.map(nm=>Math.min(done[nm]||0,qty)));
     const inn={},sn=new Set();
     for(const t of tasks){if(pipeFamOfDept(t.dept)!=='pack')continue;const k=coverKey(t);if(sn.has(k))continue;sn.add(k);
       const nm=String(t.taskType||'').trim();inn[nm]=(inn[nm]||0)+taskUnits(t);}
-    const packIn=Math.min(qty,Math.max(0,...Object.values(inn)));
-    // כל הכמות כבר הגיעה לאריזה ⇒ התפירה הסתיימה בפועל (שלב שלא נסרק עד הסוף) — בלי פיצול
-    if(packIn<qty)split={pack:packIn,sew:qty-packIn};
+    const packIn=Math.min(qty,Math.max(0,...Object.values(inn))),reached=Math.max(sewDone,packIn);
+    const parts={sewing:qty-reached,ready_pack:reached-packIn,packing:packIn};
+    const nz=PIPE_LISTS.map(l=>l.id).filter(k=>parts[k]>0);
+    // הכפתורים מוצגים בעותק אחד: בעמודת המצב אם יש בה יחידות, אחרת במתקדמת
+    if(nz.length>1)split={...parts,main:parts[id]>0?id:nz[nz.length-1]};
   }
   return{id,nat,ov:id===ov?.list?ov:null,qty,scans,steps,sew,pack,shipped,departed,split,tasks:tasks.length};
 }
@@ -7880,9 +7887,9 @@ async function buildPipelineReport(){
 
   let hidden=0;
   const cols=PIPE_LISTS.map((L,li)=>{
-    // ✂️ הזמנה מפוצלת (st.split) מופיעה גם ב"בתפירה" — עם היחידות שעוד לא הגיעו לאריזה
-    let list=rows.filter(r=>r.st.id===L.id||(L.id==='sewing'&&r.st.split));
-    const uOf=r=>r.st.split&&L.id==='sewing'?r.st.split.sew:r.st.split&&L.id==='packing'?r.st.split.pack:r.st.qty;
+    // ✂️ הזמנה מפוצלת (st.split) מופיעה בכל עמודה שיש בה ממנה יחידות, עם הכמות שם
+    let list=rows.filter(r=>r.st.split?r.st.split[L.id]>0:r.st.id===L.id);
+    const uOf=r=>r.st.split?r.st.split[L.id]:r.st.qty;
     if(L.id==='shipped'){
       const before=list.length;
       list=list.filter(r=>(!sFrom||(r.ship&&r.ship>=sFrom))&&(!sTo||(r.ship&&r.ship<=sTo)));
@@ -7894,7 +7901,7 @@ async function buildPipelineReport(){
     const units=list.reduce((s,r)=>s+uOf(r),0);
     const cards=list.map(r=>{
       const p=r.p,st=r.st;
-      const sp=st.split&&(L.id==='sewing'||L.id==='packing'),spSew=sp&&L.id==='sewing';
+      const sp=!!st.split,spSew=sp&&L.id!==st.split.main; // spSew = עותק משני — בלי כפתורים
       const nxt=PIPE_LISTS[li+1];
       return `<div style="border:1px solid var(--b);border-radius:8px;padding:6px 8px;margin-bottom:6px;background:var(--bg)">
         <div style="display:flex;align-items:center;gap:4px;flex-wrap:wrap">
@@ -7906,7 +7913,7 @@ async function buildPipelineReport(){
         <div style="display:flex;align-items:center;gap:4px;flex-wrap:wrap;font-size:10px;color:var(--txt3)">
           <span>${L.id==='shipped'?('יצא '+(r.ship||'—')):('נכנס '+(r.entry||'—'))}</span>
           <span>·</span><span>${st.qty?st.qty+" יח'":'<span style="color:var(--red-txt)">אין כמות</span>'}</span>
-          ${sp?`<span class="badge amber" style="font-size:9px" title="${esc('חלק מההזמנה כבר באריזה והתפירה עוד לא הסתיימה — ההזמנה מופיעה בשתי העמודות')}">✂️ ${spSew?'בתפירה '+st.split.sew:'באריזה '+st.split.pack} מתוך ${st.qty}</span>`:''}
+          ${sp?`<span class="badge amber" style="font-size:9px" title="${esc('ההזמנה מחולקת: בתפירה '+st.split.sewing+' · מוכן לאריזה '+st.split.ready_pack+' · באריזה '+st.split.packing)}">✂️ ${st.split[L.id]} מתוך ${st.qty}</span>`:''}
           ${prog(st.sew,'תפירה')}${prog(st.pack,'אריזה')}
           ${L.id==='ready_ship'&&st.shipped?`<span class="badge blue" style="font-size:9px" title="${esc('הופקה תעודת משלוח '+(pipeDnDate(p)||'')+' — ממתין לסימון יציאה')}">🧾 תעודה הופקה</span>`:''}
         </div>
@@ -8005,6 +8012,29 @@ async function pipeDepart(pid,on){
   showToast(on?'🚚 סומן: יצא ללקוח':'↺ סימון היציאה בוטל','var(--green-txt)',3000);
   await buildPipelineReport();
 }
+// ✔ סימון ידני "השלב גמור" (18/10/2026) — כשלא כל הברקודים של השלב נסרקו וההזמנה נתקעת בלוח.
+// products.stepMarks = [{n:שם שלב, by, at}] — רשומת ההזמנה בלבד. נחשב כ"כל הכמות" בלוח מצב הזמנות,
+// בדף הלקוח (trackStates בשרת) ובדוח "כמות שהושלמה לפי שלב". לא נוגע במשימות/בשכר/בזמנים.
+const stepMarkOf=(p,nm)=>(p?.stepMarks||[]).find(m=>m&&m.n===String(nm||'').trim())||null;
+async function stepMark(pid,nm,on){
+  if(S.user?.role!=='manager')return;
+  const p=(S.products||[]).find(x=>String(x.id)===String(pid));if(!p)return;
+  nm=String(nm||'').trim();if(!nm)return;
+  const ok=await showConfirm(on?'סימון שלב כגמור':'ביטול סימון',
+    on?`לסמן את השלב "${nm}" ב-${p.cust}/${p.prod} כגמור לכל הכמות (${_prodQty(p)} יח')?\n\nלשימוש כשהשלב הסתיים בפועל אבל לא כל הברקודים נסרקו. לא משנה משימות, שכר או זמנים.`
+      :`לבטל את הסימון הידני של "${nm}"? השלב יחזור לכמות שנסרקה בפועל.`);
+  if(!ok)return;
+  const rest=(p.stepMarks||[]).filter(m=>m&&m.n!==nm);
+  p.stepMarks=on?rest.concat([{n:nm,by:S.user?.name||'',at:new Date().toISOString()}]):rest;
+  saveLS();
+  if(S.fbConnected){
+    try{await fbSet('products',p.id,{stepMarks:p.stepMarks});}
+    catch(e){showToast('שמירה נכשלה: '+e.message,'var(--red-txt)',6000);return;}
+  }
+  showToast(on?'✔ השלב סומן כגמור':'↺ הסימון בוטל','var(--green-txt)',3000);
+  buildStepQtyReport(document.getElementById('rf-c')?.value||'',document.getElementById('rf-p')?.value||'');
+  await buildPipelineReport();
+}
 function buildStageReport(){
   const T=LANGS[currentLang];
   const el=document.getElementById('rp-stages-body');if(!el)return;
@@ -8053,7 +8083,7 @@ async function buildStepQtyReport(cf,pf){
   if(!prods.length){el.innerHTML='<div style="color:var(--txt3);font-size:13px;padding:8px">אין מוצרים עם שלבי עבודה מוגדרים</div>';return;}
   el.innerHTML='<div style="color:var(--txt3);font-size:12px;padding:.5rem 0">⏳ טוען…</div>';
   const hist=await loadHistRange('','');
-  const dm=stepDoneMap(hist);
+  const dm=stepDoneMap(hist),isMgr=S.user?.role==='manager';
   const cards=prods.map(p=>{
     const steps=(p.workSteps||[]).map(s=>stepName(s)).filter(Boolean);
     // ⚠️ פר-רשומה. getTotalQty מחזיר תמיד את ההזמנה **החדשה** ⇒ כרטיס של הזמנה א' הציג
@@ -8065,9 +8095,10 @@ async function buildStepQtyReport(cf,pf){
       // `taskUnits` של ברקוד "כל הכמות" בן 13 ספרות מחזיר orderNo=0 ⇒ הכמות נקראת
       // מהרשומה החדשה. נמדד: 02691 #001 הציג 265 על הזמנה של 180.
       const raw=dm[stepDoneKey(p.cust,p.prod,stepNm,prodStampOf(p))]||0;
-      const done=total?Math.min(raw,total):raw;
+      const mk=stepMarkOf(p,stepNm); // ✔ סומן ידנית כגמור ⇒ כל הכמות
+      const done=total?(mk?total:Math.min(raw,total)):raw;
       const pct=total?Math.min(100,Math.round(done/total*100)):0;
-      return{stepNm,done,pct};
+      return{stepNm,done,pct,mk,raw};
     });
     const anyProgress=rows.some(r=>r.done>0);
     return{p,total,rows,anyProgress};
@@ -8077,16 +8108,18 @@ async function buildStepQtyReport(cf,pf){
     <div style="margin-bottom:14px">
       <div style="font-size:13px;font-weight:600;margin-bottom:4px"><span class="bc-seg bc-c">${c.p.cust}</span> <span class="bc-seg bc-p">${c.p.prod}</span>${(parseInt(c.p.orderNo,10)||0)?` <span class="bc-seg" style="background:var(--green-bg,#dcfce7);color:var(--green-txt,#16a34a);font-weight:700">הזמנה #${String(c.p.orderNo).padStart(3,'0')}</span>`:''} ${esc(c.p.name||'')} <span style="color:var(--txt3);font-weight:400">(סה"כ ${c.total||'?'} יח')</span></div>
       <div class="tbl-wrap"><table>
-        <thead><tr><th>שלב</th><th>בוצע</th><th>התקדמות</th></tr></thead>
+        <thead><tr><th>שלב</th><th>בוצע</th><th>התקדמות</th>${isMgr?'<th></th>':''}</tr></thead>
         <tbody>${c.rows.map(r=>`<tr>
           <td style="font-size:12px">${esc(r.stepNm)}</td>
-          <td>${r.done}${c.total?'/'+c.total:''}</td>
+          <td>${r.done}${c.total?'/'+c.total:''}${r.mk?`<div style="font-size:10px;color:var(--txt3)" title="${esc('נסרקו בפועל '+Math.min(r.raw,c.total||r.raw)+' · סומן ע״י '+(r.mk.by||'—')+' ב-'+String(r.mk.at||'').slice(0,10))}">✔ סומן ידנית</div>`:''}</td>
           <td style="min-width:140px">
             ${c.total?`<div style="background:var(--bg2);border-radius:4px;height:8px;overflow:hidden">
               <div style="background:${r.pct>=100?'var(--green)':'var(--blue)'};width:${r.pct}%;height:100%;border-radius:4px"></div>
             </div>
             <div style="font-size:10px;color:var(--txt3);margin-top:2px">${r.pct}%</div>`:'<span style="color:var(--txt3);font-size:11px">אין כמות מוגדרת</span>'}
           </td>
+          ${isMgr?`<td style="white-space:nowrap">${r.mk?`<button class="btn" style="font-size:10px;padding:2px 6px" onclick="stepMark('${escj(c.p.id)}','${escj(r.stepNm)}',false)">↺ בטל סימון</button>`
+            :c.total&&r.pct<100?`<button class="btn" style="font-size:10px;padding:2px 6px" onclick="stepMark('${escj(c.p.id)}','${escj(r.stepNm)}',true)" title="השלב הסתיים בפועל אבל לא כל הברקודים נסרקו">✔ סמן כגמור</button>`:''}</td>`:''}
         </tr>`).join('')}</tbody>
       </table></div>
     </div>`).join('');
