@@ -3091,7 +3091,8 @@ function pipeStateOf(p,tasks){
     return{full:ss.filter(nm=>qty>0&&(done[nm]||0)>=qty).length,of:ss.length};};
   const sew=fam('sew'),pack=fam('pack');
   // שלבים שלא הגיעו לכמות — לטולטיפ בכרטיס (כדי לראות מי עוצר את ההזמנה)
-  const lowOf=f=>steps[f].filter(nm=>!(qty>0&&(done[nm]||0)>=qty)).map(nm=>nm+' '+Math.min(done[nm]||0,qty)+'/'+qty);
+  // הנמוך ראשון — הוא צוואר הבקבוק שקובע כמה יחידות מוכנות
+  const lowOf=f=>steps[f].filter(nm=>!(qty>0&&(done[nm]||0)>=qty)).sort((a,b)=>(done[a]||0)-(done[b]||0)).map(nm=>nm+' '+Math.min(done[nm]||0,qty)+'/'+qty);
   if(sew)sew.low=lowOf('sew');if(pack)pack.low=lowOf('pack');
   // 🚚 הופקה תעודת משלוח ≠ הסחורה יצאה (10/10/2026): תעודה ⇒ "מוכן ליציאה"; "יצא ללקוח" רק אחרי
   // סימון יציאה (`departedAt`, כפתור בלוח). תעודה מתאריך לפני PIPE_DEPART_FROM = יצאה (לא היה סימון עד אז).
