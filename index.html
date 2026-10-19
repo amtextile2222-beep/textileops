@@ -485,6 +485,7 @@ code{background:var(--bg2);border:0.5px solid var(--b);border-radius:4px;padding
           </div>
           <div style="text-align:center;font-size:12px;color:var(--txt3);margin-bottom:.75rem">— <span data-i18n="scan_manual">הזן ידנית</span> / סורק USB —</div>
           <input class="bc-inp" id="bc-inp" maxlength="16" placeholder="הזן 13 או 16 ספרות..." oninput="parseBc(this.value)" onkeydown="if(event.key==='Enter')submitBc()"/>
+          <input id="bc-part" type="number" min="1" max="999" inputmode="numeric" placeholder="🔢 כמות לעובד — ריק = כל מה שנותר" title="לתת לעובד רק חלק מהכמות שבברקוד. היתרה נשארת על אותו ברקוד לסריקה הבאה" style="margin-top:6px;width:100%;font-size:13px;padding:8px;border-radius:6px;border:1px solid var(--brd)"/>
           <div id="bc-prev" style="margin-top:.75rem;min-height:36px"></div>
           <div class="field" id="bc-tasktype-wrap" style="margin-top:.75rem;margin-bottom:0">
             <label style="font-size:12px;color:var(--txt2);margin-bottom:5px;display:block" data-i18n="lbl_task_type">סוג משימה</label>
@@ -987,6 +988,7 @@ code{background:var(--bg2);border:0.5px solid var(--b);border-radius:4px;padding
           <button class="btn primary full" onclick="mgrStartCam()" id="mgr-cam-btn" style="font-size:13px;padding:10px;margin-bottom:8px">📷 סרוק עם מצלמה</button>
           <button class="btn full nfc-only" onclick="nfcScanTo('mgr')" style="display:none;font-size:13px;padding:10px;margin-bottom:8px">📶 קרא מדבקת NFC</button>
           <input id="mgr-bc-inp" class="bc-inp" maxlength="16" placeholder="או הזן 13 או 16 ספרות ידנית..." oninput="parseMgrBc(this.value)"/>
+          <input id="mgr-part" type="number" min="1" max="999" inputmode="numeric" placeholder="🔢 כמות לעובד — ריק = כל מה שנותר" title="לתת לעובד רק חלק מהכמות שבברקוד. היתרה נשארת על אותו ברקוד לסריקה הבאה" style="margin-top:6px;width:100%;font-size:13px;padding:8px;border-radius:6px;border:1px solid var(--brd)"/>
         </div><!-- /field barcode -->
         <div id="mgr-bc-prev" style="margin-bottom:.5rem;min-height:30px"></div>
         <div id="mgr-batch-queue" style="margin-bottom:.75rem"></div>
@@ -1046,6 +1048,7 @@ code{background:var(--bg2);border:0.5px solid var(--b);border-radius:4px;padding
         <button class="btn primary full" onclick="tsStartCam()" id="ts-cam-btn" style="font-size:13px;padding:10px;margin-bottom:8px">📷 <span data-i18n="scan_cam_all">סרוק עובד / תחנה / משימה</span></button>
         <button class="btn full nfc-only" onclick="nfcScanTo('ts')" style="display:none;font-size:13px;padding:10px;margin-bottom:8px">📶 קרא מדבקת NFC (משימה)</button>
         <input id="ts-bc-inp" class="bc-inp" maxlength="16" placeholder="או הזן 13 או 16 ספרות ידנית..." data-i18n-ph="ts_inp_ph" oninput="tsParseBc(this.value)"/>
+          <input id="ts-part" type="number" min="1" max="999" inputmode="numeric" placeholder="🔢 כמות לעובד — ריק = כל מה שנותר" title="לתת לעובד רק חלק מהכמות שבברקוד. היתרה נשארת על אותו ברקוד לסריקה הבאה" style="margin-top:6px;width:100%;font-size:13px;padding:8px;border-radius:6px;border:1px solid var(--brd)"/>
       </div>
       <div id="ts-bc-prev" style="margin-bottom:.5rem;min-height:30px"></div>
       <div id="ts-batch-queue" style="margin-bottom:.75rem"></div>
@@ -5887,6 +5890,34 @@ function totalScanConflict(base,taskType,stamp,cart){
   if(!peers.length)return '';
   return base.isTotal?(peers.some(t=>!_taskIsTotal(t))?'sizes':''):(peers.some(t=>_taskIsTotal(t))?'total':'');
 }
+// ─── 🔢 כמות חלקית בסריקה (19/10/2026) ──────────────────────────
+// שדה "כמות" ליד הברקוד בשלושת הסורקים: ריק = כל מה שנותר בברקוד לשלב. כמות קטנה יותר ⇒ המשימה
+// מקבלת splitId (כמו העברה חלקית) כדי שהחלקים ייספרו בנפרד ב-coverKey/unitKey. סריקה חוזרת של
+// אותו ברקוד+שלב לא נחסמת כל עוד נשארה יתרה — ומציעה את היתרה. כשאין יתרה — חסימה כמו קודם.
+// ברקוד "כל הכמות" ודגם ראשון — בלי חלוקה.
+// יחידות שכבר נלקחו לברקוד+שלב בהזמנה (פעילות כולל מושהות + היסטוריה), בלי כפילות (coverKey)
+function bcTakenUnits(raw,tt,stamp){
+  const seen=new Set();let n=0;
+  for(const t of [...S.activeTasks,...S.histTasks]){
+    if(String(taskBc(t))!==String(raw)||(t.taskType||'')!==tt)continue;
+    const s=taskStampOf(t);if(s!=null&&s!==stamp)continue;
+    const k=coverKey(t);if(seen.has(k))continue;seen.add(k);n+=+t.qty||0;
+  }
+  return n;
+}
+// הכמות שהוזנה בשדה של הסורק (pfx = bc/ts/mgr) ומנקה אותו. 0 = ריק
+function _partWant(pfx){const el=document.getElementById(pfx+'-part');if(!el)return 0;const v=parseInt(el.value)||0;el.value='';return v>0?v:0;}
+// מחליט את הכמות לפריט: null = אין יתרה (לחסום) · {qty} = רגיל · {qty,splitId,of} = חלק
+function _partPick(base,tt,stamp){
+  const full=+base.qty||0,want=+base.want||0;
+  if(base.isTotal||base.isSample||!(full>0))return{qty:base.qty};
+  const taken=bcTakenUnits(base.raw,tt,stamp),rem=full-taken;
+  if(taken>0&&rem<=0)return null;
+  const q=want>0?Math.min(want,rem):rem;
+  if(taken===0&&q>=full)return{qty:full};
+  return{qty:q,splitId:'p'+Date.now().toString(36)+Math.random().toString(36).slice(2,6),of:full};
+}
+const _partLbl=b=>b.of?` (${b.qty} מתוך ${b.of})`:'';
 // מוסיף שלבים לסל עם חסימת כפילויות (בסל / פעיל / בוצע / התנגשות "כל הכמות"). מחזיר תיאורי הנחסמים.
 function addStepsToBatch(batch,base,types){
   const T=LANGS[currentLang];
@@ -5897,11 +5928,14 @@ function addStepsToBatch(batch,base,types){
     const tt=t||'';const label=tt||T.scan_dup_no_step;
     if(batch.some(b=>b.raw===base.raw&&(b.taskType||'')===tt)){skipped.push(label+' — '+T.scan_dup_in_cart);continue;}
     const st=stepAlreadyTaken(base.raw,tt,stamp);
-    if(st==='active'){skipped.push(label+' — '+T.scan_dup_active);continue;}
-    if(st==='done'){skipped.push(label+' — '+T.scan_dup_done);continue;}
+    const pk=_partPick(base,tt,stamp); // 🔢 נשארה יתרה ⇒ לא נחסם, מקבל את היתרה
+    if(st==='active'&&!pk?.splitId){skipped.push(label+' — '+T.scan_dup_active);continue;}
+    if(st==='done'&&!pk?.splitId){skipped.push(label+' — '+T.scan_dup_done);continue;}
     const tc=totalScanConflict(base,tt,stamp,batch);
     if(tc){skipped.push(label+' — '+(tc==='total'?T.scan_dup_total:T.scan_dup_sizes));continue;}
-    batch.push({...base,taskType:tt,prodStamp:stamp});
+    const e={...base,taskType:tt,prodStamp:stamp,...pk};delete e.want;
+    batch.push(e);
+    if(e.of)showToast(`🔢 ${label}: ${e.qty} מתוך ${e.of} יח'`,'var(--blue-txt,#1d4ed8)',4000);
   }
   return skipped;
 }
@@ -5915,7 +5949,7 @@ function renderTsBatchQueue(){
   el.innerHTML=`<div style="background:var(--card);border:1px solid var(--brd);border-radius:8px;padding:8px;font-size:12px">
     <div style="font-weight:600;margin-bottom:6px;color:var(--txt)">${T.scan_cart} (${_tsBatch.length} ${T.scan_barcodes}):</div>
     ${_tsBatch.map((b,i)=>`<div style="display:flex;justify-content:space-between;align-items:center;padding:3px 0;border-bottom:1px solid var(--brd)">
-      <span style="color:var(--txt)">${b.prod} · ${b.qty} יח' · ${COLORS[b.col]||b.col}${b.taskType?' · '+b.taskType:''}</span>
+      <span style="color:var(--txt)">${b.prod} · ${b.qty} יח'${_partLbl(b)} · ${COLORS[b.col]||b.col}${b.taskType?' · '+b.taskType:''}</span>
       <button onclick="_tsBatch.splice(${i},1);renderTsBatchQueue()" style="background:none;border:none;cursor:pointer;color:var(--red-txt);font-size:14px;padding:0 4px">✕</button>
     </div>`).join('')}
   </div>`;
@@ -5927,7 +5961,7 @@ function renderMgrBatchQueue(){
   el.innerHTML=`<div style="background:var(--card);border:1px solid var(--brd);border-radius:8px;padding:8px;font-size:12px">
     <div style="font-weight:600;margin-bottom:6px;color:var(--txt)">${T.scan_cart} (${_mgrBatch.length} ${T.scan_barcodes}):</div>
     ${_mgrBatch.map((b,i)=>`<div style="display:flex;justify-content:space-between;align-items:center;padding:3px 0;border-bottom:1px solid var(--brd)">
-      <span style="color:var(--txt)">${b.prod} · ${b.qty} יח' · ${COLORS[b.col]||b.col}${b.taskType?' · '+b.taskType:''}</span>
+      <span style="color:var(--txt)">${b.prod} · ${b.qty} יח'${_partLbl(b)} · ${COLORS[b.col]||b.col}${b.taskType?' · '+b.taskType:''}</span>
       <button onclick="_mgrBatch.splice(${i},1);renderMgrBatchQueue()" style="background:none;border:none;cursor:pointer;color:var(--red-txt);font-size:14px;padding:0 4px">✕</button>
     </div>`).join('')}
   </div>`;
@@ -5941,13 +5975,18 @@ function addStepsToBcCart(base,types,exp){
   for(const t of types){
     const tt=t||'';const label=tt||T.scan_dup_no_step;
     if(_bcBatch.some(b=>b.raw===base.raw&&(b.taskType||'')===tt)){skipped.push(label+' — '+T.scan_dup_in_cart);continue;}
-    if(S.histTasks.some(x=>{if(x.bc!==base.raw||(x.taskType||'')!==tt)return false;const s=taskStampOf(x);return s==null||s===stamp;})){skipped.push(label+' — '+T.scan_dup_done);continue;}
+    // 🔢 נשארה יתרה בברקוד לשלב ⇒ לא "בוצע" — חלק חדש עם היתרה. null = אין יתרה
+    // (נלקח כולו). עובדת אחרת על כל הכמות ⇒ pk=null בלי היסטוריה = הצטרפות כמו קודם (כמות מלאה)
+    const pk=_partPick(base,tt,stamp);
+    if(!pk?.splitId&&S.histTasks.some(x=>{if(x.bc!==base.raw||(x.taskType||'')!==tt)return false;const s=taskStampOf(x);return s==null||s===stamp;})){skipped.push(label+' — '+T.scan_dup_done);continue;}
     if(S.activeTasks.some(x=>x.workerId===S.user?.id&&taskBc(x)===base.raw&&(x.taskType||'')===tt&&!x.paused)){skipped.push(label+' — '+T.scan_dup_active);continue;}
     const tc=totalScanConflict(base,tt,stamp,_bcBatch);
     if(tc){skipped.push(label+' — '+(tc==='total'?T.scan_dup_total:T.scan_dup_sizes));continue;}
-    const entry={...base,taskType:tt,prodStamp:stamp};
-    if(exp?.ok&&exp.perStep?.[tt]!=null)entry.expMin=exp.perStep[tt];
+    const entry={...base,taskType:tt,prodStamp:stamp,...pk};delete entry.want;
+    // צפי לפי התמחור מחושב לכמות המלאה — בחלק הוא יחסי
+    if(exp?.ok&&exp.perStep?.[tt]!=null)entry.expMin=pk?.of?Math.round(exp.perStep[tt]*pk.qty/pk.of*10)/10:exp.perStep[tt];
     _bcBatch.push(entry);
+    if(entry.of)showToast(`🔢 ${label}: ${entry.qty} מתוך ${entry.of} יח'`,'var(--blue-txt,#1d4ed8)',4000);
   }
   return skipped;
 }
@@ -5959,7 +5998,7 @@ function renderBcBatchQueue(){
   el.innerHTML=`<div style="background:var(--card);border:1px solid var(--brd);border-radius:8px;padding:8px;font-size:12px">
     <div style="font-weight:600;margin-bottom:6px;color:var(--txt)">${T.scan_cart} (${_bcBatch.length} ${T.bc_tasks_in_cart||'משימות בסל'})${totExp>0?` · <span style="font-weight:400;color:var(--txt3)">${T.bc_total_exp||'🎯 צפי כולל'}: ${fmtExpMin(totExp)}</span>`:''}</div>
     ${_bcBatch.map((b,i)=>`<div style="display:flex;justify-content:space-between;align-items:center;padding:3px 0;border-bottom:1px solid var(--brd)">
-      <span style="color:var(--txt)">${b.prod}${b.size?' · מידה '+esc(b.size):''} · ${b.qty} יח' · ${COLORS[b.col]||b.col}${b.taskType?' · '+esc(b.taskType):''}${b.expMin?` · 🎯 ${fmtExpMin(+b.expMin)}`:''}</span>
+      <span style="color:var(--txt)">${b.prod}${b.size?' · מידה '+esc(b.size):''} · ${b.qty} יח'${_partLbl(b)} · ${COLORS[b.col]||b.col}${b.taskType?' · '+esc(b.taskType):''}${b.expMin?` · 🎯 ${fmtExpMin(+b.expMin)}`:''}</span>
       <button onclick="_bcBatch.splice(${i},1);renderBcBatchQueue()" style="background:none;border:none;cursor:pointer;color:var(--red-txt);font-size:14px;padding:0 4px">✕</button>
     </div>`).join('')}
     <button class="btn primary full" style="margin-top:8px" onclick="bcStartBatch()">${T.bc_start_all||'▶ התחל את כל המשימות'}</button>
@@ -5991,7 +6030,7 @@ async function bcStartBatch(){
       if(S.activeTasks.some(x=>x.workerId===u.id&&taskBc(x)===b.raw&&(x.taskType||'')===(b.taskType||'')&&!x.paused)){dupSkip.push((b.taskType||b.prod)+' — '+(T.scan_dup_active||'פעיל כעת'));continue;}
       if(findDupIn(srvActive,b.raw,b.taskType)){dupSkip.push((b.taskType||b.prod)+' — '+(T.scan_dup_active||'פעיל כעת'));continue;}
       // wu ולא u: S.user הוא עותק מרגע ההתחברות — currentStation שלו לא מתעדכן בסריקת תחנה
-      const newTask={id:String(Date.now())+Math.random().toString(36).slice(2,6),workerId:u.id,workerName:u.name,scannedBy:S.user?.id||'',scannedByName:S.user?.name||'',dept:b.taskDept||effDept(wu),station:curStation(wu)?.name||'',cust:b.cust,prod:b.prod,size:b.size,qty:b.qty,col:b.col,taskType:b.taskType,bc:b.raw,isTotal:b.isTotal||false,startTime:bcStart,elapsed:0,prodStamp:b.prodStamp};
+      const newTask={id:String(Date.now())+Math.random().toString(36).slice(2,6),workerId:u.id,workerName:u.name,scannedBy:S.user?.id||'',scannedByName:S.user?.name||'',dept:b.taskDept||effDept(wu),station:curStation(wu)?.name||'',cust:b.cust,prod:b.prod,size:b.size,qty:b.qty,col:b.col,taskType:b.taskType,bc:b.raw,isTotal:b.isTotal||false,startTime:bcStart,elapsed:0,prodStamp:b.prodStamp,...(b.splitId?{splitId:b.splitId}:{})};
       if(bcBatchId)newTask.batchId=bcBatchId;
       if(b.expMin!=null)newTask.expectedMin=b.expMin;
       if(b.isSample)newTask.isSample=true;
@@ -6681,7 +6720,7 @@ async function submitBc(){
   // 🔗 שער סדר השלבים — כל השלבים שסומנו בסריקה הזו נחשבים "אותה סריקה"
   if(!await passMergeGate(cust,prod,raw,bcUseSteps?bcCheckedSteps:[taskType],u.id))return;
   // ברקוד שכבר בעבודה אצל עובד אחר באותו שלב — אישור הצטרפות
-  const otherSame=S.activeTasks.find(t=>t.workerId!==u.id&&taskBc(t)===raw&&(t.taskType||'').trim().toLowerCase()===taskType.toLowerCase());
+  const otherSame=S.activeTasks.find(t=>t.workerId!==u.id&&!t.splitId&&taskBc(t)===raw&&(t.taskType||'').trim().toLowerCase()===taskType.toLowerCase());
   if(otherSame&&!await showConfirm(T.cfm_join_title||'הצטרפות למשימה',T.cfm_join_msg+otherSame.workerName+(otherSame.taskType?' ('+otherSame.taskType+')':'')+T.cfm_join_msg2,T.cfm_join_ok||'הצטרף',T.cancel||'ביטול'))return;
   // משימה פעילה קיימת — לסגור את כולן או לעבוד במקביל. נשאל רק בסריקה הראשונה של הסל (ההחלטה תקפה לכולו)
   if(!_bcBatch.length){
@@ -6722,7 +6761,7 @@ async function submitBc(){
     // הוספה לסל עם חסימת סריקה כפולה ([[feature-dup-scan-block]]) — חובה גם כאן, לא רק בסורק המשימות ([[two-scanners-gotcha]])
     const _bcExp=await fetchExpected(cust,prod,u.id,qty); // צפי זמן לפי התמחור (fallback לשרת בקאש-מיס)
     const types=bcUseSteps?bcCheckedSteps:[taskType||''];
-    const dupSkipped=addStepsToBcCart({raw,cust,prod,size,qty,col,isTotal,taskDept},types,_bcExp);
+    const dupSkipped=addStepsToBcCart({raw,cust,prod,size,qty,col,isTotal,taskDept,want:_partWant('bc')},types,_bcExp);
     if(dupSkipped.length)showToast(T.scan_not_added+' '+dupSkipped.join(' · '),'var(--red-txt)',7000);
     if(dupSkipped.length>=types.length){renderBcBatchQueue();return;} // כלום לא נוסף — נשאר במצב הנוכחי
     document.getElementById('bc-inp').value='';parseBc('');
@@ -10299,7 +10338,7 @@ function tsAddToBatch(){
   const taskDept=(document.getElementById('ts-dept').value||'').trim();
   const types=useSteps?checkedSteps:[taskType||''];
   if(!tsScanLimitsOk(raw,checkedSteps))return;
-  const _sk=addStepsToBatch(_tsBatch,{raw,cust,prod,size,qty,col,isTotal,taskDept},types);
+  const _sk=addStepsToBatch(_tsBatch,{raw,cust,prod,size,qty,col,isTotal,taskDept,want:_partWant('ts')},types);
   document.getElementById('ts-bc-inp').value='';
   document.getElementById('ts-bc-prev').innerHTML='';
   document.getElementById('ts-tasktype').value='';
@@ -10337,7 +10376,7 @@ async function tsStartTask(){
     const taskDept=(document.getElementById('ts-dept').value||'').trim();
     const types=useSteps?checkedSteps:[taskType||''];
     if(!tsScanLimitsOk(raw,checkedSteps))return;
-    const _sk=addStepsToBatch(_tsBatch,{raw,cust,prod,size,qty,col,isTotal,taskDept},types);
+    const _sk=addStepsToBatch(_tsBatch,{raw,cust,prod,size,qty,col,isTotal,taskDept,want:_partWant('ts')},types);
     if(_sk.length){showToast(T.scan_not_added+' '+_sk.join(' · '),'var(--red-txt)',7000);if(!_tsBatch.length)return;}
   }
   if(!_tsBatch.length){showToast(T.err_scan_one||'⚠ סרוק לפחות ברקוד אחד','var(--red-txt)');return;}
@@ -10374,7 +10413,7 @@ async function tsStartTask(){
       // האחראי محمد פותח משימות עבור עובדות אחרות, ולכן startTime הוא רגע חלוקת העבודה ולא
       // רגע ההתחלה בפועל. בלי השדה הזה אי אפשר להפריד קצב עבודה מזמן חלוקה. נוסף 10/09/2026
       // בכל ארבע נקודות היצירה (5197 עצמי · כאן · 9268 מנהל · 9322 פיצול); רשומות ישנות בלעדיו.
-      const task={id:String(Date.now())+Math.random().toString(36).slice(2,6),workerId:w.id,workerName:w.name,scannedBy:S.user?.id||'',scannedByName:S.user?.name||'',dept:b.taskDept||effDept(w),station:curStation(w)?.name||'',cust:b.cust,prod:b.prod,size:b.size,qty:b.qty,col:b.col,taskType:b.taskType,bc:b.raw,isTotal:b.isTotal||false,startTime,elapsed:0,accumulatedSec:0,prodStamp:b.prodStamp};
+      const task={id:String(Date.now())+Math.random().toString(36).slice(2,6),workerId:w.id,workerName:w.name,scannedBy:S.user?.id||'',scannedByName:S.user?.name||'',dept:b.taskDept||effDept(w),station:curStation(w)?.name||'',cust:b.cust,prod:b.prod,size:b.size,qty:b.qty,col:b.col,taskType:b.taskType,bc:b.raw,isTotal:b.isTotal||false,startTime,elapsed:0,accumulatedSec:0,prodStamp:b.prodStamp,...(b.splitId?{splitId:b.splitId}:{})};
       const exp=b.isSample?null:await fetchExpected(b.cust,b.prod,w.id,b.qty); // 👕 דגם — אין צפי
       if(exp?.ok&&exp.perStep?.[b.taskType]!=null)task.expectedMin=exp.perStep[b.taskType];
       if(b.isSample)task.isSample=true;
@@ -10647,7 +10686,7 @@ function mgrAddToBatch(){
   const taskType=mgrUseSteps?'':((document.getElementById('mgr-tasktype').value||'').trim());
   const taskDept=(document.getElementById('mgr-dept').value||'').trim();
   const types=mgrUseSteps?mgrCheckedSteps:[taskType||''];
-  const _sk=addStepsToBatch(_mgrBatch,{raw,cust,prod,size,qty,col,isTotal,taskDept},types);
+  const _sk=addStepsToBatch(_mgrBatch,{raw,cust,prod,size,qty,col,isTotal,taskDept,want:_partWant('mgr')},types);
   document.getElementById('mgr-bc-inp').value='';parseMgrBc('');
   document.getElementById('mgr-tasktype').value='';document.getElementById('mgr-dept').value='';
   renderMgrBatchQueue();
@@ -10682,7 +10721,7 @@ async function mgrStartTask(){
     const taskType=mgrUseSteps?'':((document.getElementById('mgr-tasktype').value||'').trim());
     const taskDept=(document.getElementById('mgr-dept').value||'').trim();
     const types=mgrUseSteps?mgrCheckedSteps:[taskType||''];
-    const _sk=addStepsToBatch(_mgrBatch,{raw,cust,prod,size,qty,col,isTotal,taskDept},types);
+    const _sk=addStepsToBatch(_mgrBatch,{raw,cust,prod,size,qty,col,isTotal,taskDept,want:_partWant('mgr')},types);
     if(_sk.length){showToast(T.scan_not_added+' '+_sk.join(' · '),'var(--red-txt)',7000);if(!_mgrBatch.length)return;}
   }
   if(!_mgrBatch.length){showToast(T.err_scan_one||'⚠ סרוק לפחות ברקוד אחד','var(--red-txt)');return;}
@@ -10705,7 +10744,7 @@ async function mgrStartTask(){
     // המסלול הזה סוגר קודם את המשימות הפעילות שב-cache המקומי — אבל משימה שנפתחה
     // ממכשיר אחר לא נמצאת שם כלל, ולכן לא נסגרה ולא נחסמה. כאן היא נתפסת.
     if(findDupIn(mgrSrvActive,b.raw,b.taskType)){mgrDupSkip.push((b.taskType||b.prod)+' — '+(T.scan_dup_active||'פעיל כעת'));continue;}
-    const newTask={id:String(Date.now())+Math.random().toString(36).slice(2,6),workerId:empId,workerName:w.name,scannedBy:S.user?.id||'',scannedByName:S.user?.name||'',dept:b.taskDept||effDept(w),station:curStation(w)?.name||'',cust:b.cust,prod:b.prod,size:b.size,qty:b.qty,col:b.col,taskType:b.taskType,bc:b.raw,isTotal:b.isTotal||false,startTime,elapsed:0,accumulatedSec:0,prodStamp:b.prodStamp};
+    const newTask={id:String(Date.now())+Math.random().toString(36).slice(2,6),workerId:empId,workerName:w.name,scannedBy:S.user?.id||'',scannedByName:S.user?.name||'',dept:b.taskDept||effDept(w),station:curStation(w)?.name||'',cust:b.cust,prod:b.prod,size:b.size,qty:b.qty,col:b.col,taskType:b.taskType,bc:b.raw,isTotal:b.isTotal||false,startTime,elapsed:0,accumulatedSec:0,prodStamp:b.prodStamp,...(b.splitId?{splitId:b.splitId}:{})};
     const expM=b.isSample?null:await fetchExpected(b.cust,b.prod,empId,b.qty); // 👕 דגם — אין צפי
     if(expM?.ok&&expM.perStep?.[b.taskType]!=null)newTask.expectedMin=expM.perStep[b.taskType];
     if(b.isSample)newTask.isSample=true;
