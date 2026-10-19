@@ -17426,6 +17426,7 @@ function openProductModal(id){
     <div class="sec" style="margin-top:14px;margin-bottom:8px">🔧 שלבי עבודה (לסורק + תמחור)</div>
     <div id="pm-tasksteps-list" style="margin-bottom:8px" onchange="renderProductPricing()">${(p?.workSteps||[]).map(s=>_stepRowHtml(s)).join('')}</div>
     <button type="button" class="btn" onclick="addTaskStepRow()" style="font-size:12px">+ הוסף שלב עבודה</button>
+    <button type="button" class="btn" onclick="printWorkSteps()" style="font-size:12px" title="דף שלבים ותחנות לרצפה — בלי זמן לשלב; למטה הזמן להזמנה לפי מחלקה">🖨 הדפס שלבים</button>
 
     <div class="sec" style="margin-top:14px;margin-bottom:6px">💰 תמחור ליחידה</div>
     <label style="display:flex;align-items:center;gap:6px;font-size:13px;margin-bottom:8px;cursor:pointer;flex-wrap:wrap"><input id="pm-sample" type="checkbox" style="width:auto" ${p?.isSample?'checked':''} onchange="pmSampleToggle(this)"/> <b>👕 דגם ראשון</b> <span style="font-size:11px;color:var(--txt3)">₪${SAMPLE_UNIT_PRICE} ליחידה · ברקוד דגם אחד · בלי שלבים, פתוח לכל התחנות · העלות לפי זמן העבודה</span></label>
@@ -17656,8 +17657,10 @@ function syncProfitFields(src){
   }
   renderProductPricing();
 }
+let _pmOrdMin=[]; // דקות ליחידה פר שלב מהחישוב האחרון — להדפסת השלבים (printWorkSteps)
 function renderProductPricing(){
   const box=document.getElementById('pm-pricing-result');if(!box)return;
+  _pmOrdMin=[];
   const price=parseFloat(document.getElementById('pm-price')?.value)||0;
   const profitPct=parseFloat(document.getElementById('pm-profit')?.value)||0;
   const materials=parseFloat(document.getElementById('pm-materials')?.value)||0;
@@ -17787,6 +17790,7 @@ function renderProductPricing(){
     ${derivedLine}
     ${actualLine}
     ${shortWarn}</div>${cutLine}${_orderDeptTimeHtml(_ordMin)}`;
+  _pmOrdMin=_ordMin;
 }
 // ⏱ זמן העבודה להזמנה כולה, לפי מחלקה (28/09/2026 — בקשת המשתמש: עד היום הוצג רק ליחידה).
 // דקות ליחידה של כל שלב × סה"כ היחידות בטבלת הכמויות, מקובץ לפי המחלקה שבמפתח התחנה
@@ -17795,10 +17799,7 @@ function _pmOrderUnits(){
   let n=0;document.querySelectorAll("#pm-qty-body [data-qf=\"qty\"]").forEach(el=>{n+=parseInt(el.value)||0;});
   return n;
 }
-function _orderDeptTimeHtml(list){
-  const units=_pmOrderUnits();
-  if(!list.length)return"";
-  if(!units)return`<div style="font-size:11px;color:var(--txt3);margin-top:8px">⏱ זמן להזמנה לפי מחלקה — הזן כמויות בטבלת הכמויות</div>`;
+function _orderDeptAgg(list){
   const by={},order=[];
   for(const x of list){
     const k=x.station?String(x.station).split("::")[0]:"";
@@ -17806,6 +17807,13 @@ function _orderDeptTimeHtml(list){
     if(!(key in by)){by[key]=0;order.push(key);}
     by[key]+=x.min;
   }
+  return{by,order};
+}
+function _orderDeptTimeHtml(list){
+  const units=_pmOrderUnits();
+  if(!list.length)return"";
+  if(!units)return`<div style="font-size:11px;color:var(--txt3);margin-top:8px">⏱ זמן להזמנה לפי מחלקה — הזן כמויות בטבלת הכמויות</div>`;
+  const{by,order}=_orderDeptAgg(list);
   let tot=0;
   const rows=order.map(k=>{const m=by[k]*units;tot+=m;return`<div style="display:flex;gap:8px;padding:3px 0;border-bottom:0.5px solid var(--brd);font-size:12px">
       <span style="flex:1">${esc(k)}</span><span style="color:var(--txt3)">${by[k].toFixed(1)} דק' ליח'</span><b>${fmtExpMin(m)}</b></div>`;}).join("");
@@ -17813,6 +17821,44 @@ function _orderDeptTimeHtml(list){
     <div style="font-size:12px;font-weight:700;margin-bottom:4px">⏱ זמן עבודה להזמנה כולה (${units} יח') — לפי מחלקה</div>
     ${rows}
     <div style="font-size:13px;font-weight:700;color:var(--green-txt);margin-top:6px">סה"כ להזמנה: ${fmtExpMin(tot)}</div></div>`;
+}
+// 🖨 דף שלבי עבודה לרצפה (19/10/2026 — בקשת המשתמש): שלב + תחנה (ראשית, ונוספות בקטן),
+// **בלי זמן לשלב**. למטה — הזמן להזמנה כולה לפי מחלקה, אותו חישוב בדיוק כמו בבלוק שבחלון
+// (_pmOrdMin מהרינדור האחרון × היחידות בטבלת הכמויות). נקרא מהחלון הפתוח — כולל שינויים שלא נשמרו.
+function printWorkSteps(){
+  try{renderProductPricing();}catch(_){}
+  const v=id=>(document.getElementById(id)?.value||'').trim();
+  const steps=[...document.querySelectorAll('#pm-tasksteps-list .ts-row')].map(r=>({
+    name:r.querySelector('[data-f="name"]')?.value.trim()||'',
+    nameAr:r.querySelector('[data-f="nameAr"]')?.value.trim()||'',
+    station:r.querySelector('[data-f="station"]')?.value||'',
+    alt:_rowAltStations(r),
+    cut:!!r.querySelector('[data-f="cut"]')?.checked
+  })).filter(s=>s.name);
+  if(!steps.length){showToast('⚠ אין שלבי עבודה להדפסה','var(--red-txt)');return;}
+  const stn=k=>k?stationNameOfKey(k):'—';
+  const rows=steps.map((s,i)=>`<tr><td class="n">${i+1}</td><td><b>${s.cut?'✂ ':''}${esc(s.name)}</b>${s.nameAr?`<div class="ar" dir="rtl">${esc(s.nameAr)}</div>`:''}</td>
+    <td><b>${esc(stn(s.station))}</b>${s.alt.length?`<div class="alt">+ ${s.alt.map(a=>esc(stn(a))).join(' · ')}</div>`:''}</td></tr>`).join('');
+  const units=_pmOrderUnits();
+  let dept='';
+  if(_pmOrdMin.length&&units){
+    const{by,order}=_orderDeptAgg(_pmOrdMin);let tot=0;
+    dept=`<h3>⏱ זמן עבודה להזמנה כולה (${units} יח') — לפי מחלקה</h3><table class="d">${order.map(k=>{const m=by[k]*units;tot+=m;
+      return`<tr><td>${esc(k)}</td><td class="t">${fmtExpMin(m)}</td></tr>`;}).join('')}
+      <tr class="tot"><td>סה"כ להזמנה</td><td class="t">${fmtExpMin(tot)}</td></tr></table>`;
+  }else dept=`<div class="note">⏱ זמן לפי מחלקה לא חושב — ${units?'חסרים מחיר / רמות קושי / דקות לשלבים':'לא הוזנו כמויות בטבלת הכמויות'}</div>`;
+  const prod=v('pm-prod'),cust=v('pm-cust'),name=v('pm-name');
+  const title=`שלבי עבודה — מוצר ${prod}${cust?' · לקוח '+cust:''}`;
+  printViaIframe(`<!DOCTYPE html><html dir="rtl" lang="he"><head><meta charset="utf-8"><title>${esc(title)}</title><style>
+    @page{size:A4;margin:12mm}body{font-family:Arial,sans-serif;color:#000;margin:0;font-size:13px}
+    h2{margin:0 0 2px;font-size:19px}h3{font-size:15px;margin:18px 0 6px}.sub{color:#444;font-size:12px;margin-bottom:10px}
+    table{width:100%;border-collapse:collapse}td,th{border:1px solid #888;padding:6px 8px;text-align:right;vertical-align:top}
+    th{background:#eee}td.n{width:28px;text-align:center;color:#555}.ar{font-size:12px;color:#333;margin-top:2px}.alt{font-size:11px;color:#555;margin-top:2px}
+    table.d td.t{width:130px;font-weight:700;white-space:nowrap}tr.tot td{background:#eee;font-weight:700}.note{margin-top:14px;font-size:12px;color:#555}
+    tr{page-break-inside:avoid}</style></head><body>
+    <h2>${esc(title)}</h2><div class="sub">${name?esc(name)+' · ':''}${steps.length} שלבים · הודפס ${new Date().toLocaleDateString('he-IL')}</div>
+    <table><thead><tr><th>#</th><th>שלב</th><th>תחנה</th></tr></thead><tbody>${rows}</tbody></table>
+    ${dept}</body></html>`);
 }
 // שינוי כמות בטבלה מעדכן את הבלוק מיד (הטבלה נבנית מחדש בכל פתיחה — האזנה אחת על המסמך)
 document.addEventListener("input",e=>{if(e.target?.matches?.("#pm-qty-body [data-qf=\"qty\"]"))try{renderProductPricing();}catch(_){}});
