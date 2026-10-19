@@ -17850,7 +17850,7 @@ function printWorkSteps(){
   const prod=v('pm-prod'),cust=v('pm-cust'),name=v('pm-name');
   const title=`שלבי עבודה — מוצר ${prod}${cust?' · לקוח '+cust:''}`;
   printViaIframe(`<!DOCTYPE html><html dir="rtl" lang="he"><head><meta charset="utf-8"><title>${esc(title)}</title><style>
-    @page{size:A4;margin:12mm}body{font-family:Arial,sans-serif;color:#000;margin:0;font-size:13px}
+    @page{size:A4;margin:0}body{font-family:Arial,sans-serif;color:#000;margin:0;padding:12mm;font-size:13px}
     h2{margin:0 0 2px;font-size:19px}h3{font-size:15px;margin:18px 0 6px}.sub{color:#444;font-size:12px;margin-bottom:10px}
     table{width:100%;border-collapse:collapse}td,th{border:1px solid #888;padding:6px 8px;text-align:right;vertical-align:top}
     th{background:#eee}td.n{width:28px;text-align:center;color:#555}.ar{font-size:12px;color:#333;margin-top:2px}.alt{font-size:11px;color:#555;margin-top:2px}
