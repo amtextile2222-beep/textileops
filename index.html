@@ -15837,6 +15837,15 @@ async function _dnPdfBlob(html){
     return doc.output('blob');
   }finally{fr.remove();}
 }
+// 🍎 הדפסה באייפון — Safari מתעלם מ-@page (כתובת + עמודים מיותרים) ⇒ PDF ⇒ חלון השיתוף ⇒ "הדפסה";
+// בלי שיתוף — פותחים את ה-PDF בלשונית. משותף לתעודת משלוח ולדף שלבי העבודה.
+async function _printPdfBlob(blob,name){
+  const file=new File([blob],name,{type:'application/pdf'});
+  const canShare=!!(navigator.canShare&&navigator.canShare({files:[file]}));
+  if(!await showConfirm('🖨 '+esc(name),canShare?'ה-PDF מוכן. בחלון השיתוף בחר "הדפסה".':'ה-PDF ייפתח בלשונית חדשה — הדפס משם.','🖨 הדפס','ביטול'))return;
+  if(canShare){try{await navigator.share({files:[file]});return;}catch(e){if(e?.name==='AbortError')return;}}
+  const u=URL.createObjectURL(blob);window.open(u,'_blank');setTimeout(()=>URL.revokeObjectURL(u),120000);
+}
 async function shareDeliveryNote(pid,idx,forPrint){
   const r=await dnEnsureNo(pid,idx);if(!r)return;
   const p=r.p,sh=r.list[r.i];
@@ -15857,12 +15866,7 @@ async function shareDeliveryNote(pid,idx,forPrint){
   const file=new File([blob],name,{type:'application/pdf'});
   const canShare=!!(navigator.canShare&&navigator.canShare({files:[file]}));
   const ph=_waPhone((S.customerInfo||{})[p.cust]?.phone);
-  if(forPrint){ // 🍎 הדפסה באייפון — PDF ⇒ חלון השיתוף ⇒ "הדפסה"; בלי שיתוף — פותחים את ה-PDF בלשונית
-    if(!await showConfirm('🖨 '+esc(name),canShare?'ה-PDF מוכן. בחלון השיתוף בחר "הדפסה".':'ה-PDF ייפתח בלשונית חדשה — הדפס משם.','🖨 הדפס','ביטול'))return;
-    if(canShare){try{await navigator.share({files:[file]});return;}catch(e){if(e?.name==='AbortError')return;}}
-    const u=URL.createObjectURL(blob);window.open(u,'_blank');setTimeout(()=>URL.revokeObjectURL(u),120000);
-    return;
-  }
+  if(forPrint){await _printPdfBlob(blob,name);return;}
   if(!await showConfirm('💬 '+esc(name),canShare?'ה-PDF מוכן. בחלון השיתוף בחר וואטסאפ ואת הלקוח.'
       :'ה-PDF יירד למחשב ותיפתח שיחת וואטסאפ'+(ph?' עם הלקוח':'')+' — גרור את הקובץ לשיחה.','💬 שלח','ביטול'))return;
   if(canShare){
@@ -17825,7 +17829,7 @@ function _orderDeptTimeHtml(list){
 // 🖨 דף שלבי עבודה לרצפה (19/10/2026 — בקשת המשתמש): שלב + תחנה (ראשית, ונוספות בקטן),
 // **בלי זמן לשלב**. למטה — הזמן להזמנה כולה לפי מחלקה, אותו חישוב בדיוק כמו בבלוק שבחלון
 // (_pmOrdMin מהרינדור האחרון × היחידות בטבלת הכמויות). נקרא מהחלון הפתוח — כולל שינויים שלא נשמרו.
-function printWorkSteps(){
+async function printWorkSteps(){
   try{renderProductPricing();}catch(_){}
   const v=id=>(document.getElementById(id)?.value||'').trim();
   const steps=[...document.querySelectorAll('#pm-tasksteps-list .ts-row')].map(r=>({
@@ -17849,7 +17853,7 @@ function printWorkSteps(){
   }else dept=`<div class="note">⏱ זמן לפי מחלקה לא חושב — ${units?'חסרים מחיר / רמות קושי / דקות לשלבים':'לא הוזנו כמויות בטבלת הכמויות'}</div>`;
   const prod=v('pm-prod'),cust=v('pm-cust'),name=v('pm-name');
   const title=`שלבי עבודה — מוצר ${prod}${cust?' · לקוח '+cust:''}`;
-  printViaIframe(`<!DOCTYPE html><html dir="rtl" lang="he"><head><meta charset="utf-8"><title>${esc(title)}</title><style>
+  const html=`<!DOCTYPE html><html dir="rtl" lang="he"><head><meta charset="utf-8"><title>${esc(title)}</title><style>
     @page{size:A4;margin:0}body{font-family:Arial,sans-serif;color:#000;margin:0;padding:12mm;font-size:13px}
     h2{margin:0 0 2px;font-size:19px}h3{font-size:15px;margin:18px 0 6px}.sub{color:#444;font-size:12px;margin-bottom:10px}
     table{width:100%;border-collapse:collapse}td,th{border:1px solid #888;padding:6px 8px;text-align:right;vertical-align:top}
@@ -17858,7 +17862,12 @@ function printWorkSteps(){
     tr{page-break-inside:avoid}</style></head><body>
     <h2>${esc(title)}</h2><div class="sub">${name?esc(name)+' · ':''}${steps.length} שלבים · הודפס ${new Date().toLocaleDateString('he-IL')}</div>
     <table><thead><tr><th>#</th><th>שלב</th><th>תחנה</th></tr></thead><tbody>${rows}</tbody></table>
-    ${dept}</body></html>`);
+    ${dept}</body></html>`;
+  if(!_isIOS()){printViaIframe(html);return;}
+  // 🍎 אייפון: כמו תעודת המשלוח — PDF (עד 15% מעל עמוד מתכווץ לעמוד אחד) ⇒ שיתוף ⇒ הדפסה
+  showToast('⏳ מכין PDF…','var(--txt3)',4000);
+  let blob;try{blob=await _dnPdfBlob(html);}catch(e){alert('הכנת ה-PDF נכשלה: '+(e?.message||e));return;}
+  await _printPdfBlob(blob,'work-steps-'+(prod||'0')+'.pdf');
 }
 // שינוי כמות בטבלה מעדכן את הבלוק מיד (הטבלה נבנית מחדש בכל פתיחה — האזנה אחת על המסמך)
 document.addEventListener("input",e=>{if(e.target?.matches?.("#pm-qty-body [data-qf=\"qty\"]"))try{renderProductPricing();}catch(_){}});
