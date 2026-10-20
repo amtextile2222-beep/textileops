@@ -2784,6 +2784,15 @@ function getTotalQty(cust,prod,orderNo){
     return window._bcLastGen.items.reduce((s,it)=>s+(parseInt(it.qty)||0),0);
   return 0;
 }
+// 📏 כמות משוערת (20/10/2026): עד הספירה/גזירה ההזמנה בלי כמות ⇒ אין צפי לשלבים הראשונים.
+// `products.estQty` משמש **רק לצפי זמן** (סריקה, משימות פעילות, זמן לפי מחלקה). המשימה נשמרת עם
+// qty=0 כמו היום, ו-taskUnits/דוחות ממשיכים לקחת את הכמות האמיתית בדיעבד — לא לערבב.
+function estQtyOf(p){return Math.max(0,parseInt(p?.estQty)||0);}
+function _estQtyBc(raw){
+  if(!isTotalBc(raw||''))return 0;
+  const c=raw.slice(0,2),pr=raw.slice(2,7);
+  return estQtyOf(prodByOrderNo(c,pr,orderNoOf(raw))||findProd(c,pr));
+}
 // ספירת יחידות בלי כפילויות: אותו ברקוד + אותו שלב + אותו יום = נספר פעם אחת
 // (שני עובדים שחולקים ברקוד באותו שלב לא מכפילים את הכמות)
 function unitKey(t){
@@ -3590,7 +3599,8 @@ function updateExpectedTime(prefix){
   if(cust!==listEl.dataset.cust||prod!==listEl.dataset.prod){box.innerHTML='';return;}
   const prodObj=findProd(cust,prod);
   if(!_isPriced(prodObj)){box.innerHTML='';return;} // אין תמחור — אין צפי (priced: בלי המספרים אצל עובדת)
-  const qty=isTotalBc(raw)?getTotalQty(cust,prod,orderNoOf(raw)):parseInt(raw.slice(8,11))||0;
+  let qty=isTotalBc(raw)?getTotalQty(cust,prod,orderNoOf(raw)):parseInt(raw.slice(8,11))||0;
+  const est=!qty&&_estQtyBc(raw)>0;if(est)qty=_estQtyBc(raw);
   if(!qty){box.innerHTML='';return;}
   const key=taskExpectedKey(cust,prod,workerId,qty);
   const render=res=>{
@@ -3599,7 +3609,7 @@ function updateExpectedTime(prefix){
     if(!parts.length){box.innerHTML='';return;}
     const tot=parts.reduce((s,n)=>s+res.perStep[n],0);
     box.innerHTML=`<div style="margin-top:6px;background:var(--blue-bg,#dbeafe);color:var(--blue-txt,#1d4ed8);border-radius:8px;padding:7px 10px;font-size:12px">
-      ⏱ צפי לפי תמחור (${qty} יח'): <b style="font-size:13px">${fmtExpMin(tot)}</b>
+      ⏱ צפי לפי תמחור (${est?'~':''}${qty} יח'${est?' משוער':''}):<b style="font-size:13px">${fmtExpMin(tot)}</b>
       ${parts.length>1?`<div style="font-size:11px;margin-top:2px;opacity:.85">${parts.map(n=>esc(n)+': '+fmtExpMin(res.perStep[n])).join(' · ')}</div>`:''}
     </div>`;
   };
@@ -3647,10 +3657,12 @@ async function recalcActiveExpected(cust,prod){
   const cache={};let changed=false;
   for(const t of affected){
     let res={ok:false};
-    if(hasPricing){
-      const key=taskExpectedKey(cust,prod,t.workerId,t.qty);
+    // 📏 ספירה/גזירה שנסרקה בלי כמות: הכמות האמיתית אם כבר הוזנה (taskUnits), אחרת המשוערת
+    const q=+t.qty||(t.isTotal?(taskUnits(t)||_estQtyBc(t.bc||'')):0);
+    if(hasPricing&&q){
+      const key=taskExpectedKey(cust,prod,t.workerId,q);
       if(cache[key]===undefined){
-        try{const r=await fn({cust,prod,workerId:t.workerId,qty:t.qty,stepNames:allSteps});cache[key]=r.data||{ok:false};}
+        try{const r=await fn({cust,prod,workerId:t.workerId,qty:q,stepNames:allSteps});cache[key]=r.data||{ok:false};}
         catch(e){console.error('recalcActiveExpected:',e);cache[key]={ok:false};}
       }
       res=cache[key];
@@ -6785,7 +6797,7 @@ async function submitBc(){
   }
   try{
     // הוספה לסל עם חסימת סריקה כפולה ([[feature-dup-scan-block]]) — חובה גם כאן, לא רק בסורק המשימות ([[two-scanners-gotcha]])
-    const _bcExp=await fetchExpected(cust,prod,u.id,qty); // צפי זמן לפי התמחור (fallback לשרת בקאש-מיס)
+    const _bcExp=await fetchExpected(cust,prod,u.id,qty||_estQtyBc(raw)); // צפי זמן לפי התמחור (fallback לשרת בקאש-מיס) · 📏 אין כמות ⇒ המשוערת
     const types=bcUseSteps?bcCheckedSteps:[taskType||''];
     const dupSkipped=addStepsToBcCart({raw,cust,prod,size,qty,col,isTotal,taskDept,want:_partWant('bc')},types,_bcExp);
     if(dupSkipped.length)showToast(T.scan_not_added+' '+dupSkipped.join(' · '),'var(--red-txt)',7000);
@@ -7983,7 +7995,7 @@ async function buildPipelineReport(){
         <div style="font-size:12px;color:var(--txt2);margin:2px 0">${esc(p.name||'—')}</div>
         <div style="display:flex;align-items:center;gap:4px;flex-wrap:wrap;font-size:10px;color:var(--txt3)">
           <span>${L.id==='shipped'?('יצא '+(r.ship||'—')):('נכנס '+(r.entry||'—'))}</span>
-          <span>·</span><span>${st.qty?st.qty+" יח'":'<span style="color:var(--red-txt)">אין כמות</span>'}</span>
+          <span>·</span><span>${st.qty?st.qty+" יח'":estQtyOf(p)?`<span style="color:var(--amber-txt,#b45309)" title="כמות משוערת — עד הספירה/גזירה">~${estQtyOf(p)} יח' משוער</span>`:'<span style="color:var(--red-txt)">אין כמות</span>'}</span>
           ${sp?`<span class="badge amber" style="font-size:9px" title="${esc('ההזמנה מחולקת: '+PIPE_LISTS.filter(x=>st.split[x.id]>0).map(x=>pipeShortLabel(x)+' '+st.split[x.id]).join(' · '))}">✂️ ${st.split[L.id]} מתוך ${st.qty}</span>`:''}
           ${prog(st.sew,'תפירה')}${prog(st.pack,'אריזה')}
           ${(()=>{ // השלבים שעוצרים את ההזמנה — על הכרטיס עצמו (גם בטלפון, בלי ריחוף). עד 3 + "עוד N"
@@ -10442,7 +10454,7 @@ async function tsStartTask(){
       // רגע ההתחלה בפועל. בלי השדה הזה אי אפשר להפריד קצב עבודה מזמן חלוקה. נוסף 10/09/2026
       // בכל ארבע נקודות היצירה (5197 עצמי · כאן · 9268 מנהל · 9322 פיצול); רשומות ישנות בלעדיו.
       const task={id:String(Date.now())+Math.random().toString(36).slice(2,6),workerId:w.id,workerName:w.name,scannedBy:S.user?.id||'',scannedByName:S.user?.name||'',dept:b.taskDept||effDept(w),station:curStation(w)?.name||'',cust:b.cust,prod:b.prod,size:b.size,qty:b.qty,col:b.col,taskType:b.taskType,bc:b.raw,isTotal:b.isTotal||false,startTime,elapsed:0,accumulatedSec:0,prodStamp:b.prodStamp,...(b.splitId?{splitId:b.splitId}:{})};
-      const exp=b.isSample?null:await fetchExpected(b.cust,b.prod,w.id,b.qty); // 👕 דגם — אין צפי
+      const exp=b.isSample?null:await fetchExpected(b.cust,b.prod,w.id,b.qty||_estQtyBc(b.raw)); // 👕 דגם — אין צפי · 📏 אין כמות ⇒ המשוערת
       if(exp?.ok&&exp.perStep?.[b.taskType]!=null)task.expectedMin=exp.perStep[b.taskType];
       if(b.isSample)task.isSample=true;
       if(batchId)task.batchId=batchId;
@@ -10773,7 +10785,7 @@ async function mgrStartTask(){
     // ממכשיר אחר לא נמצאת שם כלל, ולכן לא נסגרה ולא נחסמה. כאן היא נתפסת.
     if(findDupIn(mgrSrvActive,b.raw,b.taskType)){mgrDupSkip.push((b.taskType||b.prod)+' — '+(T.scan_dup_active||'פעיל כעת'));continue;}
     const newTask={id:String(Date.now())+Math.random().toString(36).slice(2,6),workerId:empId,workerName:w.name,scannedBy:S.user?.id||'',scannedByName:S.user?.name||'',dept:b.taskDept||effDept(w),station:curStation(w)?.name||'',cust:b.cust,prod:b.prod,size:b.size,qty:b.qty,col:b.col,taskType:b.taskType,bc:b.raw,isTotal:b.isTotal||false,startTime,elapsed:0,accumulatedSec:0,prodStamp:b.prodStamp,...(b.splitId?{splitId:b.splitId}:{})};
-    const expM=b.isSample?null:await fetchExpected(b.cust,b.prod,empId,b.qty); // 👕 דגם — אין צפי
+    const expM=b.isSample?null:await fetchExpected(b.cust,b.prod,empId,b.qty||_estQtyBc(b.raw)); // 👕 דגם — אין צפי · 📏 אין כמות ⇒ המשוערת
     if(expM?.ok&&expM.perStep?.[b.taskType]!=null)newTask.expectedMin=expM.perStep[b.taskType];
     if(b.isSample)newTask.isSample=true;
     if(batchId)newTask.batchId=batchId;
@@ -17438,6 +17450,11 @@ function openProductModal(id){
       <tbody id="pm-qty-body">${qRows}</tbody>
     </table>
     <button type="button" class="btn" onclick="addQtyRow()" style="font-size:12px">+ הוסף שורה</button>
+    <div style="display:flex;align-items:center;gap:8px;flex-wrap:wrap;margin-top:8px">
+      <label for="pm-estqty" style="font-size:12px;font-weight:600">📏 כמות משוערת</label>
+      <input id="pm-estqty" type="number" min="0" step="1" value="${p?.estQty||''}" placeholder="למשל 200" oninput="renderProductPricing()" style="width:90px;font-size:13px;padding:4px 8px;border-radius:6px;border:1px solid var(--brd);background:var(--card);color:var(--txt)"/>
+      <span style="font-size:11px;color:var(--txt3)">עד הספירה/גזירה — לצפי זמן בלבד (ספירה, גזירה, זמן לפי מחלקה). הכמות בטבלה גוברת ברגע שמוזנת</span>
+    </div>
     <div style="margin-top:10px;padding:8px;background:var(--bg);border-radius:8px;border:1px dashed var(--brd)">
       <div style="font-size:11px;color:var(--txt3);margin-bottom:6px">⚡ מילוי מהיר — אותה כמות לכל המידות</div>
       <div style="display:flex;gap:6px;flex-wrap:wrap;align-items:flex-end">
@@ -17831,6 +17848,12 @@ function _pmOrderUnits(){
   let n=0;document.querySelectorAll("#pm-qty-body [data-qf=\"qty\"]").forEach(el=>{n+=parseInt(el.value)||0;});
   return n;
 }
+// 📏 היחידות לחישוב הזמן: הטבלה, ובהיעדרה הכמות המשוערת (est=true לתווית)
+function _pmUnitsForTime(){
+  const n=_pmOrderUnits();if(n)return{n,est:false};
+  const e=Math.max(0,parseInt(document.getElementById('pm-estqty')?.value)||0);
+  return{n:e,est:e>0};
+}
 function _orderDeptAgg(list){
   const by={},order=[];
   for(const x of list){
@@ -17842,15 +17865,15 @@ function _orderDeptAgg(list){
   return{by,order};
 }
 function _orderDeptTimeHtml(list){
-  const units=_pmOrderUnits();
+  const{n:units,est}=_pmUnitsForTime();
   if(!list.length)return"";
-  if(!units)return`<div style="font-size:11px;color:var(--txt3);margin-top:8px">⏱ זמן להזמנה לפי מחלקה — הזן כמויות בטבלת הכמויות</div>`;
+  if(!units)return`<div style="font-size:11px;color:var(--txt3);margin-top:8px">⏱ זמן להזמנה לפי מחלקה — הזן כמויות בטבלת הכמויות או כמות משוערת</div>`;
   const{by,order}=_orderDeptAgg(list);
   let tot=0;
   const rows=order.map(k=>{const m=by[k]*units;tot+=m;return`<div style="display:flex;gap:8px;padding:3px 0;border-bottom:0.5px solid var(--brd);font-size:12px">
       <span style="flex:1">${esc(k)}</span><span style="color:var(--txt3)">${by[k].toFixed(1)} דק' ליח'</span><b>${fmtExpMin(m)}</b></div>`;}).join("");
   return`<div style="background:var(--bg2);border-radius:8px;padding:8px 10px;margin-top:8px;border:1px solid var(--brd)">
-    <div style="font-size:12px;font-weight:700;margin-bottom:4px">⏱ זמן עבודה להזמנה כולה (${units} יח') — לפי מחלקה</div>
+    <div style="font-size:12px;font-weight:700;margin-bottom:4px">⏱ זמן עבודה להזמנה כולה (${est?'~':''}${units} יח'${est?' משוער':''}) — לפי מחלקה</div>
     ${rows}
     <div style="font-size:13px;font-weight:700;color:var(--green-txt);margin-top:6px">סה"כ להזמנה: ${fmtExpMin(tot)}</div></div>`;
 }
@@ -17871,14 +17894,14 @@ async function printWorkSteps(){
   const stn=k=>k?stationNameOfKey(k):'—';
   const rows=steps.map((s,i)=>`<tr><td class="n">${i+1}</td><td><b>${s.cut?'✂ ':''}${esc(s.name)}</b>${s.nameAr?`<div class="ar" dir="rtl">${esc(s.nameAr)}</div>`:''}</td>
     <td><b>${esc(stn(s.station))}</b>${s.alt.length?`<div class="alt">+ ${s.alt.map(a=>esc(stn(a))).join(' · ')}</div>`:''}</td></tr>`).join('');
-  const units=_pmOrderUnits();
+  const{n:units,est}=_pmUnitsForTime();
   let dept='';
   if(_pmOrdMin.length&&units){
     const{by,order}=_orderDeptAgg(_pmOrdMin);let tot=0;
-    dept=`<h3>⏱ זמן עבודה להזמנה כולה (${units} יח') — לפי מחלקה</h3><table class="d">${order.map(k=>{const m=by[k]*units;tot+=m;
+    dept=`<h3>⏱ זמן עבודה להזמנה כולה (${est?'~':''}${units} יח'${est?' משוער':''}) — לפי מחלקה</h3><table class="d">${order.map(k=>{const m=by[k]*units;tot+=m;
       return`<tr><td>${esc(k)}</td><td class="t">${fmtExpMin(m)}</td></tr>`;}).join('')}
       <tr class="tot"><td>סה"כ להזמנה</td><td class="t">${fmtExpMin(tot)}</td></tr></table>`;
-  }else dept=`<div class="note">⏱ זמן לפי מחלקה לא חושב — ${units?'חסרים מחיר / רמות קושי / דקות לשלבים':'לא הוזנו כמויות בטבלת הכמויות'}</div>`;
+  }else dept=`<div class="note">⏱ זמן לפי מחלקה לא חושב — ${units?'חסרים מחיר / רמות קושי / דקות לשלבים':'לא הוזנו כמויות או כמות משוערת'}</div>`;
   const prod=v('pm-prod'),cust=v('pm-cust'),name=v('pm-name');
   const title=`שלבי עבודה — מוצר ${prod}${cust?' · לקוח '+cust:''}`;
   const html=`<!DOCTYPE html><html dir="rtl" lang="he"><head><meta charset="utf-8"><title>${esc(title)}</title><style>
@@ -18172,6 +18195,7 @@ async function saveProduct(){
   const _cpv=document.getElementById('pm-cutprofit')?.value;
   const cutProfitPct=(_cpv!=null&&_cpv!==''&&isFinite(+_cpv))?Math.max(0,Math.min(99,+_cpv)):null;
   const isSample=!!document.getElementById('pm-sample')?.checked;
+  const estQty=Math.max(0,parseInt(document.getElementById('pm-estqty')?.value)||0); // 📏 לצפי בלבד (estQtyOf)
   if(_editProdId){
     const p=S.products.find(x=>x.id===_editProdId);
     if(p){
@@ -18193,7 +18217,7 @@ async function saveProduct(){
         const{orderNo}=await newProdOrderFields(cust,prod);
         if(orderNo!==_oNo){p.orderNo=orderNo;showToast('🔢 מספר ההזמנה עודכן ל-#'+String(orderNo).padStart(3,'0')+' — אם כבר הודפסו ברקודים, יש להדפיס מחדש','var(--amber-txt)',8000);}
       }
-      Object.assign(p,{prod,cust,name,images:_prodImgs,imgCount:_prodImgs.length,docs:_prodDocs,quantities,stageLog,stageSkipped,workSteps,unitPrice,targetProfitPct,directMaterialsCost,cutPrice,cutProfitPct,extraMatPrice,isSample});
+      Object.assign(p,{prod,cust,name,images:_prodImgs,imgCount:_prodImgs.length,docs:_prodDocs,quantities,stageLog,stageSkipped,workSteps,unitPrice,targetProfitPct,directMaterialsCost,cutPrice,cutProfitPct,extraMatPrice,isSample,estQty});
     }
   }else{
     const id='p'+Date.now();
@@ -18204,7 +18228,7 @@ async function saveProduct(){
       stageLog.sort((a,b)=>PROD_STAGES.findIndex(x=>x.id===a.id)-PROD_STAGES.findIndex(x=>x.id===b.id));
     }
     const _ordF=await newProdOrderFields(cust,prod);
-    S.products.push({id,createdAt:Date.now(),..._ordF,prod,cust,name,images:_prodImgs,imgCount:_prodImgs.length,docs:_prodDocs,quantities,stageLog,stageSkipped,workSteps,unitPrice,targetProfitPct,directMaterialsCost,cutPrice,cutProfitPct,extraMatPrice,isSample});
+    S.products.push({id,createdAt:Date.now(),..._ordF,prod,cust,name,images:_prodImgs,imgCount:_prodImgs.length,docs:_prodDocs,quantities,stageLog,stageSkipped,workSteps,unitPrice,targetProfitPct,directMaterialsCost,cutPrice,cutProfitPct,extraMatPrice,isSample,estQty});
   }
   saveLS();
   if(S.fbConnected){
