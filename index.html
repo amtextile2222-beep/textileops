@@ -3101,10 +3101,25 @@ function pipeStateOf(p,tasks){
   // סימון יציאה (`departedAt`, כפתור בלוח). תעודה מתאריך לפני PIPE_DEPART_FROM = יצאה (לא היה סימון עד אז).
   // ⚠️ זהה ב-trackStates בשרת (functions/index.js) — דף המעקב של הלקוח
   const shipped=(p.stageLog||[]).some(e=>e.id==='shipped')||+p.shippedQty>0;
-  const departed=shipped&&(!!p.departedAt||String(pipeDnDate(p)||'9999')<PIPE_DEPART_FROM);
+  // 🚚 משלוח חלקי (20/10/2026): 14771 — יצאו 2 מתוך 135 והכרטיס כולו עבר ל"מוכן ליציאה". עכשיו רק
+  // היחידות שיצאו (total + ✂ לא תפור, כמו "יתרה להשלמה") עוברות; היתרה נשארת במצב הייצור שלה.
+  // יציאה **פר תעודה**: תעודה שהופקה (at) עד departedAt = יצאה; תעודה מאוחרת יותר = ממתינה לסימון.
+  // ⚠️ זהה ב-trackShipInfo בשרת
+  const shL=shipped?prodShipments(p):[];
+  const shU=s=>(+s.total||0)+shUnsewn(s);
+  const depT=p.departedAt?Date.parse(p.departedAt):NaN;
+  const shDep=s=>{const d=String(s.date||'').slice(0,10);if(d&&d<PIPE_DEPART_FROM)return true;if(isNaN(depT))return false;
+    const a=Date.parse((s.restoredAt||s.backdatedAt)?d:(s.at||d));return !(a>depT);};
+  const outU=shL.reduce((t,s)=>t+shU(s),0),depU=shL.reduce((t,s)=>t+(shDep(s)?shU(s):0),0);
+  // 🛑 לא חלקי: תעודה אחרונה לפני PIPE_PARTIAL_FROM (הזמנות ישנות שנסגרו בחוסר לא חוזרות ללוח),
+  // או שהמנהל דחף ידנית ל"מוכן ליציאה"/הלאה = "סוגרים את ההזמנה בחוסר"
+  const lastD=shL.reduce((m,s)=>String(s.date||'')>m?String(s.date||''):m,'');
+  const ovShip=!!p.pipeOverride&&PIPE_IDX(p.pipeOverride.list)>=PIPE_IDX('ready_ship');
+  const partial=shipped&&qty>0&&shL.length>0&&outU<qty&&lastD>=PIPE_PARTIAL_FROM&&!ovShip;
+  const departed=shipped&&!partial&&(shL.length?depU>=outU:(!!p.departedAt||String(pipeDnDate(p)||'9999')<PIPE_DEPART_FROM));
   let id;
   if(departed)                                   id='shipped';
-  else if(shipped)                               id='ready_ship';
+  else if(shipped&&!partial)                     id='ready_ship';
   else if(pack&&pack.of>0&&pack.full===pack.of)  id='ready_ship';
   else if(scans.pack>0)                          id='packing';
   else if(sew&&sew.of>0&&sew.full===sew.of)      id='ready_pack';
@@ -3123,21 +3138,32 @@ function pipeStateOf(p,tasks){
   //   באריזה = packIn · מוכן לאריזה = max(sewDone,packIn)−packIn · בתפירה = השאר.
   // הכרטיס מוצג בכל עמודה שיש בה יחידות (רק כשיותר מאחת). לא בדחיפה ידנית (המנהל קבע את המצב).
   // ⚠️ זהה ב-trackStates בשרת (split + sewPct)
-  let split=null;
+  let split=null,parts=null;
   if(id===nat&&sew&&qty>0&&['sewing','ready_pack','packing'].includes(nat)){
     const sewDone=Math.min(...steps.sew.map(nm=>Math.min(done[nm]||0,qty)));
     const inn={},sn=new Set();
     for(const t of tasks){if(pipeFamOfDept(t.dept)!=='pack')continue;const k=coverKey(t);if(sn.has(k))continue;sn.add(k);
       const nm=String(t.taskType||'').trim();inn[nm]=(inn[nm]||0)+taskUnits(t);}
     const packIn=Math.min(qty,Math.max(0,...Object.values(inn))),reached=Math.max(sewDone,packIn);
-    const parts={sewing:qty-reached,ready_pack:reached-packIn,packing:packIn};
+    parts={sewing:qty-reached,ready_pack:reached-packIn,packing:packIn};
+  }
+  // 🚚 משלוח חלקי: היחידות שיצאו יורדות מהעמודה המתקדמת ביותר ועוברות ל"מוכן ליציאה" (תעודה בלי
+  // סימון יציאה) / "יצא ללקוח". הזמנה שיצאה כולה בכמה תעודות — חלק יצא וחלק ממתין ⇒ פיצול גם כן.
+  if(id===nat&&partial){
+    parts=parts||{[nat]:qty};let take=outU;
+    for(const k of PIPE_LISTS.map(l=>l.id).reverse()){const d=Math.min(parts[k]||0,take);if(d){parts[k]-=d;take-=d;}}
+    parts.ready_ship=(parts.ready_ship||0)+outU-depU;parts.shipped=(parts.shipped||0)+depU;
+  }else if(id===nat&&shipped&&!partial&&depU>0&&depU<outU)parts={ready_ship:outU-depU,shipped:depU};
+  if(parts){
     const nz=PIPE_LISTS.map(l=>l.id).filter(k=>parts[k]>0);
     // הכפתורים מוצגים בעותק אחד: בעמודת המצב אם יש בה יחידות, אחרת במתקדמת
     if(nz.length>1)split={...parts,main:parts[id]>0?id:nz[nz.length-1]};
   }
-  return{id,nat,ov:id===ov?.list?ov:null,qty,scans,steps,sew,pack,shipped,departed,split,tasks:tasks.length};
+  // outPend = יחידות עם תעודה שעוד לא סומנו "יצא ללקוח" — לכפתור 🚚 בכרטיס
+  return{id,nat,ov:id===ov?.list?ov:null,qty,scans,steps,sew,pack,shipped,departed,partial,outU,outPend:shL.length?outU-depU:0,split,tasks:tasks.length};
 }
 const PIPE_DEPART_FROM='2026-10-10';
+const PIPE_PARTIAL_FROM='2026-10-20'; // משלוח חלקי נספר רק מתעודה מהתאריך הזה (ראה pipeStateOf)
 // תאריך התעודה (רישום "shipped" בלוג, שנכתב בהפקת תעודה)
 function pipeDnDate(p){
   const s=(p.stageLog||[]).find(e=>e.id==='shipped');
@@ -7945,6 +7971,8 @@ async function buildPipelineReport(){
     const cards=list.map(r=>{
       const p=r.p,st=r.st;
       const sp=!!st.split,spSew=sp&&L.id!==st.split.main; // spSew = עותק משני — בלי כפתורים
+      // 🧾 תעודה שממתינה לסימון יציאה — בפיצול רק כשיש יחידות כאלה (לא "מוכן ליציאה" של הייצור עצמו)
+      const shipHere=L.id==='ready_ship'&&st.shipped&&(!sp||st.outPend>0);
       const nxt=PIPE_LISTS[li+1];
       return `<div style="border:1px solid var(--b);border-radius:8px;padding:6px 8px;margin-bottom:6px;background:var(--bg)">
         <div style="display:flex;align-items:center;gap:4px;flex-wrap:wrap">
@@ -7956,17 +7984,17 @@ async function buildPipelineReport(){
         <div style="display:flex;align-items:center;gap:4px;flex-wrap:wrap;font-size:10px;color:var(--txt3)">
           <span>${L.id==='shipped'?('יצא '+(r.ship||'—')):('נכנס '+(r.entry||'—'))}</span>
           <span>·</span><span>${st.qty?st.qty+" יח'":'<span style="color:var(--red-txt)">אין כמות</span>'}</span>
-          ${sp?`<span class="badge amber" style="font-size:9px" title="${esc('ההזמנה מחולקת: בתפירה '+st.split.sewing+' · מוכן לאריזה '+st.split.ready_pack+' · באריזה '+st.split.packing)}">✂️ ${st.split[L.id]} מתוך ${st.qty}</span>`:''}
+          ${sp?`<span class="badge amber" style="font-size:9px" title="${esc('ההזמנה מחולקת: '+PIPE_LISTS.filter(x=>st.split[x.id]>0).map(x=>pipeShortLabel(x)+' '+st.split[x.id]).join(' · '))}">✂️ ${st.split[L.id]} מתוך ${st.qty}</span>`:''}
           ${prog(st.sew,'תפירה')}${prog(st.pack,'אריזה')}
           ${(()=>{ // השלבים שעוצרים את ההזמנה — על הכרטיס עצמו (גם בטלפון, בלי ריחוף). עד 3 + "עוד N"
             const f=['sewing','ready_pack'].includes(L.id)?st.sew:L.id==='packing'?st.pack:null;
             if(!f||!f.low||!f.low.length||f.low.length===f.of)return '';
             return `<div style="width:100%;font-size:10px;color:var(--amber-txt,#b45309)">⏳ ${esc(f.low.slice(0,3).join(' · '))}${f.low.length>3?' · +'+(f.low.length-3):''}</div>`;})()}
-          ${L.id==='ready_ship'&&st.shipped?`<span class="badge blue" style="font-size:9px" title="${esc('הופקה תעודת משלוח '+(pipeDnDate(p)||'')+' — ממתין לסימון יציאה')}">🧾 תעודה הופקה</span>`:''}
+          ${shipHere?`<span class="badge blue" style="font-size:9px" title="${esc('הופקה תעודת משלוח '+(pipeDnDate(p)||'')+' — ממתין לסימון יציאה')}">🧾 תעודה הופקה</span>`:''}
         </div>
         ${isMgr&&L.id==='shipped'&&p.departedAt?`<div style="margin-top:4px"><button class="btn" style="font-size:10px;padding:2px 6px" onclick="pipeDepart('${escj(p.id)}',false)" title="${esc('סומן ע״י '+(p.departedBy||'—'))}">↺ בטל יציאה</button></div>`:''}
-        ${isMgr&&nxt&&L.id!=='shipped'&&!spSew?`<div style="margin-top:4px;display:flex;gap:4px">
-          ${L.id==='ready_ship'&&st.shipped
+        ${isMgr&&nxt&&L.id!=='shipped'&&(!spSew||shipHere)?`<div style="margin-top:4px;display:flex;gap:4px">
+          ${shipHere
             ?`<button class="btn" style="font-size:10px;padding:2px 6px;white-space:nowrap" onclick="pipeDepart('${escj(p.id)}',true)" title="הסחורה יצאה פיזית מהמפעל">🚚 יצא ללקוח</button>`
             :`<button class="btn" style="font-size:10px;padding:2px 6px;white-space:nowrap" onclick="pipePush('${escj(p.id)}','${nxt.id}')" title="${esc('העבר ידנית ל'+nxt.label+' — לשימוש כשהמונה נתקע')}">➜ ${esc(pipeShortLabel(nxt))}</button>`}
           ${st.ov?`<button class="btn" style="font-size:10px;padding:2px 6px" onclick="pipePush('${escj(p.id)}','')">↺ בטל</button>`:''}
