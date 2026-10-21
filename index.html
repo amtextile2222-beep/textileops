@@ -214,6 +214,7 @@ code{background:var(--bg2);border:0.5px solid var(--b);border-radius:4px;padding
     <div id="l-face-hint" style="display:none;text-align:center;font-size:13px;color:var(--green-txt);margin-bottom:8px">📷 זיהוי פנים — לחץ כניסה</div>
     <div id="l-bc-hint" style="display:none;text-align:center;margin-bottom:8px">
       <button class="btn primary" style="width:100%;justify-content:center;font-size:16px;padding:12px" onclick="startBcLogin()">📷 סרוק את הברקוד שבתחנה שלך</button>
+      <button class="btn nfc-only" style="display:none;width:100%;justify-content:center;font-size:15px;padding:11px;margin-top:6px" onclick="nfcBcLogin()">📶 קרב את מדבקת ה-NFC שלך</button>
       <div style="font-size:13px;color:var(--txt3);margin-top:5px">כוון את המצלמה אל המדבקה עם השם שלך</div>
     </div>
     <div id="l-bc-cam" style="display:none;margin-bottom:8px">
@@ -412,6 +413,7 @@ code{background:var(--bg2);border:0.5px solid var(--b);border-radius:4px;padding
         </div>
         <div id="att-bc-box" style="display:none;width:100%">
           <button class="btn primary" style="width:100%;justify-content:center;font-size:15px;padding:11px" onclick="startBcPunch()">📷 סרוק ברקוד לחתימת יציאה</button>
+          <button class="btn nfc-only" style="display:none;width:100%;justify-content:center;font-size:14px;padding:10px;margin-top:6px" onclick="nfcBcPunch()">📶 חתימת יציאה במדבקת NFC</button>
           <div id="att-bc-cam" style="display:none;margin-top:6px">
             <video id="att-bc-video" playsinline muted style="width:100%;border-radius:10px;background:#000"></video>
             <div id="att-bc-status" style="font-size:15px;font-weight:600;margin-top:6px;min-height:20px"></div>
@@ -986,7 +988,7 @@ code{background:var(--bg2);border:0.5px solid var(--b);border-radius:4px;padding
             <div id="mgr-cam-status" style="position:absolute;bottom:8px;right:0;left:0;text-align:center;font-size:12px;color:#fff;background:rgba(0,0,0,.5);padding:4px">מכוון מצלמה...</div>
           </div>
           <button class="btn primary full" onclick="mgrStartCam()" id="mgr-cam-btn" style="font-size:13px;padding:10px;margin-bottom:8px">📷 סרוק עם מצלמה</button>
-          <button class="btn full nfc-only" onclick="nfcScanTo('mgr')" style="display:none;font-size:13px;padding:10px;margin-bottom:8px">📶 קרא מדבקת NFC</button>
+          <button class="btn full nfc-only" onclick="nfcScanTo('mgr')" style="display:none;font-size:13px;padding:10px;margin-bottom:8px">📶 קרא מדבקת NFC (עובד / תחנה / משימה)</button>
           <input id="mgr-bc-inp" class="bc-inp" maxlength="16" placeholder="או הזן 13 או 16 ספרות ידנית..." oninput="parseMgrBc(this.value)"/>
           <input id="mgr-part" type="number" min="1" max="999" inputmode="numeric" placeholder="🔢 כמות לעובד — ריק = כל מה שנותר" title="לתת לעובד רק חלק מהכמות שבברקוד. היתרה נשארת על אותו ברקוד לסריקה הבאה" style="margin-top:6px;width:100%;font-size:13px;padding:8px;border-radius:6px;border:1px solid var(--brd)"/>
         </div><!-- /field barcode -->
@@ -1046,7 +1048,7 @@ code{background:var(--bg2);border:0.5px solid var(--b);border-radius:4px;padding
           <div id="ts-cam-status" style="position:absolute;bottom:8px;right:0;left:0;text-align:center;font-size:12px;color:#fff;background:rgba(0,0,0,.5);padding:4px" data-i18n="scan_aiming">מכוון מצלמה...</div>
         </div>
         <button class="btn primary full" onclick="tsStartCam()" id="ts-cam-btn" style="font-size:13px;padding:10px;margin-bottom:8px">📷 <span data-i18n="scan_cam_all">סרוק עובד / תחנה / משימה</span></button>
-        <button class="btn full nfc-only" onclick="nfcScanTo('ts')" style="display:none;font-size:13px;padding:10px;margin-bottom:8px">📶 קרא מדבקת NFC (משימה)</button>
+        <button class="btn full nfc-only" onclick="nfcScanTo('ts')" style="display:none;font-size:13px;padding:10px;margin-bottom:8px">📶 קרא מדבקת NFC (עובד / תחנה / משימה)</button>
         <input id="ts-bc-inp" class="bc-inp" maxlength="16" placeholder="או הזן 13 או 16 ספרות ידנית..." data-i18n-ph="ts_inp_ph" oninput="tsParseBc(this.value)"/>
           <input id="ts-part" type="number" min="1" max="999" inputmode="numeric" placeholder="🔢 כמות לעובד — ריק = כל מה שנותר" title="לתת לעובד רק חלק מהכמות שבברקוד. היתרה נשארת על אותו ברקוד לסריקה הבאה" style="margin-top:6px;width:100%;font-size:13px;padding:8px;border-radius:6px;border:1px solid var(--brd)"/>
       </div>
@@ -2554,8 +2556,29 @@ async function nfcRead(cb){
   catch(e){nfcStop();if(e.name!=='AbortError')alert(_nfcErr(e));}
 }
 // קריאה לעמוד סריקה — ממלא את אותו שדה וקורא לאותן פונקציות כמו המצלמה
+// מדבקת עובד (EMP:) / תחנה (STN:) — אותה התנהגות כמו במצלמה של אותו עמוד
 function nfcScanTo(where){
   nfcRead(txt=>{
+    const T=LANGS[currentLang];
+    txt=(txt||'').trim();
+    if(txt.startsWith('STN:')){
+      const sid=txt.slice(4).trim();
+      const empId=where==='bc'?S.user?.id:document.getElementById(where+'-emp-sel')?.value;
+      if(empId)assignWorkerStation(empId,sid);
+      else showToast(T.st_sel_worker||'⚠ בחר עובד לפני סריקת תחנה','var(--red-txt)');
+      return;
+    }
+    if(txt.startsWith('EMP:')){
+      const empId=txt.slice(4).trim(),w=S.workers.find(x=>x.id===empId);
+      const sel=where==='bc'?null:document.getElementById(where+'-emp-sel');
+      if(!sel){showToast('⚠ זו מדבקת עובד — כאן סורקים מדבקת משימה או תחנה','var(--red-txt)');return;}
+      if(!w){showToast(T.sc_emp_notfound||'⚠ עובד לא נמצא','var(--red-txt)');return;}
+      if(sel.disabled){showToast('⚠ אי אפשר להחליף עובד כאן','var(--red-txt)');return;}
+      sel.value=empId;
+      if(where==='ts')renderStepRecs('ts');else onScanEmpChange('mgr');
+      showToast((T.sc_emp_ok||'✅ עובד זוהה: ')+w.name,'var(--green-txt)');
+      return;
+    }
     const bc=bcFromScan(txt);
     if(!bc){showToast('⚠ המדבקה ריקה או שאינה ברקוד משימה','var(--red-txt)');return;}
     if(where==='bc'){
@@ -2603,6 +2626,15 @@ async function bcNfcWriteAll(){
   const area=document.getElementById('bc-print-area');if(!area)return;
   const cards=[...area.querySelectorAll('.bc-card')].filter(c=>{
     const cb=c.querySelector('.bc-sel');return c.dataset.code&&(!cb||cb.checked);});
+  _nfcWriteSeq(cards,'הדבק כל מדבקה על החבילה שלה מיד אחרי הכתיבה');
+}
+// מדבקות עובדים/תחנות: הכרטיסים המסומנים בלוח (data-code/data-nfc-lbl על הכרטיס)
+function nfcWriteSelCards(outId,cls){
+  const cards=[...document.querySelectorAll('#'+outId+' .'+cls)].filter(cb=>cb.checked).map(cb=>cb.parentElement).filter(c=>c.dataset.code);
+  _nfcWriteSeq(cards,'הדבק כל מדבקה במקום שלה מיד אחרי הכתיבה');
+}
+async function _nfcWriteSeq(cards,hint){
+  if(!nfcOk())return;
   if(!cards.length){alert('בחר לפחות ברקוד אחד');return;}
   nfcStop();
   const ac=new AbortController();_nfcAbort=ac;
@@ -2610,7 +2642,7 @@ async function bcNfcWriteAll(){
   const show=msg=>_nfcOv(`מדבקה ${i+1} מתוך ${cards.length}`,
     esc(cards[i].dataset.nfcLbl||'')+'<br><b>'+cards[i].dataset.code+'</b>'
     +(msg?`<br><span style="color:var(--amber-txt,#b45309)">${msg}</span>`:'')
-    +'<br><span style="font-size:11px">הדבק כל מדבקה על החבילה שלה מיד אחרי הכתיבה</span>');
+    +'<br><span style="font-size:11px">'+hint+'</span>');
   show();
   const r=new NDEFReader();
   r.onreadingerror=()=>{if(_nfcAbort===ac&&!busy)show('⚠ לא הצלחתי לקרוא את המדבקה — נסה שוב');};
@@ -5014,6 +5046,25 @@ async function startBcLogin(){
     if(!text.startsWith('EMP:')){status.textContent='⚠ זה לא ברקוד עובד — סרוק את המדבקה שבתחנה שלך';return;}
     busy=true;
     status.textContent='✅ נסרק — מאמת...';
+    await _bcLoginWith(u,text);
+  },200);
+}
+// 📶 אותה כניסה ממדבקת NFC של העובד (EMP:) — אותן חסימות ואותה קריאה לשרת
+async function nfcBcLogin(){
+  const u=document.getElementById('l-user').value.trim();
+  const err=document.getElementById('l-err');
+  if(!u){err.textContent='נא למלא שם משתמש';return;}
+  if(loginLocked){err.textContent='חשבון נעול ל-30 שניות עקב ניסיונות כושלים';return;}
+  if(await checkVersion()){err.textContent='🔄 יש גרסה חדשה — לחץ "עדכן עכשיו" למעלה ונסה שוב';return;}
+  err.textContent='';
+  nfcRead(async txt=>{
+    txt=(txt||'').trim();
+    if(!txt.startsWith('EMP:')){err.textContent='⚠ זו לא מדבקת עובד — קרב את המדבקה שבתחנה שלך';return;}
+    showToast('✅ נקרא — מאמת...','var(--green-txt)');
+    await _bcLoginWith(u,txt);
+  });
+}
+async function _bcLoginWith(u,text){
     try{
       const devId=await getDeviceId();
       const res=await loginCall({user:u,empBarcode:text.trim(),deviceId:devId||undefined});
@@ -5036,7 +5087,6 @@ async function startBcLogin(){
       }
       document.getElementById('l-err').textContent=_loginErrMsg(c);
     }
-  },200);
 }
 function stopBcLogin(){
   if(_bcLoginInt){clearInterval(_bcLoginInt);_bcLoginInt=null;}
@@ -5670,6 +5720,18 @@ async function startBcPunch(){
     stopBcPunch();
     await punchOut();
   },200);
+}
+// 📶 חתימת יציאה ממדבקת NFC של העובד — אותן בדיקות כמו בסריקה במצלמה
+function nfcBcPunch(){
+  if(!S.user)return;
+  const msg=document.getElementById('att-msg');
+  nfcRead(async txt=>{
+    txt=(txt||'').trim();
+    if(!txt.startsWith('EMP:')){msg.textContent='⚠ זו לא מדבקת עובד — קרב את המדבקה שבתחנה שלך';return;}
+    if(txt!=='EMP:'+S.user.id){msg.textContent='⛔ זו המדבקה של עובד אחר — קרב את שלך';return;}
+    stopBcPunch();
+    await punchOut();
+  });
 }
 function stopBcPunch(){
   if(_bcPunchInt){clearInterval(_bcPunchInt);_bcPunchInt=null;}
@@ -9519,7 +9581,8 @@ function renderWorkerBarcodes(){
     <button class="btn" style="font-size:11px;padding:3px 8px" onclick="_bcToggleSel('worker-bc-output','wbc-sel',false)">נקה הכל</button>
   </div>
   <div style="display:grid;grid-template-columns:repeat(auto-fill,minmax(160px,1fr));gap:12px;margin-bottom:12px">
-    ${workers.map(w=>`<div style="background:var(--bg2);border:0.5px solid var(--b);border-radius:var(--rl);padding:12px;text-align:center;break-inside:avoid;position:relative">
+    ${workers.map(w=>`<div data-code="EMP:${esc(String(w.id))}" data-nfc-lbl="${esc(w.name)}" style="background:var(--bg2);border:0.5px solid var(--b);border-radius:var(--rl);padding:12px;text-align:center;break-inside:avoid;position:relative">
+      ${nfcOk()?`<button type="button" class="btn" title="כתוב למדבקת NFC" onclick="bcNfcWriteOne(this.parentElement.dataset.code,this.parentElement.dataset.nfcLbl)" style="position:absolute;top:4px;right:4px;padding:3px 7px;font-size:13px">📶</button>`:''}
       <input type="checkbox" class="wbc-sel" data-id="${esc(String(w.id))}" checked title="בחר להדפסה" style="position:absolute;top:6px;left:6px;width:18px;height:18px;cursor:pointer">
       <div id="worker-qr-${w.id}" style="display:flex;justify-content:center"></div>
       <div style="font-size:13px;font-weight:600;margin-top:6px">${esc(w.name)}</div>
@@ -9531,6 +9594,7 @@ function renderWorkerBarcodes(){
     <button class="btn" style="font-size:13px" onclick="printWorkerBarcodes()">🖨️ הדפס נבחרים</button>
     <button class="btn" style="font-size:13px;border-color:var(--amber-txt);color:var(--amber-txt)" title="רשת 105×56 מ&quot;מ (TW-2510), 10 מדבקות בדף A4 — אותן מדבקות של ברקודי המשימות" onclick="printWorkerBarcodes('labels')">🏷️ הדפס למדבקות</button>
     <button class="btn success" style="font-size:13px" title="קובץ PDF מדויק A4 (105×56 מ&quot;מ) — להדפסה מהנייד בגודל נכון" onclick="workerBcDownloadPDF()">📄 הורד PDF מדבקות</button>
+    ${nfcOk()?`<button class="btn primary" style="font-size:13px" title="כותב את העובדים המסומנים למדבקות NFC אחד אחרי השני" onclick="nfcWriteSelCards('worker-bc-output','wbc-sel')">📶 כתוב נבחרים למדבקות NFC</button>`:''}
   </div>`;
   workers.forEach(w=>{
     const el=document.getElementById('worker-qr-'+w.id);
@@ -10097,7 +10161,8 @@ function renderStationBarcodes(){
     <button class="btn" style="font-size:11px;padding:3px 8px" onclick="_bcToggleSel('station-bc-output','stnbc-sel',false)">נקה הכל</button>
   </div>
   <div style="display:grid;grid-template-columns:repeat(auto-fill,minmax(160px,1fr));gap:12px;margin-bottom:12px">
-    ${sts.map(s=>`<div style="background:var(--bg2);border:0.5px solid var(--b);border-radius:var(--rl);padding:12px;text-align:center;break-inside:avoid;position:relative">
+    ${sts.map(s=>`<div data-code="STN:${esc(String(s.id))}" data-nfc-lbl="${esc(s.name)}" style="background:var(--bg2);border:0.5px solid var(--b);border-radius:var(--rl);padding:12px;text-align:center;break-inside:avoid;position:relative">
+      ${nfcOk()?`<button type="button" class="btn" title="כתוב למדבקת NFC" onclick="bcNfcWriteOne(this.parentElement.dataset.code,this.parentElement.dataset.nfcLbl)" style="position:absolute;top:4px;right:4px;padding:3px 7px;font-size:13px">📶</button>`:''}
       <input type="checkbox" class="stnbc-sel" data-id="${esc(String(s.id))}" checked title="בחר להדפסה" style="position:absolute;top:6px;left:6px;width:18px;height:18px;cursor:pointer">
       <div id="station-qr-${esc(s.id)}" style="display:flex;justify-content:center"></div>
       <div style="font-size:13px;font-weight:600;margin-top:6px">${esc(s.name)}</div>
@@ -10109,6 +10174,7 @@ function renderStationBarcodes(){
     <button class="btn" style="font-size:13px" onclick="printStationBarcodes()">🖨️ הדפס נבחרים</button>
     <button class="btn" style="font-size:13px;border-color:var(--amber-txt);color:var(--amber-txt)" title="רשת 105×56 מ&quot;מ (TW-2510), 10 מדבקות בדף A4 — אותן מדבקות של ברקודי המשימות" onclick="printStationBarcodes('labels')">🏷️ הדפס למדבקות</button>
     <button class="btn success" style="font-size:13px" title="קובץ PDF מדויק A4 (105×56 מ&quot;מ) — להדפסה מהנייד בגודל נכון" onclick="stationBcDownloadPDF()">📄 הורד PDF מדבקות</button>
+    ${nfcOk()?`<button class="btn primary" style="font-size:13px" title="כותב את התחנות המסומנות למדבקות NFC אחת אחרי השנייה" onclick="nfcWriteSelCards('station-bc-output','stnbc-sel')">📶 כתוב נבחרים למדבקות NFC</button>`:''}
   </div>`;
   sts.forEach(s=>{
     const el=document.getElementById('station-qr-'+s.id);
