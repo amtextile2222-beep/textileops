@@ -2626,21 +2626,26 @@ async function bcNfcWriteAll(){
   const area=document.getElementById('bc-print-area');if(!area)return;
   const cards=[...area.querySelectorAll('.bc-card')].filter(c=>{
     const cb=c.querySelector('.bc-sel');return c.dataset.code&&(!cb||cb.checked);});
-  _nfcWriteSeq(cards,'הדבק כל מדבקה על החבילה שלה מיד אחרי הכתיבה');
+  // 📦 עותקים — אותו ברקוד לכמה חבילות של אותה מידה (כמו להדפיס אותו כמה פעמים)
+  const n=Math.min(20,Math.max(1,parseInt(document.getElementById('bc-nfc-copies')?.value)||1));
+  _nfcWriteSeq(cards,'הדבק כל מדבקה על החבילה שלה מיד אחרי הכתיבה',n);
 }
 // מדבקות עובדים/תחנות: הכרטיסים המסומנים בלוח (data-code/data-nfc-lbl על הכרטיס)
 function nfcWriteSelCards(outId,cls){
   const cards=[...document.querySelectorAll('#'+outId+' .'+cls)].filter(cb=>cb.checked).map(cb=>cb.parentElement).filter(c=>c.dataset.code);
   _nfcWriteSeq(cards,'הדבק כל מדבקה במקום שלה מיד אחרי הכתיבה');
 }
-async function _nfcWriteSeq(cards,hint){
+async function _nfcWriteSeq(cards,hint,copies){
   if(!nfcOk())return;
   if(!cards.length){alert('בחר לפחות ברקוד אחד');return;}
+  copies=copies||1;
+  const seq=cards.flatMap(c=>Array.from({length:copies},(_,k)=>({c,k})));
   nfcStop();
   const ac=new AbortController();_nfcAbort=ac;
   let i=0,last='',busy=false;
-  const show=msg=>_nfcOv(`מדבקה ${i+1} מתוך ${cards.length}`,
-    esc(cards[i].dataset.nfcLbl||'')+'<br><b>'+cards[i].dataset.code+'</b>'
+  const show=msg=>_nfcOv(`מדבקה ${i+1} מתוך ${seq.length}`,
+    esc(seq[i].c.dataset.nfcLbl||'')+'<br><b>'+seq[i].c.dataset.code+'</b>'
+    +(copies>1?`<br><b style="color:var(--blue-txt,#1d4ed8)">עותק ${seq[i].k+1} מתוך ${copies}</b>`:'')
     +(msg?`<br><span style="color:var(--amber-txt,#b45309)">${msg}</span>`:'')
     +'<br><span style="font-size:11px">'+hint+'</span>');
   show();
@@ -2651,14 +2656,14 @@ async function _nfcWriteSeq(cards,hint){
     const sn=e.serialNumber||'';
     if(sn&&sn===last){show('זו המדבקה הקודמת — קרב מדבקה חדשה');return;}
     busy=true;
-    const c=cards[i];
+    const c=seq[i].c;
     try{
       await r.write({records:[{recordType:'text',lang:'en',data:c.dataset.code}]},{signal:ac.signal});
       last=sn;c.style.outline='3px solid #16a34a';
       if(navigator.vibrate)navigator.vibrate(80);
       i++;
-      if(i>=cards.length){nfcStop();showToast('✅ נכתבו '+cards.length+' מדבקות','var(--green-txt)');return;}
-      show('✅ נכתב — הרחק את הטלפון וקרב את המדבקה הבאה');
+      if(i>=seq.length){nfcStop();showToast('✅ נכתבו '+seq.length+' מדבקות','var(--green-txt)');return;}
+      show(seq[i].c!==c?'✅ נכתב — עוברים לברקוד הבא, קרב מדבקה חדשה':'✅ נכתב — הרחק את הטלפון וקרב את המדבקה הבאה');
     }catch(err){if(err.name!=='AbortError'&&_nfcAbort===ac)show('⚠ הכתיבה נכשלה — קרב שוב את אותה מדבקה');}
     finally{busy=false;}
   };
@@ -15704,7 +15709,8 @@ function bcGenerate(){
         <button class="btn" onclick="bcPrint()" style="font-size:13px">🖨️ הדפס נבחרים</button>
         <button class="btn" onclick="bcPrint('labels')" style="font-size:13px" title="רשת 105×56 מ&quot;מ (TW-2510), 10 מדבקות בדף A4">🏷️ הדפס למדבקות</button>
         <button class="btn success" onclick="bcDownloadPDF()" style="font-size:13px" title="קובץ PDF מדויק A4 (105×56 מ&quot;מ) — להדפסה מהנייד בגודל נכון">📄 הורד PDF מדבקות</button>
-        ${nfcOk()?`<button class="btn primary" onclick="bcNfcWriteAll()" style="font-size:13px" title="כותב את הברקודים המסומנים למדבקות NFC אחד אחרי השני">📶 כתוב נבחרים למדבקות NFC</button>`:''}
+        ${nfcOk()?`<button class="btn primary" onclick="bcNfcWriteAll()" style="font-size:13px" title="כותב את הברקודים המסומנים למדבקות NFC אחד אחרי השני">📶 כתוב נבחרים למדבקות NFC</button>
+        <label style="display:flex;align-items:center;gap:4px;font-size:12px" title="כמה מדבקות לכל ברקוד — למשל מידה שמחולקת ל-3 חבילות">עותקים <input id="bc-nfc-copies" type="number" min="1" max="20" value="1" inputmode="numeric" style="width:52px;font-size:13px;padding:4px;border-radius:6px;border:1px solid var(--brd)"></label>`:''}
       </div>
     </div>
     <div style="display:flex;align-items:center;gap:8px;margin-bottom:12px;font-size:12px;color:var(--txt3)">
