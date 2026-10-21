@@ -2537,18 +2537,26 @@ function _nfcText(rec){
   }catch(e){}
   return '';
 }
+// סיום בלי לשחרר מיד את ה-NFC: אם המדבקה עדיין צמודה כשהסריקה נעצרת, אנדרואיד
+// פותח את מסך המערכת "התגית החדשה נסרקה". מחזיקים את הסריקה עוד 3 שנ' (בלי חלון).
+function _nfcLinger(ac){
+  document.getElementById('nfc-ov')?.remove();
+  setTimeout(()=>{if(_nfcAbort===ac)nfcStop();},3000);
+}
 // קריאה אחת: מחכה למדבקה, מעביר את הטקסט שלה ל-cb ונסגר
 async function nfcRead(cb){
   if(!nfcOk())return;
   nfcStop();
   const ac=new AbortController();_nfcAbort=ac;
+  let done=false;
   _nfcOv('קרב את הטלפון למדבקה','החזק את גב הטלפון צמוד למדבקה');
   const r=new NDEFReader();
-  r.onreadingerror=()=>{if(_nfcAbort===ac)_nfcOv('קרב את הטלפון למדבקה','⚠ לא הצלחתי לקרוא — נסה שוב');};
+  r.onreadingerror=()=>{if(_nfcAbort===ac&&!done)_nfcOv('קרב את הטלפון למדבקה','⚠ לא הצלחתי לקרוא — נסה שוב');};
   r.onreading=e=>{
-    if(_nfcAbort!==ac)return;
+    if(_nfcAbort!==ac||done)return;
+    done=true;
     const txt=(e.message?.records||[]).map(_nfcText).find(Boolean)||'';
-    nfcStop();
+    _nfcLinger(ac);
     if(navigator.vibrate)navigator.vibrate(80);
     cb(txt);
   };
@@ -2613,8 +2621,10 @@ async function bcNfcWriteOne(code,lbl){
   const ac=new AbortController();_nfcAbort=ac;
   _nfcOv('קרב את הטלפון למדבקה',(lbl?esc(lbl)+'<br>':'')+'<b>'+code+'</b>');
   try{
-    await new NDEFReader().write({records:[{recordType:'text',lang:'en',data:code}]},{signal:ac.signal});
-    nfcStop();
+    // סריקה במקביל לכתיבה — כדי שאנדרואיד לא יפתח את מסך המערכת על המדבקה (ראה _nfcLinger)
+    const r=new NDEFReader();r.onreading=()=>{};r.scan({signal:ac.signal}).catch(()=>{});
+    await r.write({records:[{recordType:'text',lang:'en',data:code}]},{signal:ac.signal});
+    _nfcLinger(ac);
     if(navigator.vibrate)navigator.vibrate(80);
     showToast('✅ נכתב למדבקה: '+code,'var(--green-txt)');
   }catch(e){nfcStop();if(e.name!=='AbortError')alert(_nfcErr(e));}
@@ -2650,9 +2660,9 @@ async function _nfcWriteSeq(cards,hint,copies){
     +'<br><span style="font-size:11px">'+hint+'</span>');
   show();
   const r=new NDEFReader();
-  r.onreadingerror=()=>{if(_nfcAbort===ac&&!busy)show('⚠ לא הצלחתי לקרוא את המדבקה — נסה שוב');};
+  r.onreadingerror=()=>{if(_nfcAbort===ac&&!busy&&i<seq.length)show('⚠ לא הצלחתי לקרוא את המדבקה — נסה שוב');};
   r.onreading=async e=>{
-    if(_nfcAbort!==ac||busy)return;
+    if(_nfcAbort!==ac||busy||i>=seq.length)return;
     const sn=e.serialNumber||'';
     if(sn&&sn===last){show('זו המדבקה הקודמת — קרב מדבקה חדשה');return;}
     busy=true;
@@ -2662,7 +2672,7 @@ async function _nfcWriteSeq(cards,hint,copies){
       last=sn;c.style.outline='3px solid #16a34a';
       if(navigator.vibrate)navigator.vibrate(80);
       i++;
-      if(i>=seq.length){nfcStop();showToast('✅ נכתבו '+seq.length+' מדבקות','var(--green-txt)');return;}
+      if(i>=seq.length){_nfcLinger(ac);showToast('✅ נכתבו '+seq.length+' מדבקות','var(--green-txt)');return;}
       show(seq[i].c!==c?'✅ נכתב — עוברים לברקוד הבא, קרב מדבקה חדשה':'✅ נכתב — הרחק את הטלפון וקרב את המדבקה הבאה');
     }catch(err){if(err.name!=='AbortError'&&_nfcAbort===ac)show('⚠ הכתיבה נכשלה — קרב שוב את אותה מדבקה');}
     finally{busy=false;}
