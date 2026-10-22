@@ -13377,6 +13377,7 @@ function _custLinkHtml(code){
       <input type="email" id="cinfo-tmail" dir="ltr" placeholder="name@example.com" style="flex:1;font-size:12px;padding:6px;border-radius:8px;border:1px solid var(--brd);background:var(--bg);color:var(--txt)" onkeydown="if(event.key==='Enter'){event.preventDefault();custEmailAdd('${escj(code)}')}"/>
       <button class="btn" style="font-size:12px" onclick="custEmailAdd('${escj(code)}')">➕ הוסף</button>
     </div>
+    <a class="btn" style="display:block;text-align:center;font-size:12px;margin-top:6px;text-decoration:none" target="_blank" rel="noopener" title="דף המעקב בדיוק כפי שהלקוח רואה אותו — דרך הכניסה שלך כמנהל, בלי מייל" href="${esc(url+'?as='+encodeURIComponent(code))}">👁 תצוגת לקוח</a>
     ${list.length?`<div style="display:flex;gap:6px;margin-top:8px">
       <button class="btn" style="flex:1;font-size:12px" onclick="custLinkCopy()">📋 העתק קישור</button>
       <span style="flex:1;font-size:10px;color:var(--txt3);align-self:center">💬 ליד כל מייל — שולח את הקישור עם אותו מייל</span>

@@ -67,8 +67,13 @@ import{initializeApp}from'https://www.gstatic.com/firebasejs/10.12.0/firebase-ap
 import{getAuth,onAuthStateChanged,sendSignInLinkToEmail,isSignInWithEmailLink,signInWithEmailLink,signOut}from'https://www.gstatic.com/firebasejs/10.12.0/firebase-auth.js';
 // אותו פרויקט כמו index.html. ⚠️ **שם אפליקציה נפרד ('track') בכוונה:** ההתחברות נשמרת לפי שם האפליקציה,
 // ובלעדיו כניסת לקוח באותו דפדפן הייתה דורסת את הכניסה של המנהל/עובד לאפליקציה (אותו origin)
-const app0=initializeApp({apiKey:"AIzaSyCN9AlUZFX6tODyClzopC9BrRi-Oj7oSv8",projectId:"textileops-aef4a",appId:"1:570030273525:web:ff4a7d125a40066a4826bc",authDomain:"textileops-aef4a.firebaseapp.com"},'track');
+const FB_CFG={apiKey:"AIzaSyCN9AlUZFX6tODyClzopC9BrRi-Oj7oSv8",projectId:"textileops-aef4a",appId:"1:570030273525:web:ff4a7d125a40066a4826bc",authDomain:"textileops-aef4a.firebaseapp.com"};
+const app0=initializeApp(FB_CFG,'track');
 const auth=getAuth(app0);auth.languageCode='he';
+// 👁 תצוגת לקוח למנהל (22/10/2026): ?as=קוד לקוח, נפתח מחלון "פרטי לקוח". משתמש בכניסה של האפליקציה
+// הראשית (שם האפליקציה 'txops3' כמו ב-initFb ב-index.html ⇒ אותה התחברות שמורה בדפדפן). השרת בודק role=manager
+const AS=(new URLSearchParams(location.search).get('as')||'').trim();
+const mAuth=AS?getAuth(initializeApp(FB_CFG,'txops3')):null;
 // ⚠️ השמות והסדר חייבים להתאים ל-TRACK_LISTS ב-functions/index.js (= PIPE_LISTS בלוח מצב הזמנות)
 // השמות = עמודות "לוח מצב הזמנות" (22/10/2026), מוצגים בתג ומתחת לכל קטע בפס
 const STAGES=['ההזמנה התקבלה','ספירה וגזירה','מוכן לתפירה','בתפירה','מוכן לאריזה','באריזה','מוכן ליציאה','יצא ללקוח'];
@@ -156,10 +161,11 @@ async function finishLink(em,link){
 }
 
 async function load(){
-  const u=auth.currentUser;if(!u||busy)return;
+  const u=(AS?mAuth:auth).currentUser;if(!u||busy)return;
   busy=true;
   try{
-    const r=await fetch(URL_FN,{cache:'no-store',headers:{Authorization:'Bearer '+await u.getIdToken(),'X-Dev':devId()}});
+    const r=await fetch(URL_FN+(AS?'?cust='+encodeURIComponent(AS):''),{cache:'no-store',headers:{Authorization:'Bearer '+await u.getIdToken(),'X-Dev':devId()}});
+    if(AS&&!r.ok){appEl.innerHTML=`<div class="msg">🔒 תצוגת לקוח זמינה למנהל בלבד.<br>היכנסו לאפליקציה כמנהל ופתחו שוב מחלון "פרטי לקוח".</div>`;return;}
     if(r.status===401){const j=await r.json().catch(()=>({}));if(j.error==='reauth')reauthMsg=true;await signOut(auth);return;}
     if(r.status===403){
       const j=await r.json().catch(()=>({}));
@@ -180,7 +186,9 @@ async function load(){
       (act.length?`<h2>🏭 בייצור (${act.length})</h2>`+act.map(card).join(''):'')+
       (shp.length?`<h2>✅ נשלחו ב-30 הימים האחרונים (${shp.length})</h2>`+shp.map(card).join(''):'');
     const t=new Date(d.at);
-    ft.innerHTML=esc(u.email)+' · עודכן '+t.toLocaleString('he-IL',{day:'2-digit',month:'2-digit',hour:'2-digit',minute:'2-digit'})+' · '+outBtn();
+    const upd=' · עודכן '+t.toLocaleString('he-IL',{day:'2-digit',month:'2-digit',hour:'2-digit',minute:'2-digit'});
+    if(AS){ft.innerHTML='👁 תצוגת מנהל — כך הלקוח רואה את הדף'+upd;return;}
+    ft.innerHTML=esc(u.email)+upd+' · '+outBtn();
     bindOut();
   }catch(e){
     if(!appEl.querySelector('.card'))appEl.innerHTML='<div class="msg">⚠️ לא ניתן לטעון כרגע. נסו שוב בעוד רגע.</div>';
@@ -189,6 +197,13 @@ async function load(){
 
 let confirmPending=false; // מכשיר אחר — מחכים שהלקוח יקליד את המייל; האזנת ה-auth לא תדרוס את הטופס
 async function start(){
+  if(AS){
+    onAuthStateChanged(mAuth,u=>{
+      if(u){appEl.innerHTML='<div class="msg">⏳ טוען…</div>';load();}
+      else appEl.innerHTML='<div class="msg">🔒 תצוגת לקוח זמינה למנהל בלבד.<br>היכנסו לאפליקציה כמנהל ופתחו שוב מחלון "פרטי לקוח".</div>';
+    });
+    return;
+  }
   if(isSignInWithEmailLink(auth,location.href)){
     appEl.innerHTML='<div class="msg">⏳ מתחבר…</div>';
     const em=ls.get(LS_MAIL);

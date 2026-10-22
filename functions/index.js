@@ -1678,24 +1678,31 @@ exports.customerTrack = functions.runWith({ memory: '1GB' }).https.onRequest(asy
   let email, tok;
   try {
     tok = await admin.auth().verifyIdToken(m[1]);
-    if (!tok.email || !tok.email_verified) { res.status(401).json({ error: 'auth' }); return; }
-    email = String(tok.email).toLowerCase();
   } catch (e) { res.status(401).json({ error: 'auth' }); return; }
+  // 👁 תצוגת לקוח למנהל (22/10/2026): טוקן האפליקציה עם role=manager + ?cust=קוד ⇒ אותו מידע שהלקוח רואה,
+  // בלי מייל, בלי יומן כניסות ובלי שער מכשירים
+  const asCust = tok.role === 'manager' ? String(req.query.cust || '') : '';
+  if (!asCust && (!tok.email || !tok.email_verified)) { res.status(401).json({ error: 'auth' }); return; }
+  if (asCust && !/^\d{1,4}$/.test(asCust)) { res.status(400).json({ error: 'cust' }); return; }
+  email = asCust ? '' : String(tok.email).toLowerCase();
   try {
-    // נקרא בכל בקשה (גם כשיש מטמון) — כך הסרת מייל חוסמת מיד
-    const map = ((await db.doc('adminSettings/custLinks').get()).data() || {}).emails || {};
-    let cust = '', ent = null;
-    for (const c of Object.keys(map)) {
-      const x = (map[c] || []).map(trackEmailEnt).find(x => x.e === email);
-      if (x) { cust = c; ent = x; break; }
+    let cust = asCust;
+    if (!asCust) {
+      // נקרא בכל בקשה (גם כשיש מטמון) — כך הסרת מייל חוסמת מיד
+      const map = ((await db.doc('adminSettings/custLinks').get()).data() || {}).emails || {};
+      let ent = null;
+      for (const c of Object.keys(map)) {
+        const x = (map[c] || []).map(trackEmailEnt).find(x => x.e === email);
+        if (x) { cust = c; ent = x; break; }
+      }
+      if (!cust) { await trackLogSignIn(tok, email, '', req); res.status(403).json({ error: 'denied', email }); return; }
+      // 🔐 הוספה מחדש של מייל מנתקת כל מכשיר שנכנס לפניה: auth_time = רגע הכניסה עם הקישור (לא מתאפס
+      // ברענון טוקן). 2 דק' סובלנות לשעון של מחשב המנהל (at נחתם בלקוח). 401 ⇒ הדף מתנתק ומבקש קישור חדש
+      if (ent.at && (Number(tok.auth_time) || 0) * 1000 < ent.at - 120000) { res.status(401).json({ error: 'reauth' }); return; }
+      await trackLogSignIn(tok, email, cust, req);
+      const dst = await trackDeviceGate(email, cust, ent, String(req.get('x-dev') || ''), req);
+      if (dst !== 'ok') { res.status(403).json({ error: dst }); return; } // pending | blocked
     }
-    if (!cust) { await trackLogSignIn(tok, email, '', req); res.status(403).json({ error: 'denied', email }); return; }
-    // 🔐 הוספה מחדש של מייל מנתקת כל מכשיר שנכנס לפניה: auth_time = רגע הכניסה עם הקישור (לא מתאפס
-    // ברענון טוקן). 2 דק' סובלנות לשעון של מחשב המנהל (at נחתם בלקוח). 401 ⇒ הדף מתנתק ומבקש קישור חדש
-    if (ent.at && (Number(tok.auth_time) || 0) * 1000 < ent.at - 120000) { res.status(401).json({ error: 'reauth' }); return; }
-    await trackLogSignIn(tok, email, cust, req);
-    const dst = await trackDeviceGate(email, cust, ent, String(req.get('x-dev') || ''), req);
-    if (dst !== 'ok') { res.status(403).json({ error: dst }); return; } // pending | blocked
     const t0 = Date.now();
     const hit = _trackCache.get(cust);
     if (hit && Date.now() - hit.at < 180000) { res.json(hit.body); return; }
