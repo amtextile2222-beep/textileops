@@ -3135,7 +3135,7 @@ function pipeStateOf(p,tasks){
   const shU=s=>(+s.total||0)+shUnsewn(s);
   const depT=p.departedAt?Date.parse(p.departedAt):NaN;
   const shDep=s=>{const d=String(s.date||'').slice(0,10);if(d&&d<PIPE_DEPART_FROM)return true;if(isNaN(depT))return false;
-    const a=Date.parse((s.restoredAt||s.backdatedAt)?d:(s.at||d));return !(a>depT);};
+    return !(_shipAtMs(s)>depT);};
   const outU=shL.reduce((t,s)=>t+shU(s),0),depU=shL.reduce((t,s)=>t+(shDep(s)?shU(s):0),0);
   // 🛑 לא חלקי: תעודה אחרונה לפני PIPE_PARTIAL_FROM (הזמנות ישנות שנסגרו בחוסר לא חוזרות ללוח),
   // או שהמנהל דחף ידנית ל"מוכן ליציאה"/הלאה = "סוגרים את ההזמנה בחוסר"
@@ -3189,6 +3189,8 @@ function pipeStateOf(p,tasks){
   return{id,nat,ov:id===ov?.list?ov:null,qty,scans,steps,sew,pack,shipped,departed,partial,outU,outPend:shL.length?outU-depU:0,split,tasks:tasks.length};
 }
 const PIPE_DEPART_FROM='2026-10-10';
+// מועד התעודה מול departedAt (תעודה ששוחזרה/הוקדמה — לפי התאריך שלה). ⚠️ זהה ב-trackShipInfo בשרת
+const _shipAtMs=s=>{const d=String(s.date||'').slice(0,10);return Date.parse((s.restoredAt||s.backdatedAt)?d:(s.at||d));};
 const PIPE_PARTIAL_FROM='2026-10-20'; // משלוח חלקי נספר רק מתעודה מהתאריך הזה (ראה pipeStateOf)
 // תאריך התעודה (רישום "shipped" בלוג, שנכתב בהפקת תעודה)
 function pipeDnDate(p){
@@ -8006,11 +8008,25 @@ async function pipePush(pid,list){
 async function pipeDepart(pid,on){
   if(S.user?.role!=='manager')return;
   const p=(S.products||[]).find(x=>String(x.id)===String(pid));if(!p)return;
-  const ok=await showConfirm(on?'יצא ללקוח':'ביטול יציאה',
-    on?`לסמן ש-${p.cust}/${p.prod} ${p.name||''} יצא מהמפעל?\n\nהלקוח יראה "נשלח" בדף המעקב.`
-      :`לבטל את סימון היציאה של ${p.cust}/${p.prod}? ההזמנה תחזור ל"מוכן ליציאה".`);
-  if(!ok)return;
-  p.departedAt=on?new Date().toISOString():null;
+  // כמה תעודות ממתינות לסימון (A251: 0710 יצאה, 0711 עוד במפעל) ⇒ בחירה: רק הישנה או כולן.
+  // "רק הישנה" = departedAt על מועד התעודה הזו — יציאה נקבעת פר תעודה לפי at ≤ departedAt (pipeStateOf)
+  let cut=on?new Date().toISOString():null;
+  const depT=p.departedAt?Date.parse(p.departedAt):NaN;
+  const pend=on?prodShipments(p).filter(s=>{const d=String(s.date||'').slice(0,10);if(d&&d<PIPE_DEPART_FROM)return false;return isNaN(depT)||_shipAtMs(s)>depT;})
+    .sort((a,b)=>(_shipAtMs(a)||0)-(_shipAtMs(b)||0)):[];
+  if(pend.length>1&&!isNaN(_shipAtMs(pend[0]))){
+    const u=s=>(+s.total||0)+shUnsewn(s),no=s=>String(s.no||'').padStart(4,'0');
+    const c=await showConfirm3('יצא ללקוח',`ל-${p.cust}/${p.prod} ${p.name||''} יש ${pend.length} תעודות שעוד לא סומנו כיציאה. מה יצא מהמפעל?`,
+      `🚚 רק תעודה ${no(pend[0])} (${u(pend[0])} יח')`,`🚚 כל ${pend.length} התעודות (${pend.reduce((t,s)=>t+u(s),0)} יח')`,'ביטול');
+    if(c!==0&&c!==1)return;
+    if(c===0)cut=new Date(_shipAtMs(pend[0])).toISOString();
+  }else{
+    const ok=await showConfirm(on?'יצא ללקוח':'ביטול יציאה',
+      on?`לסמן ש-${p.cust}/${p.prod} ${p.name||''} יצא מהמפעל?\n\nהלקוח יראה "נשלח" בדף המעקב.`
+        :`לבטל את סימון היציאה של ${p.cust}/${p.prod}? ההזמנה תחזור ל"מוכן ליציאה".`);
+    if(!ok)return;
+  }
+  p.departedAt=cut;
   p.departedBy=on?(S.user?.name||''):null;
   saveLS();
   if(S.fbConnected){

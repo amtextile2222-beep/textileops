@@ -1513,7 +1513,7 @@ function trackStates(prods, tasks) {
     const sew = fam('sew'), pack = fam('pack');
     // 🚚 תעודה ⇒ "מוכן למשלוח"; "נשלח" רק אחרי סימון יציאה (תעודה לפני TRACK_DEPART_FROM = יצאה).
     // משלוח חלקי (20/10/2026) — ההזמנה נשארת במצב הייצור של היתרה; out = יחידות שיצאו
-    const { shipped, partial, departed, depU } = trackShipInfo(p, qty);
+    const { shipped, partial, departed, depU, outU } = trackShipInfo(p, qty);
     let id;
     if (departed) id = 'shipped';
     else if (shipped && !partial) id = 'ready_ship';
@@ -1543,7 +1543,9 @@ function trackStates(prods, tasks) {
     const sewPct = split ? sew.pct : st > 3 ? 100 : (st === 3 && sew ? sew.pct : null);
     const packPct = st > 5 ? 100 : (st === 5 && pack ? pack.pct : null);
     return { no: parseInt(p.orderNo, 10) || 0, prod: p.prod, name: p.name || '', qty, entry: trackEntryDate(p),
-      ship: departed ? trackShipDate(p) : '', stage: st, sewPct, packPct, split, out: partial ? depU : 0 };
+      ship: departed ? trackShipDate(p) : '', stage: st, sewPct, packPct, split,
+      // out = יחידות שיצאו: משלוח חלקי, או כמה תעודות שרק חלקן סומנו כיציאה (A251, 22/10/2026 — כמו parts בלוח)
+      out: partial || (shipped && depU > 0 && depU < outU) ? depU : 0 };
   });
 }
 // רשומת מייל מורשה: {e, at, max} — at = מתי נוסף (ms), max = מכשירים מותרים (0/חסר = ללא הגבלה).
