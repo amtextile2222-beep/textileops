@@ -349,22 +349,8 @@ code{background:var(--bg2);border:0.5px solid var(--b);border-radius:4px;padding
         <div style="color:var(--txt3)" id="top-role"></div>
       </div>
       <div id="av-wrap" onclick="_syncDotInfo()"><div class="av" style="width:32px;height:32px;font-size:11px" id="top-av"></div><span id="sync-dot"></span></div>
-      <button class="btn hidden" id="ai-chat-btn" style="padding:5px 9px;font-size:12px;background:var(--blue-bg);color:var(--blue-txt)" onclick="openAIChat()" title="עוזר AI">🤖</button>
       <button class="btn hidden" id="enable-notif-btn" style="padding:5px 9px;font-size:12px;background:var(--amber-bg);color:var(--amber-txt)" onclick="enableMyNotifications()" title="הפעל התראות">🔔</button>
       <button class="btn" style="padding:5px 9px;font-size:12px" onclick="doLogout()" title="יציאה · خروج"><span class="lo-ico">↩</span><span class="lo-txt" data-i18n="logout">יציאה</span></button>
-    </div>
-  </div>
-
-  <!-- AI CHAT PANEL -->
-  <div id="ai-chat-panel" style="display:none;position:fixed;bottom:20px;left:20px;z-index:9500;width:340px;max-width:95vw;background:var(--bg);border:1px solid var(--b2);border-radius:var(--rl);box-shadow:0 8px 32px rgba(0,0,0,.2);flex-direction:column;overflow:hidden">
-    <div id="ai-chat-header" style="background:var(--blue-bg);padding:10px 14px;display:flex;align-items:center;justify-content:space-between;cursor:move;user-select:none">
-      <div style="font-size:14px;font-weight:600;color:var(--blue-txt)">🤖 עוזר AI</div>
-      <button onclick="closeAIChat()" style="background:none;border:none;cursor:pointer;font-size:18px;color:var(--blue-txt)">✕</button>
-    </div>
-    <div id="ai-chat-msgs" style="height:260px;overflow-y:auto;padding:10px;display:flex;flex-direction:column;gap:8px;font-size:13px"></div>
-    <div style="padding:8px;border-top:1px solid var(--b);display:flex;gap:6px">
-      <input id="ai-chat-input" placeholder="שאל שאלה..." style="flex:1;font-size:13px;padding:7px 10px" onkeydown="if(event.key==='Enter')sendAIMsg()"/>
-      <button class="btn primary" onclick="sendAIMsg()" style="padding:7px 12px;font-size:13px">שלח</button>
     </div>
   </div>
 
@@ -890,22 +876,6 @@ code{background:var(--bg2);border:0.5px solid var(--b);border-radius:4px;padding
           <button class="btn primary" onclick="addCustomColor()" style="padding:6px 12px">+</button>
         </div>
         <div id="adm-colors" style="max-height:220px;overflow-y:auto"></div>
-      </div>
-    </div>
-    <div class="card" style="margin-top:1rem">
-      <div class="sec">🤖 הגדרות עוזר AI</div>
-      <div class="field">
-        <label style="font-size:12px;color:var(--txt2)">כתובת Cloudflare Tunnel</label>
-        <input id="ai-url-input" type="text" placeholder="https://xxxx.trycloudflare.com" style="font-size:12px;direction:ltr"/>
-        <div style="font-size:11px;color:var(--txt3);margin-top:4px">עדכן כאן כשמפעיל מחדש את ה-Tunnel</div>
-      </div>
-      <button class="btn primary" style="font-size:12px" onclick="saveAIUrl()">💾 שמור כתובת</button>
-      <div id="ai-url-status" style="font-size:11px;margin-top:6px;color:var(--green-txt)"></div>
-      <div class="field" style="margin-top:10px">
-        <label style="display:flex;align-items:center;gap:8px;cursor:pointer;font-size:13px">
-          <input type="checkbox" id="ai-supervisor-toggle" onchange="saveAISupervisor()" style="width:16px;height:16px">
-          הצג עוזר AI לאחראים
-        </label>
       </div>
     </div>
     <!-- מכשירים מחוברים: דופק פר-טאב -->
@@ -4747,7 +4717,6 @@ migrateBreaks();
 function applyPerms(w){
   const fb=document.getElementById('floating-msg-btn');
   if(fb)fb.style.display=w.role==='manager'?'none':'flex';
-  updateAIBtnVisibility();
   document.getElementById('enable-notif-btn')?.classList.toggle('hidden',w.role==='manager');
   if(w.role==='manager'){
     [...ALL_SUPERVISOR_PAGE_IDS,'admin','setup','costs','products'].forEach(p=>document.getElementById('nb-'+p)?.classList.remove('hidden'));
@@ -4909,7 +4878,6 @@ function finishLogin(w,autoPunch){
   setTimeout(()=>{_checkMultiTab();},9000);
   listenWorkerMessages();
   listenMgrInbox();
-  loadAIUrl();
   setTimeout(_saveMyLang,5000); // אחרי שכרטיסי העובדים נטענו
   if(w.role==='worker'||w.role==='helper')document.getElementById('worker-send-msg-bar').style.display='block';
   if(w.role!=='manager'&&w.role!=='supervisor'){
@@ -5169,131 +5137,6 @@ async function doLogin(){
     document.getElementById('l-err').textContent=_loginErrMsg(c);
   }
 }
-// ─── AI CHAT ────────────────────────────────────────────────
-let AI_URL=localStorage.getItem('ai_url')||'https://respond-encryption-sri-tray.trycloudflare.com';
-async function saveAIUrl(){
-  const v=document.getElementById('ai-url-input').value.trim().replace(/\/$/,'');
-  if(!v){document.getElementById('ai-url-status').textContent='הזן כתובת תחילה';return;}
-  AI_URL=v;
-  localStorage.setItem('ai_url',v);
-  if(S.fbConnected)await fbSetMerge('appSettings','aiSettings',{tunnelUrl:v,updatedAt:new Date().toISOString()});
-  document.getElementById('ai-url-status').textContent='✅ נשמר!';
-  setTimeout(()=>document.getElementById('ai-url-status').textContent='',3000);
-}
-async function saveAISupervisor(){
-  const v=document.getElementById('ai-supervisor-toggle').checked;
-  if(S.fbConnected)await fbSetMerge('appSettings','aiSettings',{supervisorAccess:v,updatedAt:new Date().toISOString()});
-  localStorage.setItem('ai_supervisor',v?'1':'0');
-  updateAIBtnVisibility();
-}
-function updateAIBtnVisibility(){
-  const w=S.workers.find(x=>x.id===S.user?.id)||S.user;if(!w)return;
-  const aiBtn=document.getElementById('ai-chat-btn');if(!aiBtn)return;
-  const supervisorAllowed=localStorage.getItem('ai_supervisor')==='1';
-  const show=w.role==='manager'||(w.role==='supervisor'&&supervisorAllowed);
-  show?aiBtn.classList.remove('hidden'):aiBtn.classList.add('hidden');
-}
-async function loadAIUrl(){
-  try{
-    const data=await fbGet('appSettings','aiSettings');
-    const url=data?.tunnelUrl;
-    if(url){AI_URL=url;localStorage.setItem('ai_url',url);}
-    const sup=data?.supervisorAccess;
-    if(sup!==undefined){localStorage.setItem('ai_supervisor',sup?'1':'0');const cb=document.getElementById('ai-supervisor-toggle');if(cb)cb.checked=sup;}
-  }catch(e){}
-}
-function openAIChat(){
-  const p=document.getElementById('ai-chat-panel');
-  p.style.display='flex';
-  document.getElementById('ai-chat-input').focus();
-  const h=document.getElementById('ai-chat-header');
-  if(h&&!h._dragInit){
-    h._dragInit=true;
-    let ox=0,oy=0;
-    h.addEventListener('mousedown',e=>{
-      if(e.target.tagName==='BUTTON')return;
-      ox=e.clientX-p.getBoundingClientRect().left;
-      oy=e.clientY-p.getBoundingClientRect().top;
-      const onMove=e=>{
-        p.style.left=Math.max(0,Math.min(window.innerWidth-p.offsetWidth,e.clientX-ox))+'px';
-        p.style.top=Math.max(0,Math.min(window.innerHeight-p.offsetHeight,e.clientY-oy))+'px';
-        p.style.bottom='auto';
-      };
-      const onUp=()=>{document.removeEventListener('mousemove',onMove);document.removeEventListener('mouseup',onUp);};
-      document.addEventListener('mousemove',onMove);
-      document.addEventListener('mouseup',onUp);
-    });
-  }
-}
-function closeAIChat(){document.getElementById('ai-chat-panel').style.display='none';}
-function _aiAddMsg(text,role){
-  const box=document.getElementById('ai-chat-msgs');
-  const div=document.createElement('div');
-  div.style.cssText=`padding:8px 10px;border-radius:8px;max-width:90%;word-break:break-word;${role==='user'?'background:var(--blue-bg);color:var(--blue-txt);align-self:flex-end':'background:var(--bg2);color:var(--txt);align-self:flex-start'}`;
-  div.textContent=text;
-  box.appendChild(div);
-  box.scrollTop=box.scrollHeight;
-  return div;
-}
-function _buildContext(){
-  const today=todayStr();
-  const present=S.workers.filter(w=>w.checkin&&w.checkin.slice(0,10)===today&&w.role!=='manager');
-  const absent=S.workers.filter(w=>w.role!=='manager'&&(!w.checkin||w.checkin.slice(0,10)!==today));
-  const active=S.activeTasks||[];
-  // היסטוריה — 7 ימים אחרונים
-  const now=new Date();
-  const weekAgo=new Date(now-7*24*60*60*1000);
-  const weekStr=weekAgo.toISOString().slice(0,10);
-  const weeklyHours={};
-  (S.attHistory||[]).filter(r=>r.date>=weekStr).forEach(r=>{
-    const w=S.workers.find(x=>x.id===r.workerId);if(!w||w.role==='manager')return;
-    const hrs=((r.netMs||0)/3600000).toFixed(1);
-    if(!weeklyHours[w.name])weeklyHours[w.name]=0;
-    weeklyHours[w.name]+=parseFloat(hrs);
-  });
-  const weekSummary=Object.entries(weeklyHours).map(([n,h])=>`${n}: ${h.toFixed(1)}ש'`).join(', ')||'אין נתונים';
-  // היסטוריית משימות — 7 ימים
-  const histTasks=(S.histTasks||[]).filter(t=>{
-    const d=t.startTime?String(t.startTime).slice(0,10):'';return d>=weekStr;
-  });
-  const tasksByWorker={};
-  histTasks.forEach(t=>{
-    const w=S.workers.find(x=>x.id===t.workerId);if(!w)return;
-    if(!tasksByWorker[w.name])tasksByWorker[w.name]=0;
-    tasksByWorker[w.name]++;
-  });
-  const taskSummary=Object.entries(tasksByWorker).map(([n,c])=>`${n}: ${c} משימות`).join(', ')||'אין נתונים';
-  return`נתוני מפעל TextileOps לתאריך ${today}:
-
-=== היום ===
-נוכחים (${present.length}): ${present.map(w=>w.name+(w.status==='in'?' [בעבודה]':' [יצא]')).join(', ')||'אין'}
-נעדרים (${absent.length}): ${absent.map(w=>w.name).join(', ')||'אין'}
-משימות פעילות (${active.length}): ${active.map(t=>{const w=S.workers.find(x=>x.id===t.workerId);return(w?.name||'?')+' — '+taskBc(t);}).join(', ')||'אין'}
-
-=== 7 ימים אחרונים ===
-שעות עבודה לעובד: ${weekSummary}
-משימות שהושלמו לעובד: ${taskSummary}`;
-}
-async function sendAIMsg(){
-  const input=document.getElementById('ai-chat-input');
-  const q=input.value.trim();
-  if(!q)return;
-  input.value='';
-  _aiAddMsg(q,'user');
-  const bubble=_aiAddMsg('⏳ חושב...','ai');
-  try{
-    const ctx=_buildContext();
-    const message='חשוב: ענה תמיד באותה שפה שבה נשאלת השאלה (עברית/ערבית/אנגלית).\n\n'+ctx+'\n\nשאלה: '+q;
-    const{httpsCallable}=window._fb;
-    const fn=httpsCallable(window._fbFunctions,'aiChat');
-    const result=await fn({message});
-    bubble.textContent=result?.data?.textResponse||'לא התקבלה תשובה';
-    document.getElementById('ai-chat-msgs').scrollTop=9999;
-  }catch(e){
-    console.error('AI error:',e);
-    bubble.textContent='⛔ שגיאת חיבור ל-AI: '+(e.message||'');
-  }
-}
 function doLogout(){
   // בלי signOut ה-session של Firebase שורד את היציאה, והשחזור בטעינה הבאה
   // היה מחזיר את העובדת פנימה — כלומר אי אפשר היה לצאת בכלל.
@@ -5332,7 +5175,7 @@ function goPage(p){
     buildRep();
   }
   if(p==='alerts'){checkAlerts();renderAlerts();}
-  if(p==='admin'){renderAdmin();const inp=document.getElementById('ai-url-input');if(inp)inp.value=AI_URL;try{renderTabSessions();}catch(e){}}
+  if(p==='admin'){renderAdmin();try{renderTabSessions();}catch(e){}}
   if(p==='mgrtasks')renderMgrTasks();
   if(p==='taskscan')renderTsScan();
   if(p==='barcodes'){

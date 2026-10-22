@@ -684,53 +684,6 @@ exports.tgSend = functions.https.onCall(async (data, context) => {
   }
 });
 
-// עוזר AI — proxy מאובטח ל-AnythingLLM (רץ עכשיו על שרת Railway קבוע, לא על Tunnel מקומי)
-// כתובת/מפתח/slug מגיעים מ-`firebase functions:config:set anythingllm.*` — לא מקודדים בקובץ הזה
-exports.aiChat = functions.https.onCall(async (data, context) => {
-  const role = callerRole(context);
-  if (!role) throw new functions.https.HttpsError('unauthenticated', 'יש להתחבר תחילה');
-  if (role !== 'manager') {
-    // אחראי מורשה רק אם המנהל הפעיל זאת בהגדרות
-    let supervisorAllowed = false;
-    if (role === 'supervisor') {
-      try {
-        const ai = await db.collection('appSettings').doc('aiSettings').get();
-        supervisorAllowed = !!(ai.exists && ai.data().supervisorAccess);
-      } catch (e) {}
-    }
-    if (!supervisorAllowed) throw new functions.https.HttpsError('permission-denied', 'עוזר AI זמין למנהל בלבד');
-  }
-  const message = String(data && data.message || '').slice(0, 8000);
-  if (!message) throw new functions.https.HttpsError('invalid-argument', 'הודעה ריקה');
-  try {
-    const cfg = functions.config().anythingllm || {};
-    const aiUrl = cfg.url || '';
-    const aiKey = cfg.key || '';
-    const aiSlug = cfg.slug || '';
-    if (!aiUrl || !aiKey || !aiSlug) throw new functions.https.HttpsError('failed-precondition', 'הגדרות שרת AI חסרות');
-    // /chat (לא-סטרימינג) מחזיר textResponse ריק בהתקנה הזו — משתמשים ב-/stream-chat
-    // ומרכיבים את הטקסט מה-chunks בצד השרת (בלי לחשוף streaming ללקוח)
-    const res = await fetch(`${aiUrl.replace(/\/$/, '')}/api/v1/workspace/${aiSlug}/stream-chat`, {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json', 'Authorization': 'Bearer ' + aiKey },
-      body: JSON.stringify({ message, mode: 'chat' })
-    });
-    const raw = await res.text();
-    let full = '';
-    for (const line of raw.split('\n')) {
-      if (!line.startsWith('data:')) continue;
-      try {
-        const obj = JSON.parse(line.slice(5).trim());
-        if (obj.textResponse && obj.type === 'textResponseChunk') full += obj.textResponse;
-      } catch (e) {}
-    }
-    return { textResponse: full || 'לא התקבלה תשובה' };
-  } catch (e) {
-    console.error('aiChat error:', e);
-    throw new functions.https.HttpsError('internal', e.message || 'שגיאת AI');
-  }
-});
-
 // ─── שמירת פונקציית login "חמה" בשעות העבודה (מונע cold-start / "מאמת..." ארוך) ───
 // רץ כל 2 דקות בין 06:00-15:59 שעון ישראל (מכסה 6:10-15:20). מחוץ לחלון login מתקררת כרגיל.
 // שולח ping ל-login עצמה כדי להשאיר מופע חי; ה-ping מזוהה בתחילת login וחוזר מיד.
