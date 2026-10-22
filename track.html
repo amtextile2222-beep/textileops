@@ -32,9 +32,15 @@ h2{font-size:14px;color:var(--txt2);margin:20px 0 8px}
 .badge{flex:0 0 auto;font-size:12px;font-weight:700;padding:3px 10px;border-radius:999px;background:var(--blue-bg);color:var(--blue);white-space:nowrap}
 .badge.done{background:var(--green-bg);color:var(--green)}
 .bar{display:flex;gap:3px;margin:10px 0 4px}
-.bar i{flex:1;height:6px;border-radius:3px;background:var(--track)}
-.bar i.on{background:var(--blue)}
+.bar span{flex:1;min-width:0;text-align:center}
+.bar i{display:block;height:6px;border-radius:3px;background:var(--track)}
+.bar .on i{background:var(--blue)}
 .bar.done i{background:var(--green)}
+.bar em{display:block;font-style:normal;font-size:10px;line-height:1.2;margin-top:4px;color:var(--txt3)}
+.bar .on em{color:var(--txt2)}
+.bar .cur em{color:var(--blue);font-weight:700}
+.bar.done em{color:var(--txt2);font-weight:400}
+@media (max-width:420px){.bar{gap:2px}.bar em{font-size:9px}}
 .pct{height:6px;border-radius:3px;background:var(--track);overflow:hidden;margin-top:6px}
 .pct b{display:block;height:100%;background:var(--blue)}
 .stage{font-size:12px;color:var(--txt2)}
@@ -63,7 +69,8 @@ import{getAuth,onAuthStateChanged,sendSignInLinkToEmail,isSignInWithEmailLink,si
 const app0=initializeApp({apiKey:"AIzaSyCN9AlUZFX6tODyClzopC9BrRi-Oj7oSv8",projectId:"textileops-aef4a",appId:"1:570030273525:web:ff4a7d125a40066a4826bc",authDomain:"textileops-aef4a.firebaseapp.com"},'track');
 const auth=getAuth(app0);auth.languageCode='he';
 // ⚠️ השמות והסדר חייבים להתאים ל-TRACK_LISTS ב-functions/index.js (= PIPE_LISTS בלוח מצב הזמנות)
-const STAGES=['ההזמנה התקבלה','בספירה וגזירה','ממתין לתפירה','בתפירה','התפירה הסתיימה','באריזה','מוכן למשלוח','נשלח'];
+// השמות = עמודות "לוח מצב הזמנות" (22/10/2026), מוצגים בתג ומתחת לכל קטע בפס
+const STAGES=['ההזמנה התקבלה','ספירה וגזירה','מוכן לתפירה','בתפירה','מוכן לאריזה','באריזה','מוכן ליציאה','יצא ללקוח'];
 const URL_FN='https://us-central1-textileops-aef4a.cloudfunctions.net/customerTrack';
 const PAGE=location.origin+location.pathname;
 const LS_MAIL='trk_email';
@@ -84,9 +91,9 @@ function card(o){
   const last=STAGES.length-1,done=o.stage===last;
   const pct=o.stage===3?o.sewPct:o.stage===5?o.packPct:null;
   const no=o.no?'הזמנה #'+String(o.no).padStart(3,'0')+' · ':'';
-  // ✂️ פיצול: חלק באריזה והתפירה עוד לא הסתיימה ⇒ "התפירה הסתיימה" לא מסומן, ושורת אחוז נוספת לתפירה
+  // ✂️ פיצול: חלק באריזה והתפירה עוד לא הסתיימה ⇒ "מוכן לאריזה" לא מסומן, ושורת אחוז נוספת לתפירה
   const sp=!!o.split&&o.sewPct!=null;
-  const segs=STAGES.map((_,i)=>`<i class="${i<=o.stage&&!(sp&&i===4)?'on':''}"></i>`).join('');
+  const segs=STAGES.map((s,i)=>`<span class="${i<=o.stage&&!(sp&&i===4)?'on':''}${i===o.stage?' cur':''}" "><i></i><em>${esc(s)}</em></span>`).join('');
   return `<div class="card">
     <div class="top"><div><div class="nm">${esc(o.name||('דגם '+o.prod))}</div>
       <div class="meta">${no}${o.qty?o.qty+" יח' · ":''}${done?'נשלח '+fmtD(o.ship):'התקבל '+fmtD(o.entry)}</div></div>
