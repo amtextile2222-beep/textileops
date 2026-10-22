@@ -40,6 +40,7 @@ h2{font-size:14px;color:var(--txt2);margin:20px 0 8px}
 .bar .on em{color:var(--txt2)}
 .bar .cur em{color:var(--blue);font-weight:700}
 .bar.done em{color:var(--txt2);font-weight:400}
+.bar small{display:block;font-size:9px;line-height:1.2;color:var(--txt3);direction:ltr}
 @media (max-width:420px){.bar{gap:2px}.bar em{font-size:9px}}
 .pct{height:6px;border-radius:3px;background:var(--track);overflow:hidden;margin-top:6px}
 .pct b{display:block;height:100%;background:var(--blue)}
@@ -79,6 +80,7 @@ const LS_MAIL='trk_email';
 const STANDALONE=navigator.standalone===true||matchMedia('(display-mode: standalone)').matches;
 const esc=s=>String(s??'').replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;');
 const fmtD=d=>{const m=/^(\d{4})-(\d{2})-(\d{2})/.exec(d||'');return m?m[3]+'/'+m[2]+'/'+m[1]:'';};
+const fmtDM=d=>{const m=/^\d{4}-(\d{2})-(\d{2})/.exec(d||'');return m?m[2]+'/'+m[1]:'';}; // 📅 תאריך שלב בפס
 const ls={get:k=>{try{return localStorage.getItem(k)||''}catch(e){return''}},set:(k,v)=>{try{localStorage.setItem(k,v)}catch(e){}},del:k=>{try{localStorage.removeItem(k)}catch(e){}}};
 // 📱 מזהה מכשיר (16/10/2026) — השרת מגביל מכשירים לכל מייל; מכשיר חדש מעל ההגבלה ממתין לאישור המפעל.
 // localStorage בלבד: מחיקת נתוני הדפדפן (או ספארי אחרי 7 ימים בלי ביקור) = מכשיר חדש
@@ -93,7 +95,7 @@ function card(o){
   const no=o.no?'הזמנה #'+String(o.no).padStart(3,'0')+' · ':'';
   // ✂️ פיצול: חלק באריזה והתפירה עוד לא הסתיימה ⇒ "מוכן לאריזה" לא מסומן, ושורת אחוז נוספת לתפירה
   const sp=!!o.split&&o.sewPct!=null;
-  const segs=STAGES.map((s,i)=>`<span class="${i<=o.stage&&!(sp&&i===4)?'on':''}${i===o.stage?' cur':''}" "><i></i><em>${esc(s)}</em></span>`).join('');
+  const segs=STAGES.map((s,i)=>`<span class="${i<=o.stage&&!(sp&&i===4)?'on':''}${i===o.stage?' cur':''}" "><i></i><em>${esc(s)}</em>${o.dates&&o.dates[i]?`<small>${esc(fmtDM(o.dates[i]))}</small>`:''}</span>`).join('');
   return `<div class="card">
     <div class="top"><div><div class="nm">${esc(o.name||('דגם '+o.prod))}</div>
       <div class="meta">${no}${o.qty?o.qty+" יח' · ":''}${done?'נשלח '+fmtD(o.ship):'התקבל '+fmtD(o.entry)}</div></div>

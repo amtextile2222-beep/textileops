@@ -1542,8 +1542,32 @@ function trackStates(prods, tasks) {
     // אחוז בשלב הנוכחי בלבד; שלב שכבר עבר = 100 (חוץ מתפירה בפיצול)
     const sewPct = split ? sew.pct : st > 3 ? 100 : (st === 3 && sew ? sew.pct : null);
     const packPct = st > 5 ? 100 : (st === 5 && pack ? pack.pct : null);
+    // 📅 תאריך לכל שלב שהגיעו אליו (22/10/2026) — מהסריקות עצמן, לתצוגת הלקוח בלבד:
+    // התחלת שלב = הסריקה הראשונה במשפחה; "מוכן ל…" = היום שבו כל שלבי המשפחה הגיעו לכמות
+    // (או סימון ✔ ידני); מוכן ליציאה = אריזה הושלמה / התעודה הראשונה; יצא = תאריך היציאה.
+    const dOf = iso => { if (!iso || isNaN(new Date(iso))) return ''; return ilDateOf(iso); };
+    const minD = a => a.filter(Boolean).sort()[0] || '';
+    const famT = (f, k) => ts.filter(t => trackFamOfDept(t.dept) === f).map(t => dOf(t[k]));
+    const doneAt = f => {
+      if (!steps[f].length || !(qty > 0)) return '';
+      let last = '';
+      for (const nm of steps[f]) {
+        const sn = new Set(); let sum = 0, at = '';
+        const list = ts.filter(t => t.duration > 0 && t.endTime && String(t.taskType || '').trim() === nm).sort((a, b) => String(a.endTime).localeCompare(String(b.endTime)));
+        for (const t of list) { const k = trackCoverKey(t); if (sn.has(k)) continue; sn.add(k); sum += units(t); if (sum >= qty) { at = dOf(t.endTime); break; } }
+        const m = (p.stepMarks || []).find(x => x && x.n === nm);
+        if (!at && m) at = dOf(m.at);
+        if (!at) return '';
+        if (at > last) last = at;
+      }
+      return last;
+    };
+    const firstDn = minD(Array.isArray(p.shipments) && p.shipments.length ? p.shipments.map(s => String(s.date || '').slice(0, 10)) : [trackDnDate(p)]);
+    const dates = [trackEntryDate(p), minD(famT('recv', 'startTime')), minD(famT('recv', 'endTime')), minD(famT('sew', 'startTime')),
+      doneAt('sew'), minD(famT('pack', 'startTime')), minD([doneAt('pack'), shipped ? firstDn : '']), departed ? trackShipDate(p) : '']
+      .map((d, i) => i > st ? '' : (i === st && !d && ov === id ? dOf(p.pipeOverride.at) : d));
     return { no: parseInt(p.orderNo, 10) || 0, prod: p.prod, name: p.name || '', qty, entry: trackEntryDate(p),
-      ship: departed ? trackShipDate(p) : '', stage: st, sewPct, packPct, split,
+      ship: departed ? trackShipDate(p) : '', stage: st, sewPct, packPct, split, dates,
       // out = יחידות שיצאו: משלוח חלקי, או כמה תעודות שרק חלקן סומנו כיציאה (A251, 22/10/2026 — כמו parts בלוח)
       out: partial || (shipped && depU > 0 && depU < outU) ? depU : 0 };
   });
