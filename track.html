@@ -102,7 +102,7 @@ function card(o){
     <div class="stage">שלב ${o.stage+1} מתוך ${STAGES.length}</div>
     ${sp?`<div class="stage">בתפירה ${o.sewPct}%</div><div class="pct" title="${o.sewPct}%"><b style="width:${Math.max(0,Math.min(100,o.sewPct))}%"></b></div><div class="stage">באריזה ${pct??0}%</div>`:''}
     ${pct!=null?`<div class="pct" title="${pct}%"><b style="width:${Math.max(0,Math.min(100,pct))}%"></b></div>`:''}
-    ${o.out>0?`<div class="stage">🚚 נשלחו ${o.out} יח' · השאר בייצור</div>`:''}
+    ${o.out>0?`<div class="stage">🚚 נשלחו ${o.out} יח' · השאר: ${esc(STAGES[o.stage]||'בייצור')}</div>`:''}
   </div>`;
 }
 const outBtn=()=>'<button id="out">התנתקות</button>';
