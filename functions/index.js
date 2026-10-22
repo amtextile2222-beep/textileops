@@ -1566,7 +1566,8 @@ function trackStates(prods, tasks) {
     const dates = [trackEntryDate(p), minD(famT('recv', 'startTime')), minD(famT('recv', 'endTime')), minD(famT('sew', 'startTime')),
       doneAt('sew'), minD(famT('pack', 'startTime')), minD([doneAt('pack'), shipped ? firstDn : '']), departed ? trackShipDate(p) : '']
       .map((d, i) => i > st ? '' : (i === st && !d && ov === id ? dOf(p.pipeOverride.at) : d));
-    return { no: parseInt(p.orderNo, 10) || 0, prod: p.prod, name: p.name || '', qty, entry: trackEntryDate(p),
+    // est = כמות משוערת (products.estQty) כשאין עדיין כמות בטבלה — כמו "~N משוער" בלוח
+    return { no: parseInt(p.orderNo, 10) || 0, prod: p.prod, name: p.name || '', qty, est: qty ? 0 : Math.max(0, parseInt(p.estQty) || 0), entry: trackEntryDate(p),
       ship: departed ? trackShipDate(p) : '', stage: st, sewPct, packPct, split, dates,
       // out = יחידות שיצאו: משלוח חלקי, או כמה תעודות שרק חלקן סומנו כיציאה (A251, 22/10/2026 — כמו parts בלוח)
       out: partial || (shipped && depU > 0 && depU < outU) ? depU : 0 };

@@ -98,7 +98,7 @@ function card(o){
   const segs=STAGES.map((s,i)=>`<span class="${i<=o.stage&&!(sp&&i===4)?'on':''}${i===o.stage?' cur':''}" "><i></i><em>${esc(s)}</em>${o.dates&&o.dates[i]?`<small>${esc(fmtDM(o.dates[i]))}</small>`:''}</span>`).join('');
   return `<div class="card">
     <div class="top"><div><div class="nm">${esc(o.name||('דגם '+o.prod))}</div>
-      <div class="meta">${no}${o.qty?o.qty+" יח' · ":''}${done?'נשלח '+fmtD(o.ship):'התקבל '+fmtD(o.entry)}</div></div>
+      <div class="meta">${no}${o.qty?o.qty+" יח' · ":o.est?'~'+o.est+" יח' (משוער) · ":''}${done?'נשלח '+fmtD(o.ship):'התקבל '+fmtD(o.entry)}</div></div>
       <span class="badge ${done?'done':''}">${esc(STAGES[o.stage]||'')}${pct!=null?' '+pct+'%':''}</span></div>
     <div class="bar ${done?'done':''}">${segs}</div>
     <div class="stage">שלב ${o.stage+1} מתוך ${STAGES.length}</div>
