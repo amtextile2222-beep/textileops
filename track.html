@@ -200,9 +200,25 @@ async function start(){
     else if(!confirmPending&&!appEl.querySelector('.login'))showLogin();
   });
 }
-start();
-setInterval(()=>{if(!document.hidden)load();},5*60000);
-document.addEventListener('visibilitychange',()=>{if(!document.hidden)load();});
+// 🔄 גרסה חדשה של הדף (22/10/2026) — דף שנשאר פתוח (לשונית/אפליקציה במחשב) מרענן את עצמו לבד.
+// טביעה מכותרות HEAD כמו _verFingerprint ב-index.html: בסיס נפרד לכל סוג טביעה (רפליקות CDN שונות
+// מחזירות ETag או לא — השוואה בין סוגים = רענון שווא). לא בזמן טופס כניסה (המייל שהוקלד היה נמחק)
+const verBase={};
+async function checkVer(){
+  try{
+    const r=await fetch(location.pathname+'?v='+Date.now(),{method:'HEAD',cache:'no-store'});if(!r.ok)return;
+    const et=(r.headers.get('etag')||'').replace(/^W\//,'').replace(/"/g,''),cl=r.headers.get('content-length');
+    // ETag של Pages = "mtime-גודל"; כל דחיפה משנה mtime לכל הקבצים ⇒ משווים רק את הגודל (רענון רק כשהדף עצמו השתנה)
+    const m=et.match(/^[0-9a-f]+-([0-9a-f]+)$/);
+    const tag=m?{k:'et',v:parseInt(m[1],16)}:et?{k:'etx',v:et}:cl?{k:'cl',v:+cl}:null;if(!tag)return;
+    if(!verBase[tag.k]){verBase[tag.k]=tag.v;return;}
+    if(tag.v!==verBase[tag.k]&&!appEl.querySelector('.login'))location.reload();
+  }catch(e){}
+}
+const tick=()=>{if(!document.hidden){load();checkVer();}};
+start();checkVer();
+setInterval(tick,5*60000);
+document.addEventListener('visibilitychange',tick);
 </script>
 </body>
 </html>
