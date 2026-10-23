@@ -49,6 +49,13 @@ h2{font-size:14px;color:var(--txt2);margin:20px 0 8px}
 /* 📦 מלאי חומר האריזה (23/10/2026): במסך רחב — עמודה צרה משמאל לצד ההזמנות (נשארת גלויה בגלילה);
    בטלפון — למעלה, לפני ההזמנות. בלי מלאי הדף נשאר בעמודה אחת ברוחב הרגיל */
 .wrap.wide{max-width:1000px}
+/* 🔔 התראות Push (23/10/2026) */
+.pbar{display:flex;align-items:center;gap:10px;flex-wrap:wrap;font-size:13px;color:var(--txt2);background:var(--card);border:1px solid var(--brd);border-radius:12px;padding:9px 12px;margin-bottom:12px}
+.pbar.on{background:var(--green-bg);color:var(--green);border-color:transparent}
+.pbar span{font-size:12px;color:var(--txt3)}
+.pbar .pbtn{font-size:14px;font-weight:700;padding:8px 14px;border-radius:10px;border:0;background:var(--blue);color:#fff;cursor:pointer}
+.pbar .pbtn:disabled{opacity:.6}
+.pbar #poff{background:none;border:0;color:inherit;text-decoration:underline;font:inherit;cursor:pointer;padding:0}
 .lay.has-stk{display:grid;grid-template-columns:minmax(0,1fr) 250px;gap:16px;align-items:start}
 .lay.has-stk aside{position:sticky;top:12px}
 @media (max-width:760px){.lay.has-stk{display:flex;flex-direction:column;gap:0}.lay.has-stk aside{order:-1;position:static}}
@@ -65,15 +72,17 @@ footer button{background:none;border:0;color:var(--blue);font:inherit;cursor:poi
 <body>
 <div class="wrap">
   <header><span class="logo">✂️</span><div><h1 id="ttl">מעקב הזמנות</h1><div class="sub" id="sub"></div></div></header>
+  <div id="pushbar"></div>
   <div id="app"><div class="msg">⏳ טוען…</div></div>
   <footer id="ft"></footer>
 </div>
 <script type="module">
 import{initializeApp}from'https://www.gstatic.com/firebasejs/10.12.0/firebase-app.js';
 import{getAuth,onAuthStateChanged,sendSignInLinkToEmail,isSignInWithEmailLink,signInWithEmailLink,signOut}from'https://www.gstatic.com/firebasejs/10.12.0/firebase-auth.js';
+import{getMessaging,getToken,onMessage,isSupported}from'https://www.gstatic.com/firebasejs/10.12.0/firebase-messaging.js';
 // אותו פרויקט כמו index.html. ⚠️ **שם אפליקציה נפרד ('track') בכוונה:** ההתחברות נשמרת לפי שם האפליקציה,
 // ובלעדיו כניסת לקוח באותו דפדפן הייתה דורסת את הכניסה של המנהל/עובד לאפליקציה (אותו origin)
-const FB_CFG={apiKey:"AIzaSyCN9AlUZFX6tODyClzopC9BrRi-Oj7oSv8",projectId:"textileops-aef4a",appId:"1:570030273525:web:ff4a7d125a40066a4826bc",authDomain:"textileops-aef4a.firebaseapp.com"};
+const FB_CFG={apiKey:"AIzaSyCN9AlUZFX6tODyClzopC9BrRi-Oj7oSv8",projectId:"textileops-aef4a",appId:"1:570030273525:web:ff4a7d125a40066a4826bc",authDomain:"textileops-aef4a.firebaseapp.com",messagingSenderId:"570030273525"};
 const app0=initializeApp(FB_CFG,'track');
 const auth=getAuth(app0);auth.languageCode='he';
 // 👁 תצוגת לקוח למנהל (22/10/2026): ?as=קוד לקוח, נפתח מחלון "פרטי לקוח". משתמש בכניסה של האפליקציה
@@ -119,7 +128,64 @@ function card(o){
   </div>`;
 }
 const outBtn=()=>'<button id="out">התנתקות</button>';
-const bindOut=()=>{const b=$('out');if(b)b.onclick=()=>signOut(auth);};
+// התנתקות ⇒ גם ביטול ההתראות במכשיר (אחרת מכשיר שהתנתק היה ממשיך לקבל עדכונים)
+const bindOut=()=>{const b=$('out');if(b)b.onclick=async()=>{if(pushSt?.on)try{await pushCall('POST',{off:true});}catch(e){}pushSt=null;$('pushbar').innerHTML='';signOut(auth);};};
+
+// ── 🔔 התראות Push (23/10/2026) — שרת: customerPush (רישום) + customerNotify (שליחה כל 15 דק' בשעות
+// העבודה). SW נפרד (track-sw.js, scope './track') — לא נוגע ברישום של האפליקציה באותו דפדפן.
+// באייפון עובד רק מהאייקון במסך הבית (iOS 16.4+). תצוגת מנהל — בלי (הטוקן היה של המנהל)
+const URL_PUSH='https://us-central1-textileops-aef4a.cloudfunctions.net/customerPush';
+const IOS=/iP(hone|ad|od)/.test(navigator.userAgent);
+let pushSt=null,fgOn=false; // {vapid,on} מהשרת
+async function pushCall(method,body){
+  const u=auth.currentUser;if(!u)throw new Error('auth');
+  const r=await fetch(URL_PUSH,{method,headers:{Authorization:'Bearer '+await u.getIdToken(),'X-Dev':devId(),...(body?{'Content-Type':'application/json'}:{})},body:body?JSON.stringify(body):undefined});
+  if(!r.ok)throw new Error('server '+r.status);
+  return r.json();
+}
+async function pushOk(){try{return 'Notification' in window&&'serviceWorker' in navigator&&await isSupported();}catch(e){return false;}}
+async function pushInit(){
+  if(AS||pushSt)return;
+  try{pushSt=await pushCall('GET');}catch(e){return;}
+  await pushUi();
+  if(pushSt.on&&await pushOk()&&Notification.permission==='granted')pushFg();
+}
+async function pushUi(){
+  const el=$('pushbar');if(!el)return;
+  if(!pushSt||!pushSt.vapid){el.innerHTML='';return;}
+  if(!await pushOk()){
+    el.innerHTML=IOS&&!STANDALONE?'<div class="pbar">🔔 לקבלת התראות באייפון: לחצו על <b>שיתוף</b> ← <b>הוסף למסך הבית</b>, ופתחו את הדף מהאייקון.</div>':'';
+    return;
+  }
+  if(Notification.permission==='denied'){el.innerHTML='<div class="pbar">🔕 ההתראות חסומות בדפדפן הזה — אפשר לאשר אותן בהגדרות האתר.</div>';return;}
+  el.innerHTML=pushSt.on&&Notification.permission==='granted'
+    ?'<div class="pbar on">🔔 תקבלו התראה כשהזמנה עוברת שלב, או כשחומר שלכם עומד להיגמר · <button id="poff">כיבוי</button></div>'
+    :'<div class="pbar"><button id="pon" class="pbtn">🔔 קבלו התראות על ההזמנות</button><span>מעבר שלב בהזמנה, וחומר שעומד להיגמר — בשעות העבודה</span></div>';
+  const on=$('pon'),off=$('poff');
+  if(on)on.onclick=pushOn;
+  if(off)off.onclick=async()=>{off.disabled=true;try{await pushCall('POST',{off:true});pushSt.on=false;}catch(e){}pushUi();};
+}
+async function pushOn(){
+  const b=$('pon');if(b){b.disabled=true;b.textContent='⏳ רגע…';}
+  try{
+    // requestPermission ישירות מהלחיצה — אחרת ספארי/אייפון דוחים את הבקשה
+    if(await Notification.requestPermission()!=='granted'){await pushUi();return;}
+    const reg=await navigator.serviceWorker.register('track-sw.js',{scope:'./track'});
+    const token=await getToken(getMessaging(app0),{vapidKey:pushSt.vapid,serviceWorkerRegistration:reg});
+    if(!token)throw new Error('no token');
+    await pushCall('POST',{token});
+    pushSt.on=true;pushFg();
+  }catch(e){alert('לא הצלחנו להפעיל התראות: '+(e?.message||e));}
+  await pushUi();
+}
+// הדף פתוח ובפוקוס ⇒ ההודעה מגיעה לדף ולא ל-SW: מציגים אותה בכל זאת ומרעננים את הנתונים
+function pushFg(){
+  if(fgOn)return;fgOn=true;
+  try{onMessage(getMessaging(app0),p=>{
+    const d=p.data||{};load();
+    navigator.serviceWorker.getRegistration('./track').then(r=>r&&r.showNotification(d.title||'מעקב הזמנות',{body:d.body||'',icon:'icon-192.png',dir:'rtl',lang:'he',tag:'track-update',data:{link:d.link}})).catch(()=>{});
+  });}catch(e){}
+}
 
 // ── מסך כניסה: מייל ← קישור למייל ──
 function showLogin(msg,confirmMode){
@@ -208,6 +274,7 @@ async function load(){
     if(AS){ft.innerHTML='👁 תצוגת מנהל — כך הלקוח רואה את הדף'+upd;return;}
     ft.innerHTML=esc(u.email)+upd+' · '+outBtn();
     bindOut();
+    pushInit(); // 🔔 פעם אחת אחרי טעינה מוצלחת (pushSt שמור — לא קורא שוב לשרת בכל רענון)
   }catch(e){
     if(!appEl.querySelector('.card'))appEl.innerHTML='<div class="msg">⚠️ לא ניתן לטעון כרגע. נסו שוב בעוד רגע.</div>';
   }finally{busy=false;}

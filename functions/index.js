@@ -1711,6 +1711,69 @@ async function trackLogSignIn(tok, email, cust, req) {
   } catch (e) { console.error('trackLogSignIn error:', e); } // היומן לא מפיל את הצגת ההזמנות
 }
 
+// 🔐 אימות דף הלקוח — משותף ל-customerTrack ול-customerPush. מחזיר {cust, email, asCust, tok}
+// או null אחרי שכבר נשלחה תשובת שגיאה. סדר הבדיקות זהה למה שהיה ב-customerTrack (23/10/2026 הוצא לפונקציה)
+async function trackAuth(req, res) {
+  const m = /^Bearer (.+)$/.exec(String(req.get('Authorization') || ''));
+  if (!m) { res.status(401).json({ error: 'auth' }); return null; }
+  let tok;
+  try {
+    tok = await admin.auth().verifyIdToken(m[1]);
+  } catch (e) { res.status(401).json({ error: 'auth' }); return null; }
+  // 👁 תצוגת לקוח למנהל (22/10/2026): טוקן האפליקציה עם role=manager + ?cust=קוד ⇒ אותו מידע שהלקוח רואה,
+  // בלי מייל, בלי יומן כניסות ובלי שער מכשירים
+  const asCust = tok.role === 'manager' ? String(req.query.cust || '') : '';
+  if (!asCust && (!tok.email || !tok.email_verified)) { res.status(401).json({ error: 'auth' }); return null; }
+  if (asCust && !/^\d{1,4}$/.test(asCust)) { res.status(400).json({ error: 'cust' }); return null; }
+  const email = asCust ? '' : String(tok.email).toLowerCase();
+  if (asCust) return { cust: asCust, email, asCust, tok };
+  // נקרא בכל בקשה (גם כשיש מטמון) — כך הסרת מייל חוסמת מיד
+  const map = ((await db.doc('adminSettings/custLinks').get()).data() || {}).emails || {};
+  let cust = '', ent = null;
+  for (const c of Object.keys(map)) {
+    const x = (map[c] || []).map(trackEmailEnt).find(x => x.e === email);
+    if (x) { cust = c; ent = x; break; }
+  }
+  if (!cust) { await trackLogSignIn(tok, email, '', req); res.status(403).json({ error: 'denied', email }); return null; }
+  // 🔐 הוספה מחדש של מייל מנתקת כל מכשיר שנכנס לפניה: auth_time = רגע הכניסה עם הקישור (לא מתאפס
+  // ברענון טוקן). 2 דק' סובלנות לשעון של מחשב המנהל (at נחתם בלקוח). 401 ⇒ הדף מתנתק ומבקש קישור חדש
+  if (ent.at && (Number(tok.auth_time) || 0) * 1000 < ent.at - 120000) { res.status(401).json({ error: 'reauth' }); return null; }
+  await trackLogSignIn(tok, email, cust, req);
+  const dst = await trackDeviceGate(email, cust, ent, String(req.get('x-dev') || ''), req);
+  if (dst !== 'ok') { res.status(403).json({ error: dst }); return null; } // pending | blocked
+  return { cust, email, asCust: '', tok };
+}
+
+// מצב ההזמנות + המלאי של לקוח — מה שדף הלקוח מציג. משותף ל-customerTrack ול-customerNotify
+async function trackBuild(cust) {
+  const t0 = Date.now();
+  const [pS, aS, nS, kS] = await Promise.all([
+    db.collection('products').where('cust', '==', cust).get(),
+    db.collection('activeTasks').where('cust', '==', cust).get(),
+    db.doc('appSettings/customerNames').get(),
+    db.doc('appSettings/packStock').get()
+  ]);
+  const prods = pS.docs.map(d => ({ id: d.id, ...d.data() }));
+  const from = new Date(Date.now() - TRACK_SHIP_DAYS * 86400000).toISOString().slice(0, 10);
+  // ⚡ היסטוריה רק של הדגמים שמוצגים (פתוחים / נשלחו ב-30 יום) — "נשלח" נקבע מהמוצר בלבד, ולכן
+  // הסינון לא משנה אף מצב שמוצג. כל ההיסטוריה של הלקוח לקחה 17-25 שנ' (נמדד 10/10/2026).
+  // where('prod','in') בלבד (בלי cust) — לא דורש אינדקס מורכב; הלקוח מסונן בזיכרון
+  const shipOf = p => trackShipInfo(p, trackQty(p)).departed ? (trackShipDate(p) || '0') : '';
+  const codes = [...new Set(prods.filter(p => { const s = shipOf(p); return !s || s >= from; }).map(p => p.prod))];
+  const chunks = [];
+  for (let i = 0; i < codes.length; i += 30) chunks.push(codes.slice(i, i + 30));
+  const hSs = await Promise.all(chunks.map(c => db.collection('histTasks').where('prod', 'in', c).get()));
+  const tasks = [...hSs.flatMap(s => s.docs), ...aS.docs].map(d => d.data()).filter(t => t.cust === cust);
+  // פעילות לפי סדר כניסה (הוותיקה ראשונה), ואחריהן שנשלחו — החדשה ראשונה
+  const orders = trackStates(prods, tasks)
+    .filter(o => o.stage < 7 || (o.ship && o.ship >= from))
+    .sort((a, b) => ((a.stage === 7) - (b.stage === 7)) ||
+      (a.stage === 7 ? String(b.ship).localeCompare(String(a.ship)) : String(a.entry || '9999').localeCompare(String(b.entry || '9999'))));
+  console.log(`trackBuild ${cust}: ${tasks.length} tasks, ${codes.length} models, ${Date.now() - t0} ms`);
+  return { name: (nS.data() || {})[cust] || '', at: new Date().toISOString(), orders,
+    stock: trackPackStock(cust, prods, kS.data() || {}) };
+}
+
 // ⚡ 1GB: בדור הראשון המעבד גדל עם הזיכרון — עיבוד אלפי משימות על ברירת המחדל (256MB) לקח 11 שנ'
 // (נמדד 10/10/2026). רק לפונקציה הזו; נקראת לעיתים רחוקות, כך שהעלות זניחה
 exports.customerTrack = functions.runWith({ memory: '1GB' }).https.onRequest(async (req, res) => {
@@ -1721,37 +1784,10 @@ exports.customerTrack = functions.runWith({ memory: '1GB' }).https.onRequest(asy
     res.set('Access-Control-Allow-Headers', 'Authorization, X-Dev');
     res.status(204).send(''); return;
   }
-  const m = /^Bearer (.+)$/.exec(String(req.get('Authorization') || ''));
-  if (!m) { res.status(401).json({ error: 'auth' }); return; }
-  let email, tok;
   try {
-    tok = await admin.auth().verifyIdToken(m[1]);
-  } catch (e) { res.status(401).json({ error: 'auth' }); return; }
-  // 👁 תצוגת לקוח למנהל (22/10/2026): טוקן האפליקציה עם role=manager + ?cust=קוד ⇒ אותו מידע שהלקוח רואה,
-  // בלי מייל, בלי יומן כניסות ובלי שער מכשירים
-  const asCust = tok.role === 'manager' ? String(req.query.cust || '') : '';
-  if (!asCust && (!tok.email || !tok.email_verified)) { res.status(401).json({ error: 'auth' }); return; }
-  if (asCust && !/^\d{1,4}$/.test(asCust)) { res.status(400).json({ error: 'cust' }); return; }
-  email = asCust ? '' : String(tok.email).toLowerCase();
-  try {
-    let cust = asCust;
-    if (!asCust) {
-      // נקרא בכל בקשה (גם כשיש מטמון) — כך הסרת מייל חוסמת מיד
-      const map = ((await db.doc('adminSettings/custLinks').get()).data() || {}).emails || {};
-      let ent = null;
-      for (const c of Object.keys(map)) {
-        const x = (map[c] || []).map(trackEmailEnt).find(x => x.e === email);
-        if (x) { cust = c; ent = x; break; }
-      }
-      if (!cust) { await trackLogSignIn(tok, email, '', req); res.status(403).json({ error: 'denied', email }); return; }
-      // 🔐 הוספה מחדש של מייל מנתקת כל מכשיר שנכנס לפניה: auth_time = רגע הכניסה עם הקישור (לא מתאפס
-      // ברענון טוקן). 2 דק' סובלנות לשעון של מחשב המנהל (at נחתם בלקוח). 401 ⇒ הדף מתנתק ומבקש קישור חדש
-      if (ent.at && (Number(tok.auth_time) || 0) * 1000 < ent.at - 120000) { res.status(401).json({ error: 'reauth' }); return; }
-      await trackLogSignIn(tok, email, cust, req);
-      const dst = await trackDeviceGate(email, cust, ent, String(req.get('x-dev') || ''), req);
-      if (dst !== 'ok') { res.status(403).json({ error: dst }); return; } // pending | blocked
-    }
-    const t0 = Date.now();
+    const a = await trackAuth(req, res);
+    if (!a) return;
+    const { cust, asCust } = a;
     // ⏱ (23/10/2026) המטמון של 3 דק' רק למצב ההזמנות (החלק הכבד). המלאי מחושב מחדש גם כשיש מטמון —
     // מסמך אחד + המוצרים של הלקוח, והדף מרענן כל דקה ⇒ תיקון מלאי מגיע ללקוח תוך דקה.
     // תצוגת המנהל (asCust) לא משתמשת במטמון בכלל — רואה תמיד את המצב העדכני.
@@ -1761,35 +1797,127 @@ exports.customerTrack = functions.runWith({ memory: '1GB' }).https.onRequest(asy
       res.json({ ...hit.body, stock: trackPackStock(cust, hp.docs.map(d => ({ id: d.id, ...d.data() })), hk.data() || {}) });
       return;
     }
-    const [pS, aS, nS, kS] = await Promise.all([
-      db.collection('products').where('cust', '==', cust).get(),
-      db.collection('activeTasks').where('cust', '==', cust).get(),
-      db.doc('appSettings/customerNames').get(),
-      db.doc('appSettings/packStock').get()
-    ]);
-    const prods = pS.docs.map(d => ({ id: d.id, ...d.data() }));
-    const from = new Date(Date.now() - TRACK_SHIP_DAYS * 86400000).toISOString().slice(0, 10);
-    // ⚡ היסטוריה רק של הדגמים שמוצגים (פתוחים / נשלחו ב-30 יום) — "נשלח" נקבע מהמוצר בלבד, ולכן
-    // הסינון לא משנה אף מצב שמוצג. כל ההיסטוריה של הלקוח לקחה 17-25 שנ' (נמדד 10/10/2026).
-    // where('prod','in') בלבד (בלי cust) — לא דורש אינדקס מורכב; הלקוח מסונן בזיכרון
-    const shipOf = p => trackShipInfo(p, trackQty(p)).departed ? (trackShipDate(p) || '0') : '';
-    const codes = [...new Set(prods.filter(p => { const s = shipOf(p); return !s || s >= from; }).map(p => p.prod))];
-    const chunks = [];
-    for (let i = 0; i < codes.length; i += 30) chunks.push(codes.slice(i, i + 30));
-    const hSs = await Promise.all(chunks.map(c => db.collection('histTasks').where('prod', 'in', c).get()));
-    const tasks = [...hSs.flatMap(s => s.docs), ...aS.docs].map(d => d.data()).filter(t => t.cust === cust);
-    // פעילות לפי סדר כניסה (הוותיקה ראשונה), ואחריהן שנשלחו — החדשה ראשונה
-    const orders = trackStates(prods, tasks)
-      .filter(o => o.stage < 7 || (o.ship && o.ship >= from))
-      .sort((a, b) => ((a.stage === 7) - (b.stage === 7)) ||
-        (a.stage === 7 ? String(b.ship).localeCompare(String(a.ship)) : String(a.entry || '9999').localeCompare(String(b.entry || '9999'))));
-    const body = { name: (nS.data() || {})[cust] || '', at: new Date().toISOString(), orders,
-      stock: trackPackStock(cust, prods, kS.data() || {}) };
-    console.log(`customerTrack ${cust}: ${tasks.length} tasks, ${codes.length} models, ${Date.now() - t0} ms`);
+    const body = await trackBuild(cust);
     _trackCache.set(cust, { at: Date.now(), body });
     res.json(body);
   } catch (e) {
     console.error('customerTrack error:', e);
     res.status(500).json({ error: 'server' });
   }
+});
+
+// 🔔 התראות Push ללקוח (23/10/2026). adminSettings/custPush.tokens = {devId: {token, cust, e, at}} — מכשיר
+// של לקוח שלחץ "קבלו התראות" בדף המעקב. GET ⇒ {vapid, on} · POST {token} ⇒ רישום · POST {off:true} ⇒ ביטול.
+// אותו אימות כמו customerTrack (מייל מורשה + שער מכשירים); תצוגת המנהל לא נרשמת (הטוקן הוא של המנהל).
+// המייל מוסר / המכשיר נחסם ⇒ customerNotify לא שולח אליו (בודק מחדש מול custLinks ו-custDevices)
+exports.customerPush = functions.https.onRequest(async (req, res) => {
+  res.set('Access-Control-Allow-Origin', '*');
+  res.set('Cache-Control', 'no-store');
+  if (req.method === 'OPTIONS') {
+    res.set('Access-Control-Allow-Methods', 'GET, POST');
+    res.set('Access-Control-Allow-Headers', 'Authorization, X-Dev, Content-Type');
+    res.status(204).send(''); return;
+  }
+  try {
+    const a = await trackAuth(req, res);
+    if (!a) return;
+    if (a.asCust) { res.status(403).json({ error: 'manager' }); return; }
+    const devId = String(req.get('x-dev') || '');
+    if (!TRACK_DEV_RE.test(devId)) { res.status(400).json({ error: 'dev' }); return; }
+    const ref = db.doc('adminSettings/custPush');
+    if (req.method === 'GET') {
+      const [ps, cp] = await Promise.all([db.doc('appSettings/pushSettings').get(), ref.get()]);
+      const cur = ((cp.data() || {}).tokens || {})[devId];
+      res.json({ vapid: (ps.data() || {}).vapidKey || '', on: !!(cur && cur.cust === a.cust) }); return;
+    }
+    if (req.method !== 'POST') { res.status(405).json({ error: 'method' }); return; }
+    const b = (req.body && typeof req.body === 'object') ? req.body : {};
+    const token = String(b.token || '');
+    if (!b.off && !/^[\w:.-]{20,4096}$/.test(token)) { res.status(400).json({ error: 'token' }); return; }
+    await db.runTransaction(async tx => {
+      const s = await tx.get(ref);
+      const all = (s.data() || {}).tokens || {};
+      const upd = {};
+      // אותו טוקן תחת מזהה מכשיר אחר (נתוני הדפדפן נמחקו) — רשומה כפולה שהייתה שולחת פעמיים
+      Object.keys(all).forEach(k => { if (k !== devId && token && all[k] && all[k].token === token) upd['tokens.' + k] = FieldValue.delete(); });
+      upd['tokens.' + devId] = b.off ? FieldValue.delete() : { token, cust: a.cust, e: a.email, at: Date.now() };
+      if (s.exists) tx.update(ref, upd);
+      else if (!b.off) tx.set(ref, { tokens: { [devId]: upd['tokens.' + devId] } });
+    });
+    res.json({ ok: true, on: !b.off });
+  } catch (e) {
+    console.error('customerPush error:', e);
+    res.status(500).json({ error: 'server' });
+  }
+});
+
+// 🔔 שליחת העדכונים ללקוחות — כל 15 דק' בשעות העבודה (א'-ה' 07:00-17:59, ו' עד 12:59).
+// לכל לקוח עם מכשיר רשום: trackBuild ⇒ השוואה למצב ששמרנו בריצה הקודמת (adminSettings/custNotifyState)
+// ⇒ הודעה אחת מאוחדת. נשלח רק על: הזמנה חדשה, מעבר לשלב מרכזי (תפירה/אריזה/מוכן ליציאה/יצא),
+// וחומר שירד עכשיו מתחת למינימום. ריצה ראשונה ללקוח רק שומרת מצב (בלי הודעה על כל מה שכבר קיים).
+// ⚠️ מספרי השלבים = TRACK_LISTS (0 התקבלה … 7 יצא ללקוח)
+const NOTIFY_STAGES = { 3: 'התחילה תפירה 🧵', 5: 'התחילה אריזה 📦', 6: 'מוכנה ליציאה ✅', 7: 'יצאה אליכם 🚚' };
+const NOTIFY_LINK = 'https://amtextile2222-beep.github.io/textileops/track.html';
+exports.customerNotify = functions.runWith({ memory: '1GB', timeoutSeconds: 300 }).pubsub
+  .schedule('*/15 7-17 * * 0-5').timeZone('Asia/Jerusalem').onRun(async () => {
+  const il = new Date(new Date().toLocaleString('en-US', { timeZone: 'Asia/Jerusalem' }));
+  if (il.getDay() === 5 && il.getHours() >= 13) return null;
+  const pushRef = db.doc('adminSettings/custPush'), stRef = db.doc('adminSettings/custNotifyState');
+  const [pS, lS, dS, sS] = await Promise.all([pushRef.get(), db.doc('adminSettings/custLinks').get(),
+    db.doc('adminSettings/custDevices').get(), stRef.get()]);
+  const toks = (pS.data() || {}).tokens || {};
+  const links = (lS.data() || {}).emails || {}, devs = (dS.data() || {}).entries || {};
+  const state = sS.data() || {};
+  // מכשיר תקף = המייל עדיין מורשה לאותו לקוח, והמכשיר לא נחסם/ממתין בשער המכשירים
+  const byCust = {};
+  Object.entries(toks).forEach(([devId, t]) => {
+    if (!t || !t.token || !t.cust) return;
+    const ent = (links[t.cust] || []).map(trackEmailEnt).find(x => x.e === t.e);
+    if (!ent || (ent.at && (+t.at || 0) < ent.at - 120000)) return;
+    const dv = devs[devId];
+    if (dv && dv.st !== 'ok') return;
+    (byCust[t.cust] = byCust[t.cust] || []).push({ devId, token: t.token });
+  });
+  const dead = [];
+  for (const cust of Object.keys(byCust)) {
+    try {
+      const body = await trackBuild(cust);
+      const prev = state[cust], cur = { o: {}, low: [], at: Date.now() };
+      const lines = [];
+      body.orders.forEach(o => {
+        const key = o.prod + '#' + (o.no || 0), nm = o.name || ('דגם ' + o.prod);
+        cur.o[key] = o.stage;
+        if (!prev) return;
+        const was = prev.o ? prev.o[key] : undefined;
+        if (was == null) { if (o.stage < 7) lines.push('🆕 ' + nm + ': הזמנה חדשה התקבלה'); return; }
+        // השלב המרכזי הגבוה ביותר שעברו מאז הריצה הקודמת (קפיצה של כמה שלבים = הודעה אחת)
+        const hit = Object.keys(NOTIFY_STAGES).map(Number).filter(s => s > was && s <= o.stage).pop();
+        if (hit != null) lines.push(nm + ': ' + NOTIFY_STAGES[hit]);
+      });
+      (body.stock || []).forEach(s => {
+        if (!s.low) return;
+        cur.low.push(s.k);
+        if (prev && !(prev.low || []).includes(s.k))
+          lines.push('⚠️ ' + s.name + ': נשארו ' + s.n + (s.unit && s.unit !== "יח'" ? ' ' + s.unit : '') + ' — כדאי לשלוח עוד');
+      });
+      // החלפה מלאה של שדה הלקוח (update) — set עם merge היה ממזג ומשאיר הזמנות ישנות לנצח
+      if (sS.exists) await stRef.update({ [cust]: cur }); else await stRef.set({ [cust]: cur }, { merge: true });
+      if (!lines.length) continue;
+      const title = '📦 ' + (body.name ? body.name + ' — ' : '') + 'עדכון הזמנות';
+      const text = lines.slice(0, 4).join('\n') + (lines.length > 5 ? '\nועוד ' + (lines.length - 4) + ' עדכונים' : lines.length === 5 ? '\nועוד עדכון אחד' : '');
+      // data בלבד: track-sw.js מציג את ההתראה בעצמו ופותח את דף המעקב בלחיצה (בלי הצגה כפולה של ה-SDK)
+      const rs = await Promise.allSettled(byCust[cust].map(d => admin.messaging().send(withTtl({
+        token: d.token,
+        data: { title, body: text, link: NOTIFY_LINK },
+        webpush: { headers: { Urgency: 'high' } }
+      }, 2 * 3600))));
+      rs.forEach((r, i) => { if (r.status === 'rejected' && DEAD_FCM_CODES.includes(r.reason && r.reason.code)) dead.push(byCust[cust][i].devId); });
+      console.log(`customerNotify ${cust}: ${lines.length} updates → ${rs.filter(r => r.status === 'fulfilled').length}/${rs.length} devices`);
+    } catch (e) { console.error('customerNotify ' + cust + ':', e); }
+  }
+  if (dead.length) {
+    const upd = {}; dead.forEach(k => { upd['tokens.' + k] = FieldValue.delete(); });
+    await pushRef.update(upd).catch(() => {});
+  }
+  return null;
 });
