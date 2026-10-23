@@ -1469,6 +1469,32 @@ function trackShipInfo(p, qty) {
   const departed = shipped && !partial && (shL.length ? depU >= outU : (!!p.departedAt || String(trackDnDate(p) || '9999') < TRACK_DEPART_FROM));
   return { shipped, partial, departed, outU, depU };
 }
+// 📦 מלאי חומר האריזה שהלקוח סיפק (23/10/2026) — ⚠️ העתק של pstkCalc ב-index.html, רק למלאי של הלקוח הזה:
+// תנועות appSettings/packStock (in/out/count) פחות חומר "של הלקוח" (own) בתעודות, מהתנועה הראשונה של כל חומר ואילך.
+// מחזיר רק חומר שנספר: [{k, name, n, low}]. low = מתחת למינימום שהמנהל קבע (בלי לחשוף את המינימום).
+const TRACK_MATS = [['hanger', 'קולבים'], ['nylon', 'ניילון'], ['cello', 'ניילון צלופן']];
+function trackPackStock(cust, prods, ps) {
+  const moves = (Array.isArray(ps.moves) ? ps.moves : []).filter(m => m && m.pool === cust && m.k);
+  if (!moves.length) return [];
+  const start = {};
+  moves.forEach(m => { if (start[m.k] == null || +m.at < start[m.k]) start[m.k] = +m.at || 0; });
+  const ev = moves.map(m => ({ at: +m.at || 0, k: m.k, t: m.t, n: +m.n || 0 }));
+  const shMs = s => { const t = Date.parse((s && s.at) || ''); return isNaN(t) ? (Date.parse(((s && s.date) || '') + 'T12:00:00') || 0) : t; };
+  prods.forEach(p => (Array.isArray(p.shipments) ? p.shipments : []).forEach(s => {
+    const at = shMs(s);
+    (Array.isArray(s && s.mats) ? s.mats : []).forEach(m => {
+      if (m && m.own && (+m.n || 0) > 0 && start[m.k] != null && at >= start[m.k]) ev.push({ at, k: m.k, t: 'use', n: +m.n || 0 });
+    });
+  }));
+  ev.sort((a, b) => a.at - b.at || (a.t === 'use') - (b.t === 'use'));
+  const bal = {};
+  ev.forEach(e => { if (e.t === 'count') bal[e.k] = e.n; else bal[e.k] = (bal[e.k] || 0) + (e.t === 'in' ? e.n : -e.n); });
+  const min = ps.min || {};
+  return TRACK_MATS.filter(([k]) => k in bal).map(([k, name]) => {
+    const mn = +min[cust + '|' + k] || 0;
+    return { k, name, n: bal[k], low: mn > 0 && bal[k] < mn };
+  });
+}
 // prods = כל רשומות המוצר של הלקוח (prodByOrderNo/findProd/prodStampOldest מסננים ממילא לפי לקוח)
 function trackStates(prods, tasks) {
   const byNo = (prod, no) => no ? prods.find(p => p.prod === prod && (parseInt(p.orderNo, 10) || 0) === no) || null : null;
@@ -1706,10 +1732,11 @@ exports.customerTrack = functions.runWith({ memory: '1GB' }).https.onRequest(asy
     const t0 = Date.now();
     const hit = _trackCache.get(cust);
     if (hit && Date.now() - hit.at < 180000) { res.json(hit.body); return; }
-    const [pS, aS, nS] = await Promise.all([
+    const [pS, aS, nS, kS] = await Promise.all([
       db.collection('products').where('cust', '==', cust).get(),
       db.collection('activeTasks').where('cust', '==', cust).get(),
-      db.doc('appSettings/customerNames').get()
+      db.doc('appSettings/customerNames').get(),
+      db.doc('appSettings/packStock').get()
     ]);
     const prods = pS.docs.map(d => ({ id: d.id, ...d.data() }));
     const from = new Date(Date.now() - TRACK_SHIP_DAYS * 86400000).toISOString().slice(0, 10);
@@ -1727,7 +1754,8 @@ exports.customerTrack = functions.runWith({ memory: '1GB' }).https.onRequest(asy
       .filter(o => o.stage < 7 || (o.ship && o.ship >= from))
       .sort((a, b) => ((a.stage === 7) - (b.stage === 7)) ||
         (a.stage === 7 ? String(b.ship).localeCompare(String(a.ship)) : String(a.entry || '9999').localeCompare(String(b.entry || '9999'))));
-    const body = { name: (nS.data() || {})[cust] || '', at: new Date().toISOString(), orders };
+    const body = { name: (nS.data() || {})[cust] || '', at: new Date().toISOString(), orders,
+      stock: trackPackStock(cust, prods, kS.data() || {}) };
     console.log(`customerTrack ${cust}: ${tasks.length} tasks, ${codes.length} models, ${Date.now() - t0} ms`);
     _trackCache.set(cust, { at: Date.now(), body });
     res.json(body);

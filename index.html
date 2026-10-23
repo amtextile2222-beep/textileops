@@ -16581,6 +16581,7 @@ function shipPackCost(s){return shipMats(s).reduce((t,m)=>t+(m.own?0:(+m.n||0)*(
 // 🔑 היתרה **מחושבת ולא נשמרת**: תנועות פחות החומר שבתעודות (own ⇒ מלאי הלקוח, אחרת המפעל),
 // רק מהתנועה הראשונה של אותו מלאי+חומר ואילך ⇒ עריכה/מחיקה של תעודה מתקנת את המלאי לבד.
 // appSettings פתוח לכתיבה לכל מחובר — ההרשאה (מנהל/אחראי) נאכפת במסך בלבד.
+// ⚠️ trackPackStock בשרת (דף הלקוח) הוא העתק של pstkCalc למלאי של לקוח אחד — שינוי כאן ⇒ שינוי שם.
 const PSTK_F='F';
 const PSTK_T={in:'📥 קבלה',out:'📤 הוצאה',count:'🔢 ספירה'};
 function canPackStock(){return ['manager','supervisor'].includes(S.user?.role);}

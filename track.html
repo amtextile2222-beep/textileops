@@ -182,9 +182,14 @@ async function load(){
     const d=await r.json();
     if(d.name){$('sub').textContent=d.name;document.title='מעקב הזמנות — '+d.name;}
     const act=d.orders.filter(o=>o.stage<STAGES.length-1),shp=d.orders.filter(o=>o.stage===STAGES.length-1);
-    appEl.innerHTML=!d.orders.length?'<div class="msg">אין כרגע הזמנות פעילות.</div>':
+    // 📦 חומר האריזה שהלקוח סיפק ונמצא במפעל (23/10/2026) — רק חומר שהמפעל סופר; שרת ישן = אין stock
+    const stk=Array.isArray(d.stock)?d.stock:[];
+    const stkHtml=stk.length?`<h2>📦 חומר האריזה שלכם במפעל</h2><div class="card">${stk.map(s=>`<div class="top" style="padding:3px 0">
+        <span>${esc(s.name)}</span><span><b style="${s.n<0||s.low?'color:#dc2626':''}">${Number(s.n)||0}</b>${s.low?' <span class="badge" style="background:#fee2e2;color:#dc2626">⚠ כדאי לשלוח עוד</span>':''}</span>
+      </div>`).join('')}<div class="meta">מתעדכן אוטומטית עם כל משלוח שיוצא אליכם.</div></div>`:'';
+    appEl.innerHTML=(!d.orders.length?'<div class="msg">אין כרגע הזמנות פעילות.</div>':
       (act.length?`<h2>🏭 בייצור (${act.length})</h2>`+act.map(card).join(''):'')+
-      (shp.length?`<h2>✅ נשלחו ב-30 הימים האחרונים (${shp.length})</h2>`+shp.map(card).join(''):'');
+      (shp.length?`<h2>✅ נשלחו ב-30 הימים האחרונים (${shp.length})</h2>`+shp.map(card).join(''):''))+stkHtml;
     const t=new Date(d.at);
     const upd=' · עודכן '+t.toLocaleString('he-IL',{day:'2-digit',month:'2-digit',hour:'2-digit',minute:'2-digit'});
     if(AS){ft.innerHTML='👁 תצוגת מנהל — כך הלקוח רואה את הדף'+upd;return;}
