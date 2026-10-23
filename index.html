@@ -11823,7 +11823,7 @@ function shipPackTotal(){
   const ot=outerTxt(_shipOuterCollect());
   if(!packs.length){el.textContent=ot||'לא הוזנה';el.style.color=ot?'var(--txt)':'var(--txt3)';return;}
   const u=packsUnits(packs),q=_shipQtySum();
-  el.textContent=packsCount(packs)+' חבילות'+(ot?' ב-'+ot:'')+' · '+u+" יח'"+(!_packsMatch(u,q)?' ⚠ במשלוח '+q:'');
+  el.textContent=packsCount(packs)+' חבילות'+(ot?' '+outerIn(ot):'')+' · '+u+" יח'"+(!_packsMatch(u,q)?' ⚠ במשלוח '+q:'');
   el.style.color=!_packsMatch(u,q)?'var(--amber-txt)':'var(--green-txt,#16a34a)';
 }
 // ─── 🛍 אריזה חיצונית (23/10/2026) — שקים/קרטונים גדולים שהחבילות יוצאות בהם ───
@@ -11834,6 +11834,8 @@ function outerTxt(a){
   const m={};(Array.isArray(a)?a:[]).forEach(x=>{const n=+x.n||0;if(n>0)m[x.k]=(m[x.k]||0)+n;});
   return OUTER_KINDS.filter(k=>m[k[0]]).map(k=>m[k[0]]===1?k[1]+' אחד':m[k[0]]+' '+k[2]).join(' + ');
 }
+// "ב-3 שקים" אבל "בשק אחד" — מקף רק לפני מספר
+function outerIn(t){return /^\d/.test(t)?'ב-'+t:'ב'+t;}
 function shipOuterRowHtml(k,n){
   const inp='font-size:13px;padding:6px;border-radius:6px;border:1px solid var(--brd);background:var(--bg);color:var(--txt)';
   return `<div class="outer-row" style="display:flex;align-items:center;gap:5px;margin-bottom:5px">
@@ -16934,7 +16936,7 @@ table.pk th.ttl{background:#eef2ff;font-size:12px;text-align:center}
     ${ordered?(surplus?line('עודף מעל ההזמנה:',surplus+" יח'"):line('יתרה להשלמה:',balance+" יח'")):''}
     ${unsewn?line('לא תפור:',unsewn+" יח' (לא לחיוב)"):''}
     ${+sh?.orig?line('דגם מקורי:',(+sh.orig)+" יח' הוחזר"):''}
-    ${packCount?line('חבילות:',packCount+(outer?' ב-'+outer:'')):line('אריזה:',outer)}
+    ${packCount?line('חבילות:',packCount+(outer?' '+outerIn(outer):'')):line('אריזה:',outer)}
     ${line('סוג אריזה:',packModeName(sh&&sh.packMode))}
   </div>
 </div>
@@ -16966,7 +16968,7 @@ ${packs.length?`<table class="pk">
   </thead>
   <tbody>${packs.map(x=>`<tr><td class="c">${+x.n}</td><td class="c">${+x.per}</td><td class="n">${(+x.n)*(+x.per)}</td></tr>`).join('')}</tbody>
   <tfoot><tr><td class="c">${packCount} חבילות</td><td class="c">—</td><td class="n">${packUnits}</td></tr>
-    ${outer?`<tr><td colspan="3" class="c">🛍 ארוז ב-${esc(outer)}</td></tr>`:''}</tfoot>
+    ${outer?`<tr><td colspan="3" class="c">🛍 ארוז ${esc(outerIn(outer))}</td></tr>`:''}</tfoot>
 </table>
 ${packUnits!==total&&packUnits!==total+unsewn?`<div class="warn">⚠ סכום האריזה (${packUnits}) שונה מהכמות שיצאה במשלוח (${total}).</div>`:''}`:''}
 ${dnote?`<div class="note"><b>הערות:</b> ${esc(dnote)}</div>`:''}
