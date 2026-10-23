@@ -16765,13 +16765,14 @@ function renderPstkItems(){
   const custs=Object.keys(S.customerNames||{}).sort();
   const sl='font-size:12px;padding:5px;border-radius:6px;border:1px solid var(--brd);background:var(--bg);color:var(--txt)';
   const custSel=(v,on)=>`<select ${on} style="${sl};flex:1;min-width:0"><option value="">כל הלקוחות</option>${custs.map(c=>`<option value="${esc(c)}"${c===v?' selected':''}>${esc(S.customerNames[c])}</option>`).join('')}</select>`;
-  const unitSel=(v,on)=>`<select ${on} style="${sl}">${PSTK_UNITS.map(u=>`<option${u===v?' selected':''}>${esc(u)}</option>`).join('')}</select>`;
+  // 📐 שם בשורה מלאה משלו: ב-flex ליד <select> שדה השם נדחס לרוחב 0 (נצפה 23/10 — "הזן שם לפריט" בלי שדה גלוי)
+  const unitSel=(v,on)=>`<select ${on} style="${sl};flex:0 0 auto;width:90px">${PSTK_UNITS.map(u=>`<option${u===v?' selected':''}>${esc(u)}</option>`).join('')}</select>`;
   const list=pstkItems().filter(i=>i.dept===_pstkDept);
   box.innerHTML=list.map(i=>`<div style="border-bottom:1px solid var(--brd);padding:6px 0">
       <div style="display:flex;gap:5px;align-items:center">
-        <input value="${esc(i.name)}" onchange="pstkItemSet('${escj(i.id)}','name',this.value)" style="${sl};flex:1;min-width:0"/>
+        <input value="${esc(i.name)}" onchange="pstkItemSet('${escj(i.id)}','name',this.value)" style="${sl};flex:1 1 auto;min-width:120px;width:100%"/>
         ${unitSel(i.unit,`onchange="pstkItemSet('${escj(i.id)}','unit',this.value)"`)}
-        <button class="btn" style="font-size:11px;padding:3px 7px" onclick="pstkItemDel('${escj(i.id)}')">🗑</button>
+        <button class="btn" style="font-size:11px;padding:3px 7px;flex:0 0 auto" onclick="pstkItemDel('${escj(i.id)}')">🗑</button>
       </div>
       <div style="display:flex;gap:6px;align-items:center;margin-top:4px;font-size:12px">
         <label style="display:flex;align-items:center;gap:3px;white-space:nowrap;cursor:pointer"><input type="checkbox"${i.own?' checked':''} onchange="pstkItemSet('${escj(i.id)}','own',this.checked)" style="width:14px;height:14px;margin:0"/> 👤 הלקוח מספק</label>
@@ -16779,9 +16780,9 @@ function renderPstkItems(){
       </div>
     </div>`).join('')+`<div style="padding-top:8px">
       <div style="font-size:12px;font-weight:700;margin-bottom:4px">➕ פריט חדש</div>
-      <div style="display:flex;gap:5px;align-items:center">
-        <input id="pstk-ni-name" placeholder="שם — למשל תווית ראשית" style="${sl};flex:1;min-width:0"/>
-        ${unitSel("יח'",'id="pstk-ni-unit"')}
+      <input id="pstk-ni-name" placeholder="שם הפריט — למשל תווית ראשית" style="${sl};display:block;width:100%;box-sizing:border-box;font-size:13px;padding:7px"/>
+      <div style="display:flex;gap:5px;align-items:center;margin-top:4px;font-size:12px">
+        <span style="color:var(--txt3)">יחידה</span>${unitSel("יח'",'id="pstk-ni-unit"')}
       </div>
       <div style="display:flex;gap:6px;align-items:center;margin-top:4px;font-size:12px">
         <label style="display:flex;align-items:center;gap:3px;white-space:nowrap;cursor:pointer"><input id="pstk-ni-own" type="checkbox" checked style="width:14px;height:14px;margin:0"/> 👤 הלקוח מספק</label>
