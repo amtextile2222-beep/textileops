@@ -46,6 +46,12 @@ h2{font-size:14px;color:var(--txt2);margin:20px 0 8px}
 .pct b{display:block;height:100%;background:var(--blue)}
 .stage{font-size:12px;color:var(--txt2)}
 .msg{text-align:center;color:var(--txt3);padding:40px 10px;font-size:14px}
+/* 📦 מלאי חומר האריזה (23/10/2026): במסך רחב — עמודה צרה משמאל לצד ההזמנות (נשארת גלויה בגלילה);
+   בטלפון — למעלה, לפני ההזמנות. בלי מלאי הדף נשאר בעמודה אחת ברוחב הרגיל */
+.wrap.wide{max-width:1000px}
+.lay.has-stk{display:grid;grid-template-columns:minmax(0,1fr) 250px;gap:16px;align-items:start}
+.lay.has-stk aside{position:sticky;top:12px}
+@media (max-width:760px){.lay.has-stk{display:flex;flex-direction:column;gap:0}.lay.has-stk aside{order:-1;position:static}}
 footer{font-size:11px;color:var(--txt3);text-align:center;margin:20px 0 8px}
 footer button{background:none;border:0;color:var(--blue);font:inherit;cursor:pointer;text-decoration:underline;padding:0}
 .login{max-width:380px;margin:30px auto;text-align:center}
@@ -187,9 +193,11 @@ async function load(){
     const stkHtml=stk.length?`<h2>📦 חומר האריזה שלכם במפעל</h2><div class="card">${stk.map(s=>`<div class="top" style="padding:3px 0">
         <span>${esc(s.name)}</span><span><b style="${s.n<0||s.low?'color:#dc2626':''}">${Number(s.n)||0}</b>${s.low?' <span class="badge" style="background:#fee2e2;color:#dc2626">⚠ כדאי לשלוח עוד</span>':''}</span>
       </div>`).join('')}<div class="meta">מתעדכן אוטומטית עם כל משלוח שיוצא אליכם.</div></div>`:'';
-    appEl.innerHTML=(!d.orders.length?'<div class="msg">אין כרגע הזמנות פעילות.</div>':
+    appEl.closest('.wrap')?.classList.toggle('wide',!!stk.length);
+    appEl.innerHTML=`<div class="lay${stk.length?' has-stk':''}"><main>`+(!d.orders.length?'<div class="msg">אין כרגע הזמנות פעילות.</div>':
       (act.length?`<h2>🏭 בייצור (${act.length})</h2>`+act.map(card).join(''):'')+
-      (shp.length?`<h2>✅ נשלחו ב-30 הימים האחרונים (${shp.length})</h2>`+shp.map(card).join(''):''))+stkHtml;
+      (shp.length?`<h2>✅ נשלחו ב-30 הימים האחרונים (${shp.length})</h2>`+shp.map(card).join(''):''))+
+      `</main>${stk.length?'<aside>'+stkHtml+'</aside>':''}</div>`;
     const t=new Date(d.at);
     const upd=' · עודכן '+t.toLocaleString('he-IL',{day:'2-digit',month:'2-digit',hour:'2-digit',minute:'2-digit'});
     if(AS){ft.innerHTML='👁 תצוגת מנהל — כך הלקוח רואה את הדף'+upd;return;}
