@@ -245,7 +245,8 @@ async function checkVer(){
 }
 const tick=()=>{if(!document.hidden){load();checkVer();}};
 start();checkVer();
-setInterval(tick,5*60000);
+// כל דקה (23/10/2026, היה 5) — רק כשהדף על המסך; ההזמנות עצמן שמורות בשרת 3 דק', המלאי מחושב בכל פעם
+setInterval(tick,60000);
 document.addEventListener('visibilitychange',tick);
 </script>
 </body>

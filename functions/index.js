@@ -1730,8 +1730,15 @@ exports.customerTrack = functions.runWith({ memory: '1GB' }).https.onRequest(asy
       if (dst !== 'ok') { res.status(403).json({ error: dst }); return; } // pending | blocked
     }
     const t0 = Date.now();
-    const hit = _trackCache.get(cust);
-    if (hit && Date.now() - hit.at < 180000) { res.json(hit.body); return; }
+    // ⏱ (23/10/2026) המטמון של 3 דק' רק למצב ההזמנות (החלק הכבד). המלאי מחושב מחדש גם כשיש מטמון —
+    // מסמך אחד + המוצרים של הלקוח, והדף מרענן כל דקה ⇒ תיקון מלאי מגיע ללקוח תוך דקה.
+    // תצוגת המנהל (asCust) לא משתמשת במטמון בכלל — רואה תמיד את המצב העדכני.
+    const hit = asCust ? null : _trackCache.get(cust);
+    if (hit && Date.now() - hit.at < 180000) {
+      const [hp, hk] = await Promise.all([db.collection('products').where('cust', '==', cust).get(), db.doc('appSettings/packStock').get()]);
+      res.json({ ...hit.body, stock: trackPackStock(cust, hp.docs.map(d => ({ id: d.id, ...d.data() })), hk.data() || {}) });
+      return;
+    }
     const [pS, aS, nS, kS] = await Promise.all([
       db.collection('products').where('cust', '==', cust).get(),
       db.collection('activeTasks').where('cust', '==', cust).get(),
