@@ -16641,6 +16641,7 @@ async function pstkWrite(fn){
 // אחראי רושם קבלה בלבד; הוצאה, ספירה, מינימום ומחיקת תנועה — מנהל.
 function openPackStock(){
   if(!canPackStock())return;
+  _pstkEditId=null;
   document.getElementById('pstk-wrap')?.remove();
   const wrap=document.createElement('div');
   wrap.id='pstk-wrap';
@@ -16657,7 +16658,7 @@ function openPackStock(){
     <div style="font-size:11px;color:var(--txt3);margin-bottom:10px">כל חומר נספר מהרישום הראשון שלו (רצוי ספירה). מאותו רגע כל תעודה מורידה ממנו לבד: חומר שסומן "👤 של הלקוח" יורד ממלאי הלקוח, ושאר החומר יורד ממלאי המפעל.</div>
     <div id="pstk-bal"></div>
     <div style="margin-top:12px;border:1px solid var(--brd);border-radius:10px;padding:10px">
-      <div style="font-size:13px;font-weight:700;margin-bottom:7px">➕ רישום תנועה</div>
+      <div id="pstk-ftl" style="font-size:13px;font-weight:700;margin-bottom:7px">➕ רישום תנועה</div>
       <div style="display:grid;grid-template-columns:1fr 1fr;gap:6px">
         <select id="pstk-pool" style="${inp}"><option value="${PSTK_F}">🏭 המפעל (קנינו)</option>${custs.map(c=>`<option value="${esc(c)}">👤 ${esc(S.customerNames[c])} (${esc(c)})</option>`).join('')}</select>
         <select id="pstk-k" style="${inp}">${PACK_MATS.map(m=>`<option value="${m.k}">${esc(m.name)}</option>`).join('')}</select>
@@ -16665,7 +16666,10 @@ function openPackStock(){
         <input id="pstk-n" type="number" inputmode="numeric" min="0" placeholder="כמות" style="${inp}"/>
       </div>
       <input id="pstk-note" type="text" maxlength="80" placeholder="הערה (לא חובה) — ספק, מספר תעודה של הלקוח…" style="${inp};width:100%;margin-top:6px"/>
-      <button class="btn primary" style="width:100%;margin-top:8px;font-size:14px" onclick="pstkAdd()">💾 רשום</button>
+      <div style="display:flex;gap:6px;margin-top:8px">
+        <button id="pstk-save" class="btn primary" style="flex:1;font-size:14px" onclick="pstkAdd()">💾 רשום</button>
+        <button id="pstk-cancel" class="btn" style="font-size:14px;display:none" onclick="pstkEditReset()">ביטול תיקון</button>
+      </div>
     </div>
     <div style="font-size:13px;font-weight:700;margin:12px 0 5px">🕘 תנועות אחרונות</div>
     <div id="pstk-moves"></div>
@@ -16692,9 +16696,40 @@ function renderPackStock(){
   const moves=(st.moves||[]).slice().sort((a,b)=>b.at-a.at).slice(0,30);
   const fmt=t=>{const d=new Date(+t);return pad2(d.getDate())+'/'+pad2(d.getMonth()+1)+' '+pad2(d.getHours())+':'+pad2(d.getMinutes());};
   mv.innerHTML=moves.length?moves.map(m=>`<div style="display:flex;align-items:center;gap:6px;font-size:12px;padding:5px 2px;border-bottom:1px solid var(--brd)">
-      <span style="flex:1">${fmt(m.at)} · ${PSTK_T[m.t]||m.t} <b dir="ltr" style="unicode-bidi:isolate">${m.t==='out'?'−':m.t==='in'?'+':''}${+m.n||0}</b> ${esc(packMatName(m.k))} · ${esc(pstkPoolName(m.pool))}${m.note?' · '+esc(m.note):''}<span style="color:var(--txt3)"> · ${esc(m.byName||'')}</span></span>
+      <span style="flex:1">${fmt(m.at)} · ${PSTK_T[m.t]||m.t} <b dir="ltr" style="unicode-bidi:isolate">${m.t==='out'?'−':m.t==='in'?'+':''}${+m.n||0}</b> ${esc(packMatName(m.k))} · ${esc(pstkPoolName(m.pool))}${m.note?' · '+esc(m.note):''}<span style="color:var(--txt3)"> · ${esc(m.byName||'')}</span>${pstkEditTip(m)}</span>
+      ${pstkCanEdit(m)?`<button class="btn" style="font-size:11px;padding:3px 7px" title="תיקון" onclick="pstkStartEdit('${escj(m.id)}')">✏️</button>`:''}
       ${mgr?`<button class="btn" style="font-size:11px;padding:3px 7px" onclick="pstkDel('${escj(m.id)}')">🗑</button>`:''}
     </div>`).join(''):'<div style="font-size:12px;color:var(--txt3)">עדיין לא נרשמה שום תנועה. התחל בספירה של מה שיש היום במלאי.</div>';
+}
+// ✏️ תיקון תנועה: מנהל — כל תנועה; אחראי — רק קבלה שהוא עצמו רשם היום (טעות הקלדה מיידית).
+// הזמן (at) לא משתנה ⇒ התנועה נשארת במקומה ביחס לתעודות. edits = יומן תיקונים (מה היה, מי תיקן)
+let _pstkEditId=null;
+function pstkCanEdit(m){
+  if(S.user?.role==='manager')return true;
+  return S.user?.role==='supervisor'&&m.t==='in'&&m.by===S.user?.id&&new Date(+m.at).toDateString()===new Date().toDateString();
+}
+function pstkEditTip(m){
+  const e=Array.isArray(m.edits)?m.edits:[];if(!e.length)return '';
+  const l=e[e.length-1];
+  return ` <span title="${esc('תוקן'+(e.length>1?' '+e.length+' פעמים':'')+' · היה '+(+l.n||0)+' '+packMatName(l.k)+(l.byName?' · '+l.byName:''))}" style="color:var(--amber-txt)">✏️</span>`;
+}
+function pstkStartEdit(id){
+  const m=((S.packStock||{}).moves||[]).find(x=>x.id===id);
+  if(!m||!pstkCanEdit(m))return;
+  _pstkEditId=id;
+  const set=(i,v)=>{const el=document.getElementById(i);if(el)el.value=v;};
+  set('pstk-pool',m.pool);set('pstk-k',m.k);set('pstk-t',m.t);set('pstk-n',+m.n||0);set('pstk-note',m.note||'');
+  document.getElementById('pstk-ftl').textContent='✏️ תיקון תנועה מ-'+new Date(+m.at).toLocaleDateString('he-IL',{day:'2-digit',month:'2-digit'});
+  document.getElementById('pstk-save').textContent='💾 שמור תיקון';
+  document.getElementById('pstk-cancel').style.display='';
+  document.getElementById('pstk-n')?.focus();
+}
+function pstkEditReset(){
+  _pstkEditId=null;
+  const ftl=document.getElementById('pstk-ftl');if(ftl)ftl.textContent='➕ רישום תנועה';
+  const sv=document.getElementById('pstk-save');if(sv)sv.textContent='💾 רשום';
+  const cn=document.getElementById('pstk-cancel');if(cn)cn.style.display='none';
+  ['pstk-n','pstk-note'].forEach(i=>{const el=document.getElementById(i);if(el)el.value='';});
 }
 async function pstkAdd(){
   const pool=document.getElementById('pstk-pool')?.value||PSTK_F,k=document.getElementById('pstk-k')?.value,t=document.getElementById('pstk-t')?.value||'in';
@@ -16702,6 +16737,20 @@ async function pstkAdd(){
   if(t!=='in'&&S.user?.role!=='manager')return;
   if(!n&&t!=='count'){alert('הזן כמות');return;}
   const before=pstkCalc();
+  if(_pstkEditId){
+    const id=_pstkEditId,old=((S.packStock||{}).moves||[]).find(x=>x.id===id);
+    if(!old||!pstkCanEdit(old)){pstkEditReset();return;}
+    const ed={at:Date.now(),by:S.user?.id||'',byName:S.user?.name||'',pool:old.pool,k:old.k,t:old.t,n:+old.n||0};
+    if(!await pstkWrite(d=>({...d,moves:d.moves.map(m=>{
+      if(m.id!==id)return m;
+      const x={...m,pool,k,t,n,edits:(Array.isArray(m.edits)?m.edits:[]).concat([ed]).slice(-10)};
+      if(note)x.note=note;else delete x.note;
+      return x;})})))return;
+    pstkEditReset();
+    showToast('✅ התנועה תוקנה · '+(+old.n||0)+' ← '+n+' '+packMatName(k));
+    renderPackStock();pstkAlert(before);
+    return;
+  }
   const mv={id:Date.now().toString(36)+Math.random().toString(36).slice(2,6),at:Date.now(),pool,k,t,n,
     ...(note?{note}:{}),by:S.user?.id||'',byName:S.user?.name||''};
   if(!await pstkWrite(d=>({...d,moves:d.moves.concat([mv])})))return;
@@ -16712,7 +16761,7 @@ async function pstkAdd(){
 async function pstkDel(id){
   if(S.user?.role!=='manager')return;
   if(!await showConfirm('מחיקת תנועה','למחוק את התנועה? היתרה תחושב מחדש.','מחק','ביטול'))return;
-  if(await pstkWrite(d=>({...d,moves:d.moves.filter(m=>m.id!==id)})))renderPackStock();
+  if(await pstkWrite(d=>({...d,moves:d.moves.filter(m=>m.id!==id)}))){if(_pstkEditId===id)pstkEditReset();renderPackStock();}
 }
 async function pstkSetMin(key,v){
   if(S.user?.role!=='manager')return;
