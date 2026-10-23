@@ -1335,6 +1335,7 @@ code{background:var(--bg2);border:0.5px solid var(--b);border-radius:4px;padding
     <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:12px;flex-wrap:wrap;gap:8px">
       <div style="font-size:16px;font-weight:700">👗 מוצרים ודגמים</div>
       <div style="display:flex;gap:8px;flex-wrap:wrap">
+        <button class="btn pstk-btn" onclick="openPackStock()" style="font-size:12px;display:none">📦 מלאי אריזה</button>
         <button class="btn" onclick="openRaumaOCR()" style="font-size:12px">📄 קרא תעודה</button>
         <button class="btn primary" onclick="openProductModal()">+ הוסף מוצר</button>
       </div>
@@ -1361,6 +1362,7 @@ code{background:var(--bg2);border:0.5px solid var(--b);border-radius:4px;padding
       <button class="btn" style="font-size:12px" onclick="dnClearFilter()">נקה</button>
       <button class="btn" style="font-size:12px" onclick="openProformaList()">🧾 חשבוניות עסקה</button>
       <button class="btn" style="font-size:12px" onclick="openChecksReport()">💳 שיקים</button>
+      <button class="btn pstk-btn" style="font-size:12px;display:none" onclick="openPackStock()">📦 מלאי אריזה</button>
       <button class="btn" style="font-size:12px" title="סמן את התעודות המסומנות ☑ כמחויבות בחשבונית ידנית מהפנקס" onclick="dnManualInvoice()">📒 חשבונית ידנית</button>
       <button class="btn primary" style="font-size:12px" id="dn-print-btn" onclick="dnPrintDialog()">🖨 הדפסה…</button>
     </div>
@@ -4238,6 +4240,7 @@ function listenFb(){
       if(d.id==='customerInfo'){S.customerInfo=data;saveLS();}
       if(d.id==='company'){S.settings.company={...(S.settings.company||{}),...data};saveLS();}
       if(d.id==='packPrices'){S.settings.packPrices={...(S.settings.packPrices||{}),...data};saveLS();}
+      if(d.id==='packStock'){S.packStock=data;try{pstkBadge();if(document.getElementById('pstk-wrap'))renderPackStock();}catch(e){}}
       // 🕳 יומן הביטולים משותף לכל המכשירים — מי שמחק תעודה בנייד, והמנהל
       // שמסתכל במסך הגדול, חייבים לראות את אותו חור עם אותו הסבר.
       if(d.id==='deliveryVoids'){S.settings.dnVoids=Array.isArray(data.list)?data.list:[];saveLS();
@@ -11888,7 +11891,7 @@ function shipMatRowsHtml(cust){
   const hid=canSeePackPrice()?'':'display:none;';
   return PACK_MATS.map(m=>{
     const pr=packPrice(m.k),own=cust?custMatOwn(cust,m.k):false;
-    return `<div class="mat-row" data-k="${m.k}" style="margin-bottom:7px">
+    return `<div class="mat-row" data-k="${m.k}" data-cust="${esc(cust||'')}" style="margin-bottom:7px">
       <div style="display:flex;align-items:center;gap:6px">
         <span style="font-size:12px;font-weight:600;min-width:76px">${esc(m.name)}</span>
         <input class="mat-n" type="number" inputmode="numeric" min="0" value="" data-auto="${m.autoQty?'1':'0'}"
@@ -11897,7 +11900,7 @@ function shipMatRowsHtml(cust){
         <span class="mat-eq" style="${hid}font-size:12px;font-weight:800;min-width:58px;text-align:left;color:var(--txt3)">—</span>
       </div>
       <div style="display:flex;align-items:center;gap:8px;font-size:10px;color:var(--txt3);margin-right:82px;margin-top:1px">
-        <span style="flex:1">${esc(m.hint)}</span>
+        <span style="flex:1">${esc(m.hint)}<span class="mat-stk" style="display:block;font-weight:700"></span></span>
         <label style="display:flex;align-items:center;gap:3px;font-size:11px;font-weight:600;color:var(--txt2,var(--txt));white-space:nowrap;cursor:pointer"><input type="checkbox" class="mat-own"${own?' checked':''} onchange="shipMatTotal()" style="width:14px;height:14px;margin:0"/> 👤 של הלקוח</label>
       </div>
     </div>`;
@@ -11918,8 +11921,14 @@ function _shipMatsCollect(){
   }).filter(x=>x.n>0);
 }
 function shipMatTotal(){
+  let bal={};try{bal=pstkCalc();}catch(e){}
   document.querySelectorAll('.mat-row').forEach(r=>{
     const own=!!r.querySelector('.mat-own')?.checked;
+    // 📦 יתרת המלאי הרלוונטי (הלקוח / המפעל) ומה יישאר אחרי המשלוח — רק לחומר שנספר
+    const sk=r.querySelector('.mat-stk'),key=(own?r.dataset.cust:PSTK_F)+'|'+r.dataset.k;
+    if(sk){const nn=Math.max(0,parseInt(r.querySelector('.mat-n')?.value)||0);
+      if(key in bal){const left=bal[key]-nn;sk.textContent='📦 במלאי '+(own?'הלקוח':'המפעל')+': '+bal[key]+(nn?' ← יישארו '+left:'');sk.style.color=left<0?'var(--red-txt)':'var(--txt3)';}
+      else sk.textContent='';}
     const n=Math.max(0,parseInt(r.querySelector('.mat-n')?.value)||0),pr=own?0:packPrice(r.dataset.k);
     const eq=r.querySelector('.mat-eq'),ps=r.querySelector('.mat-pr');
     if(ps){ps.textContent=own?'של הלקוח':'× '+(pr?dnMoney(pr):'אין מחיר');ps.style.color=own||pr?'var(--txt3)':'var(--amber-txt)';}
@@ -12860,6 +12869,7 @@ async function confirmShip(){
   // לפי id ייחודי מהבורר — לא לפי לקוח+מוצר, שעמום כשיש כמה הזמנות לאותו דגם
   const p=S.products.find(x=>x.id===document.getElementById('ship-prod-sel')?.value);
   if(!p){closeShipModal();return;}
+  const _stk=pstkCalc(); // 📦 היתרות לפני המשלוח — להתראת מלאי נמוך
   const rows=_shipRowsCollect();
   const qty=_shipQtySum();
   const packs=_shipPacksCollect();
@@ -12924,6 +12934,7 @@ async function confirmShip(){
   S.settings.dnAutoPrint=autoPrint;
   saveLS();
   if(S.fbConnected)try{await fbSet('products',p.id,{...p});}catch(e){}
+  pstkAlert(_stk);
   closeShipModal();
   showToast((rs?.restore?'♻ תעודה '+String(no).padStart(4,'0')+' שוחזרה':rs?.past?'📅 משלוח מ-'+date.slice(8,10)+'/'+date.slice(5,7)+(no?' · תעודה '+String(no).padStart(4,'0'):' · בלי מספר'):'✅ תעודת משלוח '+String(no||0).padStart(4,'0'))+' · '+qty+" יח'"+(list.length>1?' (משלוח '+list.length+')':''));
   try{renderDNotes();}catch(e){}
@@ -16289,12 +16300,14 @@ async function saveShipMats(pid,idx){
   const list=prodShipments(p).map(x=>({...x}));
   if(!list[idx]){document.getElementById('esm-wrap')?.remove();return;}
   const mats=_esmCollect();
+  const _stk=pstkCalc();
   list[idx].mats=mats;
   list[idx].packMode=packModeOf(mats);
   p.shipments=list;
   saveLS();
   // fbReplaceFields ולא merge — merge לא מוחק פריט שהוסר מהמערך
   if(S.fbConnected)try{await fbReplaceFields('products',p.id,{shipments:list});}catch(e){}
+  pstkAlert(_stk);
   document.getElementById('esm-wrap')?.remove();
   showToast(mats.length?'✅ האריזה עודכנה'+(canSeePackPrice()?' · '+dnMoney(mats.reduce((t,m)=>t+m.n*m.price,0)):''):'✅ האריזה נוקתה');
   try{renderProducts();}catch(e){}
@@ -16562,6 +16575,149 @@ function packPrice(k){return +((S.settings?.packPrices||{})[k])||0;}
 // ידנית בכל משלוח ממילא, ועדכון מחירון לא אמור לשכתב תעודה שכבר נמסרה ללקוח.
 function shipMats(s){return (Array.isArray(s?.mats)?s.mats:[]).filter(m=>m&&(+m.n||0)>0);}
 function shipPackCost(s){return shipMats(s).reduce((t,m)=>t+(m.own?0:(+m.n||0)*(+m.price||0)),0);}
+// ─── 📦 מלאי חומר אריזה (23/10/2026) ──────────────────────────
+// appSettings/packStock = {moves:[{id,at,pool,k,t,n,note,by,byName}], min:{'pool|k':n}}.
+// pool = 'F' (המפעל קנה) או קוד לקוח (חומר שהלקוח סיפק). t: in=קבלה · out=הוצאה ידנית · count=ספירה.
+// 🔑 היתרה **מחושבת ולא נשמרת**: תנועות פחות החומר שבתעודות (own ⇒ מלאי הלקוח, אחרת המפעל),
+// רק מהתנועה הראשונה של אותו מלאי+חומר ואילך ⇒ עריכה/מחיקה של תעודה מתקנת את המלאי לבד.
+// appSettings פתוח לכתיבה לכל מחובר — ההרשאה (מנהל/אחראי) נאכפת במסך בלבד.
+const PSTK_F='F';
+const PSTK_T={in:'📥 קבלה',out:'📤 הוצאה',count:'🔢 ספירה'};
+function canPackStock(){return ['manager','supervisor'].includes(S.user?.role);}
+function _shipMs(s){const t=Date.parse(s?.at||'');return isNaN(t)?(Date.parse((s?.date||'')+'T12:00:00')||0):t;}
+function pstkPoolName(pool){return pool===PSTK_F?'🏭 המפעל':'👤 '+(S.customerNames?.[pool]||('לקוח '+pool));}
+function pstkCalc(){
+  const moves=((S.packStock||{}).moves||[]).filter(m=>m&&m.pool&&m.k);
+  const start={};moves.forEach(m=>{const key=m.pool+'|'+m.k;if(start[key]==null||m.at<start[key])start[key]=+m.at||0;});
+  const ev=moves.map(m=>({at:+m.at||0,key:m.pool+'|'+m.k,t:m.t,n:+m.n||0}));
+  (S.products||[]).forEach(p=>prodShipments(p).forEach(s=>{const at=_shipMs(s);
+    shipMats(s).forEach(m=>{const key=(m.own?p.cust:PSTK_F)+'|'+m.k;
+      if(start[key]!=null&&at>=start[key])ev.push({at,key,t:'use',n:+m.n||0});});}));
+  // באותו רגע — התנועה הידנית קודם (ספירה שנרשמה לפני היציאה)
+  ev.sort((a,b)=>a.at-b.at||(a.t==='use')-(b.t==='use'));
+  const bal={};
+  ev.forEach(e=>{if(e.t==='count')bal[e.key]=e.n;else bal[e.key]=(bal[e.key]||0)+(e.t==='in'?e.n:-e.n);});
+  return bal;
+}
+function pstkLowKeys(bal){
+  const min=(S.packStock||{}).min||{};
+  return Object.keys(min).filter(k=>(+min[k]||0)>0&&k in bal&&bal[k]<+min[k]);
+}
+// 🔔 נקרא אחרי פעולה שמזיזה מלאי (תעודה / תנועה) עם היתרות שלפניה: מתריע רק על מי
+// **שירד עכשיו** מתחת למינימום — המכשיר שביצע את הפעולה שולח, ולכן אין כפילויות.
+function pstkAlert(before){
+  try{
+    const after=pstkCalc(),min=(S.packStock||{}).min||{};
+    const fresh=pstkLowKeys(after).filter(k=>!(k in (before||{}))||before[k]>=+min[k]);
+    pstkBadge();
+    if(!fresh.length)return;
+    const lines=fresh.map(k=>{const[pool,mk]=k.split('|');return '• '+packMatName(mk)+' — '+pstkPoolName(pool)+': נשארו '+after[k]+' (מינימום '+min[k]+')';});
+    showToast('⚠ מלאי אריזה נמוך: '+fresh.map(k=>packMatName(k.split('|')[1])).join(', '),'var(--amber-txt)',6000);
+    sendTelegram('📦 מלאי חומר אריזה נמוך\n'+lines.join('\n'));
+  }catch(e){}
+}
+function pstkBadge(){
+  let low=0;try{low=pstkLowKeys(pstkCalc()).length;}catch(e){}
+  document.querySelectorAll('.pstk-btn').forEach(b=>{
+    b.style.display=canPackStock()?'':'none';
+    b.textContent='📦 מלאי אריזה'+(low?' ⚠ '+low:'');
+    b.style.color=low?'var(--amber-txt)':'';
+  });
+}
+async function pstkWrite(fn){
+  if(!S.fbConnected||!db){alert('אין חיבור לשרת — המלאי משותף לכל המכשירים ונרשם רק כשיש חיבור');return false;}
+  const{doc,runTransaction}=window._fb;const ref=doc(db,'appSettings','packStock');
+  try{
+    await _pw(runTransaction(db,async tx=>{
+      const sn=await tx.get(ref);const d=sn.exists()?sn.data():{};
+      const nd=fn({moves:Array.isArray(d.moves)?d.moves.slice():[],min:{...(d.min||{})}});
+      tx.set(ref,nd);S.packStock=nd;
+    }));
+    return true;
+  }catch(e){alert('השמירה נכשלה: '+(e?.message||e));return false;}
+}
+// חלון המלאי — יתרות לפי מלאי (המפעל / כל לקוח) + רישום תנועה + 30 התנועות האחרונות.
+// אחראי רושם קבלה בלבד; הוצאה, ספירה, מינימום ומחיקת תנועה — מנהל.
+function openPackStock(){
+  if(!canPackStock())return;
+  document.getElementById('pstk-wrap')?.remove();
+  const wrap=document.createElement('div');
+  wrap.id='pstk-wrap';
+  wrap.style.cssText='position:fixed;inset:0;background:rgba(0,0,0,.5);display:flex;align-items:flex-start;justify-content:center;z-index:9999;padding:16px;overflow-y:auto;overscroll-behavior:contain;-webkit-overflow-scrolling:touch';
+  wrap.onclick=e=>{if(e.target===wrap)wrap.remove();};
+  const inp='font-size:13px;padding:7px;border-radius:8px;border:1px solid var(--brd);background:var(--bg);color:var(--txt)';
+  const mgr=S.user?.role==='manager';
+  const custs=Object.keys(S.customerNames||{}).sort();
+  wrap.innerHTML=`<div style="background:var(--card);border-radius:14px;padding:20px;max-width:520px;width:100%;box-shadow:0 10px 40px rgba(0,0,0,.3);margin:auto">
+    <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:4px">
+      <div style="font-size:16px;font-weight:800">📦 מלאי חומר אריזה</div>
+      <button class="btn" style="font-size:12px;padding:4px 10px" onclick="document.getElementById('pstk-wrap')?.remove()">✕</button>
+    </div>
+    <div style="font-size:11px;color:var(--txt3);margin-bottom:10px">כל חומר נספר מהרישום הראשון שלו (רצוי ספירה). מאותו רגע כל תעודה מורידה ממנו לבד: חומר שסומן "👤 של הלקוח" יורד ממלאי הלקוח, ושאר החומר יורד ממלאי המפעל.</div>
+    <div id="pstk-bal"></div>
+    <div style="margin-top:12px;border:1px solid var(--brd);border-radius:10px;padding:10px">
+      <div style="font-size:13px;font-weight:700;margin-bottom:7px">➕ רישום תנועה</div>
+      <div style="display:grid;grid-template-columns:1fr 1fr;gap:6px">
+        <select id="pstk-pool" style="${inp}"><option value="${PSTK_F}">🏭 המפעל (קנינו)</option>${custs.map(c=>`<option value="${esc(c)}">👤 ${esc(S.customerNames[c])} (${esc(c)})</option>`).join('')}</select>
+        <select id="pstk-k" style="${inp}">${PACK_MATS.map(m=>`<option value="${m.k}">${esc(m.name)}</option>`).join('')}</select>
+        <select id="pstk-t" style="${inp}">${Object.entries(PSTK_T).filter(([t])=>mgr||t==='in').map(([t,l])=>`<option value="${t}">${l}${t==='count'?' — כמה יש בפועל':''}</option>`).join('')}</select>
+        <input id="pstk-n" type="number" inputmode="numeric" min="0" placeholder="כמות" style="${inp}"/>
+      </div>
+      <input id="pstk-note" type="text" maxlength="80" placeholder="הערה (לא חובה) — ספק, מספר תעודה של הלקוח…" style="${inp};width:100%;margin-top:6px"/>
+      <button class="btn primary" style="width:100%;margin-top:8px;font-size:14px" onclick="pstkAdd()">💾 רשום</button>
+    </div>
+    <div style="font-size:13px;font-weight:700;margin:12px 0 5px">🕘 תנועות אחרונות</div>
+    <div id="pstk-moves"></div>
+  </div>`;
+  document.body.appendChild(wrap);
+  renderPackStock();
+}
+function renderPackStock(){
+  const box=document.getElementById('pstk-bal'),mv=document.getElementById('pstk-moves');
+  if(!box||!mv)return;
+  const mgr=S.user?.role==='manager',st=S.packStock||{},min=st.min||{},bal=pstkCalc();
+  const pools=[PSTK_F,...new Set([...(st.moves||[]).map(m=>m.pool),...Object.keys(min).map(k=>k.split('|')[0])].filter(p=>p&&p!==PSTK_F))];
+  box.innerHTML=pools.map(pool=>`<div style="border:1px solid var(--brd);border-radius:10px;margin-bottom:8px;overflow:hidden">
+    <div style="font-size:13px;font-weight:700;padding:6px 10px;background:var(--bg)">${esc(pstkPoolName(pool))}</div>
+    ${PACK_MATS.map(m=>{const key=pool+'|'+m.k,has=key in bal,b=bal[key],mn=+min[key]||0,low=has&&mn>0&&b<mn;
+      return `<div style="display:flex;align-items:center;gap:8px;padding:6px 10px;border-top:1px solid var(--brd);font-size:13px${low?';background:var(--red-bg,#fee2e2)':''}">
+        <span style="flex:1">${esc(m.name)}</span>
+        <b style="min-width:70px;text-align:center;color:${!has?'var(--txt3)':b<0||low?'var(--red-txt)':'var(--txt)'}">${has?b:'לא נספר'}</b>
+        <span style="font-size:11px;color:var(--txt3)">מינימום</span>
+        ${mgr?`<input type="number" min="0" value="${mn||''}" placeholder="—" onchange="pstkSetMin('${escj(key)}',this.value)" style="width:64px;font-size:12px;padding:4px;border-radius:6px;border:1px solid var(--brd);background:var(--bg);color:var(--txt)"/>`
+          :`<span style="width:40px;text-align:center;font-size:12px">${mn||'—'}</span>`}
+      </div>`;}).join('')}
+  </div>`).join('');
+  const moves=(st.moves||[]).slice().sort((a,b)=>b.at-a.at).slice(0,30);
+  const fmt=t=>{const d=new Date(+t);return pad2(d.getDate())+'/'+pad2(d.getMonth()+1)+' '+pad2(d.getHours())+':'+pad2(d.getMinutes());};
+  mv.innerHTML=moves.length?moves.map(m=>`<div style="display:flex;align-items:center;gap:6px;font-size:12px;padding:5px 2px;border-bottom:1px solid var(--brd)">
+      <span style="flex:1">${fmt(m.at)} · ${PSTK_T[m.t]||m.t} <b dir="ltr" style="unicode-bidi:isolate">${m.t==='out'?'−':m.t==='in'?'+':''}${+m.n||0}</b> ${esc(packMatName(m.k))} · ${esc(pstkPoolName(m.pool))}${m.note?' · '+esc(m.note):''}<span style="color:var(--txt3)"> · ${esc(m.byName||'')}</span></span>
+      ${mgr?`<button class="btn" style="font-size:11px;padding:3px 7px" onclick="pstkDel('${escj(m.id)}')">🗑</button>`:''}
+    </div>`).join(''):'<div style="font-size:12px;color:var(--txt3)">עדיין לא נרשמה שום תנועה. התחל בספירה של מה שיש היום במלאי.</div>';
+}
+async function pstkAdd(){
+  const pool=document.getElementById('pstk-pool')?.value||PSTK_F,k=document.getElementById('pstk-k')?.value,t=document.getElementById('pstk-t')?.value||'in';
+  const n=Math.max(0,parseInt(document.getElementById('pstk-n')?.value)||0),note=(document.getElementById('pstk-note')?.value||'').trim();
+  if(t!=='in'&&S.user?.role!=='manager')return;
+  if(!n&&t!=='count'){alert('הזן כמות');return;}
+  const before=pstkCalc();
+  const mv={id:Date.now().toString(36)+Math.random().toString(36).slice(2,6),at:Date.now(),pool,k,t,n,
+    ...(note?{note}:{}),by:S.user?.id||'',byName:S.user?.name||''};
+  if(!await pstkWrite(d=>({...d,moves:d.moves.concat([mv])})))return;
+  document.getElementById('pstk-n').value='';document.getElementById('pstk-note').value='';
+  showToast('✅ '+PSTK_T[t]+' · '+n+' '+packMatName(k)+' · '+pstkPoolName(pool));
+  renderPackStock();pstkAlert(before);
+}
+async function pstkDel(id){
+  if(S.user?.role!=='manager')return;
+  if(!await showConfirm('מחיקת תנועה','למחוק את התנועה? היתרה תחושב מחדש.','מחק','ביטול'))return;
+  if(await pstkWrite(d=>({...d,moves:d.moves.filter(m=>m.id!==id)})))renderPackStock();
+}
+async function pstkSetMin(key,v){
+  if(S.user?.role!=='manager')return;
+  const n=Math.max(0,parseInt(v)||0);
+  if(await pstkWrite(d=>{const min={...d.min};if(n)min[key]=n;else delete min[key];return {...d,min};})){renderPackStock();pstkBadge();}
+}
 // ─── 🧾 התחשבנות עם לקוח ──────────────────────────────────────
 // מחיר העבודה ליחידה כפי שהוא רשום בכרטיס המוצר **היום**. ⚠ המחיר לא נצרב על
 // רשומת המשלוח (`p.shipments[]` מחזיק no/date/rows/total בלבד) ⇒ עדכון מחיר לדגם
@@ -17366,6 +17522,7 @@ function bcExportNiimbot(){
   URL.revokeObjectURL(url);
 }
 function renderProducts(){
+  try{pstkBadge();}catch(e){}
   const q=(document.getElementById('prod-search')?.value||'').trim().toLowerCase();
   const list=S.products.filter(p=>!q||p.prod.includes(q)||p.cust.includes(q)||(p.name||'').toLowerCase().includes(q));
   const el=document.getElementById('products-list');
