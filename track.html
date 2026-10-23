@@ -190,9 +190,14 @@ async function load(){
     const act=d.orders.filter(o=>o.stage<STAGES.length-1),shp=d.orders.filter(o=>o.stage===STAGES.length-1);
     // 📦 חומר האריזה שהלקוח סיפק ונמצא במפעל (23/10/2026) — רק חומר שהמפעל סופר; שרת ישן = אין stock
     const stk=Array.isArray(d.stock)?d.stock:[];
-    const stkHtml=stk.length?`<h2>📦 חומר האריזה שלכם במפעל</h2><div class="card">${stk.map(s=>`<div class="top" style="padding:3px 0">
-        <span>${esc(s.name)}</span><span><b style="${s.n<0||s.low?'color:#dc2626':''}">${Number(s.n)||0}</b>${s.low?' <span class="badge" style="background:#fee2e2;color:#dc2626">⚠ כדאי לשלוח עוד</span>':''}</span>
-      </div>`).join('')}<div class="meta">מתעדכן אוטומטית עם כל משלוח שיוצא אליכם.</div></div>`:'';
+    // 🧵 (23/10/2026) גם פריטי גזירה/תפירה (תוויות, פלזלין…) — מקובצים לפי מחלקה, עם יחידה (מטר/גליל…)
+    const DEPT={cut:'✂️ גזירה',sew:'🧵 תפירה',pack:'📦 אריזה'},multi=new Set(stk.map(s=>s.dept||'pack')).size>1;
+    const stkRow=s=>`<div class="top" style="padding:3px 0">
+        <span>${esc(s.name)}</span><span><b style="${s.n<0||s.low?'color:#dc2626':''}">${Number(s.n)||0}</b>${s.unit&&s.unit!=="יח'"?' <span class="meta" style="display:inline">'+esc(s.unit)+'</span>':''}${s.low?' <span class="badge" style="background:#fee2e2;color:#dc2626">⚠ כדאי לשלוח עוד</span>':''}</span>
+      </div>`;
+    const stkHtml=stk.length?`<h2>📦 החומרים שלכם במפעל</h2><div class="card">${multi
+        ?Object.keys(DEPT).map(d=>{const l=stk.filter(s=>(s.dept||'pack')===d);return l.length?`<div class="meta" style="font-weight:700;margin-top:6px">${DEPT[d]}</div>`+l.map(stkRow).join(''):'';}).join('')
+        :stk.map(stkRow).join('')}<div class="meta">מתעדכן אוטומטית עם כל משלוח שיוצא אליכם.</div></div>`:'';
     appEl.closest('.wrap')?.classList.toggle('wide',!!stk.length);
     appEl.innerHTML=`<div class="lay${stk.length?' has-stk':''}"><main>`+(!d.orders.length?'<div class="msg">אין כרגע הזמנות פעילות.</div>':
       (act.length?`<h2>🏭 בייצור (${act.length})</h2>`+act.map(card).join(''):'')+

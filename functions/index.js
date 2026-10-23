@@ -1469,30 +1469,39 @@ function trackShipInfo(p, qty) {
   const departed = shipped && !partial && (shL.length ? depU >= outU : (!!p.departedAt || String(trackDnDate(p) || '9999') < TRACK_DEPART_FROM));
   return { shipped, partial, departed, outU, depU };
 }
-// 📦 מלאי חומר האריזה שהלקוח סיפק (23/10/2026) — ⚠️ העתק של pstkCalc ב-index.html, רק למלאי של הלקוח הזה:
-// תנועות appSettings/packStock (in/out/count) פחות חומר "של הלקוח" (own) בתעודות, מהתנועה הראשונה של כל חומר ואילך.
-// מחזיר רק חומר שנספר: [{k, name, n, low}]. low = מתחת למינימום שהמנהל קבע (בלי לחשוף את המינימום).
+// 📦 מלאי החומרים שהלקוח סיפק (23/10/2026) — ⚠️ העתק של pstkCalc ב-index.html, רק למלאי של הלקוח הזה:
+// תנועות appSettings/packStock (in/out/count) פחות מה שיצא בתעודות, מהתנועה הראשונה של כל חומר ואילך:
+// חומר אריזה מובנה — mats עם own; פריט שהלקוח מספק (items[].own) — p.cons × יחידות התעודה.
+// מחזיר רק חומר שנספר: [{k, name, unit, dept, n, low}]. low = מתחת למינימום (בלי לחשוף את המינימום).
 const TRACK_MATS = [['hanger', 'קולבים'], ['nylon', 'ניילון'], ['cello', 'ניילון צלופן']];
 function trackPackStock(cust, prods, ps) {
   const moves = (Array.isArray(ps.moves) ? ps.moves : []).filter(m => m && m.pool === cust && m.k);
   if (!moves.length) return [];
+  const own = new Map((Array.isArray(ps.items) ? ps.items : []).filter(i => i && i.own && (!i.cust || i.cust === cust)).map(i => [i.id, i]));
   const start = {};
   moves.forEach(m => { if (start[m.k] == null || +m.at < start[m.k]) start[m.k] = +m.at || 0; });
   const ev = moves.map(m => ({ at: +m.at || 0, k: m.k, t: m.t, n: +m.n || 0 }));
   const shMs = s => { const t = Date.parse((s && s.at) || ''); return isNaN(t) ? (Date.parse(((s && s.date) || '') + 'T12:00:00') || 0) : t; };
-  prods.forEach(p => (Array.isArray(p.shipments) ? p.shipments : []).forEach(s => {
-    const at = shMs(s);
-    (Array.isArray(s && s.mats) ? s.mats : []).forEach(m => {
-      if (m && m.own && (+m.n || 0) > 0 && start[m.k] != null && at >= start[m.k]) ev.push({ at, k: m.k, t: 'use', n: +m.n || 0 });
+  prods.forEach(p => {
+    const cons = (Array.isArray(p.cons) ? p.cons : []).filter(c => c && own.has(c.id) && (+c.n || 0) > 0);
+    (Array.isArray(p.shipments) ? p.shipments : []).forEach(s => {
+      const at = shMs(s), u = +(s && s.total) || 0;
+      (Array.isArray(s && s.mats) ? s.mats : []).forEach(m => {
+        if (m && m.own && (+m.n || 0) > 0 && start[m.k] != null && at >= start[m.k]) ev.push({ at, k: m.k, t: 'use', n: +m.n || 0 });
+      });
+      if (u) cons.forEach(c => { if (start[c.id] != null && at >= start[c.id]) ev.push({ at, k: c.id, t: 'use', n: (+c.n) * u }); });
     });
-  }));
+  });
   ev.sort((a, b) => a.at - b.at || (a.t === 'use') - (b.t === 'use'));
   const bal = {};
   ev.forEach(e => { if (e.t === 'count') bal[e.k] = e.n; else bal[e.k] = (bal[e.k] || 0) + (e.t === 'in' ? e.n : -e.n); });
   const min = ps.min || {};
-  return TRACK_MATS.filter(([k]) => k in bal).map(([k, name]) => {
-    const mn = +min[cust + '|' + k] || 0;
-    return { k, name, n: bal[k], low: mn > 0 && bal[k] < mn };
+  const DEPT_ORD = { cut: 0, sew: 1, pack: 2 };
+  const list = TRACK_MATS.map(([k, name]) => ({ k, name, unit: "יח'", dept: 'pack' }))
+    .concat([...own.values()].map(i => ({ k: i.id, name: String(i.name || ''), unit: String(i.unit || "יח'"), dept: i.dept || '' })));
+  return list.filter(x => x.k in bal).sort((a, b) => (DEPT_ORD[a.dept] ?? 3) - (DEPT_ORD[b.dept] ?? 3)).map(x => {
+    const mn = +min[cust + '|' + x.k] || 0, n = Math.round(bal[x.k] * 100) / 100;
+    return { ...x, n, low: mn > 0 && bal[x.k] < mn };
   });
 }
 // prods = כל רשומות המוצר של הלקוח (prodByOrderNo/findProd/prodStampOldest מסננים ממילא לפי לקוח)

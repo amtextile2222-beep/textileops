@@ -1335,7 +1335,9 @@ code{background:var(--bg2);border:0.5px solid var(--b);border-radius:4px;padding
     <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:12px;flex-wrap:wrap;gap:8px">
       <div style="font-size:16px;font-weight:700">👗 מוצרים ודגמים</div>
       <div style="display:flex;gap:8px;flex-wrap:wrap">
-        <button class="btn pstk-btn" onclick="openPackStock()" style="font-size:12px;display:none">📦 מלאי אריזה</button>
+        <button class="btn pstk-btn" data-dept="cut" onclick="openPackStock('cut')" style="font-size:12px;display:none">✂️ מלאי גזירה</button>
+        <button class="btn pstk-btn" data-dept="sew" onclick="openPackStock('sew')" style="font-size:12px;display:none">🧵 מלאי תפירה</button>
+        <button class="btn pstk-btn" data-dept="pack" onclick="openPackStock('pack')" style="font-size:12px;display:none">📦 מלאי אריזה</button>
         <button class="btn" onclick="openRaumaOCR()" style="font-size:12px">📄 קרא תעודה</button>
         <button class="btn primary" onclick="openProductModal()">+ הוסף מוצר</button>
       </div>
@@ -1362,7 +1364,9 @@ code{background:var(--bg2);border:0.5px solid var(--b);border-radius:4px;padding
       <button class="btn" style="font-size:12px" onclick="dnClearFilter()">נקה</button>
       <button class="btn" style="font-size:12px" onclick="openProformaList()">🧾 חשבוניות עסקה</button>
       <button class="btn" style="font-size:12px" onclick="openChecksReport()">💳 שיקים</button>
-      <button class="btn pstk-btn" style="font-size:12px;display:none" onclick="openPackStock()">📦 מלאי אריזה</button>
+      <button class="btn pstk-btn" data-dept="pack" style="font-size:12px;display:none" onclick="openPackStock('pack')">📦 מלאי אריזה</button>
+      <button class="btn pstk-btn" data-dept="sew" style="font-size:12px;display:none" onclick="openPackStock('sew')">🧵 מלאי תפירה</button>
+      <button class="btn pstk-btn" data-dept="cut" style="font-size:12px;display:none" onclick="openPackStock('cut')">✂️ מלאי גזירה</button>
       <button class="btn" style="font-size:12px" title="סמן את התעודות המסומנות ☑ כמחויבות בחשבונית ידנית מהפנקס" onclick="dnManualInvoice()">📒 חשבונית ידנית</button>
       <button class="btn primary" style="font-size:12px" id="dn-print-btn" onclick="dnPrintDialog()">🖨 הדפסה…</button>
     </div>
@@ -16575,29 +16579,58 @@ function packPrice(k){return +((S.settings?.packPrices||{})[k])||0;}
 // ידנית בכל משלוח ממילא, ועדכון מחירון לא אמור לשכתב תעודה שכבר נמסרה ללקוח.
 function shipMats(s){return (Array.isArray(s?.mats)?s.mats:[]).filter(m=>m&&(+m.n||0)>0);}
 function shipPackCost(s){return shipMats(s).reduce((t,m)=>t+(m.own?0:(+m.n||0)*(+m.price||0)),0);}
-// ─── 📦 מלאי חומר אריזה (23/10/2026) ──────────────────────────
-// appSettings/packStock = {moves:[{id,at,pool,k,t,n,note,by,byName}], min:{'pool|k':n}}.
+// ─── 📦 מלאי חומרים — אריזה / תפירה / גזירה (23/10/2026) ─────────
+// appSettings/packStock = {moves:[{id,at,pool,k,t,n,note,by,byName,edits}], min:{'pool|k':n},
+//   items:[{id,name,dept,unit,own,cust}]}.
+// k = חומר אריזה מובנה (PACK_MATS: hanger/nylon/cello) או מזהה פריט שהמנהל הגדיר (items).
 // pool = 'F' (המפעל קנה) או קוד לקוח (חומר שהלקוח סיפק). t: in=קבלה · out=הוצאה ידנית · count=ספירה.
-// 🔑 היתרה **מחושבת ולא נשמרת**: תנועות פחות החומר שבתעודות (own ⇒ מלאי הלקוח, אחרת המפעל),
-// רק מהתנועה הראשונה של אותו מלאי+חומר ואילך ⇒ עריכה/מחיקה של תעודה מתקנת את המלאי לבד.
+// 🔑 היתרה **מחושבת ולא נשמרת**: תנועות פחות מה שיצא בתעודות, מהתנועה הראשונה של אותו מלאי+חומר
+// ואילך ⇒ עריכה/מחיקה של תעודה מתקנת את המלאי לבד. חומר אריזה מובנה — לפי mats בתעודה (own ⇒ מלאי
+// הלקוח); פריט — צריכה ליחידה בכרטיס המוצר (p.cons=[{id,n}]) × יחידות התעודה; item.own ⇒ מלאי הלקוח.
 // appSettings פתוח לכתיבה לכל מחובר — ההרשאה (מנהל/אחראי) נאכפת במסך בלבד.
 // ⚠️ trackPackStock בשרת (דף הלקוח) הוא העתק של pstkCalc למלאי של לקוח אחד — שינוי כאן ⇒ שינוי שם.
 const PSTK_F='F';
 const PSTK_T={in:'📥 קבלה',out:'📤 הוצאה',count:'🔢 ספירה'};
+const PSTK_BTN={pack:'📦 מלאי אריזה',sew:'🧵 מלאי תפירה',cut:'✂️ מלאי גזירה'};
+const PSTK_UNITS=["יח'",'מטר','גליל','ק"ג'];
+let _pstkDept='pack';
 function canPackStock(){return ['manager','supervisor'].includes(S.user?.role);}
 function _shipMs(s){const t=Date.parse(s?.at||'');return isNaN(t)?(Date.parse((s?.date||'')+'T12:00:00')||0):t;}
 function pstkPoolName(pool){return pool===PSTK_F?'🏭 המפעל':'👤 '+(S.customerNames?.[pool]||('לקוח '+pool));}
+const pstkFmt=n=>String(Math.round((+n||0)*100)/100);
+function pstkItems(){return Array.isArray(S.packStock?.items)?S.packStock.items:[];}
+function pstkItem(k){
+  const m=PACK_MATS.find(x=>x.k===k);
+  if(m)return {id:k,name:m.name,dept:'pack',unit:"יח'",builtin:true};
+  return pstkItems().find(x=>x.id===k)||null;
+}
+function pstkItemName(k){return pstkItem(k)?.name||k;}
+function pstkUnit(k){const u=pstkItem(k)?.unit||"יח'";return u==="יח'"?'':' '+u;}
+// אילו חומרים שייכים למלאי: אריזה מובנית — לשניהם (own נקבע בתעודה); פריט שהלקוח מספק (own) — רק
+// למלאי לקוח, ורק ללקוח שלו אם הוגדר; פריט שהמפעל קונה — רק למלאי המפעל
+function pstkItemsFor(pool,dept){
+  const b=dept==='pack'?PACK_MATS.map(m=>pstkItem(m.k)):[];
+  return b.concat(pstkItems().filter(i=>i.dept===dept&&(pool===PSTK_F?!i.own:(i.own&&(!i.cust||i.cust===pool)))));
+}
 function pstkCalc(){
   const moves=((S.packStock||{}).moves||[]).filter(m=>m&&m.pool&&m.k);
   const start={};moves.forEach(m=>{const key=m.pool+'|'+m.k;if(start[key]==null||m.at<start[key])start[key]=+m.at||0;});
   const ev=moves.map(m=>({at:+m.at||0,key:m.pool+'|'+m.k,t:m.t,n:+m.n||0}));
-  (S.products||[]).forEach(p=>prodShipments(p).forEach(s=>{const at=_shipMs(s);
-    shipMats(s).forEach(m=>{const key=(m.own?p.cust:PSTK_F)+'|'+m.k;
-      if(start[key]!=null&&at>=start[key])ev.push({at,key,t:'use',n:+m.n||0});});}));
+  const its=new Map(pstkItems().map(i=>[i.id,i]));
+  (S.products||[]).forEach(p=>{
+    const cons=(Array.isArray(p.cons)?p.cons:[]).filter(c=>c&&its.has(c.id)&&(+c.n||0)>0);
+    prodShipments(p).forEach(s=>{const at=_shipMs(s),u=+s.total||0;
+      shipMats(s).forEach(m=>{const key=(m.own?p.cust:PSTK_F)+'|'+m.k;
+        if(start[key]!=null&&at>=start[key])ev.push({at,key,t:'use',n:+m.n||0});});
+      if(u)cons.forEach(c=>{const key=(its.get(c.id).own?p.cust:PSTK_F)+'|'+c.id;
+        if(start[key]!=null&&at>=start[key])ev.push({at,key,t:'use',n:(+c.n)*u});});
+    });
+  });
   // באותו רגע — התנועה הידנית קודם (ספירה שנרשמה לפני היציאה)
   ev.sort((a,b)=>a.at-b.at||(a.t==='use')-(b.t==='use'));
   const bal={};
   ev.forEach(e=>{if(e.t==='count')bal[e.key]=e.n;else bal[e.key]=(bal[e.key]||0)+(e.t==='in'?e.n:-e.n);});
+  Object.keys(bal).forEach(k=>{bal[k]=Math.round(bal[k]*1000)/1000;});
   return bal;
 }
 function pstkLowKeys(bal){
@@ -16612,17 +16645,19 @@ function pstkAlert(before){
     const fresh=pstkLowKeys(after).filter(k=>!(k in (before||{}))||before[k]>=+min[k]);
     pstkBadge();
     if(!fresh.length)return;
-    const lines=fresh.map(k=>{const[pool,mk]=k.split('|');return '• '+packMatName(mk)+' — '+pstkPoolName(pool)+': נשארו '+after[k]+' (מינימום '+min[k]+')';});
-    showToast('⚠ מלאי אריזה נמוך: '+fresh.map(k=>packMatName(k.split('|')[1])).join(', '),'var(--amber-txt)',6000);
-    sendTelegram('📦 מלאי חומר אריזה נמוך\n'+lines.join('\n'));
+    const lines=fresh.map(k=>{const[pool,mk]=k.split('|');return '• '+pstkItemName(mk)+' — '+pstkPoolName(pool)+': נשארו '+pstkFmt(after[k])+pstkUnit(mk)+' (מינימום '+min[k]+')';});
+    showToast('⚠ מלאי נמוך: '+fresh.map(k=>pstkItemName(k.split('|')[1])).join(', '),'var(--amber-txt)',6000);
+    sendTelegram('📦 מלאי חומרים נמוך\n'+lines.join('\n'));
   }catch(e){}
 }
 function pstkBadge(){
-  let low=0;try{low=pstkLowKeys(pstkCalc()).length;}catch(e){}
+  const low={};
+  try{pstkLowKeys(pstkCalc()).forEach(k=>{const d=pstkItem(k.split('|')[1])?.dept;if(d)low[d]=(low[d]||0)+1;});}catch(e){}
   document.querySelectorAll('.pstk-btn').forEach(b=>{
+    const d=b.dataset.dept||'pack';
     b.style.display=canPackStock()?'':'none';
-    b.textContent='📦 מלאי אריזה'+(low?' ⚠ '+low:'');
-    b.style.color=low?'var(--amber-txt)':'';
+    b.textContent=PSTK_BTN[d]+(low[d]?' ⚠ '+low[d]:'');
+    b.style.color=low[d]?'var(--amber-txt)':'';
   });
 }
 async function pstkWrite(fn){
@@ -16631,16 +16666,17 @@ async function pstkWrite(fn){
   try{
     await _pw(runTransaction(db,async tx=>{
       const sn=await tx.get(ref);const d=sn.exists()?sn.data():{};
-      const nd=fn({moves:Array.isArray(d.moves)?d.moves.slice():[],min:{...(d.min||{})}});
+      const nd=fn({...d,moves:Array.isArray(d.moves)?d.moves.slice():[],min:{...(d.min||{})},items:Array.isArray(d.items)?d.items.slice():[]});
       tx.set(ref,nd);S.packStock=nd;
     }));
     return true;
   }catch(e){alert('השמירה נכשלה: '+(e?.message||e));return false;}
 }
-// חלון המלאי — יתרות לפי מלאי (המפעל / כל לקוח) + רישום תנועה + 30 התנועות האחרונות.
-// אחראי רושם קבלה בלבד; הוצאה, ספירה, מינימום ומחיקת תנועה — מנהל.
-function openPackStock(){
+// חלון המלאי של מחלקה — יתרות לפי מלאי (המפעל / כל לקוח) + רישום תנועה + 30 התנועות האחרונות
+// + (מנהל) ניהול הפריטים. אחראי רושם קבלה בלבד; הוצאה, ספירה, מינימום, פריטים ומחיקה — מנהל.
+function openPackStock(dept){
   if(!canPackStock())return;
+  _pstkDept=PSTK_BTN[dept]?dept:'pack';
   _pstkEditId=null;
   document.getElementById('pstk-wrap')?.remove();
   const wrap=document.createElement('div');
@@ -16650,20 +16686,23 @@ function openPackStock(){
   const inp='font-size:13px;padding:7px;border-radius:8px;border:1px solid var(--brd);background:var(--bg);color:var(--txt)';
   const mgr=S.user?.role==='manager';
   const custs=Object.keys(S.customerNames||{}).sort();
+  const help=_pstkDept==='pack'
+    ?'כל חומר נספר מהרישום הראשון שלו (רצוי ספירה). מאותו רגע כל תעודה מורידה ממנו לבד: חומר שסומן "👤 של הלקוח" יורד ממלאי הלקוח, ושאר החומר יורד ממלאי המפעל.'
+    :'כל פריט נספר מהרישום הראשון שלו (רצוי ספירה). מאותו רגע כל תעודת משלוח מורידה ממנו לבד: הצריכה ליחידה שבכרטיס המוצר × היחידות שיצאו. פריט שהלקוח מספק יורד ממלאי הלקוח.';
   wrap.innerHTML=`<div style="background:var(--card);border-radius:14px;padding:20px;max-width:520px;width:100%;box-shadow:0 10px 40px rgba(0,0,0,.3);margin:auto">
     <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:4px">
-      <div style="font-size:16px;font-weight:800">📦 מלאי חומר אריזה</div>
+      <div style="font-size:16px;font-weight:800">${PSTK_BTN[_pstkDept]}</div>
       <button class="btn" style="font-size:12px;padding:4px 10px" onclick="document.getElementById('pstk-wrap')?.remove()">✕</button>
     </div>
-    <div style="font-size:11px;color:var(--txt3);margin-bottom:10px">כל חומר נספר מהרישום הראשון שלו (רצוי ספירה). מאותו רגע כל תעודה מורידה ממנו לבד: חומר שסומן "👤 של הלקוח" יורד ממלאי הלקוח, ושאר החומר יורד ממלאי המפעל.</div>
+    <div style="font-size:11px;color:var(--txt3);margin-bottom:10px">${help}</div>
     <div id="pstk-bal"></div>
     <div style="margin-top:12px;border:1px solid var(--brd);border-radius:10px;padding:10px">
       <div id="pstk-ftl" style="font-size:13px;font-weight:700;margin-bottom:7px">➕ רישום תנועה</div>
       <div style="display:grid;grid-template-columns:1fr 1fr;gap:6px">
-        <select id="pstk-pool" style="${inp}"><option value="${PSTK_F}">🏭 המפעל (קנינו)</option>${custs.map(c=>`<option value="${esc(c)}">👤 ${esc(S.customerNames[c])} (${esc(c)})</option>`).join('')}</select>
-        <select id="pstk-k" style="${inp}">${PACK_MATS.map(m=>`<option value="${m.k}">${esc(m.name)}</option>`).join('')}</select>
+        <select id="pstk-pool" onchange="pstkFillItems()" style="${inp}"><option value="${PSTK_F}">🏭 המפעל (קנינו)</option>${custs.map(c=>`<option value="${esc(c)}">👤 ${esc(S.customerNames[c])} (${esc(c)})</option>`).join('')}</select>
+        <select id="pstk-k" style="${inp}"></select>
         <select id="pstk-t" style="${inp}">${Object.entries(PSTK_T).filter(([t])=>mgr||t==='in').map(([t,l])=>`<option value="${t}">${l}${t==='count'?' — כמה יש בפועל':''}</option>`).join('')}</select>
-        <input id="pstk-n" type="number" inputmode="numeric" min="0" placeholder="כמות" style="${inp}"/>
+        <input id="pstk-n" type="number" inputmode="decimal" min="0" step="any" placeholder="כמות" style="${inp}"/>
       </div>
       <input id="pstk-note" type="text" maxlength="80" placeholder="הערה (לא חובה) — ספק, מספר תעודה של הלקוח…" style="${inp};width:100%;margin-top:6px"/>
       <div style="display:flex;gap:6px;margin-top:8px">
@@ -16671,35 +16710,108 @@ function openPackStock(){
         <button id="pstk-cancel" class="btn" style="font-size:14px;display:none" onclick="pstkEditReset()">ביטול תיקון</button>
       </div>
     </div>
+    ${mgr?`<details id="pstk-items-det" style="margin-top:12px;border:1px dashed var(--brd);border-radius:10px;padding:8px 10px"${_pstkDept!=='pack'&&!pstkItems().some(i=>i.dept===_pstkDept)?' open':''}>
+      <summary style="font-size:13px;font-weight:700;cursor:pointer">⚙️ פריטים במלאי ${PSTK_BTN[_pstkDept].replace(/^\S+ מלאי /,'')}</summary>
+      <div style="font-size:11px;color:var(--txt3);margin:6px 0">לכל פריט: שם, יחידה, ומי מספק אותו. פריט של לקוח אחד בלבד (למשל התווית שלו) — בחר את הלקוח. הצריכה ליחידה נרשמת בכרטיס המוצר.</div>
+      <div id="pstk-items"></div>
+    </details>`:''}
     <div style="font-size:13px;font-weight:700;margin:12px 0 5px">🕘 תנועות אחרונות</div>
     <div id="pstk-moves"></div>
   </div>`;
   document.body.appendChild(wrap);
+  pstkFillItems();
   renderPackStock();
+}
+// בורר החומר בטופס — לפי המלאי שנבחר (המפעל / לקוח) והמחלקה; שומר את הבחירה כשהיא עדיין קיימת
+function pstkFillItems(){
+  const sel=document.getElementById('pstk-k');if(!sel)return;
+  const pool=document.getElementById('pstk-pool')?.value||PSTK_F,cur=sel.value;
+  const list=pstkItemsFor(pool,_pstkDept);
+  sel.innerHTML=list.length?list.map(i=>`<option value="${esc(i.id)}">${esc(i.name)}${i.unit&&i.unit!=="יח'"?' ('+esc(i.unit)+')':''}</option>`).join('')
+    :`<option value="">— אין פריטים ל${pool===PSTK_F?'מפעל':'לקוח הזה'} —</option>`;
+  if(list.some(i=>i.id===cur))sel.value=cur;
 }
 function renderPackStock(){
   const box=document.getElementById('pstk-bal'),mv=document.getElementById('pstk-moves');
   if(!box||!mv)return;
-  const mgr=S.user?.role==='manager',st=S.packStock||{},min=st.min||{},bal=pstkCalc();
-  const pools=[PSTK_F,...new Set([...(st.moves||[]).map(m=>m.pool),...Object.keys(min).map(k=>k.split('|')[0])].filter(p=>p&&p!==PSTK_F))];
-  box.innerHTML=pools.map(pool=>`<div style="border:1px solid var(--brd);border-radius:10px;margin-bottom:8px;overflow:hidden">
+  const dept=_pstkDept,mgr=S.user?.role==='manager',st=S.packStock||{},min=st.min||{},bal=pstkCalc();
+  const inDept=k=>pstkItem(k)?.dept===dept;
+  const custPools=[...new Set([...(st.moves||[]).filter(m=>inDept(m.k)).map(m=>m.pool),
+    ...Object.keys(min).filter(k=>inDept(k.split('|')[1])).map(k=>k.split('|')[0])].filter(p=>p&&p!==PSTK_F))];
+  const pools=[PSTK_F,...custPools].filter(pool=>pstkItemsFor(pool,dept).length);
+  box.innerHTML=pools.length?pools.map(pool=>`<div style="border:1px solid var(--brd);border-radius:10px;margin-bottom:8px;overflow:hidden">
     <div style="font-size:13px;font-weight:700;padding:6px 10px;background:var(--bg)">${esc(pstkPoolName(pool))}</div>
-    ${PACK_MATS.map(m=>{const key=pool+'|'+m.k,has=key in bal,b=bal[key],mn=+min[key]||0,low=has&&mn>0&&b<mn;
+    ${pstkItemsFor(pool,dept).map(m=>{const key=pool+'|'+m.id,has=key in bal,b=bal[key],mn=+min[key]||0,low=has&&mn>0&&b<mn;
       return `<div style="display:flex;align-items:center;gap:8px;padding:6px 10px;border-top:1px solid var(--brd);font-size:13px${low?';background:var(--red-bg,#fee2e2)':''}">
         <span style="flex:1">${esc(m.name)}</span>
-        <b style="min-width:70px;text-align:center;color:${!has?'var(--txt3)':b<0||low?'var(--red-txt)':'var(--txt)'}">${has?b:'לא נספר'}</b>
+        <b style="min-width:70px;text-align:center;color:${!has?'var(--txt3)':b<0||low?'var(--red-txt)':'var(--txt)'}">${has?pstkFmt(b)+esc(pstkUnit(m.id)):'לא נספר'}</b>
         <span style="font-size:11px;color:var(--txt3)">מינימום</span>
-        ${mgr?`<input type="number" min="0" value="${mn||''}" placeholder="—" onchange="pstkSetMin('${escj(key)}',this.value)" style="width:64px;font-size:12px;padding:4px;border-radius:6px;border:1px solid var(--brd);background:var(--bg);color:var(--txt)"/>`
+        ${mgr?`<input type="number" min="0" step="any" value="${mn||''}" placeholder="—" onchange="pstkSetMin('${escj(key)}',this.value)" style="width:64px;font-size:12px;padding:4px;border-radius:6px;border:1px solid var(--brd);background:var(--bg);color:var(--txt)"/>`
           :`<span style="width:40px;text-align:center;font-size:12px">${mn||'—'}</span>`}
       </div>`;}).join('')}
-  </div>`).join('');
-  const moves=(st.moves||[]).slice().sort((a,b)=>b.at-a.at).slice(0,30);
+  </div>`).join(''):`<div style="font-size:12px;color:var(--txt3);padding:6px 2px">${mgr?'עדיין לא הוגדרו פריטים במחלקה הזו — הוסף אותם ב"⚙️ פריטים" למטה.':'עדיין לא הוגדרו פריטים במחלקה הזו.'}</div>`;
+  const moves=(st.moves||[]).filter(m=>inDept(m.k)).sort((a,b)=>b.at-a.at).slice(0,30);
   const fmt=t=>{const d=new Date(+t);return pad2(d.getDate())+'/'+pad2(d.getMonth()+1)+' '+pad2(d.getHours())+':'+pad2(d.getMinutes());};
   mv.innerHTML=moves.length?moves.map(m=>`<div style="display:flex;align-items:center;gap:6px;font-size:12px;padding:5px 2px;border-bottom:1px solid var(--brd)">
-      <span style="flex:1">${fmt(m.at)} · ${PSTK_T[m.t]||m.t} <b dir="ltr" style="unicode-bidi:isolate">${m.t==='out'?'−':m.t==='in'?'+':''}${+m.n||0}</b> ${esc(packMatName(m.k))} · ${esc(pstkPoolName(m.pool))}${m.note?' · '+esc(m.note):''}<span style="color:var(--txt3)"> · ${esc(m.byName||'')}</span>${pstkEditTip(m)}</span>
+      <span style="flex:1">${fmt(m.at)} · ${PSTK_T[m.t]||m.t} <b dir="ltr" style="unicode-bidi:isolate">${m.t==='out'?'−':m.t==='in'?'+':''}${pstkFmt(m.n)}</b>${esc(pstkUnit(m.k))} ${esc(pstkItemName(m.k))} · ${esc(pstkPoolName(m.pool))}${m.note?' · '+esc(m.note):''}<span style="color:var(--txt3)"> · ${esc(m.byName||'')}</span>${pstkEditTip(m)}</span>
       ${pstkCanEdit(m)?`<button class="btn" style="font-size:11px;padding:3px 7px" title="תיקון" onclick="pstkStartEdit('${escj(m.id)}')">✏️</button>`:''}
       ${mgr?`<button class="btn" style="font-size:11px;padding:3px 7px" onclick="pstkDel('${escj(m.id)}')">🗑</button>`:''}
     </div>`).join(''):'<div style="font-size:12px;color:var(--txt3)">עדיין לא נרשמה שום תנועה. התחל בספירה של מה שיש היום במלאי.</div>';
+  renderPstkItems();
+}
+// ⚙️ ניהול הפריטים (מנהל): כל שינוי נשמר מיד. פריט שנמחק — גם התנועות והמינימום שלו נמחקים
+function renderPstkItems(){
+  const box=document.getElementById('pstk-items');if(!box)return;
+  const custs=Object.keys(S.customerNames||{}).sort();
+  const sl='font-size:12px;padding:5px;border-radius:6px;border:1px solid var(--brd);background:var(--bg);color:var(--txt)';
+  const custSel=(v,on)=>`<select ${on} style="${sl};flex:1;min-width:0"><option value="">כל הלקוחות</option>${custs.map(c=>`<option value="${esc(c)}"${c===v?' selected':''}>${esc(S.customerNames[c])}</option>`).join('')}</select>`;
+  const unitSel=(v,on)=>`<select ${on} style="${sl}">${PSTK_UNITS.map(u=>`<option${u===v?' selected':''}>${esc(u)}</option>`).join('')}</select>`;
+  const list=pstkItems().filter(i=>i.dept===_pstkDept);
+  box.innerHTML=list.map(i=>`<div style="border-bottom:1px solid var(--brd);padding:6px 0">
+      <div style="display:flex;gap:5px;align-items:center">
+        <input value="${esc(i.name)}" onchange="pstkItemSet('${escj(i.id)}','name',this.value)" style="${sl};flex:1;min-width:0"/>
+        ${unitSel(i.unit,`onchange="pstkItemSet('${escj(i.id)}','unit',this.value)"`)}
+        <button class="btn" style="font-size:11px;padding:3px 7px" onclick="pstkItemDel('${escj(i.id)}')">🗑</button>
+      </div>
+      <div style="display:flex;gap:6px;align-items:center;margin-top:4px;font-size:12px">
+        <label style="display:flex;align-items:center;gap:3px;white-space:nowrap;cursor:pointer"><input type="checkbox"${i.own?' checked':''} onchange="pstkItemSet('${escj(i.id)}','own',this.checked)" style="width:14px;height:14px;margin:0"/> 👤 הלקוח מספק</label>
+        ${i.own?custSel(i.cust||'',`onchange="pstkItemSet('${escj(i.id)}','cust',this.value)"`):'<span style="color:var(--txt3)">🏭 המפעל קונה</span>'}
+      </div>
+    </div>`).join('')+`<div style="padding-top:8px">
+      <div style="font-size:12px;font-weight:700;margin-bottom:4px">➕ פריט חדש</div>
+      <div style="display:flex;gap:5px;align-items:center">
+        <input id="pstk-ni-name" placeholder="שם — למשל תווית ראשית" style="${sl};flex:1;min-width:0"/>
+        ${unitSel("יח'",'id="pstk-ni-unit"')}
+      </div>
+      <div style="display:flex;gap:6px;align-items:center;margin-top:4px;font-size:12px">
+        <label style="display:flex;align-items:center;gap:3px;white-space:nowrap;cursor:pointer"><input id="pstk-ni-own" type="checkbox" checked style="width:14px;height:14px;margin:0"/> 👤 הלקוח מספק</label>
+        ${custSel('','id="pstk-ni-cust"')}
+      </div>
+      <button class="btn" style="width:100%;margin-top:6px;font-size:13px" onclick="pstkItemAdd()">➕ הוסף פריט</button>
+    </div>`;
+}
+async function pstkItemAdd(){
+  if(S.user?.role!=='manager')return;
+  const name=(document.getElementById('pstk-ni-name')?.value||'').trim();
+  if(!name){alert('הזן שם לפריט');return;}
+  const own=!!document.getElementById('pstk-ni-own')?.checked;
+  const it={id:'i'+Date.now().toString(36)+Math.random().toString(36).slice(2,5),name,dept:_pstkDept,
+    unit:document.getElementById('pstk-ni-unit')?.value||"יח'",own,cust:own?(document.getElementById('pstk-ni-cust')?.value||''):''};
+  if(await pstkWrite(d=>({...d,items:d.items.concat([it])}))){showToast('✅ נוסף: '+name);pstkFillItems();renderPackStock();}
+}
+async function pstkItemSet(id,f,v){
+  if(S.user?.role!=='manager')return;
+  if(f==='name'&&!String(v).trim()){renderPackStock();return;}
+  if(f==='own'&&((S.packStock||{}).moves||[]).some(m=>m.k===id)
+    &&!await showConfirm('שינוי מי מספק','לפריט כבר יש תנועות במלאי '+(v?'המפעל':'הלקוח')+'. אחרי השינוי הוא ייספר במלאי '+(v?'הלקוח':'המפעל')+', והתנועות הקודמות יישארו בצד. להמשיך?','המשך','ביטול')){renderPackStock();return;}
+  if(await pstkWrite(d=>({...d,items:d.items.map(i=>i.id!==id?i:{...i,[f]:f==='name'?String(v).trim():v,...(f==='own'&&!v?{cust:''}:{})})}))){pstkFillItems();renderPackStock();}
+}
+async function pstkItemDel(id){
+  if(S.user?.role!=='manager')return;
+  const it=pstkItem(id),nMv=((S.packStock||{}).moves||[]).filter(m=>m.k===id).length;
+  if(!await showConfirm('מחיקת פריט','למחוק את "'+(it?.name||'')+'"?'+(nMv?' יימחקו גם '+nMv+' התנועות שלו.':'')+' הצריכה שהוגדרה במוצרים תפסיק להיספר.','מחק','ביטול'))return;
+  if(await pstkWrite(d=>{const min={...d.min};Object.keys(min).forEach(k=>{if(k.split('|')[1]===id)delete min[k];});
+    return {...d,items:d.items.filter(i=>i.id!==id),moves:d.moves.filter(m=>m.k!==id),min};})){pstkFillItems();renderPackStock();pstkBadge();}
 }
 // ✏️ תיקון תנועה: מנהל — כל תנועה; אחראי — רק קבלה שהוא עצמו רשם היום (טעות הקלדה מיידית).
 // הזמן (at) לא משתנה ⇒ התנועה נשארת במקומה ביחס לתעודות. edits = יומן תיקונים (מה היה, מי תיקן)
@@ -16711,14 +16823,14 @@ function pstkCanEdit(m){
 function pstkEditTip(m){
   const e=Array.isArray(m.edits)?m.edits:[];if(!e.length)return '';
   const l=e[e.length-1];
-  return ` <span title="${esc('תוקן'+(e.length>1?' '+e.length+' פעמים':'')+' · היה '+(+l.n||0)+' '+packMatName(l.k)+(l.byName?' · '+l.byName:''))}" style="color:var(--amber-txt)">✏️</span>`;
+  return ` <span title="${esc('תוקן'+(e.length>1?' '+e.length+' פעמים':'')+' · היה '+pstkFmt(l.n)+' '+pstkItemName(l.k)+(l.byName?' · '+l.byName:''))}" style="color:var(--amber-txt)">✏️</span>`;
 }
 function pstkStartEdit(id){
   const m=((S.packStock||{}).moves||[]).find(x=>x.id===id);
   if(!m||!pstkCanEdit(m))return;
   _pstkEditId=id;
   const set=(i,v)=>{const el=document.getElementById(i);if(el)el.value=v;};
-  set('pstk-pool',m.pool);set('pstk-k',m.k);set('pstk-t',m.t);set('pstk-n',+m.n||0);set('pstk-note',m.note||'');
+  set('pstk-pool',m.pool);pstkFillItems();set('pstk-k',m.k);set('pstk-t',m.t);set('pstk-n',+m.n||0);set('pstk-note',m.note||'');
   document.getElementById('pstk-ftl').textContent='✏️ תיקון תנועה מ-'+new Date(+m.at).toLocaleDateString('he-IL',{day:'2-digit',month:'2-digit'});
   document.getElementById('pstk-save').textContent='💾 שמור תיקון';
   document.getElementById('pstk-cancel').style.display='';
@@ -16733,13 +16845,14 @@ function pstkEditReset(){
 }
 async function pstkAdd(){
   const pool=document.getElementById('pstk-pool')?.value||PSTK_F,k=document.getElementById('pstk-k')?.value,t=document.getElementById('pstk-t')?.value||'in';
-  const n=Math.max(0,parseInt(document.getElementById('pstk-n')?.value)||0),note=(document.getElementById('pstk-note')?.value||'').trim();
+  const n=Math.round(Math.max(0,parseFloat(document.getElementById('pstk-n')?.value)||0)*1000)/1000,note=(document.getElementById('pstk-note')?.value||'').trim();
   if(t!=='in'&&S.user?.role!=='manager')return;
+  if(!k||!pstkItem(k)){alert('בחר חומר');return;}
   // תיקון ל-0 = התנועה כולה נרשמה בטעות ⇒ מציעים למחוק אותה (גם אחראי — רק את מה שמותר לו לתקן)
   if(!n&&t!=='count'&&_pstkEditId){
     const id=_pstkEditId,old=((S.packStock||{}).moves||[]).find(x=>x.id===id);
     if(!old||!pstkCanEdit(old)){pstkEditReset();return;}
-    if(!await showConfirm('תיקון ל-0','כמות 0 = התנועה לא הייתה. למחוק את התנועה ('+PSTK_T[old.t]+' '+(+old.n||0)+' '+packMatName(old.k)+')?','מחק','חזור'))return;
+    if(!await showConfirm('תיקון ל-0','כמות 0 = התנועה לא הייתה. למחוק את התנועה ('+PSTK_T[old.t]+' '+pstkFmt(old.n)+' '+pstkItemName(old.k)+')?','מחק','חזור'))return;
     const before=pstkCalc();
     if(!await pstkWrite(d=>({...d,moves:d.moves.filter(m=>m.id!==id)})))return;
     pstkEditReset();showToast('🗑 התנועה נמחקה');renderPackStock();pstkAlert(before);
@@ -16757,7 +16870,7 @@ async function pstkAdd(){
       if(note)x.note=note;else delete x.note;
       return x;})})))return;
     pstkEditReset();
-    showToast('✅ התנועה תוקנה · '+(+old.n||0)+' ← '+n+' '+packMatName(k));
+    showToast('✅ התנועה תוקנה · '+pstkFmt(old.n)+' ← '+pstkFmt(n)+' '+pstkItemName(k));
     renderPackStock();pstkAlert(before);
     return;
   }
@@ -16765,7 +16878,7 @@ async function pstkAdd(){
     ...(note?{note}:{}),by:S.user?.id||'',byName:S.user?.name||''};
   if(!await pstkWrite(d=>({...d,moves:d.moves.concat([mv])})))return;
   document.getElementById('pstk-n').value='';document.getElementById('pstk-note').value='';
-  showToast('✅ '+PSTK_T[t]+' · '+n+' '+packMatName(k)+' · '+pstkPoolName(pool));
+  showToast('✅ '+PSTK_T[t]+' · '+pstkFmt(n)+pstkUnit(k)+' '+pstkItemName(k)+' · '+pstkPoolName(pool));
   renderPackStock();pstkAlert(before);
 }
 async function pstkDel(id){
@@ -16775,8 +16888,30 @@ async function pstkDel(id){
 }
 async function pstkSetMin(key,v){
   if(S.user?.role!=='manager')return;
-  const n=Math.max(0,parseInt(v)||0);
+  const n=Math.max(0,parseFloat(v)||0);
   if(await pstkWrite(d=>{const min={...d.min};if(n)min[key]=n;else delete min[key];return {...d,min};})){renderPackStock();pstkBadge();}
+}
+// 🧵 צריכה ליחידה בכרטיס המוצר — פריטי המלאי שרלוונטיים ללקוח (כלליים + של הלקוח הזה).
+// נשמר כ-p.cons=[{id,n}] (מערך ולא map: fbSet ממזג maps, ופריט שנמחק מהמפה היה נשאר במסמך)
+function pmConsHtml(cust,cons){
+  const its=pstkItems().filter(i=>!i.cust||i.cust===cust);
+  if(!its.length)return S.user?.role==='manager'?'<div style="font-size:11px;color:var(--txt3)">אין עדיין פריטי מלאי — מגדירים אותם בחלון "🧵 מלאי תפירה" / "✂️ מלאי גזירה" ← ⚙️ פריטים.</div>':'';
+  const cur=new Map((Array.isArray(cons)?cons:[]).map(c=>[c.id,+c.n||0]));
+  return ['cut','sew','pack'].map(d=>{const l=its.filter(i=>i.dept===d);if(!l.length)return '';
+    return `<div style="font-size:11px;font-weight:700;color:var(--txt3);margin:6px 0 3px">${PSTK_BTN[d].replace('מלאי ','')}</div>`+l.map(i=>`<div style="display:flex;align-items:center;gap:6px;margin-bottom:4px;font-size:12px">
+      <span style="flex:1">${esc(i.name)}${i.own?' <span style="color:var(--txt3)">👤</span>':''}</span>
+      <input class="pm-cons" data-id="${esc(i.id)}" type="number" min="0" step="any" value="${cur.get(i.id)||''}" placeholder="0" style="width:70px;font-size:12px;padding:4px;border-radius:6px;border:1px solid var(--brd);background:var(--card);color:var(--txt)"/>
+      <span style="color:var(--txt3);min-width:60px">${esc(i.unit||"יח'")} ליחידה</span>
+    </div>`).join('');}).join('');
+}
+function pmConsCollect(){
+  return [...document.querySelectorAll('.pm-cons')].map(i=>({id:i.dataset.id,n:Math.round(Math.max(0,parseFloat(i.value)||0)*10000)/10000})).filter(c=>c.n>0);
+}
+// לקוח שהוקלד בחלון המוצר השתנה ⇒ רשימת הפריטים מתעדכנת; ערכים שכבר הוזנו נשמרים
+function pmConsRefresh(){
+  const box=document.getElementById('pm-cons');if(!box)return;
+  const cust=(document.getElementById('pm-cust')?.value||'').trim().padStart(2,'0');
+  box.innerHTML=pmConsHtml(cust,pmConsCollect());
 }
 // ─── 🧾 התחשבנות עם לקוח ──────────────────────────────────────
 // מחיר העבודה ליחידה כפי שהוא רשום בכרטיס המוצר **היום**. ⚠ המחיר לא נצרב על
@@ -17659,7 +17794,7 @@ function openProductModal(id){
   document.getElementById('prod-modal-body').innerHTML=`
     <div style="display:grid;grid-template-columns:1fr 1fr;gap:8px;margin-bottom:10px">
       <div class="field"><label>מספר מוצר (5 ספרות)</label><input id="pm-prod" value="${esc(p?.prod||'')}" maxlength="5" placeholder="12345" style="font-size:13px" oninput="pmCheckPrevOrder()"/></div>
-      <div class="field"><label>לקוח (2 ספרות)</label><input id="pm-cust" value="${esc(p?.cust||'')}" maxlength="2" placeholder="01" style="font-size:13px" oninput="pmCheckPrevOrder()"/></div>
+      <div class="field"><label>לקוח (2 ספרות)</label><input id="pm-cust" value="${esc(p?.cust||'')}" maxlength="2" placeholder="01" style="font-size:13px" oninput="pmCheckPrevOrder();pmConsRefresh()"/></div>
     </div>
     <!-- הזמנה חוזרת: השלבים והתמחור זהים לקודמת. הכמות **לא** מועתקת — היא נספרת
          במפעל אחרי הגזירה ומוזנת אחר כך. -->
@@ -17704,6 +17839,10 @@ function openProductModal(id){
       <label for="pm-estqty" style="font-size:12px;font-weight:600">📏 כמות משוערת</label>
       <input id="pm-estqty" type="number" min="0" step="1" value="${p?.estQty||''}" placeholder="למשל 200" oninput="renderProductPricing()" style="width:90px;font-size:13px;padding:4px 8px;border-radius:6px;border:1px solid var(--brd);background:var(--card);color:var(--txt)"/>
       <span style="font-size:11px;color:var(--txt3)">עד הספירה/גזירה — לצפי זמן בלבד (ספירה, גזירה, זמן לפי מחלקה). הכמות בטבלה גוברת ברגע שמוזנת</span>
+    </div>
+    <div style="margin-top:10px;padding:8px;border-radius:8px;border:1px solid var(--brd)">
+      <div style="font-size:12px;font-weight:700">🧵 צריכת חומרים ליחידה <span style="font-weight:400;color:var(--txt3)">— יורד מהמלאי בכל תעודת משלוח × היחידות שיצאו</span></div>
+      <div id="pm-cons">${pmConsHtml(p?.cust||'',p?.cons)}</div>
     </div>
     <div style="margin-top:10px;padding:8px;background:var(--bg);border-radius:8px;border:1px dashed var(--brd)">
       <div style="font-size:11px;color:var(--txt3);margin-bottom:6px">⚡ מילוי מהיר — אותה כמות לכל המידות</div>
@@ -17874,6 +18013,8 @@ function pmCopyFromPrev(pid){
   const pr=+p.unitPrice||0,pc=+p.targetProfitPct||0;
   set('pm-profit-ils',pr&&pc?(pr*pc/100).toFixed(2):'');
   try{renderProductPricing();}catch(e){}
+  // 🧵 הצריכה ליחידה (תוויות, פלזלין…) זהה בהזמנה חוזרת — מועתקת יחד עם השלבים
+  const cb=document.getElementById('pm-cons');if(cb&&Array.isArray(p.cons)&&p.cons.length)cb.innerHTML=pmConsHtml(p.cust,p.cons);
   showToast('✅ הועתקו '+((p.workSteps||[]).length)+' שלבי עבודה והתמחור — הכמות מוזנת אחרי הספירה','var(--green-txt,#16a34a)',6000);
 }
 function _stepRowHtml(s){
@@ -18446,6 +18587,7 @@ async function saveProduct(){
   const cutProfitPct=(_cpv!=null&&_cpv!==''&&isFinite(+_cpv))?Math.max(0,Math.min(99,+_cpv)):null;
   const isSample=!!document.getElementById('pm-sample')?.checked;
   const estQty=Math.max(0,parseInt(document.getElementById('pm-estqty')?.value)||0); // 📏 לצפי בלבד (estQtyOf)
+  const cons=pmConsCollect(); // 🧵 צריכה ליחידה — מלאי תפירה/גזירה (pstkCalc)
   if(_editProdId){
     const p=S.products.find(x=>x.id===_editProdId);
     if(p){
@@ -18467,7 +18609,7 @@ async function saveProduct(){
         const{orderNo}=await newProdOrderFields(cust,prod);
         if(orderNo!==_oNo){p.orderNo=orderNo;showToast('🔢 מספר ההזמנה עודכן ל-#'+String(orderNo).padStart(3,'0')+' — אם כבר הודפסו ברקודים, יש להדפיס מחדש','var(--amber-txt)',8000);}
       }
-      Object.assign(p,{prod,cust,name,images:_prodImgs,imgCount:_prodImgs.length,docs:_prodDocs,quantities,stageLog,stageSkipped,workSteps,unitPrice,targetProfitPct,directMaterialsCost,cutPrice,cutProfitPct,extraMatPrice,isSample,estQty});
+      Object.assign(p,{prod,cust,name,images:_prodImgs,imgCount:_prodImgs.length,docs:_prodDocs,quantities,stageLog,stageSkipped,workSteps,unitPrice,targetProfitPct,directMaterialsCost,cutPrice,cutProfitPct,extraMatPrice,isSample,estQty,cons});
     }
   }else{
     const id='p'+Date.now();
@@ -18478,7 +18620,7 @@ async function saveProduct(){
       stageLog.sort((a,b)=>PROD_STAGES.findIndex(x=>x.id===a.id)-PROD_STAGES.findIndex(x=>x.id===b.id));
     }
     const _ordF=await newProdOrderFields(cust,prod);
-    S.products.push({id,createdAt:Date.now(),..._ordF,prod,cust,name,images:_prodImgs,imgCount:_prodImgs.length,docs:_prodDocs,quantities,stageLog,stageSkipped,workSteps,unitPrice,targetProfitPct,directMaterialsCost,cutPrice,cutProfitPct,extraMatPrice,isSample,estQty});
+    S.products.push({id,createdAt:Date.now(),..._ordF,prod,cust,name,images:_prodImgs,imgCount:_prodImgs.length,docs:_prodDocs,quantities,stageLog,stageSkipped,workSteps,unitPrice,targetProfitPct,directMaterialsCost,cutPrice,cutProfitPct,extraMatPrice,isSample,estQty,cons});
   }
   saveLS();
   if(S.fbConnected){
