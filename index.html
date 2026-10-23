@@ -11880,8 +11880,12 @@ function custMatOwn(cust,k){
       if(m&&(!best||String(s.at||s.date||'')>best.t))best={t:String(s.at||s.date||''),own:!!m.own};});});
   return !!best?.own;
 }
+// 💰 מחיר חומר האריזה — **למנהל בלבד** (23/10/2026, החלטת המשתמש). אחראי/עובד/עוזר שסורק
+// "יצא ללקוח" רושם כמויות בלי לראות מחיר. תצוגה בלבד: המחיר עדיין נצרב על המשלוח.
+function canSeePackPrice(){return S.user?.role==='manager';}
 function shipMatRowsHtml(cust){
   const inp='flex:1;min-width:0;font-size:13px;padding:6px;border-radius:6px;border:1px solid var(--brd);background:var(--bg);color:var(--txt)';
+  const hid=canSeePackPrice()?'':'display:none;';
   return PACK_MATS.map(m=>{
     const pr=packPrice(m.k),own=cust?custMatOwn(cust,m.k):false;
     return `<div class="mat-row" data-k="${m.k}" style="margin-bottom:7px">
@@ -11889,8 +11893,8 @@ function shipMatRowsHtml(cust){
         <span style="font-size:12px;font-weight:600;min-width:76px">${esc(m.name)}</span>
         <input class="mat-n" type="number" inputmode="numeric" min="0" value="" data-auto="${m.autoQty?'1':'0'}"
           placeholder="${m.autoQty?'לפי הכמות':'ידני'}" oninput="this.dataset.auto='0';shipMatTotal()" style="${inp}"/>
-        <span class="mat-pr" style="font-size:11px;white-space:nowrap;color:${pr?'var(--txt3)':'var(--amber-txt)'}">× ${pr?dnMoney(pr):'אין מחיר'}</span>
-        <span class="mat-eq" style="font-size:12px;font-weight:800;min-width:58px;text-align:left;color:var(--txt3)">—</span>
+        <span class="mat-pr" style="${hid}font-size:11px;white-space:nowrap;color:${pr?'var(--txt3)':'var(--amber-txt)'}">× ${pr?dnMoney(pr):'אין מחיר'}</span>
+        <span class="mat-eq" style="${hid}font-size:12px;font-weight:800;min-width:58px;text-align:left;color:var(--txt3)">—</span>
       </div>
       <div style="display:flex;align-items:center;gap:8px;font-size:10px;color:var(--txt3);margin-right:82px;margin-top:1px">
         <span style="flex:1">${esc(m.hint)}</span>
@@ -11930,6 +11934,7 @@ function shipMatTotal(){
   // אותה. חסימה כאן הייתה עוצרת משלוח אמיתי בגלל שדה שכחו למלא בניהול.
   const no=mats.filter(m=>!m.price&&!m.own).map(m=>packMatName(m.k));
   const ow=mats.filter(m=>m.own).map(m=>packMatName(m.k));
+  if(!canSeePackPrice()){el.textContent=PACK_MODES[mode]+(ow.length?' · 👤 של הלקוח: '+ow.join(', '):'');el.style.color='var(--green-txt,#16a34a)';return;}
   el.textContent=PACK_MODES[mode]+' · '+dnMoney(mats.reduce((t,m)=>t+m.n*m.price,0))
     +(ow.length?' · 👤 של הלקוח: '+ow.join(', '):'')+(no.length?' ⚠ אין מחיר: '+no.join(', '):'');
   el.style.color=no.length?'var(--amber-txt)':'var(--green-txt,#16a34a)';
@@ -12889,7 +12894,7 @@ async function confirmShip(){
   // לא חוסם — יש משלוחים בלי אריזה — אבל שואל, כי לשכוח את זה עולה כסף אמיתי.
   if(!packMode&&!await showConfirm('בלי חומר אריזה','לא הוזנה כמות לאף חומר אריזה, ולכן לא ייכנס חיוב עליו. לאשר בכל זאת?','אשר','חזור'))return;
   const matNoPrice=mats.filter(m=>!m.price&&!m.own).map(m=>packMatName(m.k));
-  if(matNoPrice.length&&!await showConfirm('חומר בלי מחיר','אין מחיר במחירון ל: '+matNoPrice.join(', ')+'. הכמות תירשם אבל תסומן בדוח כחסרת מחיר. להמשיך?','המשך','חזור'))return;
+  if(matNoPrice.length&&canSeePackPrice()&&!await showConfirm('חומר בלי מחיר','אין מחיר במחירון ל: '+matNoPrice.join(', ')+'. הכמות תירשם אבל תסומן בדוח כחסרת מחיר. להמשיך?','המשך','חזור'))return;
   // 🚚 **כל אישור יוצר משלוח חדש עם תעודה משלו** — לא דורס את הקודם.
   // ההזמנה יוצאת בפעימות, ולכל פעימה נמסר ללקוח נייר נפרד עם מספר נפרד.
   // packs ו-note נגררים מהמשלוחים הקיימים — בלעדיהם בנייה מחדש של הרשימה הייתה
@@ -16203,6 +16208,8 @@ function editShipMats(pid,idx){
   document.getElementById('esm-wrap')?.remove();
   const cur=new Map(shipMats(s).map(m=>[m.k,m]));
   const inp='width:100%;font-size:13px;padding:6px;border-radius:6px;border:1px solid var(--brd);background:var(--bg);color:var(--txt)';
+  // 💰 לא-מנהל: שדה המחיר נשאר (מוסתר) כדי שהמחיר הצרוב יישמר כמו שהוא
+  const hid=canSeePackPrice()?'':'display:none;';
   const wrap=document.createElement('div');
   wrap.id='esm-wrap';
   wrap.style.cssText='position:fixed;inset:0;background:rgba(0,0,0,.5);display:flex;align-items:flex-start;justify-content:center;z-index:10000;padding:16px;overflow-y:auto;overscroll-behavior:contain;-webkit-overflow-scrolling:touch';
@@ -16211,7 +16218,7 @@ function editShipMats(pid,idx){
     <div style="font-size:16px;font-weight:800;margin-bottom:2px">✏️ עריכת חומר אריזה</div>
     <div style="font-size:12px;color:var(--txt3);margin-bottom:12px">תעודה <b style="color:var(--txt)">${s.no?String(s.no).padStart(4,'0'):'—'}</b> · ${esc(p.name||p.prod)} · <b style="color:var(--txt)">${+s.total||0}</b> יח'</div>
     <div style="display:flex;gap:6px;font-size:10px;color:var(--txt3);padding:0 2px 3px">
-      <span style="min-width:76px"></span><span style="flex:1">כמות</span><span style="flex:1">מחיר ליח'</span><span style="min-width:60px;text-align:left">סכום</span>
+      <span style="min-width:76px"></span><span style="flex:1">כמות</span><span style="${hid}flex:1">מחיר ליח'</span><span style="${hid}min-width:60px;text-align:left">סכום</span>
     </div>
     ${PACK_MATS.map(m=>{
       const e=cur.get(m.k);
@@ -16222,8 +16229,8 @@ function editShipMats(pid,idx){
         <div style="display:flex;align-items:center;gap:6px">
           <span style="font-size:12px;font-weight:600;min-width:76px">${esc(m.name)}</span>
           <input class="esm-n" type="number" inputmode="numeric" min="0" value="${e?(+e.n||0):''}" placeholder="0" oninput="esmTotal()" style="${inp};flex:1"/>
-          <input class="esm-p" type="number" min="0" step="0.01" value="${price||''}" placeholder="0" oninput="esmTotal()" style="${inp};flex:1"${own?' disabled':''}/>
-          <span class="esm-eq" style="font-size:12px;font-weight:800;min-width:60px;text-align:left;color:var(--txt3)">—</span>
+          <input class="esm-p" type="number" min="0" step="0.01" value="${price||''}" placeholder="0" oninput="esmTotal()" style="${inp};flex:1;${hid}"${own?' disabled':''}/>
+          <span class="esm-eq" style="${hid}font-size:12px;font-weight:800;min-width:60px;text-align:left;color:var(--txt3)">—</span>
         </div>
         <div style="display:flex;align-items:center;gap:8px;font-size:10px;color:var(--txt3);margin-right:82px;margin-top:1px">
           <span style="flex:1">${esc(m.hint)}</span>
@@ -16270,6 +16277,7 @@ function esmTotal(){
   if(!mode){el.textContent='בלי חומר אריזה — לא ייכנס חיוב';el.style.color='var(--txt3)';return;}
   const no=mats.filter(m=>!m.price&&!m.own).map(m=>packMatName(m.k));
   const ow=mats.filter(m=>m.own).map(m=>packMatName(m.k));
+  if(!canSeePackPrice()){el.textContent=PACK_MODES[mode]+(ow.length?' · 👤 של הלקוח: '+ow.join(', '):'');el.style.color='var(--green-txt,#16a34a)';return;}
   el.textContent=PACK_MODES[mode]+' · '+dnMoney(mats.reduce((t,m)=>t+m.n*m.price,0))+(ow.length?' · 👤 של הלקוח: '+ow.join(', '):'')+(no.length?' ⚠ בלי מחיר: '+no.join(', '):'');
   el.style.color=no.length?'var(--amber-txt)':'var(--green-txt,#16a34a)';
 }
@@ -16288,7 +16296,7 @@ async function saveShipMats(pid,idx){
   // fbReplaceFields ולא merge — merge לא מוחק פריט שהוסר מהמערך
   if(S.fbConnected)try{await fbReplaceFields('products',p.id,{shipments:list});}catch(e){}
   document.getElementById('esm-wrap')?.remove();
-  showToast(mats.length?'✅ האריזה עודכנה · '+dnMoney(mats.reduce((t,m)=>t+m.n*m.price,0)):'✅ האריזה נוקתה');
+  showToast(mats.length?'✅ האריזה עודכנה'+(canSeePackPrice()?' · '+dnMoney(mats.reduce((t,m)=>t+m.n*m.price,0)):''):'✅ האריזה נוקתה');
   try{renderProducts();}catch(e){}
   try{renderDNotes();}catch(e){}
 }
@@ -16308,7 +16316,7 @@ function showShipments(pid){
     <div style="font-size:12px;color:var(--txt3);margin-bottom:10px">${esc(p.name||p.prod)} · סה"כ יצא ${shipmentsTotal(p)} מתוך ${_prodQty(p)||'?'} יח'</div>
     ${list.map((s,i)=>`<div class="row" style="align-items:center">
       <span class="bc-seg" style="background:var(--green-bg,#dcfce7);color:var(--green-txt,#16a34a);font-weight:700;flex-shrink:0">${s.no?String(s.no).padStart(4,'0'):'—'}</span>
-      <span style="flex:1;font-size:12px;margin-right:8px">${shipEditMark(s)}${heDate(s.date)} · <b>${s.total}</b> יח'${packsCount(s.packs)?' · 📦 '+packsCount(s.packs):''}${outerTxt(s.outer)?' · 🛍 '+esc(outerTxt(s.outer)):''}${s.note?' · 📝':''}${shipPackCost(s)?' · <span style="color:var(--green-txt,#16a34a);font-weight:700">'+dnMoney(shipPackCost(s))+'</span>':''}</span>
+      <span style="flex:1;font-size:12px;margin-right:8px">${shipEditMark(s)}${heDate(s.date)} · <b>${s.total}</b> יח'${packsCount(s.packs)?' · 📦 '+packsCount(s.packs):''}${outerTxt(s.outer)?' · 🛍 '+esc(outerTxt(s.outer)):''}${s.note?' · 📝':''}${shipPackCost(s)&&canSeePackPrice()?' · <span style="color:var(--green-txt,#16a34a);font-weight:700">'+dnMoney(shipPackCost(s))+'</span>':''}</span>
       <button class="btn" style="font-size:11px;padding:4px 8px" title="עריכת כמויות, אריזה והערה — המספר והתאריך לא משתנים" onclick="editShipment('${escj(pid)}',${i})">✏️</button>
       <button class="btn" style="font-size:11px;padding:4px 8px" title="עריכת חומר אריזה (קולב/ניילון/צלופן)" onclick="editShipMats('${escj(pid)}',${i})">📦</button>
       <button class="btn" style="font-size:11px;padding:4px 9px" onclick="printDeliveryNote('${escj(pid)}',${i})">📄 הדפס</button>
