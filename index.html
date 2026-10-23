@@ -16735,6 +16735,16 @@ async function pstkAdd(){
   const pool=document.getElementById('pstk-pool')?.value||PSTK_F,k=document.getElementById('pstk-k')?.value,t=document.getElementById('pstk-t')?.value||'in';
   const n=Math.max(0,parseInt(document.getElementById('pstk-n')?.value)||0),note=(document.getElementById('pstk-note')?.value||'').trim();
   if(t!=='in'&&S.user?.role!=='manager')return;
+  // תיקון ל-0 = התנועה כולה נרשמה בטעות ⇒ מציעים למחוק אותה (גם אחראי — רק את מה שמותר לו לתקן)
+  if(!n&&t!=='count'&&_pstkEditId){
+    const id=_pstkEditId,old=((S.packStock||{}).moves||[]).find(x=>x.id===id);
+    if(!old||!pstkCanEdit(old)){pstkEditReset();return;}
+    if(!await showConfirm('תיקון ל-0','כמות 0 = התנועה לא הייתה. למחוק את התנועה ('+PSTK_T[old.t]+' '+(+old.n||0)+' '+packMatName(old.k)+')?','מחק','חזור'))return;
+    const before=pstkCalc();
+    if(!await pstkWrite(d=>({...d,moves:d.moves.filter(m=>m.id!==id)})))return;
+    pstkEditReset();showToast('🗑 התנועה נמחקה');renderPackStock();pstkAlert(before);
+    return;
+  }
   if(!n&&t!=='count'){alert('הזן כמות');return;}
   const before=pstkCalc();
   if(_pstkEditId){
