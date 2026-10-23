@@ -11820,10 +11820,52 @@ function shipPackTotal(){
   const el=document.getElementById('pack-sum');
   if(!el)return;
   const packs=_shipPacksCollect();
-  if(!packs.length){el.textContent='לא הוזנה';el.style.color='var(--txt3)';return;}
+  const ot=outerTxt(_shipOuterCollect());
+  if(!packs.length){el.textContent=ot||'לא הוזנה';el.style.color=ot?'var(--txt)':'var(--txt3)';return;}
   const u=packsUnits(packs),q=_shipQtySum();
-  el.textContent=packsCount(packs)+' חבילות · '+u+" יח'"+(!_packsMatch(u,q)?' ⚠ במשלוח '+q:'');
+  el.textContent=packsCount(packs)+' חבילות'+(ot?' ב-'+ot:'')+' · '+u+" יח'"+(!_packsMatch(u,q)?' ⚠ במשלוח '+q:'');
   el.style.color=!_packsMatch(u,q)?'var(--amber-txt)':'var(--green-txt,#16a34a)';
+}
+// ─── 🛍 אריזה חיצונית (23/10/2026) — שקים/קרטונים גדולים שהחבילות יוצאות בהם ───
+// sh.outer=[{k:'sack'|'carton',n}] — תצוגה בלבד (סיכום, תעודה, PDF); לא נוגע בכמויות/התחשבנות.
+// תעודה ישנה בלי השדה = אין אריזה חיצונית.
+const OUTER_KINDS=[['sack','שק','שקים'],['carton','קרטון','קרטונים']];
+function outerTxt(a){
+  const m={};(Array.isArray(a)?a:[]).forEach(x=>{const n=+x.n||0;if(n>0)m[x.k]=(m[x.k]||0)+n;});
+  return OUTER_KINDS.filter(k=>m[k[0]]).map(k=>m[k[0]]===1?k[1]+' אחד':m[k[0]]+' '+k[2]).join(' + ');
+}
+function shipOuterRowHtml(k,n){
+  const inp='font-size:13px;padding:6px;border-radius:6px;border:1px solid var(--brd);background:var(--bg);color:var(--txt)';
+  return `<div class="outer-row" style="display:flex;align-items:center;gap:5px;margin-bottom:5px">
+    <input class="outer-n" type="number" inputmode="numeric" min="0" value="${n||''}" placeholder="כמה" oninput="shipPackTotal()" style="flex:1;min-width:0;${inp}"/>
+    <select class="outer-k" onchange="shipPackTotal()" style="flex:1;min-width:0;${inp}">${OUTER_KINDS.map(o=>`<option value="${o[0]}"${o[0]===k?' selected':''}>${o[2]}</option>`).join('')}</select>
+    <button class="btn" style="font-size:11px;padding:4px 7px" onclick="delOuterRow(this)">🗑</button>
+  </div>`;
+}
+function shipOuterHtml(outer){
+  const list=(Array.isArray(outer)&&outer.length)?outer:[{k:'sack',n:''}];
+  return `<div style="font-size:12px;font-weight:700;margin:10px 0 5px;padding-top:8px;border-top:1px dashed var(--brd)">🛍 אריזה חיצונית — שקים / קרטונים גדולים</div>
+    <div id="outer-rows">${list.map(x=>shipOuterRowHtml(x.k,x.n)).join('')}</div>
+    <button class="btn" style="width:100%;font-size:12px;padding:5px;margin-top:4px" onclick="addOuterRow()">➕ עוד סוג</button>`;
+}
+function addOuterRow(){
+  const w=document.getElementById('outer-rows');if(!w)return;
+  const used=[...w.querySelectorAll('.outer-k')].map(s=>s.value);
+  w.insertAdjacentHTML('beforeend',shipOuterRowHtml((OUTER_KINDS.find(k=>!used.includes(k[0]))||OUTER_KINDS[0])[0],''));
+  w.lastElementChild?.querySelector('.outer-n')?.focus();
+}
+function delOuterRow(el){
+  const rows=[...document.querySelectorAll('.outer-row')];
+  const tr=el.closest('.outer-row');
+  if(rows.length<=1){const i=tr?.querySelector('.outer-n');if(i)i.value='';}
+  else tr?.remove();
+  shipPackTotal();
+}
+function _shipOuterCollect(){
+  return [...document.querySelectorAll('.outer-row')].map(r=>({
+    k:r.querySelector('.outer-k')?.value||'sack',
+    n:Math.max(0,parseInt(r.querySelector('.outer-n')?.value)||0)
+  })).filter(x=>x.n>0);
 }
 // 📦 שלושת החומרים מוצגים תמיד — המצב נגזר ממה שמולא, ולא נבחר מראש.
 function shipMatRowsHtml(){
@@ -11991,6 +12033,7 @@ function openShipModal(cust,prod,orderNo){
       <div style="font-size:11px;color:var(--txt3);margin:7px 0">כל גודל חבילה בשורה: 35 חבילות × 5 יח'. שורה נוספת לכל גודל אחר.</div>
       <div id="pack-rows">${shipPackRowsHtml([])}</div>
       <button class="btn" style="width:100%;font-size:12px;padding:5px;margin-top:4px" onclick="addPackRow()">➕ עוד גודל חבילה</button>
+      ${shipOuterHtml([])}
     </details>
     <div style="margin-top:10px;border:1px solid var(--brd);border-radius:8px;padding:7px 9px">
       <div style="font-size:12px;font-weight:700;margin-bottom:2px">📦 חומר אריזה — <span id="mat-sum" style="font-weight:600;color:var(--txt3)">לא הוזנה כמות</span></div>
@@ -12782,6 +12825,8 @@ function shipPickChanged(){
   // האריזה וההערה מתאפסות — הן תיארו את ההזמנה הקודמת ולא את זו שנבחרה עכשיו
   const pw=document.getElementById('pack-rows');
   if(pw)pw.innerHTML=shipPackRowsHtml([]);
+  const ow=document.getElementById('outer-rows');
+  if(ow)ow.innerHTML=shipOuterRowHtml('sack','');
   const nt=document.getElementById('ship-note');
   if(nt)nt.value='';
   const og=document.getElementById('ship-orig');
@@ -12795,6 +12840,7 @@ async function confirmShip(){
   const rows=_shipRowsCollect();
   const qty=_shipQtySum();
   const packs=_shipPacksCollect();
+  const outer=_shipOuterCollect();
   const mats=_shipMatsCollect();
   const packMode=packModeOf(mats);
   const dnote=(document.getElementById('ship-note')?.value||'').trim();
@@ -12834,7 +12880,7 @@ async function confirmShip(){
   // הרשימה בלעדיהם הייתה מוחקת בשקט את חיוב האריזה של כל תעודה קודמת.
   const list=prodShipments(p).map(s=>({...s,no:+s.no||0,date:s.date||'',at:s.at||'',rows:s.rows||[],total:+s.total||0,packs:Array.isArray(s.packs)?s.packs:[],note:s.note||'',packMode:s.packMode||'',mats:Array.isArray(s.mats)?s.mats:[]}));
   const no=rs&&rs.no!=null?rs.no:await nextDeliveryNoteNo();
-  list.push({no:no||0,date,at:now.toISOString(),rows,total:qty,packs,note:dnote,packMode,mats,...(orig?{orig}:{}),
+  list.push({no:no||0,date,at:now.toISOString(),rows,total:qty,packs,note:dnote,packMode,mats,...(orig?{orig}:{}),...(outer.length?{outer}:{}),
     ...(rs?.restore?{restoredAt:now.toISOString(),restoredBy:S.user?.name||''}:{}),
     ...(rs?.past?{backdatedAt:now.toISOString(),backdatedBy:S.user?.name||''}:{})});
   p.shipments=list;
@@ -16047,11 +16093,12 @@ function editShipment(pid,idx){
     ${after?`<div style="font-size:11px;font-weight:700;color:var(--amber-txt);background:var(--amber-bg);padding:6px 8px;border-radius:8px;margin-bottom:8px">⚠ זו אינה התעודה האחרונה — יש ${after} תעודות אחריה. שינוי הכמות כאן מזיז את שורת "יתרה להשלמה" בכולן.</div>`:''}
     <label style="font-size:13px;font-weight:600">כמות בתעודה הזו — פר מידה וצבע</label>
     <div id="ship-rows-wrap" style="margin-top:6px">${shipRowsHtml(p,s)}</div>
-    <details id="ship-pack-det" style="margin-top:10px;border:1px solid var(--brd);border-radius:8px;padding:7px 9px"${packsCount(s.packs)?' open':''}>
+    <details id="ship-pack-det" style="margin-top:10px;border:1px solid var(--brd);border-radius:8px;padding:7px 9px"${packsCount(s.packs)||outerTxt(s.outer)?' open':''}>
       <summary style="font-size:12px;font-weight:700;cursor:pointer">📦 אריזה — <span id="pack-sum" style="font-weight:600;color:var(--txt3)">לא הוזנה</span></summary>
       <div style="font-size:11px;color:var(--txt3);margin:7px 0">כל גודל חבילה בשורה: 35 חבילות × 5 יח'. שורה נוספת לכל גודל אחר.</div>
       <div id="pack-rows">${shipPackRowsHtml(s.packs)}</div>
       <button class="btn" style="width:100%;font-size:12px;padding:5px;margin-top:4px" onclick="addPackRow()">➕ עוד גודל חבילה</button>
+      ${shipOuterHtml(s.outer)}
     </details>
     <div style="margin-top:9px">
       <label style="font-size:12px;font-weight:600">📝 הערה לתעודה</label>
@@ -16079,6 +16126,7 @@ async function saveShipEdit(pid,idx){
   const rows=_shipRowsCollect();
   const qty=_shipQtySum();
   const packs=_shipPacksCollect();
+  const outer=_shipOuterCollect();
   const note=(document.getElementById('ship-note')?.value||'').trim();
   const orig=_shipOrigVal();
   const doPrint=!!document.getElementById('esh-print')?.checked;
@@ -16098,7 +16146,7 @@ async function saveShipEdit(pid,idx){
       mats:Array.isArray(x.mats)?x.mats:[],edits:Array.isArray(x.edits)?x.edits:[]};
     if(k!==idx)return base;
     // 🔒 no/date/at לא נגזרים מחדש — הם מזהים את הנייר שאצל הלקוח
-    return {...base,rows,total:qty,packs,note,orig,
+    return {...base,rows,total:qty,packs,note,orig,outer,
       edits:base.edits.concat([{at:new Date().toISOString(),by:S.user?.id||'',
         byName:S.user?.name||S.user?.user||'',prevTotal:prev,newTotal:qty}]).slice(-20)};
   });
@@ -16230,7 +16278,7 @@ function showShipments(pid){
     <div style="font-size:12px;color:var(--txt3);margin-bottom:10px">${esc(p.name||p.prod)} · סה"כ יצא ${shipmentsTotal(p)} מתוך ${_prodQty(p)||'?'} יח'</div>
     ${list.map((s,i)=>`<div class="row" style="align-items:center">
       <span class="bc-seg" style="background:var(--green-bg,#dcfce7);color:var(--green-txt,#16a34a);font-weight:700;flex-shrink:0">${s.no?String(s.no).padStart(4,'0'):'—'}</span>
-      <span style="flex:1;font-size:12px;margin-right:8px">${shipEditMark(s)}${heDate(s.date)} · <b>${s.total}</b> יח'${packsCount(s.packs)?' · 📦 '+packsCount(s.packs):''}${s.note?' · 📝':''}${shipPackCost(s)?' · <span style="color:var(--green-txt,#16a34a);font-weight:700">'+dnMoney(shipPackCost(s))+'</span>':''}</span>
+      <span style="flex:1;font-size:12px;margin-right:8px">${shipEditMark(s)}${heDate(s.date)} · <b>${s.total}</b> יח'${packsCount(s.packs)?' · 📦 '+packsCount(s.packs):''}${outerTxt(s.outer)?' · 🛍 '+esc(outerTxt(s.outer)):''}${s.note?' · 📝':''}${shipPackCost(s)?' · <span style="color:var(--green-txt,#16a34a);font-weight:700">'+dnMoney(shipPackCost(s))+'</span>':''}</span>
       <button class="btn" style="font-size:11px;padding:4px 8px" title="עריכת כמויות, אריזה והערה — המספר והתאריך לא משתנים" onclick="editShipment('${escj(pid)}',${i})">✏️</button>
       <button class="btn" style="font-size:11px;padding:4px 8px" title="עריכת חומר אריזה (קולב/ניילון/צלופן)" onclick="editShipMats('${escj(pid)}',${i})">📦</button>
       <button class="btn" style="font-size:11px;padding:4px 9px" onclick="printDeliveryNote('${escj(pid)}',${i})">📄 הדפס</button>
@@ -16810,6 +16858,7 @@ function deliveryNoteHtml(p,sh,idx,count){
   // תעודה ישנה מציגה את האריזה שנמסרה באותו יום, לא את זו של המשלוח האחרון
   const packs=(sh&&Array.isArray(sh.packs))?sh.packs.filter(x=>(+x.n||0)>0&&(+x.per||0)>0):[];
   const packUnits=packsUnits(packs),packCount=packsCount(packs);
+  const outer=outerTxt(sh&&sh.outer); // 🛍 שקים/קרטונים — ריק בתעודה ישנה
   const dnote=(sh&&sh.note)||'';
   const mtx=dnMatrix(rows);
   return `<!DOCTYPE html><html dir="rtl" lang="he"><head><meta charset="UTF-8"/><title>תעודת משלוח ${p.dnNo||''}</title><style>
@@ -16885,7 +16934,7 @@ table.pk th.ttl{background:#eef2ff;font-size:12px;text-align:center}
     ${ordered?(surplus?line('עודף מעל ההזמנה:',surplus+" יח'"):line('יתרה להשלמה:',balance+" יח'")):''}
     ${unsewn?line('לא תפור:',unsewn+" יח' (לא לחיוב)"):''}
     ${+sh?.orig?line('דגם מקורי:',(+sh.orig)+" יח' הוחזר"):''}
-    ${packCount?line('חבילות:',packCount):''}
+    ${packCount?line('חבילות:',packCount+(outer?' ב-'+outer:'')):line('אריזה:',outer)}
     ${line('סוג אריזה:',packModeName(sh&&sh.packMode))}
   </div>
 </div>
@@ -16916,7 +16965,8 @@ ${packs.length?`<table class="pk">
     <tr><th class="c">מס' חבילות</th><th class="c">יח' בחבילה</th><th class="n">סה"כ יח'</th></tr>
   </thead>
   <tbody>${packs.map(x=>`<tr><td class="c">${+x.n}</td><td class="c">${+x.per}</td><td class="n">${(+x.n)*(+x.per)}</td></tr>`).join('')}</tbody>
-  <tfoot><tr><td class="c">${packCount} חבילות</td><td class="c">—</td><td class="n">${packUnits}</td></tr></tfoot>
+  <tfoot><tr><td class="c">${packCount} חבילות</td><td class="c">—</td><td class="n">${packUnits}</td></tr>
+    ${outer?`<tr><td colspan="3" class="c">🛍 ארוז ב-${esc(outer)}</td></tr>`:''}</tfoot>
 </table>
 ${packUnits!==total&&packUnits!==total+unsewn?`<div class="warn">⚠ סכום האריזה (${packUnits}) שונה מהכמות שיצאה במשלוח (${total}).</div>`:''}`:''}
 ${dnote?`<div class="note"><b>הערות:</b> ${esc(dnote)}</div>`:''}
