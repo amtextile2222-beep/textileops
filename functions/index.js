@@ -1851,27 +1851,40 @@ exports.customerPush = functions.https.onRequest(async (req, res) => {
   }
 });
 
-// 🔔 שליחת העדכונים ללקוחות — כל 15 דק' בשעות העבודה (א'-ה' 07:00-17:59, ו' עד 12:59).
+// 🔔 שליחת העדכונים ללקוחות — כל 15 דק', לכל לקוח רק בתוך שעות ההתראות שלו (adminSettings/custNotifyCfg =
+// {def:{יום:[מ,עד]}, cust:{קוד:{...}}}, יום 0=א'…6=ש', נערך בחלון "פרטי לקוח"; בלי הגדרה — NOTIFY_DEF_WIN).
+// מחוץ לחלון הלקוח לא מעובד ולכן גם המצב השמור לא מתקדם ⇒ מה שקרה בינתיים נשלח מאוחד בתחילת החלון הבא.
 // לכל לקוח עם מכשיר רשום: trackBuild ⇒ השוואה למצב ששמרנו בריצה הקודמת (adminSettings/custNotifyState)
 // ⇒ הודעה אחת מאוחדת. נשלח רק על: הזמנה חדשה, מעבר לשלב מרכזי (תפירה/אריזה/מוכן ליציאה/יצא),
 // וחומר שירד עכשיו מתחת למינימום. ריצה ראשונה ללקוח רק שומרת מצב (בלי הודעה על כל מה שכבר קיים).
 // ⚠️ מספרי השלבים = TRACK_LISTS (0 התקבלה … 7 יצא ללקוח)
 const NOTIFY_STAGES = { 3: 'התחילה תפירה 🧵', 5: 'התחילה אריזה 📦', 6: 'מוכנה ליציאה ✅', 7: 'יצאה אליכם 🚚' };
 const NOTIFY_LINK = 'https://amtextile2222-beep.github.io/textileops/track.html';
+// ⚠️ זהה ל-NOTIFY_DEF_WIN ב-index.html: א'-ה' 07:00-18:00, ו' 07:00-13:00
+const NOTIFY_DEF_WIN = { 0: ['07:00', '18:00'], 1: ['07:00', '18:00'], 2: ['07:00', '18:00'], 3: ['07:00', '18:00'], 4: ['07:00', '18:00'], 5: ['07:00', '13:00'] };
+function notifyInWin(win, il) {
+  const w = win && win[il.getDay()];
+  if (!Array.isArray(w) || w.length < 2) return false;
+  const hm = String(il.getHours()).padStart(2, '0') + ':' + String(il.getMinutes()).padStart(2, '0');
+  return hm >= w[0] && hm < w[1];
+}
 exports.customerNotify = functions.runWith({ memory: '1GB', timeoutSeconds: 300 }).pubsub
-  .schedule('*/15 7-17 * * 0-5').timeZone('Asia/Jerusalem').onRun(async () => {
+  .schedule('*/15 * * * *').timeZone('Asia/Jerusalem').onRun(async () => {
   const il = new Date(new Date().toLocaleString('en-US', { timeZone: 'Asia/Jerusalem' }));
-  if (il.getDay() === 5 && il.getHours() >= 13) return null;
   const pushRef = db.doc('adminSettings/custPush'), stRef = db.doc('adminSettings/custNotifyState');
-  const [pS, lS, dS, sS] = await Promise.all([pushRef.get(), db.doc('adminSettings/custLinks').get(),
-    db.doc('adminSettings/custDevices').get(), stRef.get()]);
+  // שתי קריאות קלות קודם — רוב הריצות (לילה/שבת) נעצרות כאן
+  const [pS, cS] = await Promise.all([pushRef.get(), db.doc('adminSettings/custNotifyCfg').get()]);
   const toks = (pS.data() || {}).tokens || {};
+  const cfg = cS.data() || {}, winOf = c => (cfg.cust && cfg.cust[c]) || cfg.def || NOTIFY_DEF_WIN;
+  if (!Object.values(toks).some(t => t && t.cust && notifyInWin(winOf(t.cust), il))) return null;
+  const [lS, dS, sS] = await Promise.all([db.doc('adminSettings/custLinks').get(),
+    db.doc('adminSettings/custDevices').get(), stRef.get()]);
   const links = (lS.data() || {}).emails || {}, devs = (dS.data() || {}).entries || {};
   const state = sS.data() || {};
   // מכשיר תקף = המייל עדיין מורשה לאותו לקוח, והמכשיר לא נחסם/ממתין בשער המכשירים
   const byCust = {};
   Object.entries(toks).forEach(([devId, t]) => {
-    if (!t || !t.token || !t.cust) return;
+    if (!t || !t.token || !t.cust || !notifyInWin(winOf(t.cust), il)) return;
     const ent = (links[t.cust] || []).map(trackEmailEnt).find(x => x.e === t.e);
     if (!ent || (ent.at && (+t.at || 0) < ent.at - 120000)) return;
     const dv = devs[devId];

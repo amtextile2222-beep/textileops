@@ -4107,6 +4107,9 @@ function startDataListeners(){
         if(d.id==='custLinks'){_custEmails=d.data()?.emails||{};_custLinkRefresh();}
         if(d.id==='custTrackLog'){_custLog=d.data()?.entries||{};_custLinkRefresh();}
         if(d.id==='custDevices'){_custDevs=d.data()?.entries||{};_custLinkRefresh();}
+        // 🔔 התראות ללקוח (23/10/2026): שעות שליחה + מכשירים רשומים — נכתבים ע"י customerPush / כאן
+        if(d.id==='custNotifyCfg'){_custNotifyCfg=d.data()||{};_custLinkRefresh();}
+        if(d.id==='custPush'){_custPushToks=d.data()?.tokens||{};_custLinkRefresh();}
       });
       renderAll();
     });
@@ -13462,6 +13465,7 @@ function _custLinkHtml(code){
       <button class="btn" style="font-size:12px" onclick="custEmailAdd('${escj(code)}')">➕ הוסף</button>
     </div>
     <a class="btn" style="display:block;text-align:center;font-size:12px;margin-top:6px;text-decoration:none" target="_blank" rel="noopener" title="דף המעקב בדיוק כפי שהלקוח רואה אותו — דרך הכניסה שלך כמנהל, בלי מייל" href="${esc(url+'?as='+encodeURIComponent(code))}">👁 תצוגת לקוח</a>
+    ${_custNotifyHtml(code)}
     ${list.length?`<div style="display:flex;gap:6px;margin-top:8px">
       <button class="btn" style="flex:1;font-size:12px" onclick="custLinkCopy()">📋 העתק קישור</button>
       <span style="flex:1;font-size:10px;color:var(--txt3);align-self:center">💬 ליד כל מייל — שולח את הקישור עם אותו מייל</span>
@@ -13472,6 +13476,91 @@ function _custLinkHtml(code){
       :'<div style="font-size:11px;color:var(--txt3)">עדיין אין כניסות</div>'}`;
 }
 function _custLinkRefresh(){const el=document.getElementById('cinfo-link');if(el)el.innerHTML=_custLinkHtml(el.dataset.code);}
+// ─── 🔔 שעות שליחת התראות ללקוחות (23/10/2026) — מנהל בלבד ────────────────
+// adminSettings/custNotifyCfg = {def:{יום:[מ,עד]}, cust:{קוד:{יום:[מ,עד]}}} — יום = 0 (א') … 6 (ש'),
+// יום שחסר = בלי התראות. customerNotify בשרת רץ כל 15 דק' ושולח ללקוח רק בתוך החלון שלו; עדכון
+// שקרה מחוץ לשעות לא הולך לאיבוד — נשלח מאוחד בתחילת החלון הבא. ⚠️ NOTIFY_DEF_WIN זהה לשרת.
+let _custNotifyCfg={},_custPushToks={};
+const NOTIFY_DEF_WIN={0:['07:00','18:00'],1:['07:00','18:00'],2:['07:00','18:00'],3:['07:00','18:00'],4:['07:00','18:00'],5:['07:00','13:00']};
+const NOTIFY_DAYS=['א׳','ב׳','ג׳','ד׳','ה׳','ו׳','ש׳'];
+const _notifyDefWin=()=>_custNotifyCfg.def||NOTIFY_DEF_WIN;
+function _notifyWinTxt(w){
+  const ds=[0,1,2,3,4,5,6].filter(d=>w&&w[d]);
+  if(!ds.length)return 'בלי התראות';
+  // ימים רצופים עם אותן שעות מקובצים: "א׳–ה׳ 07:00–18:00 · ו׳ 07:00–13:00"
+  const out=[];let i=0;
+  while(i<ds.length){let j=i;const h=w[ds[i]].join('–');
+    while(j+1<ds.length&&ds[j+1]===ds[j]+1&&w[ds[j+1]].join('–')===h)j++;
+    out.push((j>i?NOTIFY_DAYS[ds[i]]+'–'+NOTIFY_DAYS[ds[j]]:NOTIFY_DAYS[ds[i]])+' '+h);i=j+1;}
+  return out.join(' · ');
+}
+function _notifyWinEditor(pfx,w){
+  const t='font-size:12px;padding:3px;border-radius:6px;border:1px solid var(--brd);background:var(--bg);color:var(--txt);width:auto';
+  return [0,1,2,3,4,5,6].map(d=>{const v=w&&w[d];return `<div style="display:flex;align-items:center;gap:6px;font-size:12px;padding:2px 0">
+    <label style="display:flex;align-items:center;gap:4px;min-width:46px;cursor:pointer"><input type="checkbox" id="${pfx}-d${d}"${v?' checked':''} style="width:14px;height:14px;margin:0"/> ${NOTIFY_DAYS[d]}</label>
+    <input type="time" id="${pfx}-f${d}" value="${v?v[0]:'07:00'}" style="${t}"/> – <input type="time" id="${pfx}-t${d}" value="${v?v[1]:'18:00'}" style="${t}"/>
+  </div>`;}).join('');
+}
+function _notifyWinCollect(pfx){
+  const w={};
+  for(let d=0;d<7;d++){
+    if(!document.getElementById(pfx+'-d'+d)?.checked)continue;
+    const f=document.getElementById(pfx+'-f'+d)?.value||'',t=document.getElementById(pfx+'-t'+d)?.value||'';
+    if(!/^\d\d:\d\d$/.test(f)||!/^\d\d:\d\d$/.test(t)||f>=t){alert('יום '+NOTIFY_DAYS[d]+': שעת ההתחלה חייבת להיות לפני שעת הסיום');return null;}
+    w[d]=[f,t];
+  }
+  return w;
+}
+// ⚠️ setDoc בלי merge — הסרת לקוח מ-cust (חזרה לברירת המחדל) חייבת למחוק את המפתח בשרת
+async function _custNotifySave(cfg){
+  if(!db||!S.fbConnected){showToast('⚠️ אין חיבור לשרת');return false;}
+  try{const{doc,setDoc}=window._fb;await setDoc(doc(db,'adminSettings','custNotifyCfg'),cfg);_custNotifyCfg=cfg;_custLinkRefresh();return true;}
+  catch(e){showToast('⚠️ השמירה נכשלה');return false;}
+}
+function _custNotifyHtml(code){
+  const devs=Object.values(_custPushToks).filter(t=>t&&t.cust===code).length;
+  const own=(_custNotifyCfg.cust||{})[code];
+  return `<div style="margin-top:12px;padding:8px 10px;border:1px solid var(--brd);border-radius:10px">
+    <div style="font-size:12px;font-weight:600;color:var(--txt3)">🔔 התראות ללקוח</div>
+    <div style="font-size:11px;color:var(--txt2);margin:3px 0 6px">📱 ${devs?(devs===1?'מכשיר אחד רשום להתראות':devs+' מכשירים רשומים להתראות'):'אף מכשיר עוד לא נרשם (הלקוח לוחץ "קבלו התראות" בדף המעקב)'}</div>
+    <label style="display:flex;align-items:center;gap:5px;font-size:12px;cursor:pointer"><input type="radio" name="cnw-${esc(code)}" ${own?'':'checked'} onchange="custNotifyMode('${escj(code)}',false)" style="width:auto;margin:0"/> ברירת המחדל: <span style="color:var(--txt3)">${esc(_notifyWinTxt(_notifyDefWin()))}</span></label>
+    <label style="display:flex;align-items:center;gap:5px;font-size:12px;cursor:pointer;margin-top:3px"><input type="radio" name="cnw-${esc(code)}" ${own?'checked':''} onchange="custNotifyMode('${escj(code)}',true)" style="width:auto;margin:0"/> שעות מיוחדות ללקוח הזה${own?': <span style="color:var(--txt3)">'+esc(_notifyWinTxt(own))+'</span>':''}</label>
+    <div id="cnw-ed" style="display:${own?'block':'none'};margin-top:6px">${_notifyWinEditor('cnw',own||_notifyDefWin())}
+      <button class="btn" style="width:100%;font-size:12px;margin-top:5px" onclick="custNotifySaveCust('${escj(code)}')">💾 שמור שעות ללקוח</button></div>
+    <button class="btn" style="width:100%;font-size:11px;margin-top:6px" onclick="openNotifyDefault()">⚙️ ברירת המחדל לכל הלקוחות</button>
+  </div>`;
+}
+async function custNotifyMode(code,own){
+  const ed=document.getElementById('cnw-ed');
+  if(own){if(ed)ed.style.display='block';return;}
+  if(ed)ed.style.display='none';
+  if(!(_custNotifyCfg.cust||{})[code])return;
+  const cust={...(_custNotifyCfg.cust||{})};delete cust[code];
+  if(await _custNotifySave({..._custNotifyCfg,cust}))showToast('✅ הלקוח חזר לברירת המחדל');
+}
+async function custNotifySaveCust(code){
+  const w=_notifyWinCollect('cnw');if(!w)return;
+  if(await _custNotifySave({..._custNotifyCfg,cust:{...(_custNotifyCfg.cust||{}),[code]:w}}))showToast('✅ שעות ההתראות נשמרו: '+_notifyWinTxt(w));
+}
+function openNotifyDefault(){
+  document.getElementById('cnd-wrap')?.remove();
+  const wrap=document.createElement('div');wrap.id='cnd-wrap';
+  wrap.style.cssText='position:fixed;inset:0;background:rgba(0,0,0,.5);display:flex;align-items:flex-start;justify-content:center;z-index:10001;padding:16px;overflow-y:auto';
+  wrap.onclick=e=>{if(e.target===wrap)wrap.remove();};
+  wrap.innerHTML=`<div style="background:var(--card);border-radius:14px;padding:18px;max-width:340px;width:100%;box-shadow:0 10px 40px rgba(0,0,0,.3);margin:auto">
+    <div style="font-size:15px;font-weight:800;margin-bottom:4px">🔔 שעות התראות — ברירת מחדל</div>
+    <div style="font-size:11px;color:var(--txt3);margin-bottom:8px">לכל הלקוחות, חוץ ממי שהוגדרו לו שעות מיוחדות. עדכון שקרה מחוץ לשעות נשלח מאוחד בתחילת השעות הבאות.</div>
+    ${_notifyWinEditor('cnd',_notifyDefWin())}
+    <div style="display:flex;gap:8px;margin-top:12px">
+      <button class="btn primary" style="flex:1;font-size:13px" onclick="custNotifySaveDef()">💾 שמור</button>
+      <button class="btn" style="flex:1;font-size:13px" onclick="document.getElementById('cnd-wrap').remove()">ביטול</button>
+    </div></div>`;
+  document.body.appendChild(wrap);
+}
+async function custNotifySaveDef(){
+  const w=_notifyWinCollect('cnd');if(!w)return;
+  if(await _custNotifySave({..._custNotifyCfg,def:w})){document.getElementById('cnd-wrap')?.remove();showToast('✅ ברירת המחדל נשמרה: '+_notifyWinTxt(w));}
+}
 // ⚠️ **בלי merge בכוונה** — מחיקת מפתח ב-setDoc(merge) לא מוחקת אותו בשרת (כמו customerInfo).
 // השמירה הראשונה גם מוחקת את tokens של הקישורים הישנים (לפני האימות במייל)
 async function _custEmailSave(emails){
