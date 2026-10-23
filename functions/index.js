@@ -607,12 +607,12 @@ exports.sendPush = functions.https.onCall(async (data, context) => {
 
     // שלח לכל הטוקנים שעברו סינון
     const results = await Promise.allSettled(tokenList.map(token =>
-      admin.messaging().send({
+      admin.messaging().send(withTtl({
         token,
         notification: { title, body },
         android: { priority: 'high', notification: { sound: 'default', channelId: 'textileops' } },
         webpush: { notification: { icon: 'https://amtextile2222-beep.github.io/textileops/icon-192.png', requireInteraction: false, vibrate: [200, 100, 200] } }
-      })
+      }, PUSH_TTL_FEED))
     ));
 
     const sent = results.filter(r => r.status === 'fulfilled').length;
@@ -632,13 +632,13 @@ exports.sendPushToWorker = functions.https.onCall(async (data, context) => {
     if (!workerSnap.exists) return { sent: false, reason: 'worker not found' };
     const token = workerSnap.data().fcmToken;
     if (!token) return { sent: false, reason: 'no fcm token' };
-    await admin.messaging().send({
+    await admin.messaging().send(withTtl({
       token,
       notification: { title, body },
       android: { priority: 'high', notification: { sound: 'default', channelId: 'textileops' } },
       apns: { payload: { aps: { sound: 'default', badge: 1, contentAvailable: true } }, headers: { 'apns-priority': '10', 'apns-push-type': 'alert' } },
       webpush: { notification: { icon: 'https://amtextile2222-beep.github.io/textileops/icon-192.png', requireInteraction: true, vibrate: [200, 100, 200] } }
-    });
+    }, PUSH_TTL_ALERT));
     return { sent: true };
   } catch (e) {
     console.error('sendPushToWorker error:', e);
@@ -705,6 +705,19 @@ exports.keepLoginWarm = functions.pubsub.schedule('*/2 6-15 * * *').timeZone('As
 // קודי FCM שמשמעותם "הרישום הזה מת לתמיד" (טלפון הוחלף / דפדפן נוקה / התראות בוטלו) —
 // לא תקלה זמנית, ולכן מוחקים את הרישום במקום לנסות שוב כל 5 דקות
 const DEAD_FCM_CODES = ['messaging/registration-token-not-registered', 'messaging/invalid-registration-token'];
+// ⏳ תוקף להתראה (23/10/2026): בלי TTL גוגל שומרת הודעה עד 4 שבועות — מחשב/דפדפן שהיה כבוי קיבל
+// בהתחברות את כל ההתראות של אתמול בבת אחת. אחרי התוקף הודעה שלא נמסרה פשוט נזרקת.
+// PUSH_TTL_FEED — זרם האירועים למנהל/אחראי (כניסה, משימה התחילה/הסתיימה…); PUSH_TTL_ALERT — התראה אישית/חריגה
+const PUSH_TTL_FEED = 30 * 60, PUSH_TTL_ALERT = 60 * 60;
+function withTtl(msg, sec) {
+  const wp = msg.webpush || {};
+  return {
+    ...msg,
+    android: { ...(msg.android || {}), ttl: sec * 1000 },
+    webpush: { ...wp, headers: { ...(wp.headers || {}), TTL: String(sec) } },
+    ...(msg.apns ? { apns: { ...msg.apns, headers: { ...(msg.apns.headers || {}), 'apns-expiration': String(Math.floor(Date.now() / 1000) + sec) } } } : {})
+  };
+}
 
 // Push לאחראים שרשמו טלפון (appSettings/pushSettings.tokens, role=supervisor). סדר העדפה:
 // 1) האחראי שפתח את המשימה (scannedBy — מי שעומד ליד העובדת ומכיר אותה)
@@ -740,12 +753,12 @@ async function pushSupervisors(pushSnap, dept, title, body, openerIds, opts = {}
     try {
       // title/body יכולים להיות פונקציה של שפת האחראי (workers.lang) — כמו בתזכורת הידנית
       const lg = sups[e.workerId].lang;
-      await admin.messaging().send({
+      await admin.messaging().send(withTtl({
         token: e.token,
         notification: { title: typeof title === 'function' ? title(lg) : title, body: typeof body === 'function' ? body(lg) : body },
         android: { priority: 'high', notification: { sound: 'default', channelId: 'textileops' } },
         webpush: { notification: { icon: 'https://amtextile2222-beep.github.io/textileops/icon-192.png', requireInteraction: true } }
-      });
+      }, PUSH_TTL_ALERT));
       reached.add(sups[e.workerId].name || e.workerId);
     } catch (err) {
       if (DEAD_FCM_CODES.includes(err.code)) {
@@ -808,13 +821,13 @@ exports.remindLateTask = functions.https.onCall(async (data, context) => {
   let worker = false;
   if (workerData.fcmToken) {
     try {
-      await admin.messaging().send({
+      await admin.messaging().send(withTtl({
         token: workerData.fcmToken,
         notification: { title: rt(workerData.lang).wTitle, body: bodyOf(workerData.lang) },
         android: { priority: 'high', notification: { sound: 'default', channelId: 'textileops' } },
         apns: { payload: { aps: { sound: 'default', badge: 1, contentAvailable: true } }, headers: { 'apns-priority': '10', 'apns-push-type': 'alert' } },
         webpush: { notification: { icon: 'https://amtextile2222-beep.github.io/textileops/icon-192.png', requireInteraction: true, vibrate: [200, 100, 200] } }
-      });
+      }, PUSH_TTL_ALERT));
       worker = true;
     } catch (e) {
       console.warn('remindLateTask: push לעובד נכשל', lead.workerId, e.code || e.message);
@@ -924,7 +937,7 @@ exports.longTaskMonitor = functions.pubsub.schedule('every 5 minutes').onRun(asy
       let workerReached = false;
       if (fcmToken && pushPrefs.task_long !== false) {
         try {
-          await admin.messaging().send({
+          await admin.messaging().send(withTtl({
             token: fcmToken,
             notification: {
               title: hasExpected ? '⏱ חריגה מהזמן המוקצב' : '⚠️ משימה ארוכה',
@@ -934,7 +947,7 @@ exports.longTaskMonitor = functions.pubsub.schedule('every 5 minutes').onRun(asy
             },
             android: { priority: 'high', notification: { sound: 'default', channelId: 'textileops' } },
             webpush: { notification: { icon: 'https://amtextile2222-beep.github.io/textileops/icon-192.png', requireInteraction: true } }
-          });
+          }, PUSH_TTL_ALERT));
           workerReached = true;
         } catch (e) {
           console.warn('longTaskMonitor: push לעובד נכשל', lead.workerId, e.code || e.message);
