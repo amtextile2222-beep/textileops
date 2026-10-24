@@ -2450,6 +2450,10 @@ const DEF_BREAK_END='11:00';
 // כל העובדים" (שעון קיץ/חורף). DEF_BREAK_* = רק כשעוד לא נקבעה. משמש לעובד חדש / עובד בלי הפסקה.
 const defBreakStart=()=>S.settings?.breakDefault?.start||DEF_BREAK_START;
 const defBreakEnd=()=>S.settings?.breakDefault?.end||DEF_BREAK_END;
+// ✏️ מה שהוקלד בשורות "לכולם" (הפסקה / שעות גישה) — renderMgrTasks/renderAdmin רצים שוב כל כמה שניות
+// (מאזינים), ובלי זה ההקלדה הוחלפה בערך הישן לפני הלחיצה (24/10: הוקלד 10:00–10:30, הוחל 10:30–11:00).
+// מוגדר כאן, בראש הקובץ — רינדור שרץ בזמן הטעינה לא ייפול על let שעוד לא אותחל.
+let _brkDraft={},_awDraft={};
 const ALL_SUPERVISOR_PAGE_IDS=[...ALL_WORKER_PAGE_IDS,...SUPERVISOR_EXTRA_PAGES.map(p=>p.id)];
 const pad2=n=>String(n).padStart(2,'0');
 // עיגול למטה: צפי עם שבר (66.1 דק') הציג "00:23:18.0000000000000455"
@@ -9321,9 +9325,9 @@ function renderMgrTasks(){
     const bulk=S.user?.role==='manager'?`<div class="row" style="flex-wrap:wrap;gap:6px;background:var(--bg2);border-radius:8px;padding:8px">
         <div style="min-width:120px;font-size:13px;font-weight:700">☕ לכל העובדים</div>
         <label style="font-size:11px;color:var(--txt2)">מ-</label>
-        <input type="time" id="brk-all-s" value="${defBreakStart()}" style="width:95px;font-size:12px"/>
+        <input type="time" id="brk-all-s" value="${_brkDraft.s||defBreakStart()}" oninput="_brkDraft.s=this.value" style="width:95px;font-size:12px"/>
         <label style="font-size:11px;color:var(--txt2)">עד-</label>
-        <input type="time" id="brk-all-e" value="${defBreakEnd()}" style="width:95px;font-size:12px"/>
+        <input type="time" id="brk-all-e" value="${_brkDraft.e||defBreakEnd()}" oninput="_brkDraft.e=this.value" style="width:95px;font-size:12px"/>
         <button class="btn primary" style="font-size:11px;padding:4px 10px" onclick="mgrBreakAll()">החל על כולם</button>
       </div>`:'';
     bl.innerHTML=bulk+S.workers.map(w=>`
@@ -10889,7 +10893,7 @@ async function mgrBreakAll(){
   for(const w of S.workers){
     if(await fbUpdateOnly('workers',w.id,{breakStart:s,breakEnd:e})){w.breakStart=s;w.breakEnd=e;ok++;}
   }
-  saveLS();renderMgrTasks();
+  _brkDraft={};saveLS();renderMgrTasks();
   showToast('☕ ההפסקה עודכנה ל-'+s+'–'+e+' אצל '+ok+' עובדים',ok===S.workers.length?'var(--green-txt)':'var(--amber-txt)',5000);
 }
 async function mgrToggleBreak(wId){
@@ -10909,8 +10913,8 @@ function _awAllHtml(){
   const [f,t]=Object.keys(cnt).sort((a,b)=>cnt[b]-cnt[a])[0].split('|');
   return `<div class="row" style="flex-wrap:wrap;gap:6px;background:var(--bg2);border-radius:8px;padding:8px;margin-bottom:6px">
     <div style="min-width:150px;font-size:13px;font-weight:700">⏰ שעות גישה ל-${lim.length} המוגבלים</div>
-    <label style="font-size:11px;color:var(--txt2)">מ-</label><input type="time" id="aw-all-f" value="${esc(f||'06:00')}" style="width:95px;font-size:12px"/>
-    <label style="font-size:11px;color:var(--txt2)">עד-</label><input type="time" id="aw-all-t" value="${esc(t||'16:00')}" style="width:95px;font-size:12px"/>
+    <label style="font-size:11px;color:var(--txt2)">מ-</label><input type="time" id="aw-all-f" value="${esc(_awDraft.f||f||'06:00')}" oninput="_awDraft.f=this.value" style="width:95px;font-size:12px"/>
+    <label style="font-size:11px;color:var(--txt2)">עד-</label><input type="time" id="aw-all-t" value="${esc(_awDraft.t||t||'16:00')}" oninput="_awDraft.t=this.value" style="width:95px;font-size:12px"/>
     <button class="btn primary" style="font-size:11px;padding:4px 10px" onclick="admAccessAll()">החל על כולם</button>
     <span style="font-size:11px;color:var(--txt3);flex-basis:100%">הימים של כל עובד לא משתנים. עובד בלי הגבלה לא מושפע.</span>
   </div>`;
@@ -10927,7 +10931,7 @@ async function admAccessAll(){
     const aw={...w.accessWindow,from:f,to:t};
     if(await fbUpdateOnly('workers',w.id,{accessWindow:aw})){w.accessWindow=aw;ok++;}
   }
-  saveLS();renderAdmin();
+  _awDraft={};saveLS();renderAdmin();
   showToast('⏰ שעות הגישה עודכנו ל-'+f+'–'+t+' אצל '+ok+' עובדים',ok===lim.length?'var(--green-txt)':'var(--amber-txt)',5000);
 }
 function renderAdmin(){
