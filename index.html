@@ -684,7 +684,7 @@ code{background:var(--bg2);border:0.5px solid var(--b);border-radius:4px;padding
         <div class="field"><label>שעת התחלת משמרת</label><input type="time" id="st-shift-start" value="06:30" onchange="saveSettings()"/></div>
         <div class="field"><label>שעת סיום משמרת</label><input type="time" id="st-shift-end" value="15:00" onchange="saveSettings()"/></div>
         <div class="field"><label>חלון עיגול (דקות) — ±</label><input type="number" id="st-round-min" value="5" min="0" max="30" onchange="saveSettings()"/></div>
-        <div style="font-size:12px;color:var(--txt3);margin-top:4px">כניסה בטווח של ±<span id="st-round-preview">5</span> דק' מ-06:30 תעוגל ל-06:30. יציאה בטווח ±<span id="st-round-preview2">5</span> דק' מ-15:00 תעוגל ל-15:00</div>
+        <div style="font-size:12px;color:var(--txt3);margin-top:4px">כניסה בטווח של ±<span id="st-round-preview">5</span> דק' מ-<span class="st-ss-lbl">06:30</span> תעוגל ל-<span class="st-ss-lbl">06:30</span>. יציאה בטווח ±<span id="st-round-preview2">5</span> דק' מ-<span class="st-se-lbl">15:00</span> תעוגל ל-<span class="st-se-lbl">15:00</span></div>
       </div>
       <div class="card">
         <div class="sec">סיכום</div>
@@ -2446,6 +2446,10 @@ const ALL_WORKER_PAGE_IDS=WORKER_PAGES.map(p=>p.id);
 // והרשומה של היום הראשון שלה נצרבה עם המספר השגוי (7:45 נטו במקום 8:00).
 const DEF_BREAK_START='10:30';
 const DEF_BREAK_END='11:00';
+// ☕ (24/10/2026) ברירת המחדל להפסקה נשמרת ב-appSettings/breakDefault ({start,end}) — נקבעת ב"החל על
+// כל העובדים" (שעון קיץ/חורף). DEF_BREAK_* = רק כשעוד לא נקבעה. משמש לעובד חדש / עובד בלי הפסקה.
+const defBreakStart=()=>S.settings?.breakDefault?.start||DEF_BREAK_START;
+const defBreakEnd=()=>S.settings?.breakDefault?.end||DEF_BREAK_END;
 const ALL_SUPERVISOR_PAGE_IDS=[...ALL_WORKER_PAGE_IDS,...SUPERVISOR_EXTRA_PAGES.map(p=>p.id)];
 const pad2=n=>String(n).padStart(2,'0');
 // עיגול למטה: צפי עם שבר (66.1 דק') הציג "00:23:18.0000000000000455"
@@ -4247,6 +4251,7 @@ function listenFb(){
       if(d.id==='customerInfo'){S.customerInfo=data;saveLS();}
       if(d.id==='company'){S.settings.company={...(S.settings.company||{}),...data};saveLS();}
       if(d.id==='packPrices'){S.settings.packPrices={...(S.settings.packPrices||{}),...data};saveLS();}
+      if(d.id==='breakDefault'&&data.start&&data.end){S.settings.breakDefault={start:data.start,end:data.end};saveLS();}
       if(d.id==='packStock'){S.packStock=data;try{pstkBadge();if(document.getElementById('pstk-wrap'))renderPackStock();}catch(e){}}
       // 🕳 יומן הביטולים משותף לכל המכשירים — מי שמחק תעודה בנייד, והמנהל
       // שמסתכל במסך הגדול, חייבים לראות את אותו חור עם אותו הסבר.
@@ -4612,9 +4617,15 @@ async function _claimDailyReport(){
   localStorage.setItem('txops_daily_report_sent',today);
   return true;
 }
+// 🕒 (24/10/2026, מעבר לשעון חורף) שעת הדוח = סיום המשמרת + 15 דק' (היה 15:15 קבוע; משמרת 15:00).
+// התראת אי-יציאה = סיום המשמרת + 45 דק'. שינוי "שעת סיום משמרת" בהגדרות מזיז את שניהם.
+function _afterShiftEnd(now,addMin){
+  const[h,m]=String(S.settings?.shiftEnd||'15:00').split(':').map(n=>parseInt(n,10)||0);
+  return new Date(now.getFullYear(),now.getMonth(),now.getDate(),h,m+addMin,0);
+}
 function scheduleDailyReport(){
   const now=new Date();
-  const target=new Date(now.getFullYear(),now.getMonth(),now.getDate(),15,15,0);
+  const target=_afterShiftEnd(now,15);
   // אם עברנו 15:15 ועדיין לא נשלח היום — שלח מיד (אחרי 3 שניות לטעינת נתונים + Firebase)
   if(now>=target){
     setTimeout(async()=>{if(await _claimDailyReport())await sendDailyAttReport();},3000);
@@ -4708,7 +4719,7 @@ async function sendPunchOutAlert(){
 }
 function schedulePunchOutAlert(){
   const now=new Date();
-  const target=new Date(now.getFullYear(),now.getMonth(),now.getDate(),15,45,0);
+  const target=_afterShiftEnd(now,45);
   // אם עברנו 15:45 וטרם נבדק היום — בדוק עכשיו (אחרי טעינת נתונים)
   if(now>=target){
     setTimeout(async()=>{if(await _claimPunchOutAlert())await sendPunchOutAlert();},5000);
@@ -6536,8 +6547,8 @@ function migrateToSessions(){
 function migrateBreaks(){
   let changed=false;
   S.workers.forEach(w=>{
-    if(!w.breakStart){w.breakStart=DEF_BREAK_START;changed=true;}
-    if(!w.breakEnd){w.breakEnd=DEF_BREAK_END;changed=true;}
+    if(!w.breakStart){w.breakStart=defBreakStart();changed=true;}
+    if(!w.breakEnd){w.breakEnd=defBreakEnd();changed=true;}
     if(w.breakActive===undefined||w.breakActive===null){w.breakActive=true;changed=true;}
   });
   if(changed&&S.fbConnected){
@@ -8777,6 +8788,8 @@ function saveSettings(){
   S.settings.endOfDayTime=document.getElementById('al-endofday')?.value||'15:05';
   const rp=document.getElementById('st-round-preview');if(rp)rp.textContent=S.settings.roundMinutes;
   const rp2=document.getElementById('st-round-preview2');if(rp2)rp2.textContent=S.settings.roundMinutes;
+  document.querySelectorAll('.st-ss-lbl').forEach(e=>e.textContent=S.settings.shiftStart);
+  document.querySelectorAll('.st-se-lbl').forEach(e=>e.textContent=S.settings.shiftEnd);
   saveLS();
   // שמור הגדרות טלגרם + IP ב-Firebase כדי שכל מכשיר יקבל אותם
   if(S.fbConnected){
@@ -8867,6 +8880,8 @@ function loadWaSettings(){
   set('st-round-min',s.roundMinutes??5);
   const rp=document.getElementById('st-round-preview');if(rp)rp.textContent=s.roundMinutes??5;
   const rp2=document.getElementById('st-round-preview2');if(rp2)rp2.textContent=s.roundMinutes??5;
+  document.querySelectorAll('.st-ss-lbl').forEach(e=>e.textContent=s.shiftStart||'06:30');
+  document.querySelectorAll('.st-se-lbl').forEach(e=>e.textContent=s.shiftEnd||'15:00');
   set('al-thresh',s.thresh||60);
   set('al-absent',s.absent||5);
   set('al-endofday',s.endOfDayTime||'15:05');
@@ -9302,13 +9317,22 @@ function renderMgrTasks(){
   // breaks list
   const bl=document.getElementById('mgr-breaks-list');
   if(bl){
-    bl.innerHTML=S.workers.map(w=>`
+    // ☕ שינוי לכולם בבת אחת (שעון קיץ/חורף) — מנהל בלבד; עובד עם הפסקה שונה ניתן לתקן אחר כך בשורה שלו
+    const bulk=S.user?.role==='manager'?`<div class="row" style="flex-wrap:wrap;gap:6px;background:var(--bg2);border-radius:8px;padding:8px">
+        <div style="min-width:120px;font-size:13px;font-weight:700">☕ לכל העובדים</div>
+        <label style="font-size:11px;color:var(--txt2)">מ-</label>
+        <input type="time" id="brk-all-s" value="${defBreakStart()}" style="width:95px;font-size:12px"/>
+        <label style="font-size:11px;color:var(--txt2)">עד-</label>
+        <input type="time" id="brk-all-e" value="${defBreakEnd()}" style="width:95px;font-size:12px"/>
+        <button class="btn primary" style="font-size:11px;padding:4px 10px" onclick="mgrBreakAll()">החל על כולם</button>
+      </div>`:'';
+    bl.innerHTML=bulk+S.workers.map(w=>`
       <div class="row" style="flex-wrap:wrap;gap:6px">
         <div style="min-width:120px"><div style="font-size:13px;font-weight:500">${esc(w.name)}</div><div style="font-size:11px;color:var(--txt3)">${esc(w.dept)}</div></div>
         <label style="font-size:11px;color:var(--txt2)">מ-</label>
-        <input type="time" value="${w.breakStart||DEF_BREAK_START}" style="width:95px;font-size:12px" onchange="mgrUpdateBreak('${w.id}','breakStart',this.value)"/>
+        <input type="time" value="${w.breakStart||defBreakStart()}" style="width:95px;font-size:12px" onchange="mgrUpdateBreak('${w.id}','breakStart',this.value)"/>
         <label style="font-size:11px;color:var(--txt2)">עד-</label>
-        <input type="time" value="${w.breakEnd||DEF_BREAK_END}" style="width:95px;font-size:12px" onchange="mgrUpdateBreak('${w.id}','breakEnd',this.value)"/>
+        <input type="time" value="${w.breakEnd||defBreakEnd()}" style="width:95px;font-size:12px" onchange="mgrUpdateBreak('${w.id}','breakEnd',this.value)"/>
         <button class="btn ${w.breakActive?'warn':''}  " style="font-size:11px;padding:4px 10px" onclick="mgrToggleBreak('${w.id}')">${w.breakActive?'☕ פעיל':'○ כבוי'}</button>
       </div>`).join('');
   }
@@ -10851,6 +10875,24 @@ async function mgrUpdateBreak(wId,field,val){
   if(S.fbConnected)await fbSet('workers',w.id,w);
   saveLS();
 }
+// ☕ החלפת שעות ההפסקה לכל העובדים + ברירת המחדל לעובדים חדשים (appSettings/breakDefault).
+// fbUpdateOnly — רק שני השדות, בלי לדרוס שדות אחרים במסמך העובד שהשתנו במכשיר אחר.
+async function mgrBreakAll(){
+  if(S.user?.role!=='manager')return;
+  const s=document.getElementById('brk-all-s')?.value||'',e=document.getElementById('brk-all-e')?.value||'';
+  if(!/^\d\d:\d\d$/.test(s)||!/^\d\d:\d\d$/.test(e)||s>=e){alert('שעת תחילת ההפסקה חייבת להיות לפני הסיום');return;}
+  if(!S.fbConnected){alert('אין חיבור לשרת');return;}
+  if(!await showConfirm('☕ הפסקה לכל העובדים','לקבוע הפסקה '+s+'–'+e+' לכל '+S.workers.length+' העובדים, וכברירת מחדל לעובדים חדשים?','החל','ביטול'))return;
+  S.settings.breakDefault={start:s,end:e};
+  try{await fbSetMerge('appSettings','breakDefault',{start:s,end:e});}catch(err){}
+  let ok=0;
+  for(const w of S.workers){
+    w.breakStart=s;w.breakEnd=e;
+    try{await fbUpdateOnly('workers',w.id,{breakStart:s,breakEnd:e});ok++;}catch(err){}
+  }
+  saveLS();renderMgrTasks();
+  showToast('☕ ההפסקה עודכנה ל-'+s+'–'+e+' אצל '+ok+' עובדים',ok===S.workers.length?'var(--green-txt)':'var(--amber-txt)',5000);
+}
 async function mgrToggleBreak(wId){
   const w=S.workers.find(x=>x.id===wId);if(!w)return;
   w.breakActive=!w.breakActive;
@@ -11518,7 +11560,7 @@ async function confirmModal(){
   if(S.modalAction==='add-worker'){
     if(!pass){alert('סיסמה חובה לעובד חדש');return;}
     if(!S.fbConnected){alert('אין חיבור לשרת — לא ניתן להוסיף עובד');return;}
-    const nw={id:'w'+Date.now(),name,dept,role,user,status:'out',checkin:null,permissions:perms,faceAuth:false,breakStart:DEF_BREAK_START,breakEnd:DEF_BREAK_END,breakActive:true,skills:skills||{},
+    const nw={id:'w'+Date.now(),name,dept,role,user,status:'out',checkin:null,permissions:perms,faceAuth:false,breakStart:defBreakStart(),breakEnd:defBreakEnd(),breakActive:true,skills:skills||{},
       stationGateMode:document.getElementById('mf-gate-station')?.value||'',
       stepOrderGateMode:document.getElementById('mf-gate-order')?.value||''};
     S.workers.push(nw);
