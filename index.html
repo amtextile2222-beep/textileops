@@ -8218,6 +8218,9 @@ function _prodBudget(p,ctx){
   const autoBudget=Math.max(budgetUnit-manualCost,0);
   const stepBud=splitStepBudget(mins,lvl.map(s=>stepLevel(s)),rates,budgetUnit,ctx.weights);
   const budMinUnit=stepBud.reduce((t,b)=>t+b.min,0);
+  // ⏱ הזמן **שהוזן** ליחידה (24/10/2026) — הדקות שהוקלדו לשלבים (שלב בלי דקות — הנגזר), בדיוק
+  // "סה"כ זמן שהוזן ליחידה" בחלון המוצר. budMinUnit = הזמן **שהתקציב מאפשר** בעלות שעה ממוצעת.
+  const plannedMinUnit=stepBud.reduce((t,b)=>t+(b.typed>0?b.typed:b.min),0);
   const budCostUnit=(+p.directMaterialsCost||0)+stepBud.reduce((t,b)=>t+b.ils,0);
   // ✂ הגזירה מתומחרת בנפרד ממחיר המכירה: `cutPrice` הוא הכנסה נוספת ליחידה, **ואחוז רווח
   // היעד שלה נפרד** (`cutProfitPct`) — עיסוק אחר, מרווח אחר. ראה cutProfitPctOf.
@@ -8234,7 +8237,7 @@ function _prodBudget(p,ctx){
   const cutStepBud=splitStepBudget(cutLvl.map(s=>stepManualMin(s)),cutLvl.map(s=>stepLevel(s)),cutRates,cutBudgetUnit,ctx.weights);
   const cutMinUnit=cutStepBud.reduce((t,b)=>t+b.min,0);
   const cutCostUnit=cutStepBud.reduce((t,b)=>t+b.ils,0);
-  return{price,budgetUnit,autoBudget,totW,allManual,lvl,rates,stepBud,budMinUnit,budCostUnit,materials:+p.directMaterialsCost||0,targetPct:+p.targetProfitPct||0,
+  return{price,budgetUnit,autoBudget,totW,allManual,lvl,rates,stepBud,budMinUnit,plannedMinUnit,budCostUnit,materials:+p.directMaterialsCost||0,targetPct:+p.targetProfitPct||0,
     cutPrice,cutPct,cutHasPct:hasCutProfitPct(p),cutBudgetUnit,cutNames,cutLvl,cutRates,cutStepBud,cutMinUnit,cutCostUnit};
 }
 function buildBudgetReport(fl){
@@ -8460,7 +8463,15 @@ function buildProfitReport(fl){
           // ✂ שעות הגזירה יורדות מ"בפועל" של התפירה — התקציב כאן הוא תקציב התפירה בלבד.
           const sewAct=Math.max(0,b.actMinTot-b.cutActMin);
           const left=totBud-sewAct;
-          return`<span style="font-size:12px;font-weight:600;color:${left<0?'var(--red-txt)':'var(--txt2)'}" title="${base} יח' × ${b.pb.budMinUnit.toFixed(1)} דק'/יח' — תפירה בלבד${b.cutActMin>0?`, ללא ${fmtExpMin(b.cutActMin)} גזירה`:''}">⏱ תפירה להזמנה ${fmtExpMin(totBud)} · בפועל ${fmtExpMin(sewAct)} · ${left<0?'חריגה ':'נותר '}${fmtExpMin(Math.abs(left))}</span>`;
+          const noCut=b.cutActMin>0?`, ללא ${fmtExpMin(b.cutActMin)} גזירה`:'';
+          // ⏱ (24/10/2026) שני זמנים: מה **שהוזן** בשלבים (= דף השלבים / חלון המוצר) ומה **שהתקציב
+          // מאפשר** (מחיר − רווח − חומרים ÷ עלות שעה ממוצעת), כל אחד עם החריגה שלו. זהים ⇒ שורה אחת כמו קודם
+          const totPlan=(b.pb.plannedMinUnit||0)*base,leftP=totPlan-sewAct;
+          const lr=(l,lbl)=>`<b style="color:${l<0?'var(--red-txt)':'var(--green-txt,#16a34a)'}">${l<0?'חריגה':'נותר'} ${fmtExpMin(Math.abs(l))}</b> מול ${lbl}`;
+          if(!(totPlan>0)||Math.abs(totPlan-totBud)<=Math.max(1,totBud*0.005))
+            return`<span style="font-size:12px;font-weight:600;color:${left<0?'var(--red-txt)':'var(--txt2)'}" title="${base} יח' × ${b.pb.budMinUnit.toFixed(1)} דק'/יח' — תפירה בלבד${noCut}">⏱ תפירה להזמנה ${fmtExpMin(totBud)} · בפועל ${fmtExpMin(sewAct)} · ${left<0?'חריגה ':'נותר '}${fmtExpMin(Math.abs(left))}</span>`;
+          return`<span style="font-size:12px;font-weight:600;color:var(--txt2);line-height:1.7" title="${base} יח' — תפירה בלבד${noCut}">⏱ תפירה להזמנה: <span title="${base} × ${b.pb.plannedMinUnit.toFixed(1)} דק' שהוזנו בשלבים">מתוכנן ${fmtExpMin(totPlan)}</span> · <span title="${base} × ${b.pb.budMinUnit.toFixed(1)} דק' — (מחיר − רווח יעד − חומרים) ÷ עלות שעה ממוצעת">התקציב מאפשר ${fmtExpMin(totBud)}</span> · בפועל ${fmtExpMin(sewAct)}
+            <br>${lr(leftP,'המתוכנן')} · ${lr(left,'התקציב')}</span>`;
         })()}
         ${(()=>{ // רווח אמיתי לפי כמות שיצאה: הכנסה על מה שיצא בלבד, עלות על כל מה שיוצר (המקסימום מתוכנן/יצא)
           if(b.shipped==null)return'';
