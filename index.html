@@ -10887,8 +10887,7 @@ async function mgrBreakAll(){
   try{await fbSetMerge('appSettings','breakDefault',{start:s,end:e});}catch(err){}
   let ok=0;
   for(const w of S.workers){
-    w.breakStart=s;w.breakEnd=e;
-    try{await fbUpdateOnly('workers',w.id,{breakStart:s,breakEnd:e});ok++;}catch(err){}
+    if(await fbUpdateOnly('workers',w.id,{breakStart:s,breakEnd:e})){w.breakStart=s;w.breakEnd=e;ok++;}
   }
   saveLS();renderMgrTasks();
   showToast('☕ ההפסקה עודכנה ל-'+s+'–'+e+' אצל '+ok+' עובדים',ok===S.workers.length?'var(--green-txt)':'var(--amber-txt)',5000);
@@ -10901,9 +10900,39 @@ async function mgrToggleBreak(wId){
 }
 
 // ─── ADMIN ──────────────────────────────────────────────────
+// ⏰ שעות גישה לכל העובדים המוגבלים בבת אחת (24/10/2026, שעון חורף). רק שעות מ/עד — הימים של כל
+// עובד נשמרים. ערך ההתחלה בשדות = השעות הנפוצות ביותר כרגע. נאכף בשרת (login) — שדה מנהל בלבד ב-Rules.
+function _awAllHtml(){
+  const lim=S.workers.filter(w=>w.accessWindow?.enabled);
+  if(!lim.length)return '';
+  const cnt={};lim.forEach(w=>{const k=(w.accessWindow.from||'')+'|'+(w.accessWindow.to||'');cnt[k]=(cnt[k]||0)+1;});
+  const [f,t]=Object.keys(cnt).sort((a,b)=>cnt[b]-cnt[a])[0].split('|');
+  return `<div class="row" style="flex-wrap:wrap;gap:6px;background:var(--bg2);border-radius:8px;padding:8px;margin-bottom:6px">
+    <div style="min-width:150px;font-size:13px;font-weight:700">⏰ שעות גישה ל-${lim.length} המוגבלים</div>
+    <label style="font-size:11px;color:var(--txt2)">מ-</label><input type="time" id="aw-all-f" value="${esc(f||'06:00')}" style="width:95px;font-size:12px"/>
+    <label style="font-size:11px;color:var(--txt2)">עד-</label><input type="time" id="aw-all-t" value="${esc(t||'16:00')}" style="width:95px;font-size:12px"/>
+    <button class="btn primary" style="font-size:11px;padding:4px 10px" onclick="admAccessAll()">החל על כולם</button>
+    <span style="font-size:11px;color:var(--txt3);flex-basis:100%">הימים של כל עובד לא משתנים. עובד בלי הגבלה לא מושפע.</span>
+  </div>`;
+}
+async function admAccessAll(){
+  if(S.user?.role!=='manager')return;
+  const f=document.getElementById('aw-all-f')?.value||'',t=document.getElementById('aw-all-t')?.value||'';
+  if(!/^\d\d:\d\d$/.test(f)||!/^\d\d:\d\d$/.test(t)||f>=t){alert('שעת ההתחלה חייבת להיות לפני שעת הסיום');return;}
+  if(!S.fbConnected){alert('אין חיבור לשרת');return;}
+  const lim=S.workers.filter(w=>w.accessWindow?.enabled);
+  if(!await showConfirm('⏰ שעות גישה','לקבוע גישה '+f+'–'+t+' ל-'+lim.length+' העובדים עם הגבלת שעות? הימים של כל אחד נשארים.','החל','ביטול'))return;
+  let ok=0;
+  for(const w of lim){
+    const aw={...w.accessWindow,from:f,to:t};
+    if(await fbUpdateOnly('workers',w.id,{accessWindow:aw})){w.accessWindow=aw;ok++;}
+  }
+  saveLS();renderAdmin();
+  showToast('⏰ שעות הגישה עודכנו ל-'+f+'–'+t+' אצל '+ok+' עובדים',ok===lim.length?'var(--green-txt)':'var(--amber-txt)',5000);
+}
 function renderAdmin(){
   if(S.user?.role!=='manager')return;
-  document.getElementById('adm-workers').innerHTML=S.workers.map(w=>`
+  document.getElementById('adm-workers').innerHTML=_awAllHtml()+S.workers.map(w=>`
     <div class="row">
       <div class="av" style="width:28px;height:28px;font-size:10px">${esc(w.name.split(' ').map(n=>n[0]).join(''))}</div>
       <div style="flex:1"><div style="font-size:13px;font-weight:500">${esc(w.name)}</div>
