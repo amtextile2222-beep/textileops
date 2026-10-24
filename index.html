@@ -18752,11 +18752,45 @@ async function deleteProduct(id){
   saveLS();renderProducts();
 }
 
+// 🔍 תמונה במסך מלא עם זום (24/10/2026): בנייד הדפדפן מגדיל בצביטה, במחשב לא היה שום דרך.
+// גלגלת = זום לכיוון העכבר · לחיצה כפולה = ×2.5 / חזרה · גרירה = הזזה כשמוגדל · + − ✕ · Esc.
+// לחיצה על הרקע (לא על התמונה) סוגרת, כמו קודם; גרירה שהסתיימה על הרקע לא סוגרת.
 function viewImg(prodId,src){
   const ov=document.createElement('div');
-  ov.style.cssText='position:fixed;inset:0;background:rgba(0,0,0,.85);z-index:9999;display:flex;align-items:center;justify-content:center;cursor:pointer';
-  ov.onclick=()=>document.body.removeChild(ov);
-  ov.innerHTML=`<img src="${src}" style="max-width:95vw;max-height:90vh;border-radius:10px;object-fit:contain">`;
+  ov.style.cssText='position:fixed;inset:0;background:rgba(0,0,0,.88);z-index:9999;display:flex;align-items:center;justify-content:center;overflow:hidden;touch-action:pinch-zoom';
+  const bs='width:38px;height:38px;border-radius:50%;border:0;background:rgba(255,255,255,.18);color:#fff;font-size:20px;cursor:pointer';
+  ov.innerHTML=`<img draggable="false" style="max-width:95vw;max-height:90vh;border-radius:10px;object-fit:contain;transform-origin:0 0;cursor:zoom-in;user-select:none;will-change:transform">
+    <div style="position:absolute;top:12px;left:12px;display:flex;gap:8px">
+      <button data-z="close" title="סגור (Esc)" style="${bs}">✕</button>
+      <button data-z="in" title="הגדל" style="${bs}">+</button>
+      <button data-z="out" title="הקטן" style="${bs}">−</button>
+    </div>
+    <div data-hint style="position:absolute;bottom:10px;left:0;right:0;text-align:center;font-size:12px;color:rgba(255,255,255,.6);pointer-events:none">גלגלת או לחיצה כפולה להגדלה · גרירה להזזה</div>`;
+  const img=ov.querySelector('img'),hint=ov.querySelector('[data-hint]');img.src=src;
+  let s=1,x=0,y=0,drag=null,moved=false;
+  const apply=()=>{img.style.transform=`translate(${x}px,${y}px) scale(${s})`;img.style.cursor=s>1?(drag?'grabbing':'grab'):'zoom-in';hint.style.display=s>1?'none':'';};
+  // זום סביב נקודה (px,py במסך) — הנקודה שמתחת לעכבר נשארת במקומה
+  const zoomAt=(ns,px,py)=>{
+    ns=Math.max(1,Math.min(8,ns));
+    const r=img.getBoundingClientRect(),ox=r.left-x,oy=r.top-y; // מיקום התמונה בלי ההזזה
+    const ix=(px-r.left)/s,iy=(py-r.top)/s;                     // הנקודה בקואורדינטות התמונה
+    s=ns;
+    if(s===1){x=0;y=0;}else{x=px-ox-ix*s;y=py-oy-iy*s;}
+    apply();
+  };
+  const mid=()=>{const r=img.getBoundingClientRect();return [r.left+r.width/2,r.top+r.height/2];};
+  const close=()=>{ov.remove();document.removeEventListener('keydown',onKey);};
+  const onKey=e=>{if(e.key==='Escape')close();else if(e.key==='+'||e.key==='=')zoomAt(s*1.4,...mid());else if(e.key==='-')zoomAt(s/1.4,...mid());};
+  document.addEventListener('keydown',onKey);
+  ov.addEventListener('wheel',e=>{e.preventDefault();zoomAt(s*(e.deltaY<0?1.2:1/1.2),e.clientX,e.clientY);},{passive:false});
+  img.addEventListener('dblclick',e=>{e.stopPropagation();zoomAt(s>1?1:2.5,e.clientX,e.clientY);});
+  img.addEventListener('pointerdown',e=>{if(s<=1||e.pointerType==='touch')return;drag={sx:e.clientX-x,sy:e.clientY-y};moved=false;img.setPointerCapture(e.pointerId);apply();});
+  img.addEventListener('pointermove',e=>{if(!drag)return;x=e.clientX-drag.sx;y=e.clientY-drag.sy;moved=true;apply();});
+  img.addEventListener('pointerup',()=>{drag=null;apply();});
+  img.addEventListener('click',e=>e.stopPropagation());
+  ov.querySelectorAll('[data-z]').forEach(b=>b.addEventListener('click',e=>{e.stopPropagation();const z=b.dataset.z;
+    if(z==='close')close();else zoomAt(z==='in'?s*1.5:s/1.5,...mid());}));
+  ov.addEventListener('click',()=>{if(moved){moved=false;return;}close();});
   document.body.appendChild(ov);
 }
 
