@@ -1509,13 +1509,34 @@ function trackPackStock(cust, prods, ps) {
   ev.sort((a, b) => a.at - b.at || (a.t === 'use') - (b.t === 'use'));
   const bal = {};
   ev.forEach(e => { if (e.t === 'count') bal[e.k] = e.n; else bal[e.k] = (bal[e.k] || 0) + (e.t === 'in' ? e.n : -e.n); });
+  // 📋 נדרש להזמנות הפתוחות של הלקוח (25/10/2026) — ⚠️ העתק של pstkNeed ב-index.html, רק לחומר שהלקוח
+  // מספק: יחידות שעוד לא יצאו (כמות, או משוערת) × צריכה ליחידה (p.cons; חומר אריזה מובנה — לפי c.own).
+  // פתוחה = לא דגם, לא נדחפה ל"מוכן ליציאה"/"יצא" (סגירה בחוסר), ותעודה אחרונה לא לפני יותר מ-21 יום
+  const need = {}, cutMs = Date.now() - 21 * 86400000;
+  prods.forEach(p => {
+    if (p.isSample) return;
+    const cons = (Array.isArray(p.cons) ? p.cons : []).filter(c => c && (+c.n || 0) > 0);
+    if (!cons.length) return;
+    const shL = Array.isArray(p.shipments) && p.shipments.length ? p.shipments
+      : (p.shippedQty != null ? [{ total: +p.shippedQty || 0, at: p.shippedAt || '', date: p.dnDate || '' }] : []);
+    const out = shL.reduce((t, s) => t + (+(s && s.total) || 0), 0), last = shL.reduce((m, s) => Math.max(m, shMs(s)), 0);
+    const ov = p.pipeOverride && p.pipeOverride.list;
+    if (ov === 'ready_ship' || ov === 'shipped' || (out > 0 && last && last < cutMs)) return;
+    const rem = Math.max(0, (trackQty(p) || Math.max(0, parseInt(p.estQty) || 0)) - out);
+    if (!rem) return;
+    cons.forEach(c => {
+      const builtin = TRACK_MATS.some(([k]) => k === c.id);
+      if (builtin ? !c.own : !own.has(c.id)) return;
+      need[c.id] = (need[c.id] || 0) + (+c.n) * rem;
+    });
+  });
   const min = ps.min || {};
   const DEPT_ORD = { cut: 0, sew: 1, pack: 2 };
   const list = TRACK_MATS.map(([k, name]) => ({ k, name, unit: "יח'", dept: 'pack' }))
     .concat([...own.values()].map(i => ({ k: i.id, name: String(i.name || ''), unit: String(i.unit || "יח'"), dept: i.dept || '' })));
   return list.filter(x => x.k in bal).sort((a, b) => (DEPT_ORD[a.dept] ?? 3) - (DEPT_ORD[b.dept] ?? 3)).map(x => {
     const mn = +min[cust + '|' + x.k] || 0, n = Math.round(bal[x.k] * 100) / 100;
-    return { ...x, n, low: mn > 0 && bal[x.k] < mn };
+    return { ...x, n, low: mn > 0 && bal[x.k] < mn, need: Math.round((need[x.k] || 0) * 100) / 100 };
   });
 }
 // prods = כל רשומות המוצר של הלקוח (prodByOrderNo/findProd/prodStampOldest מסננים ממילא לפי לקוח)

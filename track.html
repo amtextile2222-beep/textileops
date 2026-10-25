@@ -273,9 +273,12 @@ async function load(){
     const stk=Array.isArray(d.stock)?d.stock:[];
     // 🧵 (23/10/2026) גם פריטי גזירה/תפירה (תוויות, פלזלין…) — מקובצים לפי מחלקה, עם יחידה (מטר/גליל…)
     const DEPT={cut:'✂️ גזירה',sew:'🧵 תפירה',pack:'📦 אריזה'},multi=new Set(stk.map(s=>s.dept||'pack')).size>1;
-    const stkRow=s=>`<div class="top" style="padding:3px 0">
-        <span>${esc(s.name)}</span><span><b style="${s.n<0||s.low?'color:#dc2626':''}">${Number(s.n)||0}</b>${s.unit&&s.unit!=="יח'"?' <span class="meta" style="display:inline">'+esc(s.unit)+'</span>':''}${s.low?' <span class="badge" style="background:#fee2e2;color:#dc2626">⚠ כדאי לשלוח עוד</span>':''}</span>
-      </div>`;
+    // 📋 (25/10/2026) נדרש להזמנות שלכם שבמפעל וכמה חסר — מהשרת (need); בלי need — כמו קודם
+    const stkRow=s=>{const nd=Number(s.need)||0,n=Number(s.n)||0,miss=nd>0&&n<nd,u=s.unit&&s.unit!=="יח'"?' '+esc(s.unit):'';
+      return `<div style="padding:3px 0"><div class="top">
+        <span>${esc(s.name)}</span><span><b style="${n<0||s.low||miss?'color:#dc2626':''}">${n}</b>${u?' <span class="meta" style="display:inline">'+u.trim()+'</span>':''}${s.low||miss?' <span class="badge" style="background:#fee2e2;color:#dc2626">⚠ כדאי לשלוח עוד</span>':''}</span></div>
+        ${nd>0?`<div class="meta" style="${miss?'color:#dc2626;font-weight:600':''}">נדרש להזמנות שלכם ${Math.round(nd*100)/100}${u}${miss?' · חסר '+(Math.round((nd-n)*100)/100)+u:' · יש מספיק'}</div>`:''}
+      </div>`;};
     const stkHtml=stk.length?`<h2>📦 החומרים שלכם במפעל</h2><div class="card">${multi
         ?Object.keys(DEPT).map(d=>{const l=stk.filter(s=>(s.dept||'pack')===d);return l.length?`<div class="meta" style="font-weight:700;margin-top:6px">${DEPT[d]}</div>`+l.map(stkRow).join(''):'';}).join('')
         :stk.map(stkRow).join('')}<div class="meta">מתעדכן אוטומטית עם כל משלוח שיוצא אליכם.</div></div>`:'';
