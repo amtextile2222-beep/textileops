@@ -859,10 +859,11 @@ code{background:var(--bg2);border:0.5px solid var(--b);border-radius:4px;padding
           <div style="font-size:11px;color:var(--txt3);margin:3px 0 7px">המחיר נצרב על התעודה בעת אישור המשלוח — שינוי כאן <b>לא</b> משנה תעודות שכבר יצאו.</div>
           <div style="display:flex;gap:6px;flex-wrap:wrap">
             <div style="flex:1;min-width:88px"><label style="font-size:11px;color:var(--txt3)">🧷 קולב</label><input type="number" id="pp-hanger" min="0" step="0.01" style="width:100%;font-size:13px;margin-top:3px"/></div>
+            <div style="flex:1;min-width:88px"><label style="font-size:11px;color:var(--txt3)">🧷 קולב קליפס</label><input type="number" id="pp-clip" min="0" step="0.01" style="width:100%;font-size:13px;margin-top:3px"/></div>
             <div style="flex:1;min-width:88px"><label style="font-size:11px;color:var(--txt3)">🧷 ניילון</label><input type="number" id="pp-nylon" min="0" step="0.01" style="width:100%;font-size:13px;margin-top:3px"/></div>
             <div style="flex:1;min-width:88px"><label style="font-size:11px;color:var(--txt3)">📦 ניילון צלופן</label><input type="number" id="pp-cello" min="0" step="0.01" style="width:100%;font-size:13px;margin-top:3px"/></div>
           </div>
-          <div style="font-size:11px;color:var(--txt3);margin-top:5px">🧷 תלייה = קולב + ניילון · 📦 קיפול = ניילון צלופן<br>הקולבים בדרך כלל של הלקוח — הכמות שלהם נשארת ריקה באישור המשלוח, והמחיר כאן משמש רק כשהם שלנו.</div>
+          <div style="font-size:11px;color:var(--txt3);margin-top:5px">🧷 תלייה = קולב / קולב קליפס + ניילון · 📦 קיפול = ניילון צלופן<br>הקולבים בדרך כלל של הלקוח — הכמות שלהם נשארת ריקה באישור המשלוח, והמחיר כאן משמש רק כשהם שלנו.</div>
         </div>
         <button class="btn primary" onclick="saveCompanyInfo()" style="width:100%;margin-top:8px;font-size:13px">💾 שמור פרטי עסק</button>
       </div>
@@ -2943,7 +2944,7 @@ let S={
     dnVoids:[],
     // 📦 מחירון חומר האריזה ₪ ליחידה — נערך בלשונית ניהול. ברירת מחדל 0 ולא מספר
     // מומצא: מחיר שגוי שנצרב על תעודה גרוע ממחיר חסר, שהמערכת צועקת עליו.
-    packPrices:{hanger:0,nylon:0,cello:0}},
+    packPrices:{hanger:0,clip:0,nylon:0,cello:0}},
   waLastSent:0,
   wifiAlertSent:{},
   tgSentAlerts:{},
@@ -13411,7 +13412,7 @@ function saveCompanyInfo(){
   // 📦 מחירון האריזה נשמר במסמך משלו — הוא נקרא בכל אישור משלוח, ולכן עדיף לו
   // מסמך קטן שלא נוגע בפרטי העסק ולא בהגדרות הטלגרם
   const num=id=>Math.max(0,parseFloat(document.getElementById(id)?.value)||0);
-  const pp={hanger:num('pp-hanger'),nylon:num('pp-nylon'),cello:num('pp-cello')};
+  const pp={hanger:num('pp-hanger'),clip:num('pp-clip'),nylon:num('pp-nylon'),cello:num('pp-cello')};
   S.settings.packPrices=pp;
   saveLS();
   if(S.fbConnected){fbSet('appSettings','company',co);fbSet('appSettings','telegramSettings',{dnStart:S.settings.dnStart,invStart:S.settings.invStart,vatPct:S.settings.vatPct});fbSet('appSettings','packPrices',pp);}
@@ -13511,7 +13512,7 @@ function fillCompanyInfo(){
   const pp=S.settings?.packPrices||{};
   // 0 מוצג כשדה ריק ולא כ-"0" — "אין מחיר" ו-"מחיר אפס" נראים אז אותו דבר, וזה
   // בדיוק המצב שהדוח מסמן באזהרה
-  s('pp-hanger',+pp.hanger||'');s('pp-nylon',+pp.nylon||'');s('pp-cello',+pp.cello||'');
+  s('pp-hanger',+pp.hanger||'');s('pp-clip',+pp.clip||'');s('pp-nylon',+pp.nylon||'');s('pp-cello',+pp.cello||'');
   const issued=(S.products||[]).reduce((m,x)=>Math.max(m,parseInt(x.dnNo,10)||0),0);
   s('co-dnstart',Math.max(parseInt(S.settings?.dnStart,10)||1,issued+1));
   const el=document.getElementById('co-dnlast');
@@ -16809,6 +16810,8 @@ const PACK_MODES={hang:'🧷 תלייה',fold:'📦 קיפול',mixed:'🧷📦 
 // הלקוח בשקט על מה שלא סיפקנו.
 const PACK_MATS=[
   {k:'hanger',name:'קולב',      mode:'hang',hint:'רק כשהקולבים שלנו — הלקוח מספק ברוב המקרים'},
+  // 🧷 קולב קליפס (25/10/2026) — למכנסיים וחצאיות. תלייה כמו קולב רגיל, עם מחיר משלו
+  {k:'clip'  ,name:'קולב קליפס',mode:'hang',hint:'מכנסיים וחצאיות — רק כשהקולבים שלנו'},
   {k:'nylon' ,name:'ניילון',    mode:'hang',hint:'תלייה — לא כל פריט נארז בניילון, כמות ידנית'},
   {k:'cello' ,name:'ניילון צלופן',mode:'fold',autoQty:true,hint:'קיפול — כל פריט בשק, עוקב אחרי הכמות שיוצאת'}
 ];
@@ -16832,7 +16835,7 @@ function shipPackCost(s){return shipMats(s).reduce((t,m)=>t+(m.own?0:(+m.n||0)*(
 // ─── 📦 מלאי חומרים — אריזה / תפירה / גזירה (23/10/2026) ─────────
 // appSettings/packStock = {moves:[{id,at,pool,k,t,n,note,by,byName,edits}], min:{'pool|k':n},
 //   items:[{id,name,dept,unit,own,cust}]}.
-// k = חומר אריזה מובנה (PACK_MATS: hanger/nylon/cello) או מזהה פריט שהמנהל הגדיר (items).
+// k = חומר אריזה מובנה (PACK_MATS: hanger/clip/nylon/cello) או מזהה פריט שהמנהל הגדיר (items).
 // pool = 'F' (המפעל קנה) או קוד לקוח (חומר שהלקוח סיפק). t: in=קבלה · out=הוצאה ידנית · count=ספירה.
 // 🔑 היתרה **מחושבת ולא נשמרת**: תנועות פחות מה שיצא בתעודות, מהתנועה הראשונה של אותו מלאי+חומר
 // ואילך ⇒ עריכה/מחיקה של תעודה מתקנת את המלאי לבד. חומר אריזה מובנה — לפי mats בתעודה (own ⇒ מלאי

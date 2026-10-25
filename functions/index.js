@@ -1486,7 +1486,8 @@ function trackShipInfo(p, qty) {
 // תנועות appSettings/packStock (in/out/count) פחות מה שיצא בתעודות, מהתנועה הראשונה של כל חומר ואילך:
 // חומר אריזה מובנה — mats עם own; פריט שהלקוח מספק (items[].own) — p.cons × יחידות התעודה.
 // מחזיר רק חומר שנספר: [{k, name, unit, dept, n, low}]. low = מתחת למינימום (בלי לחשוף את המינימום).
-const TRACK_MATS = [['hanger', 'קולבים'], ['nylon', 'ניילון'], ['cello', 'ניילון צלופן']];
+// ⚠️ זהה ל-PACK_MATS ב-index.html (מפתחות; השמות כאן בלשון רבים לדף הלקוח)
+const TRACK_MATS = [['hanger', 'קולבים'], ['clip', 'קולבי קליפס'], ['nylon', 'ניילון'], ['cello', 'ניילון צלופן']];
 function trackPackStock(cust, prods, ps) {
   const moves = (Array.isArray(ps.moves) ? ps.moves : []).filter(m => m && m.pool === cust && m.k);
   if (!moves.length) return [];
