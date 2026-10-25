@@ -14,9 +14,9 @@
 /* 📦 דף מעקב הזמנות ללקוח (10/10/2026). כניסה עם קישור במייל (Firebase Email Link), פעם אחת למכשיר.
    הנתונים מ-Cloud Function customerTrack, שבודקת שהמייל המאומת מורשה ללקוח — ראה functions/index.js */
 :root{--bg:#f5f5f3;--card:#fff;--txt:#1c1c1a;--txt2:#555;--txt3:#888;--brd:rgba(0,0,0,.1);
-  --blue:#185FA5;--blue-bg:#e6f0fa;--green:#16a34a;--green-bg:#dcfce7;--track:#e5e5e2}
+  --blue:#185FA5;--blue-bg:#e6f0fa;--green:#16a34a;--green-bg:#dcfce7;--track:#e5e5e2;--red:#dc2626;--red-bg:#fee2e2}
 @media (prefers-color-scheme:dark){:root{--bg:#1c1c1a;--card:#252523;--txt:#f0f0ee;--txt2:#bbb;--txt3:#888;
-  --brd:rgba(255,255,255,.12);--blue:#6aa8e8;--blue-bg:#1d3047;--green:#4ade80;--green-bg:#173a24;--track:#3a3a37}}
+  --brd:rgba(255,255,255,.12);--blue:#6aa8e8;--blue-bg:#1d3047;--green:#4ade80;--green-bg:#173a24;--track:#3a3a37;--red:#f87171;--red-bg:#3f1d1d}}
 *{box-sizing:border-box}
 body{margin:0;background:var(--bg);color:var(--txt);font-family:system-ui,-apple-system,"Segoe UI",Arial,sans-serif;line-height:1.45}
 .wrap{max-width:720px;margin:0 auto;padding:16px}
@@ -41,6 +41,13 @@ h2{font-size:14px;color:var(--txt2);margin:20px 0 8px}
 .bar .cur em{color:var(--blue);font-weight:700}
 .bar.done em{color:var(--txt2);font-weight:400}
 .bar small{display:block;font-size:9px;line-height:1.2;color:var(--txt3);direction:ltr}
+/* 🎨 (25/10/2026) שלב שהסתיים — ירוק · השלב הנוכחי — כחול · שלב עם חוסר פתוח — אדום (גם שלב עתידי) */
+.bar .ok i{background:var(--green)}
+.bar .ok em{color:var(--txt2)}
+.bar .bad i{background:var(--red)}
+.bar .bad em{color:var(--red);font-weight:700}
+.short{font-size:12px;margin-top:4px;padding:5px 8px;border-radius:8px;background:var(--red-bg);color:var(--red)}
+.short.res{background:none;color:var(--txt3);padding:2px 8px}
 @media (max-width:420px){.bar{gap:2px}.bar em{font-size:9px}}
 .pct{height:6px;border-radius:3px;background:var(--track);overflow:hidden;margin-top:6px}
 .pct b{display:block;height:100%;background:var(--blue)}
@@ -115,7 +122,14 @@ function card(o){
   const no=o.no?'הזמנה #'+String(o.no).padStart(3,'0')+' · ':'';
   // ✂️ פיצול: חלק באריזה והתפירה עוד לא הסתיימה ⇒ "מוכן לאריזה" לא מסומן, ושורת אחוז נוספת לתפירה
   const sp=!!o.split&&o.sewPct!=null;
-  const segs=STAGES.map((s,i)=>`<span class="${i<=o.stage&&!(sp&&i===4)?'on':''}${i===o.stage?' cur':''}" "><i></i><em>${esc(s)}</em>${o.dates&&o.dates[i]?`<small>${esc(fmtDM(o.dates[i]))}</small>`:''}</span>`).join('');
+  // ⚠ חוסרים (25/10/2026): פתוחים צובעים את השלב שלהם באדום; שלב שעבר — ירוק, הנוכחי — כחול
+  const sh=Array.isArray(o.short)?o.short:[],openSt=new Set(sh.filter(x=>!x.res).map(x=>x.st));
+  const segCls=i=>openSt.has(i)?'bad':!(i<=o.stage&&!(sp&&i===4))?'':(i<o.stage||done)?'ok':'on';
+  const segs=STAGES.map((s,i)=>`<span class="${segCls(i)}${i===o.stage?' cur':''}" "><i></i><em>${esc(s)}</em>${o.dates&&o.dates[i]?`<small>${esc(fmtDM(o.dates[i]))}</small>`:''}</span>`).join('');
+  const dm=ms=>{const d=new Date(+ms);return String(d.getDate()).padStart(2,'0')+'/'+String(d.getMonth()+1).padStart(2,'0');}; // תאריך מקומי
+  const shHtml=sh.slice().sort((a,b)=>(!!a.res-!!b.res)||(b.at-a.at)).map(x=>x.res
+    ?`<div class="short res">✓ ${esc(STAGES[x.st]||'')}: ${esc(x.txt)} · ${dm(x.at)} · נפתר ${dm(x.res)}</div>`
+    :`<div class="short">⚠ חוסר · ${esc(STAGES[x.st]||'')}: ${esc(x.txt)} · ${dm(x.at)}</div>`).join('');
   return `<div class="card">
     <div class="top"><div><div class="nm">${esc(o.name||('דגם '+o.prod))}</div>
       <div class="meta">${no}${o.qty?o.qty+" יח' · ":o.est?'~'+o.est+" יח' (משוער) · ":''}${done?'נשלח '+fmtD(o.ship):'התקבל '+fmtD(o.entry)}</div></div>
@@ -125,6 +139,7 @@ function card(o){
     ${sp?`<div class="stage">בתפירה ${o.sewPct}%</div><div class="pct" title="${o.sewPct}%"><b style="width:${Math.max(0,Math.min(100,o.sewPct))}%"></b></div><div class="stage">באריזה ${pct??0}%</div>`:''}
     ${pct!=null?`<div class="pct" title="${pct}%"><b style="width:${Math.max(0,Math.min(100,pct))}%"></b></div>`:''}
     ${o.out>0?`<div class="stage">🚚 נשלחו ${o.out} יח' · השאר: ${esc(STAGES[o.stage]||'בייצור')}</div>`:''}
+    ${shHtml}
   </div>`;
 }
 const outBtn=()=>'<button id="out">התנתקות</button>';

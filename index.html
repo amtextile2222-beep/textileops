@@ -7952,6 +7952,10 @@ async function buildPipelineReport(){
             return `<div style="width:100%;font-size:10px;color:var(--amber-txt,#b45309)">⏳ ${esc(f.low.slice(0,3).join(' · '))}${f.low.length>3?' · +'+(f.low.length-3):''}</div>`;})()}
           ${shipHere?`<span class="badge blue" style="font-size:9px" title="${esc('הופקה תעודת משלוח '+(pipeDnDate(p)||'')+' — ממתין לסימון יציאה')}">🧾 תעודה הופקה</span>`:''}
         </div>
+        ${(()=>{ // ⚠ חוסרים פתוחים — על הכרטיס, וכפתור לחלון החוסרים (מנהל/אחראי)
+          const op=shortOpen(p);
+          return (op.length?`<div style="font-size:10px;color:var(--red-txt);font-weight:600;margin-top:3px">⚠ ${esc(op.slice(0,2).map(x=>pipeShortLabel(PIPE_LISTS[x.st]||{})+': '+x.txt).join(' · '))}${op.length>2?' · +'+(op.length-2):''}</div>`:'')
+            +(canShort()?`<div style="margin-top:3px"><button class="btn" style="font-size:10px;padding:2px 6px${op.length?';color:var(--red-txt);border-color:var(--red-txt)':''}" onclick="openShortages('${escj(p.id)}')">⚠ חוסרים${op.length?' ('+op.length+')':''}</button></div>`:'');})()}
         ${isMgr&&L.id==='shipped'&&p.departedAt?`<div style="margin-top:4px"><button class="btn" style="font-size:10px;padding:2px 6px" onclick="pipeDepart('${escj(p.id)}',false)" title="${esc('סומן ע״י '+(p.departedBy||'—'))}">↺ בטל יציאה</button></div>`:''}
         ${isMgr&&nxt&&L.id!=='shipped'&&(!spSew||shipHere)?`<div style="margin-top:4px;display:flex;gap:4px">
           ${shipHere
@@ -8008,6 +8012,77 @@ function pipePrintHtml(){
   return out;
 }
 function pipeShipAll(){_pipeShip={from:'',to:''};buildPipelineReport();}
+// ─── ⚠ הערות חוסרים לפי שלב (25/10/2026) ────────────────────────
+// products.shortages = [{id, st, txt, at, by, byName, res, resBy}] — st = אינדקס השלב ב-PIPE_LISTS (0 כניסה … 7 יצא),
+// res = מתי סומן "נפתר" (0 = פתוח). נכתב ע"י מנהל/אחראי מלוח מצב הזמנות; מחיקה — מנהל. מוצג ללקוח בדף המעקב
+// (customerTrack ⇒ short): שלב עם חוסר פתוח אדום (גם שלב עתידי), שלב שעבר ירוק, השלב הנוכחי כחול.
+// customerNotify שולח ללקוח התראה על חוסר חדש. מערך ⇒ fbSet מחליף אותו כולו (מחיקה נשמרת).
+const canShort=()=>['manager','supervisor'].includes(S.user?.role);
+const shortList=p=>Array.isArray(p?.shortages)?p.shortages.filter(x=>x&&x.txt):[];
+const shortOpen=p=>shortList(p).filter(x=>!x.res);
+async function _shortSave(p,list){
+  p.shortages=list;saveLS();
+  if(S.fbConnected){try{await fbSet('products',p.id,{shortages:list});}catch(e){showToast('שמירה נכשלה: '+e.message,'var(--red-txt)',6000);return false;}}
+  try{buildPipelineReport();}catch(e){}
+  return true;
+}
+function openShortages(pid){
+  if(!canShort())return;
+  const p=(S.products||[]).find(x=>String(x.id)===String(pid));if(!p)return;
+  document.getElementById('shrt-wrap')?.remove();
+  const wrap=document.createElement('div');wrap.id='shrt-wrap';wrap.dataset.pid=p.id;
+  wrap.style.cssText='position:fixed;inset:0;background:rgba(0,0,0,.5);display:flex;align-items:flex-start;justify-content:center;z-index:9999;padding:16px;overflow-y:auto';
+  wrap.onclick=e=>{if(e.target===wrap)wrap.remove();};
+  document.body.appendChild(wrap);
+  renderShortages();
+}
+function renderShortages(){
+  const wrap=document.getElementById('shrt-wrap');if(!wrap)return;
+  const p=(S.products||[]).find(x=>String(x.id)===String(wrap.dataset.pid));if(!p){wrap.remove();return;}
+  const mgr=S.user?.role==='manager';
+  // השלב הנוכחי — מהרינדור האחרון של הלוח (_pipeRows מחושב שם עם המשימות של ההזמנה בלבד)
+  const cur=Math.max(0,PIPE_IDX((_pipeRows||[]).find(r=>String(r.p.id)===String(p.id))?.st?.id||'intake'));
+  const fmt=ms=>{const d=new Date(+ms);return pad2(d.getDate())+'/'+pad2(d.getMonth()+1);};
+  const list=shortList(p).slice().sort((a,b)=>(!!a.res-!!b.res)||(b.at-a.at));
+  const inp='font-size:13px;padding:7px;border-radius:8px;border:1px solid var(--brd);background:var(--bg);color:var(--txt)';
+  wrap.innerHTML=`<div style="background:var(--card);border-radius:14px;padding:18px;max-width:440px;width:100%;box-shadow:0 10px 40px rgba(0,0,0,.3);margin:auto">
+    <div style="display:flex;justify-content:space-between;align-items:center">
+      <div style="font-size:16px;font-weight:800">⚠ חוסרים — ${esc(p.cust)}/${esc(p.prod)}${(parseInt(p.orderNo,10)||0)?' #'+String(p.orderNo).padStart(3,'0'):''}</div>
+      <button class="btn" style="font-size:12px;padding:4px 10px" onclick="document.getElementById('shrt-wrap')?.remove()">✕</button>
+    </div>
+    <div style="font-size:12px;color:var(--txt3);margin:2px 0 10px">${esc(p.name||'')} · הלקוח רואה את ההערות בדף המעקב, והשלב נצבע באדום עד שמסמנים "נפתר".</div>
+    ${list.length?list.map(x=>`<div style="display:flex;gap:8px;align-items:flex-start;padding:7px 0;border-top:1px solid var(--brd);font-size:13px;${x.res?'color:var(--txt3)':''}">
+      <div style="flex:1"><b style="color:${x.res?'var(--txt3)':'var(--red-txt)'}">${x.res?'✓':'⚠'} ${esc(pipeShortLabel(PIPE_LISTS[x.st]||{})||'')}</b> — ${esc(x.txt)}
+        <div style="font-size:11px;color:var(--txt3)">${fmt(x.at)} · ${esc(x.byName||'')}${x.res?' · נפתר '+fmt(x.res)+(x.resBy?' · '+esc(x.resBy):''):''}</div></div>
+      ${x.res?'':`<button class="btn" style="font-size:11px;padding:3px 8px;color:var(--green-txt)" onclick="shortResolve('${escj(x.id)}')">✅ נפתר</button>`}
+      ${mgr?`<button class="btn" style="font-size:11px;padding:3px 7px" onclick="shortDel('${escj(x.id)}')">🗑</button>`:''}
+    </div>`).join(''):'<div style="font-size:12px;color:var(--txt3);padding:6px 0;border-top:1px solid var(--brd)">אין הערות חוסרים להזמנה הזו.</div>'}
+    <div style="margin-top:10px;border:1px solid var(--brd);border-radius:10px;padding:10px">
+      <div style="font-size:13px;font-weight:700;margin-bottom:6px">➕ חוסר חדש</div>
+      <select id="shrt-st" style="${inp};width:100%">${PIPE_LISTS.map((L,i)=>`<option value="${i}"${i===cur?' selected':''}>${esc(L.label)}${i===cur?' (השלב הנוכחי)':''}</option>`).join('')}</select>
+      <input id="shrt-txt" maxlength="160" placeholder="מה חסר — למשל: חסרים כפתורים במידה 3" style="${inp};width:100%;margin-top:6px" onkeydown="if(event.key==='Enter')shortAdd()"/>
+      <button class="btn primary" style="width:100%;margin-top:8px;font-size:14px" onclick="shortAdd()">💾 הוסף</button>
+    </div>
+  </div>`;
+}
+const _shortP=()=>(S.products||[]).find(x=>String(x.id)===String(document.getElementById('shrt-wrap')?.dataset.pid));
+async function shortAdd(){
+  const p=_shortP();if(!p||!canShort())return;
+  const txt=(document.getElementById('shrt-txt')?.value||'').trim();
+  if(!txt){alert('כתוב מה חסר');return;}
+  const st=Math.max(0,Math.min(PIPE_LISTS.length-1,parseInt(document.getElementById('shrt-st')?.value,10)||0));
+  const x={id:Date.now().toString(36)+Math.random().toString(36).slice(2,5),st,txt,at:Date.now(),by:S.user?.id||'',byName:S.user?.name||'',res:0};
+  if(await _shortSave(p,shortList(p).concat([x]))){showToast('⚠ החוסר נרשם');renderShortages();}
+}
+async function shortResolve(id){
+  const p=_shortP();if(!p||!canShort())return;
+  if(await _shortSave(p,shortList(p).map(x=>x.id===id?{...x,res:Date.now(),resBy:S.user?.name||''}:x))){showToast('✅ סומן כנפתר');renderShortages();}
+}
+async function shortDel(id){
+  const p=_shortP();if(!p||S.user?.role!=='manager')return;
+  if(!await showConfirm('מחיקת הערה','למחוק את הערת החוסר? (עדיף "נפתר" — כך נשארת היסטוריה)','מחק','ביטול'))return;
+  if(await _shortSave(p,shortList(p).filter(x=>x.id!==id)))renderShortages();
+}
 // 📌 דחיפה ידנית קדימה. list ריק = ביטול. נשמר על מסמך המוצר בשדה pipeOverride.
 async function pipePush(pid,list){
   if(S.user?.role!=='manager')return;

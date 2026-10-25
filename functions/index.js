@@ -1618,7 +1618,11 @@ function trackStates(prods, tasks) {
     return { no: parseInt(p.orderNo, 10) || 0, prod: p.prod, name: p.name || '', qty, est: qty ? 0 : Math.max(0, parseInt(p.estQty) || 0), entry: trackEntryDate(p),
       ship: departed ? trackShipDate(p) : '', stage: st, sewPct, packPct, split, dates,
       // out = יחידות שיצאו: משלוח חלקי, או כמה תעודות שרק חלקן סומנו כיציאה (A251, 22/10/2026 — כמו parts בלוח)
-      out: partial || (shipped && depU > 0 && depU < outU) ? depU : 0 };
+      out: partial || (shipped && depU > 0 && depU < outU) ? depU : 0,
+      // ⚠ הערות חוסרים לפי שלב (25/10/2026, products.shortages — נכתב מלוח מצב הזמנות). פתוחות — כולן,
+      // שנפתרו — 30 יום אחרונים. st = אינדקס ב-TRACK_LISTS
+      short: (Array.isArray(p.shortages) ? p.shortages : []).filter(x => x && x.txt && (!x.res || Date.now() - x.res < 30 * 86400000))
+        .map(x => ({ id: String(x.id || ''), st: Math.max(0, Math.min(7, parseInt(x.st, 10) || 0)), txt: String(x.txt).slice(0, 200), at: +x.at || 0, res: +x.res || 0 })) };
   });
 }
 // רשומת מייל מורשה: {e, at, max} — at = מתי נוסף (ms), max = מכשירים מותרים (0/חסר = ללא הגבלה).
@@ -1860,6 +1864,8 @@ exports.customerPush = functions.https.onRequest(async (req, res) => {
 // ⚠️ מספרי השלבים = TRACK_LISTS (0 התקבלה … 7 יצא ללקוח)
 const NOTIFY_STAGES = { 3: 'התחילה תפירה 🧵', 5: 'התחילה אריזה 📦', 6: 'מוכנה ליציאה ✅', 7: 'יצאה אליכם 🚚' };
 const NOTIFY_LINK = 'https://amtextile2222-beep.github.io/textileops/track.html';
+// שמות השלבים בדף הלקוח (STAGES ב-track.html) — לשורת "חוסר ב…"
+const NOTIFY_STAGE_NAMES = ['קבלת ההזמנה', 'ספירה וגזירה', 'מוכן לתפירה', 'תפירה', 'מוכן לאריזה', 'אריזה', 'מוכן ליציאה', 'יציאה ללקוח'];
 // ⚠️ זהה ל-NOTIFY_DEF_WIN ב-index.html: א'-ה' 07:00-18:00, ו' 07:00-13:00
 const NOTIFY_DEF_WIN = { 0: ['07:00', '18:00'], 1: ['07:00', '18:00'], 2: ['07:00', '18:00'], 3: ['07:00', '18:00'], 4: ['07:00', '18:00'], 5: ['07:00', '13:00'] };
 function notifyInWin(win, il) {
@@ -1895,11 +1901,16 @@ exports.customerNotify = functions.runWith({ memory: '1GB', timeoutSeconds: 300 
   for (const cust of Object.keys(byCust)) {
     try {
       const body = await trackBuild(cust);
-      const prev = state[cust], cur = { o: {}, low: [], at: Date.now() };
+      const prev = state[cust], cur = { o: {}, low: [], sh: [], at: Date.now() };
       const lines = [];
       body.orders.forEach(o => {
         const key = o.prod + '#' + (o.no || 0), nm = o.name || ('דגם ' + o.prod);
         cur.o[key] = o.stage;
+        // ⚠ חוסר חדש (פתוח, לא היה בריצה הקודמת) ⇒ שורה בהודעה
+        (o.short || []).filter(x => !x.res && x.id).forEach(x => {
+          cur.sh.push(x.id);
+          if (prev && !(prev.sh || []).includes(x.id)) lines.push('⚠️ ' + nm + ': חוסר ב' + NOTIFY_STAGE_NAMES[x.st] + ' — ' + x.txt);
+        });
         if (!prev) return;
         const was = prev.o ? prev.o[key] : undefined;
         if (was == null) { if (o.stage < 7) lines.push('🆕 ' + nm + ': הזמנה חדשה התקבלה'); return; }
