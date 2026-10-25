@@ -12055,16 +12055,20 @@ function custMatOwn(cust,k){
 // 💰 מחיר חומר האריזה — **למנהל בלבד** (23/10/2026, החלטת המשתמש). אחראי/עובד/עוזר שסורק
 // "יצא ללקוח" רושם כמויות בלי לראות מחיר. תצוגה בלבד: המחיר עדיין נצרב על המשלוח.
 function canSeePackPrice(){return S.user?.role==='manager';}
-function shipMatRowsHtml(cust){
+// 📦 (25/10/2026) הזמנה שהוגדר לה חומר אריזה בכרטיס המוצר (p.cons עם מפתחות PACK_MATS) — רק החומרים
+// שלה מתמלאים: כמות × ליחידה (data-per), "של הלקוח" כפי שהוגדר. בלי הגדרה — כמו קודם (צלופן לפי הכמות).
+function shipMatRowsHtml(cust,p){
   const inp='flex:1;min-width:0;font-size:13px;padding:6px;border-radius:6px;border:1px solid var(--brd);background:var(--bg);color:var(--txt)';
   const hid=canSeePackPrice()?'':'display:none;';
+  const pc=new Map((Array.isArray(p?.cons)?p.cons:[]).filter(c=>c&&PACK_MATS.some(m=>m.k===c.id)&&(+c.n||0)>0).map(c=>[c.id,c]));
   return PACK_MATS.map(m=>{
-    const pr=packPrice(m.k),own=cust?custMatOwn(cust,m.k):false;
+    const c=pc.get(m.k),auto=pc.size?!!c:!!m.autoQty;
+    const pr=packPrice(m.k),own=c?!!c.own:(cust?custMatOwn(cust,m.k):false);
     return `<div class="mat-row" data-k="${m.k}" data-cust="${esc(cust||'')}" style="margin-bottom:7px">
       <div style="display:flex;align-items:center;gap:6px">
         <span style="font-size:12px;font-weight:600;min-width:76px">${esc(m.name)}</span>
-        <input class="mat-n" type="number" inputmode="numeric" min="0" value="" data-auto="${m.autoQty?'1':'0'}"
-          placeholder="${m.autoQty?'לפי הכמות':'ידני'}" oninput="this.dataset.auto='0';shipMatTotal()" style="${inp}"/>
+        <input class="mat-n" type="number" inputmode="numeric" min="0" value="" data-auto="${auto?'1':'0'}" data-per="${c?+c.n:1}"
+          placeholder="${auto?(c&&+c.n!==1?'× '+(+c.n)+' לפי הכמות':'לפי הכמות'):'ידני'}" oninput="this.dataset.auto='0';shipMatTotal()" style="${inp}"/>
         <span class="mat-pr" style="${hid}font-size:11px;white-space:nowrap;color:${pr?'var(--txt3)':'var(--amber-txt)'}">× ${pr?dnMoney(pr):'אין מחיר'}</span>
         <span class="mat-eq" style="${hid}font-size:12px;font-weight:800;min-width:58px;text-align:left;color:var(--txt3)">—</span>
       </div>
@@ -12079,7 +12083,7 @@ function shipMatRowsHtml(cust){
 // `data-auto` מתאפס ב-oninput, ולכן תיקון ידני לא נדרס בעדכון הבא של הכמויות.
 function shipMatSyncAuto(){
   const q=_shipQtySum();
-  document.querySelectorAll('.mat-row .mat-n').forEach(i=>{if(i.dataset.auto==='1')i.value=q||'';});
+  document.querySelectorAll('.mat-row .mat-n').forEach(i=>{if(i.dataset.auto==='1')i.value=q?Math.ceil(q*(+i.dataset.per||1)):'';});
   shipMatTotal();
 }
 function _shipMatsCollect(){
@@ -12239,7 +12243,7 @@ function openShipModal(cust,prod,orderNo){
     <div style="margin-top:10px;border:1px solid var(--brd);border-radius:8px;padding:7px 9px">
       <div style="font-size:12px;font-weight:700;margin-bottom:2px">📦 חומר אריזה — <span id="mat-sum" style="font-weight:600;color:var(--txt3)">לא הוזנה כמות</span></div>
       <div style="font-size:11px;color:var(--txt3);margin-bottom:7px">רשום מה נארז בפועל. מצב המשלוח נקבע לפי זה, והחומר מחויב ללקוח בדוח ההתחשבנות.</div>
-      <div id="ship-mat-rows">${shipMatRowsHtml(p.cust)}</div>
+      <div id="ship-mat-rows">${shipMatRowsHtml(p.cust,p)}</div>
     </div>
     <div style="margin-top:9px">
       <label style="font-size:12px;font-weight:600">📝 הערה לתעודה</label>
@@ -13020,6 +13024,9 @@ function shipPickChanged(){
   if(!p)return;
   const planned=_prodQty(p)||getTotalQty(p.cust,p.prod)||0;
   const el=document.getElementById('ship-planned');if(el)el.textContent=planned;
+  // 📦 חומר האריזה לפי ההזמנה שנבחרה (p.cons) — לפני הכמויות, כדי ש-shipRowsTotal ימלא אותו
+  const mw=document.getElementById('ship-mat-rows');
+  if(mw)mw.innerHTML=shipMatRowsHtml(p.cust,p);
   // הטבלה נבנית מחדש לרשומה הנבחרת — לכל הזמנה פירוט מידות משלה
   const wrap=document.getElementById('ship-rows-wrap');
   if(wrap){wrap.innerHTML=shipRowsHtml(p);shipRowsTotal();}
@@ -16886,6 +16893,28 @@ function pstkCalc(){
   Object.keys(bal).forEach(k=>{bal[k]=Math.round(bal[k]*1000)/1000;});
   return bal;
 }
+// 📋 נדרש להזמנות פתוחות (25/10/2026): לכל הזמנה פתוחה — יחידות שעוד לא יצאו (כמות, או משוערת) ×
+// הצריכה ליחידה בכרטיס המוצר (p.cons, כולל חומר אריזה מובנה). פתוחה = נשארו יחידות, לא דגם, ולא נסגרה:
+// דחיפה ידנית ל"מוכן ליציאה"/"יצא" (= סגירה בחוסר), או תעודה אחרונה לפני 21 יום. מפתח = מלאי|חומר
+function pstkNeed(){
+  const need={},cnt={},cut=Date.now()-21*864e5;
+  (S.products||[]).forEach(p=>{
+    if(p.isSample)return;
+    const cons=(Array.isArray(p.cons)?p.cons:[]).filter(c=>c&&(+c.n||0)>0);if(!cons.length)return;
+    const sh=prodShipments(p),out=sh.reduce((t,s)=>t+(+s.total||0),0),last=sh.reduce((m,s)=>Math.max(m,_shipMs(s)),0);
+    const ov=p.pipeOverride?.list;
+    if(ov==='ready_ship'||ov==='shipped'||(out>0&&last&&last<cut))return;
+    const rem=Math.max(0,(_prodQty(p)||estQtyOf(p))-out);if(!rem)return;
+    cons.forEach(c=>{
+      const it=pstkItem(c.id);if(!it)return;
+      const own=it.builtin?!!c.own:!!it.own,key=(own?p.cust:PSTK_F)+'|'+c.id;
+      need[key]=(need[key]||0)+(+c.n)*rem;cnt[key]=(cnt[key]||0)+1;
+    });
+  });
+  return {need,cnt};
+}
+// חומר שנספר ואין ממנו מספיק להזמנות הפתוחות
+function pstkShortKeys(bal,need){return Object.keys(need).filter(k=>k in bal&&bal[k]<need[k]-0.0001);}
 function pstkLowKeys(bal){
   const min=(S.packStock||{}).min||{};
   return Object.keys(min).filter(k=>(+min[k]||0)>0&&k in bal&&bal[k]<+min[k]);
@@ -16905,7 +16934,8 @@ function pstkAlert(before){
 }
 function pstkBadge(){
   const low={};
-  try{pstkLowKeys(pstkCalc()).forEach(k=>{const d=pstkItem(k.split('|')[1])?.dept;if(d)low[d]=(low[d]||0)+1;});}catch(e){}
+  // ⚠ על הכפתור = חומרים מתחת למינימום **או** שאין מהם מספיק להזמנות הפתוחות (כל מפתח פעם אחת)
+  try{const bal=pstkCalc();new Set([...pstkLowKeys(bal),...pstkShortKeys(bal,pstkNeed().need)]).forEach(k=>{const d=pstkItem(k.split('|')[1])?.dept;if(d)low[d]=(low[d]||0)+1;});}catch(e){}
   document.querySelectorAll('.pstk-btn').forEach(b=>{
     const d=b.dataset.dept||'pack';
     b.style.display=canPackStock()?'':'none';
@@ -16988,15 +17018,17 @@ function renderPackStock(){
   const box=document.getElementById('pstk-bal'),mv=document.getElementById('pstk-moves');
   if(!box||!mv)return;
   const dept=_pstkDept,mgr=S.user?.role==='manager',st=S.packStock||{},min=st.min||{},bal=pstkCalc();
+  const {need,cnt}=pstkNeed();
   const inDept=k=>pstkItem(k)?.dept===dept;
   const custPools=[...new Set([...(st.moves||[]).filter(m=>inDept(m.k)).map(m=>m.pool),
-    ...Object.keys(min).filter(k=>inDept(k.split('|')[1])).map(k=>k.split('|')[0])].filter(p=>p&&p!==PSTK_F))];
+    ...Object.keys(min).filter(k=>inDept(k.split('|')[1])).map(k=>k.split('|')[0]),
+    ...Object.keys(need).filter(k=>inDept(k.split('|')[1])).map(k=>k.split('|')[0])].filter(p=>p&&p!==PSTK_F))]; // 📋 גם לקוח שרק נדרש לו
   const pools=[PSTK_F,...custPools].filter(pool=>pstkItemsFor(pool,dept).length);
   box.innerHTML=pools.length?pools.map(pool=>`<div style="border:1px solid var(--brd);border-radius:10px;margin-bottom:8px;overflow:hidden">
     <div style="font-size:13px;font-weight:700;padding:6px 10px;background:var(--bg)">${esc(pstkPoolName(pool))}</div>
-    ${pstkItemsFor(pool,dept).map(m=>{const key=pool+'|'+m.id,has=key in bal,b=bal[key],mn=+min[key]||0,low=has&&mn>0&&b<mn;
+    ${pstkItemsFor(pool,dept).map(m=>{const key=pool+'|'+m.id,has=key in bal,b=bal[key],mn=+min[key]||0,nd=need[key]||0,miss=has&&nd>0&&b<nd-0.0001,low=has&&mn>0&&b<mn||miss;
       return `<div style="display:flex;align-items:center;gap:8px;padding:6px 10px;border-top:1px solid var(--brd);font-size:13px${low?';background:var(--red-bg,#fee2e2)':''}">
-        <span style="flex:1">${esc(m.name)}</span>
+        <span style="flex:1">${esc(m.name)}${nd>0?`<div style="font-size:11px;font-weight:600;color:${miss?'var(--red-txt)':'var(--txt3)'}">📋 נדרש ${pstkFmt(nd)}${esc(pstkUnit(m.id))} ${cnt[key]===1?'להזמנה פתוחה אחת':'ל-'+cnt[key]+' הזמנות פתוחות'}${miss?' · חסר '+pstkFmt(nd-b):has?' · יש מספיק':''}</div>`:''}</span>
         <b style="min-width:70px;text-align:center;color:${!has?'var(--txt3)':b<0||low?'var(--red-txt)':'var(--txt)'}">${has?pstkFmt(b)+esc(pstkUnit(m.id)):'לא נספר'}</b>
         <span style="font-size:11px;color:var(--txt3)">מינימום</span>
         ${mgr?`<input type="number" min="0" step="any" value="${mn||''}" placeholder="—" onchange="pstkSetMin('${escj(key)}',this.value)" style="width:64px;font-size:12px;padding:4px;border-radius:6px;border:1px solid var(--brd);background:var(--bg);color:var(--txt)"/>`
@@ -17147,19 +17179,35 @@ async function pstkSetMin(key,v){
 }
 // 🧵 צריכה ליחידה בכרטיס המוצר — פריטי המלאי שרלוונטיים ללקוח (כלליים + של הלקוח הזה).
 // נשמר כ-p.cons=[{id,n}] (מערך ולא map: fbSet ממזג maps, ופריט שנמחק מהמפה היה נשאר במסמך)
+// 📦 (25/10/2026) גם חומרי האריזה המובנים (PACK_MATS) — {id:'hanger',n,own}: לא יורדים מהמלאי לפי
+// הצריכה (הם יורדים לפי mats בתעודה — אחרת ספירה כפולה; pstkCalc מדלג עליהם), אלא משמשים ל:
+// מילוי מראש של חלון "יצא ללקוח" (כמות × ליחידה, "של הלקוח") ולחישוב "נדרש להזמנות" בחלון המלאי.
+// own של חומר מובנה — ברירת מחדל לפי התעודה האחרונה של הלקוח (custMatOwn).
 function pmConsHtml(cust,cons){
   const its=pstkItems().filter(i=>!i.cust||i.cust===cust);
-  if(!its.length)return S.user?.role==='manager'?'<div style="font-size:11px;color:var(--txt3)">אין עדיין פריטי מלאי — מגדירים אותם בחלון "🧵 מלאי תפירה" / "✂️ מלאי גזירה" ← ⚙️ פריטים.</div>':'';
-  const cur=new Map((Array.isArray(cons)?cons:[]).map(c=>[c.id,+c.n||0]));
-  return ['cut','sew','pack'].map(d=>{const l=its.filter(i=>i.dept===d);if(!l.length)return '';
-    return `<div style="font-size:11px;font-weight:700;color:var(--txt3);margin:6px 0 3px">${PSTK_BTN[d].replace('מלאי ','')}</div>`+l.map(i=>`<div style="display:flex;align-items:center;gap:6px;margin-bottom:4px;font-size:12px">
+  const cur=new Map((Array.isArray(cons)?cons:[]).map(c=>[c.id,c]));
+  const inp='width:70px;font-size:12px;padding:4px;border-radius:6px;border:1px solid var(--brd);background:var(--card);color:var(--txt)';
+  const packRows=PACK_MATS.map(m=>{const c=cur.get(m.k),own=c?!!c.own:custMatOwn(cust,m.k);
+    return `<div style="display:flex;align-items:center;gap:6px;margin-bottom:4px;font-size:12px">
+      <span style="flex:1">${esc(m.name)}</span>
+      <label style="display:flex;align-items:center;gap:3px;font-size:11px;white-space:nowrap;cursor:pointer"><input type="checkbox" class="pm-cons-own" data-id="${m.k}"${own?' checked':''} style="width:13px;height:13px;margin:0"/> 👤 של הלקוח</label>
+      <input class="pm-cons" data-id="${m.k}" type="number" min="0" step="any" value="${c?(+c.n||''):''}" placeholder="0" style="${inp}"/>
+      <span style="color:var(--txt3);min-width:60px">יח' ליחידה</span>
+    </div>`;}).join('');
+  const rowsOf=l=>l.map(i=>`<div style="display:flex;align-items:center;gap:6px;margin-bottom:4px;font-size:12px">
       <span style="flex:1">${esc(i.name)}${i.own?' <span style="color:var(--txt3)">👤</span>':''}</span>
-      <input class="pm-cons" data-id="${esc(i.id)}" type="number" min="0" step="any" value="${cur.get(i.id)||''}" placeholder="0" style="width:70px;font-size:12px;padding:4px;border-radius:6px;border:1px solid var(--brd);background:var(--card);color:var(--txt)"/>
+      <input class="pm-cons" data-id="${esc(i.id)}" type="number" min="0" step="any" value="${cur.get(i.id)?(+cur.get(i.id).n||''):''}" placeholder="0" style="${inp}"/>
       <span style="color:var(--txt3);min-width:60px">${esc(i.unit||"יח'")} ליחידה</span>
-    </div>`).join('');}).join('');
+    </div>`).join('');
+  const sec=t=>`<div style="font-size:11px;font-weight:700;color:var(--txt3);margin:6px 0 3px">${t}</div>`;
+  return sec('📦 אריזה — חומר האריזה של ההזמנה (קיפול = צלופן · תלייה = קולב/קליפס + ניילון)')+packRows
+    +['cut','sew','pack'].map(d=>{const l=its.filter(i=>i.dept===d);return l.length?sec(PSTK_BTN[d].replace('מלאי ','')+(d==='pack'?' — פריטים נוספים':''))+rowsOf(l):'';}).join('')
+    +(!its.length&&S.user?.role==='manager'?'<div style="font-size:11px;color:var(--txt3);margin-top:4px">פריטי גזירה/תפירה (תוויות, פלזלין…) מגדירים בחלון "🧵 מלאי תפירה" / "✂️ מלאי גזירה" ← ⚙️ פריטים.</div>':'');
 }
 function pmConsCollect(){
-  return [...document.querySelectorAll('.pm-cons')].map(i=>({id:i.dataset.id,n:Math.round(Math.max(0,parseFloat(i.value)||0)*10000)/10000})).filter(c=>c.n>0);
+  const own=new Set([...document.querySelectorAll('.pm-cons-own:checked')].map(i=>i.dataset.id));
+  return [...document.querySelectorAll('.pm-cons')].map(i=>{const id=i.dataset.id,n=Math.round(Math.max(0,parseFloat(i.value)||0)*10000)/10000;
+    return PACK_MATS.some(m=>m.k===id)?{id,n,own:own.has(id)}:{id,n};}).filter(c=>c.n>0);
 }
 // לקוח שהוקלד בחלון המוצר השתנה ⇒ רשימת הפריטים מתעדכנת; ערכים שכבר הוזנו נשמרים
 function pmConsRefresh(){
