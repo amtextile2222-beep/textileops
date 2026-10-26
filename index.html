@@ -1606,7 +1606,7 @@ const LANGS={
     scan_dup_in_cart:'כבר בסל',
     scan_dup_active:'פעיל כעת',
     scan_dup_done:'כבר בוצע',
-    bc_ret_cut:'🔒 ברקוד ספירה/גזירה סגור — הכמויות כבר הוזנו. סרוק את ברקוד המידה',
+    bc_ret_cut:'🔒 ברקוד ספירה/גזירה סגור — ההזמנה כבר בתפירה. סרוק את ברקוד המידה',
     bc_ret_ship:'🔒 ברקוד סגור — כל הכמות של המידה והצבע האלה כבר יצאה בתעודת משלוח',
     bc_ret_ovr:'לפתוח משימה בכל זאת?',
     smp_label:'👕 דגם ראשון',
@@ -1886,7 +1886,7 @@ const LANGS={
     scan_dup_in_cart:'موجود في السلة',
     scan_dup_active:'قيد التنفيذ حالياً',
     scan_dup_done:'تم تنفيذه مسبقاً',
-    bc_ret_cut:'🔒 باركود العدّ/القص مُغلق — تم إدخال الكميات. امسح باركود المقاس',
+    bc_ret_cut:'🔒 باركود العدّ/القص مُغلق — الطلبية في الخياطة. امسح باركود المقاس',
     bc_ret_ship:'🔒 باركود مُغلق — كل كمية هذا المقاس واللون خرجت في إرسالية',
     bc_ret_ovr:'فتح المهمة رغم ذلك؟',
     smp_label:'👕 عينة أولى',
@@ -2166,7 +2166,7 @@ const LANGS={
     scan_dup_in_cart:'Already in cart',
     scan_dup_active:'Currently active',
     scan_dup_done:'Already done',
-    bc_ret_cut:'🔒 Count/cut barcode closed — quantities already entered. Scan the size barcode',
+    bc_ret_cut:'🔒 Count/cut barcode closed — the order is already in sewing. Scan the size barcode',
     bc_ret_ship:'🔒 Barcode closed — all of this size+color already shipped on a delivery note',
     bc_ret_ovr:'Start the task anyway?',
     smp_label:'👕 First sample',
@@ -2736,7 +2736,9 @@ function bcRetiredWhy(raw){
   raw=String(raw||'');
   if(!isBcLen(raw.length)||isShipBc(raw)||isSampleScan(raw))return '';
   const p=bcOrderProd(raw);if(!p)return '';
-  if(isTotalBc(raw))return _prodQty(p)>0?'cut':'';
+  // ✂️ (26/10/2026) נסגר כשההזמנה **נכנסה לתפירה** — לא כשהוזנה כמות: הסופר מזין כמות מהסורק לפני הגזירה,
+  // והברקוד חייב להישאר פתוח לגוזר. orderInSewing — משימה במחלקת תפירה על ההזמנה הזו, או שלב מתקדם יותר
+  if(isTotalBc(raw))return orderInSewing(p)?'cut':'';
   const sz=raw.slice(7,8),col=raw.slice(11,13);
   const ord=(p.quantities||[]).filter(q=>String(q.size)===sz&&String(q.color)===col).reduce((t,q)=>t+(parseInt(q.qty)||0),0);
   if(!(ord>0))return '';
@@ -2750,7 +2752,19 @@ function bcRetiredWhy(raw){
 // כתיבה: fbUpdateOnly של quantities/workSteps בלבד (Rules: products update פתוח לכל מחובר) + טלגרם למנהל.
 // ⚠️ ברגע שהוזנה כמות, ברקוד הספירה/גזירה "נסגר" (bcRetiredWhy 'cut') — כמו היום, כשהמנהל מזין כמות.
 const stepPending=s=>!stepStation(s)&&!(stepManualMin(s)>0)&&!stepLevel(s);
-const countEntryBtnHtml=v=>bcOrderProd(v)?`<button class="btn" style="width:100%;margin-top:6px;font-size:14px;font-weight:700;border-color:var(--amber-txt);color:var(--amber-txt)" onclick="openCountEntry('${escj(v)}')">📝 כמויות ושלבים · الكميات والمراحل</button>`:'';
+// ההזמנה בתפירה ומעלה: משימה במחלקת תפירה/אריזה על **ההזמנה הזו** (activeTasks + histTasks של 14 יום — נטענים
+// בכל מכשיר), או סימון ידני/משלוח שאחרי התפירה (הזמנה ישנה שהמשימות שלה כבר מחוץ לחלון)
+function orderInSewing(p){
+  if(!p)return false;
+  if(+p.shippedQty>0||(Array.isArray(p.shipments)&&p.shipments.length))return true;
+  const ov=p.pipeOverride?.list;if(ov&&PIPE_IDX(ov)>=PIPE_IDX('sewing'))return true;
+  const log=Array.isArray(p.stageLog)?p.stageLog:[],si=PROD_STAGES.findIndex(s=>s.id==='sewing');
+  if(log.some(e=>PROD_STAGES.findIndex(s=>s.id===e.id)>=si&&si>=0))return true;
+  const st=prodStampOf(p),cache={};
+  return [...(S.activeTasks||[]),...(S.histTasks||[])].some(t=>t&&t.cust===p.cust&&t.prod===p.prod&&['sew','pack'].includes(pipeFamOfDept(t.dept))&&taskOrderStamp(t,cache)===st);
+}
+// הכפתור רק כשהברקוד עדיין פתוח — הזמנה שכבר בתפירה לא נפתחת לסופר (נצפה 26/10 ב-03017 #002)
+const countEntryBtnHtml=v=>bcOrderProd(v)&&!bcRetiredWhy(v)?`<button class="btn" style="width:100%;margin-top:6px;font-size:14px;font-weight:700;border-color:var(--amber-txt);color:var(--amber-txt)" onclick="openCountEntry('${escj(v)}')">📝 כמויות ושלבים · الكميات والمراحل</button>`:'';
 let _ceRows=[],_ceSteps=[];
 function openCountEntry(raw){
   const p=bcOrderProd(raw);if(!p){showToast('⚠ ההזמנה לא נמצאה','var(--red-txt)');return;}
