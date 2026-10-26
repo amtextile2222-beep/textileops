@@ -2742,6 +2742,84 @@ function bcRetiredWhy(raw){
   if(!(ord>0))return '';
   return (shippedCellMap(p).get(sz+'|'+col)||0)>=ord?'ship':'';
 }
+// ─── ✂️ הזנת כמויות ושלבים מהסורק (26/10/2026) ──────────────────────
+// מי שסורק ברקוד ספירה/גזירה (כל תפקיד) מקבל כפתור "📝 כמויות ושלבים" — בלי להיכנס ללשונית המוצרים:
+// • כמויות: ממלא שורות מידה+צבע שהמנהל הקים בלי כמות, ומוסיף מידה/צבע שחסרים. שורה עם כמות — קריאה בלבד.
+// • שלבים: רואה את הקיימים ומוסיף שלבים **בשם בלבד** (בלי תחנה/רמה/דקות) — המנהל משלים בכרטיס המוצר
+//   (stepPending: שלב בלי תחנה, רמה ודקות ⇒ "⚠ ממתין לתחנה וזמן" בכרטיס).
+// כתיבה: fbUpdateOnly של quantities/workSteps בלבד (Rules: products update פתוח לכל מחובר) + טלגרם למנהל.
+// ⚠️ ברגע שהוזנה כמות, ברקוד הספירה/גזירה "נסגר" (bcRetiredWhy 'cut') — כמו היום, כשהמנהל מזין כמות.
+const stepPending=s=>!stepStation(s)&&!(stepManualMin(s)>0)&&!stepLevel(s);
+const countEntryBtnHtml=v=>bcOrderProd(v)?`<button class="btn" style="width:100%;margin-top:6px;font-size:14px;font-weight:700;border-color:var(--amber-txt);color:var(--amber-txt)" onclick="openCountEntry('${escj(v)}')">📝 כמויות ושלבים · الكميات والمراحل</button>`:'';
+let _ceRows=[],_ceSteps=[];
+function openCountEntry(raw){
+  const p=bcOrderProd(raw);if(!p){showToast('⚠ ההזמנה לא נמצאה','var(--red-txt)');return;}
+  // fromMgr = שורה שהמנהל הקים — מידה וצבע קבועים, רק הכמות נפתחת. lock = כבר יש כמות — קריאה בלבד
+  _ceRows=(p.quantities||[]).map(q=>({size:String(q.size||''),color:String(q.color||''),qty:parseInt(q.qty)||0,lock:(parseInt(q.qty)||0)>0,fromMgr:true}));
+  _ceSteps=[];
+  document.getElementById('ce-wrap')?.remove();
+  const wrap=document.createElement('div');wrap.id='ce-wrap';wrap.dataset.pid=p.id;
+  wrap.style.cssText='position:fixed;inset:0;background:rgba(0,0,0,.5);display:flex;align-items:flex-start;justify-content:center;z-index:9999;padding:12px;overflow-y:auto';
+  document.body.appendChild(wrap);
+  renderCountEntry();
+}
+function renderCountEntry(){
+  const wrap=document.getElementById('ce-wrap');if(!wrap)return;
+  const p=(S.products||[]).find(x=>String(x.id)===String(wrap.dataset.pid));if(!p){wrap.remove();return;}
+  const inp='font-size:14px;padding:7px;border-radius:8px;border:1px solid var(--brd);background:var(--bg);color:var(--txt)';
+  const colOpts=c=>`<option value="">--</option>`+Object.entries(COLORS).map(([k,v])=>`<option value="${k}"${k===c?' selected':''}>${k} · ${esc(COLORS_AR?.[k]||v)}</option>`).join('');
+  const tot=_ceRows.reduce((t,r)=>t+(+r.qty||0),0);
+  const steps=(p.workSteps||[]).map(s=>stepDisplay(s)||stepName(s)).filter(Boolean);
+  wrap.innerHTML=`<div style="background:var(--card);border-radius:14px;padding:16px;max-width:460px;width:100%;box-shadow:0 10px 40px rgba(0,0,0,.3);margin:auto">
+    <div style="display:flex;justify-content:space-between;align-items:center">
+      <div style="font-size:16px;font-weight:800">📝 ${esc(p.cust)}/${esc(p.prod)}${(parseInt(p.orderNo,10)||0)?' #'+String(p.orderNo).padStart(3,'0'):''}</div>
+      <button class="btn" style="font-size:12px;padding:4px 10px" onclick="document.getElementById('ce-wrap')?.remove()">✕</button>
+    </div>
+    <div style="font-size:12px;color:var(--txt3);margin-bottom:10px">${esc(p.name||'')}</div>
+    <div style="font-size:14px;font-weight:700;margin-bottom:6px">📦 כמויות · الكميات <span style="font-weight:400;color:var(--txt3);font-size:12px">— סה"כ <span id="ce-tot">${tot}</span></span></div>
+    ${_ceRows.map((r,i)=>`<div style="display:flex;gap:6px;align-items:center;margin-bottom:5px">
+      <span style="font-size:12px;color:var(--txt3);min-width:34px">מידה</span>
+      ${r.lock||r.fromMgr?`<b style="min-width:30px;text-align:center">${esc(r.size)}</b>`:`<input value="${esc(r.size)}" maxlength="1" inputmode="numeric" oninput="_ceRows[${i}].size=this.value.replace(/\\D/g,'')" style="${inp};width:44px;text-align:center"/>`}
+      ${r.lock||r.fromMgr?`<span style="flex:1;font-size:13px">${esc(r.color)} · ${esc(COLORS_AR?.[r.color]||COLORS[r.color]||'')}</span>`:`<select onchange="_ceRows[${i}].color=this.value" style="${inp};flex:1;min-width:0">${colOpts(r.color)}</select>`}
+      ${r.lock?`<b style="min-width:70px;text-align:center">${r.qty}</b>`:`<input type="number" min="0" inputmode="numeric" value="${r.qty||''}" placeholder="כמות" oninput="_ceRows[${i}].qty=Math.max(0,parseInt(this.value)||0);renderCountEntryTot()" style="${inp};width:80px"/>`}
+    </div>`).join('')||'<div style="font-size:12px;color:var(--txt3)">אין שורות — הוסף מידה וצבע</div>'}
+    <button class="btn" style="width:100%;font-size:13px;margin-top:2px" onclick="_ceRows.push({size:'',color:'',qty:0});renderCountEntry()">➕ מידה / צבע · مقاس / لون</button>
+    <div style="font-size:14px;font-weight:700;margin:14px 0 6px">✂️ שלבי עבודה · مراحل العمل</div>
+    <div style="font-size:12px;color:var(--txt2);margin-bottom:6px">${steps.length?steps.map(n=>esc(n)).join(' · '):'<span style="color:var(--txt3)">אין עדיין שלבים</span>'}</div>
+    ${_ceSteps.map((n,i)=>`<div style="display:flex;gap:6px;margin-bottom:5px"><input value="${esc(n)}" oninput="_ceSteps[${i}]=this.value" placeholder="שם השלב · اسم المرحلة" style="${inp};flex:1;min-width:0"/>
+      <button class="btn" style="font-size:12px" onclick="_ceSteps.splice(${i},1);renderCountEntry()">✕</button></div>`).join('')}
+    <button class="btn" style="width:100%;font-size:13px" onclick="_ceSteps.push('');renderCountEntry()">➕ שלב חדש · مرحلة جديدة</button>
+    <div style="font-size:11px;color:var(--txt3);margin-top:4px">רק שם השלב — התחנה והזמן מושלמים אחר כך במשרד.</div>
+    <button class="btn primary" style="width:100%;margin-top:14px;font-size:15px" onclick="saveCountEntry()">💾 שמור · حفظ</button>
+  </div>`;
+}
+function renderCountEntryTot(){const el=document.getElementById('ce-tot');if(el)el.textContent=_ceRows.reduce((t,r)=>t+(+r.qty||0),0);}
+async function saveCountEntry(){
+  const wrap=document.getElementById('ce-wrap');
+  const p=(S.products||[]).find(x=>String(x.id)===String(wrap?.dataset.pid));if(!p)return;
+  const rows=_ceRows.filter(r=>r.size||r.color);
+  if(rows.some(r=>!/^\d$/.test(r.size)||!r.color)){alert('לכל שורה צריך מידה (ספרה אחת) וצבע · لكل سطر مقاس ولون');return;}
+  const keys=rows.map(r=>r.size+'|'+r.color);
+  if(new Set(keys).size!==keys.length){alert('מידה+צבע כפולים · مقاس ولون مكرر');return;}
+  const newSteps=[...new Set(_ceSteps.map(s=>String(s||'').trim()).filter(Boolean))];
+  const have=new Set((p.workSteps||[]).map(s=>stepName(s)));
+  const addSteps=newSteps.filter(n=>!have.has(n));
+  const quantities=rows.map(r=>({size:r.size,color:r.color,qty:+r.qty||0}));
+  const before=_prodQty(p);
+  const qChanged=JSON.stringify(quantities)!==JSON.stringify((p.quantities||[]).map(q=>({size:String(q.size||''),color:String(q.color||''),qty:parseInt(q.qty)||0})));
+  if(!qChanged&&!addSteps.length){wrap.remove();return;}
+  const workSteps=(p.workSteps||[]).concat(addSteps.map(n=>({name:n,nameAr:'',level:0,station:'',altStations:[],manualMin:0,quick:false,merge:false,cut:false})));
+  const upd={...(qChanged?{quantities}:{}),...(addSteps.length?{workSteps}:{}),countBy:S.user?.name||'',countAt:Date.now()};
+  if(S.fbConnected&&!await fbUpdateOnly('products',p.id,upd)){alert('השמירה נכשלה — בדוק חיבור · فشل الحفظ');return;}
+  Object.assign(p,upd);saveLS();
+  wrap.remove();
+  const after=_prodQty(p);
+  showToast('✅ נשמר · تم الحفظ'+(after?' · '+after+" יח'":'')+(addSteps.length?' · '+addSteps.length+' שלבים':''),'var(--green-txt)',4000);
+  try{renderProducts();}catch(e){}
+  sendTelegram('📝 ספירה/גזירה — '+(S.user?.name||'')+'\n🏷 '+p.cust+'/'+p.prod+((parseInt(p.orderNo,10)||0)?' #'+String(p.orderNo).padStart(3,'0'):'')+' '+(p.name||'')
+    +(qChanged?'\n📦 כמות: '+before+' ← '+after+" יח'":'')
+    +(addSteps.length?'\n✂️ '+addSteps.length+' שלבים חדשים ממתינים לתחנה וזמן: '+addSteps.join(', '):'')).catch(()=>{});
+}
 const bcRetiredMsg=why=>{const T=LANGS[currentLang];return why==='cut'?T.bc_ret_cut:T.bc_ret_ship;};
 // שורה אדומה בתצוגה המקדימה של שלושת הסורקים — העובד רואה מיד, לא רק בלחיצה על "התחל"
 const bcRetiredHtml=v=>{const w=bcRetiredWhy(v);return w?`<div style="margin-top:6px;padding:8px;border-radius:8px;background:var(--red-bg,#fee2e2);color:var(--red-txt);font-size:13px;font-weight:700">${esc(bcRetiredMsg(w))}</div>`:'';};
@@ -6644,6 +6722,7 @@ function parseBc(v){
         <span class="bc-seg bc-col">צבע: ${COLORS[col]||col||'__'}</span>
       </div>`;
   if(isBcLen(v.length))el.innerHTML+=bcRetiredHtml(v); // 🔒 ברקוד שסיים את תפקידו
+  if(isBcLen(v.length)&&isTotalBc(v))el.innerHTML+=countEntryBtnHtml(v); // 📝 כמויות ושלבים מהסורק
   if(isBcLen(v.length)){
     // 🔢 לפי **ההזמנה שבברקוד** ולא לפי הרשומה העדכנית: למוצר יכולות להיות כמה
     // הזמנות עם שלבים שונים, ו-findProd היה מחזיר תמיד את האחרונה (ראה gotcha_duplicate_prod_records).
@@ -9433,6 +9512,7 @@ function parseMgrBc(v){
         <span class="bc-seg" style="background:var(--amber-bg);color:var(--amber-txt)">מידה: ${sz||'_'}</span>
         <span class="bc-seg bc-q">כמות: ${q.padEnd(3,'_')}</span><span class="bc-seg bc-col">צבע: ${COLORS[col]||col||'__'}</span></div>`;
   if(isBcLen(v.length))el.innerHTML+=bcRetiredHtml(v); // 🔒 ברקוד שסיים את תפקידו
+  if(isBcLen(v.length)&&isTotalBc(v))el.innerHTML+=countEntryBtnHtml(v); // 📝 כמויות ושלבים מהסורק
   if(isBcLen(v.length)){
     // 🔢 לפי **ההזמנה שבברקוד** ולא לפי הרשומה העדכנית: למוצר יכולות להיות כמה
     // הזמנות עם שלבים שונים, ו-findProd היה מחזיר תמיד את האחרונה (ראה gotcha_duplicate_prod_records).
@@ -10304,6 +10384,7 @@ function tsParseBc(v){
         <span class="bc-seg" style="background:var(--amber-bg);color:var(--amber-txt)">מידה: ${sz||'_'}</span>
         <span class="bc-seg bc-q">כמות: ${q.padEnd(3,'_')}</span><span class="bc-seg bc-col">צבע: ${COLORS[col]||col||'__'}</span></div>`;
   if(isBcLen(v.length))el.innerHTML+=bcRetiredHtml(v); // 🔒 ברקוד שסיים את תפקידו
+  if(isBcLen(v.length)&&isTotalBc(v))el.innerHTML+=countEntryBtnHtml(v); // 📝 כמויות ושלבים מהסורק
   // אם המוצר מוגדר עם שלבי עבודה — הצג checkboxes
   if(isBcLen(v.length)){
     // 🔢 לפי **ההזמנה שבברקוד** ולא לפי הרשומה העדכנית: למוצר יכולות להיות כמה
@@ -18060,6 +18141,9 @@ function renderProducts(){
           ${nextStage&&!isDone?`<span style="color:var(--txt3);margin-right:6px">← הבא: ${nextStage.label}</span>`:''}
         </div>`
       :'';
+    // ✂️ שלבים שנוספו מהסורק (שם בלבד) — מחכים שהמנהל ישלים תחנה וזמן בכרטיס
+    const pendSt=(p.workSteps||[]).filter(stepPending);
+    const pendHtml=pendSt.length&&S.user?.role!=='worker'&&S.user?.role!=='helper'?`<div style="margin-top:4px;font-size:11px;font-weight:600;color:var(--red-txt)" title="${esc(pendSt.map(stepName).join(' · '))}">⚠ ${pendSt.length===1?'שלב אחד ממתין':pendSt.length+' שלבים ממתינים'} לתחנה וזמן: ${esc(pendSt.slice(0,3).map(stepName).join(' · '))}${pendSt.length>3?' …':''}${p.countBy?' · '+esc(p.countBy):''}</div>`:'';
     // תמחור בכרטיס המוצר — מנהל בלבד (תמחור שלב ה', השלמה משלב ד')
     let pricingHtml='';
     if(S.user?.role==='manager'&&+p.unitPrice){
@@ -18071,7 +18155,7 @@ function renderProducts(){
       <div style="display:flex;align-items:flex-start;justify-content:space-between;gap:8px">
         <div style="flex:1">
           <div style="font-size:14px;font-weight:700;color:var(--txt)">מוצר ${esc(p.prod)} &nbsp;·&nbsp; לקוח ${esc(p.cust)}${(parseInt(p.orderNo,10)||0)?` &nbsp;·&nbsp; <span style="color:var(--green-txt,#16a34a)" title="${p.bcLen===BC_LEN_NEW?'ברקודים בני 16 ספרות':'הזמנה מלפני השינוי — ברקודים בני 13 ספרות'}">הזמנה #${String(p.orderNo).padStart(3,'0')}${p.bcLen===BC_LEN_NEW?'':' <span style="color:var(--txt3);font-weight:400">(13)</span>'}</span>`:''}${p.name?` &nbsp;·&nbsp; <span style="color:var(--txt3)">${esc(p.name)}</span>`:''}${p.isSample?` &nbsp;·&nbsp; <span style="color:var(--blue-txt)">${SAMPLE_STEP}</span>`:''}</div>
-          ${stageHtml}${pricingHtml}${qtyRows}${imgHtml}${docHtml}
+          ${stageHtml}${pendHtml}${pricingHtml}${qtyRows}${imgHtml}${docHtml}
         </div>
         <div style="display:flex;gap:6px;flex-shrink:0">
           ${(p.workSteps||[]).some(s=>stepLevel(s)&&stepStation(s))?`<button class="btn" style="font-size:11px;padding:4px 10px;color:var(--blue-txt)" onclick="showProductPlan('${p.id}')">🎯 שיבוץ</button>`:''}
