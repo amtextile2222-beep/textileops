@@ -15921,6 +15921,7 @@ function bcGenerate(){
         <button class="btn" onclick="bcPrint()" style="font-size:13px">🖨️ הדפס נבחרים</button>
         <button class="btn" onclick="bcPrint('labels')" style="font-size:13px" title="רשת 105×56 מ&quot;מ (TW-2510), 10 מדבקות בדף A4">🏷️ הדפס למדבקות</button>
         <button class="btn success" onclick="bcDownloadPDF()" style="font-size:13px" title="קובץ PDF מדויק A4 (105×56 מ&quot;מ) — להדפסה מהנייד בגודל נכון">📄 הורד PDF מדבקות</button>
+        <button class="btn" onclick="bcSharePDF()" style="font-size:13px" title="אותו PDF של המדבקות המסומנות — נשלח בוואטסאפ">💬 שלח בוואטסאפ</button>
         ${nfcOk()?`<button class="btn primary" onclick="bcNfcWriteAll()" style="font-size:13px" title="כותב את הברקודים המסומנים למדבקות NFC אחד אחרי השני">📶 כתוב נבחרים למדבקות NFC</button>
         <label style="display:flex;align-items:center;gap:4px;font-size:12px" title="כמה מדבקות לכל ברקוד — למשל מידה שמחולקת ל-3 חבילות">עותקים <input id="bc-nfc-copies" type="number" min="1" max="20" value="1" inputmode="numeric" style="width:52px;font-size:13px;padding:4px;border-radius:6px;border:1px solid var(--brd)"></label>`:''}
       </div>
@@ -16006,6 +16007,7 @@ function bcGenerateSample(cust,prod,t){
         <button class="btn" onclick="bcPrint()" style="font-size:13px">🖨️ הדפס הכל</button>
         <button class="btn" onclick="bcPrint('labels')" style="font-size:13px">🏷️ הדפס למדבקות</button>
         <button class="btn success" onclick="bcDownloadPDF()" style="font-size:13px">📄 הורד PDF מדבקות</button>
+        <button class="btn" onclick="bcSharePDF()" style="font-size:13px">💬 שלח בוואטסאפ</button>
       </div>
     </div>
     <div id="bc-print-area" style="display:grid;grid-template-columns:repeat(auto-fill,minmax(300px,1fr));gap:12px"></div>`;
@@ -16188,20 +16190,8 @@ async function shareDeliveryNote(pid,idx,forPrint){
   // שם קובץ באנגלית בלבד: וואטסאפ במחשב הציג שם עברי כג'יבריש (×ª×¢...) — נצפה 13/10
   const name='delivery-note-'+no+'.pdf';
   const text='תעודת משלוח '+no+' · '+(p.name||p.prod)+' · '+(+sh.total||0)+" יח'";
-  const file=new File([blob],name,{type:'application/pdf'});
-  const canShare=!!(navigator.canShare&&navigator.canShare({files:[file]}));
-  const ph=_waPhone((S.customerInfo||{})[p.cust]?.phone);
   if(forPrint){await _printPdfBlob(blob,name);return;}
-  if(!await showConfirm('💬 '+esc(name),canShare?'ה-PDF מוכן. בחלון השיתוף בחר וואטסאפ ואת הלקוח.'
-      :'ה-PDF יירד למחשב ותיפתח שיחת וואטסאפ'+(ph?' עם הלקוח':'')+' — גרור את הקובץ לשיחה.','💬 שלח','ביטול'))return;
-  if(canShare){
-    try{await navigator.share({files:[file],text});return;}
-    catch(e){if(e?.name==='AbortError')return;} // נכשל ⇒ נופלים להורדה
-  }
-  const a=document.createElement('a');a.href=URL.createObjectURL(blob);a.download=name;
-  document.body.appendChild(a);a.click();a.remove();setTimeout(()=>URL.revokeObjectURL(a.href),60000);
-  window.open('https://wa.me/'+ph+'?text='+encodeURIComponent(text),'_blank','noopener');
-  showToast('📎 ה-PDF ירד — גרור אותו לשיחת הוואטסאפ','var(--green-txt)',8000);
+  await _waSharePdf(blob,name,text,_waPhone((S.customerInfo||{})[p.cust]?.phone));
 }
 // מחזיר {p,list,i} של משלוח מוכן להדפסה — ואם אין לו עדיין מספר, מקצה ושומר.
 async function dnEnsureNo(pid,idx){
@@ -17843,7 +17833,8 @@ function _bcPdfCell(card){
   });
   return cv;
 }
-function bcDownloadPDF(){
+// share=true (26/10/2026) — אותו PDF בדיוק, נשלח בוואטסאפ במקום להישמר (bcSharePDF)
+async function bcDownloadPDF(share){
   const g=window._bcLastGen;
   if(!g){alert('צור ברקודים תחילה');return;}
   const J=window.jspdf&&window.jspdf.jsPDF;
@@ -17895,7 +17886,28 @@ function bcDownloadPDF(){
     const y=TOP+row*CH;
     doc.addImage(_bcPdfCell(card).toDataURL('image/png'),'PNG',x,y,CW,CH);
   });
-  doc.save('מדבקות_'+cust+'_'+prod+'.pdf');
+  if(!share){doc.save('מדבקות_'+cust+'_'+prod+'.pdf');return;}
+  // 💬 שם קובץ באנגלית — וואטסאפ במחשב מציג שם עברי כג'יבריש (כמו בתעודת המשלוח, 13/10)
+  const name='labels-'+cust+'-'+prod+(sfx?'-'+sfx:'')+'.pdf';
+  const text='מדבקות ברקוד · לקוח '+cust+' · מוצר '+prod+(sfx?' · הזמנה #'+sfx:'')+' · '+(cards.length===1?'מדבקה אחת':cards.length+' מדבקות');
+  await _waSharePdf(doc.output('blob'),name,text,'');
+}
+function bcSharePDF(){return bcDownloadPDF(true);}
+// 💬 שליחת PDF בוואטסאפ — משותף לתעודת המשלוח ולמדבקות: חלון השיתוף של המערכת (נייד / Windows עם
+// אפליקציית וואטסאפ), ואם אין — הקובץ יורד ונפתחת שיחת וואטסאפ (wa.me, לטלפון אם ידוע) לגרירת הקובץ
+async function _waSharePdf(blob,name,text,phone){
+  const file=new File([blob],name,{type:'application/pdf'});
+  const canShare=!!(navigator.canShare&&navigator.canShare({files:[file]}));
+  if(!await showConfirm('💬 '+esc(name),canShare?'ה-PDF מוכן. בחלון השיתוף בחר וואטסאפ ואת איש הקשר.'
+      :'ה-PDF יירד למחשב ותיפתח שיחת וואטסאפ'+(phone?' עם הלקוח':'')+' — גרור את הקובץ לשיחה.','💬 שלח','ביטול'))return;
+  if(canShare){
+    try{await navigator.share({files:[file],text});return;}
+    catch(e){if(e?.name==='AbortError')return;} // נכשל ⇒ נופלים להורדה
+  }
+  const a=document.createElement('a');a.href=URL.createObjectURL(blob);a.download=name;
+  document.body.appendChild(a);a.click();a.remove();setTimeout(()=>URL.revokeObjectURL(a.href),60000);
+  window.open('https://wa.me/'+(phone||'')+'?text='+encodeURIComponent(text),'_blank','noopener');
+  showToast('📎 ה-PDF ירד — גרור אותו לשיחת הוואטסאפ','var(--green-txt)',8000);
 }
 // ─── PDF IMPORT ──────────────────────────────────────────────
 function bcOpenPDF(){document.getElementById('bc-pdf-input')?.click();}
