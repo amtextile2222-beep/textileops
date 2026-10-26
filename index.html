@@ -9695,14 +9695,14 @@ function workerBcDownloadPDF(){
     {t:w.name,mm:5,bold:true,color:'#000'},
     {t:w.dept||'',mm:3.4,bold:false,color:'#555'},
     {t:_wbRole(w),mm:3.4,bold:false,color:'#555'}]}));
-  const doc=new J({unit:'mm',format:'a4',orientation:'portrait'});
+  const doc=new J({unit:'mm',format:'a4',orientation:'portrait',compress:true}); // 🗜 (26/10/2026) דחיסה — 3.2 מ"ב ⇒ ~40 ק"ב ל-4 מדבקות, אותם פיקסלים
   const CW=105,CH=56,TOP=(297-5*CH)/2; // 8.5 מ"מ שוליים עליון/תחתון, 0 בצדדים
   cards.forEach((card,i)=>{
     const pos=i%10;
     if(i>0&&pos===0)doc.addPage();
     const row=Math.floor(pos/2),col=pos%2;
     const x=col===0?CW:0; // RTL: הכרטיס הראשון בצד ימין
-    doc.addImage(_bcPdfCell(card).toDataURL('image/png'),'PNG',x,TOP+row*CH,CW,CH);
+    doc.addImage(_bcPdfCell(card).toDataURL('image/png'),'PNG',x,TOP+row*CH,CW,CH,undefined,'FAST');
   });
   doc.save('מדבקות_עובדים.pdf');
 }
@@ -10273,14 +10273,14 @@ function stationBcDownloadPDF(){
     if(s.dvrChannel)lines.push({t:'📹 ערוץ '+s.dvrChannel,mm:3.4,bold:false,color:'#555'});
     return {qr:'STN:'+s.id,lines};
   });
-  const doc=new J({unit:'mm',format:'a4',orientation:'portrait'});
+  const doc=new J({unit:'mm',format:'a4',orientation:'portrait',compress:true}); // 🗜 (26/10/2026) דחיסה — 3.2 מ"ב ⇒ ~40 ק"ב ל-4 מדבקות, אותם פיקסלים
   const CW=105,CH=56,TOP=(297-5*CH)/2; // 8.5 מ"מ שוליים עליון/תחתון, 0 בצדדים
   cards.forEach((card,i)=>{
     const pos=i%10;
     if(i>0&&pos===0)doc.addPage();
     const row=Math.floor(pos/2),col=pos%2;
     const x=col===0?CW:0; // RTL: הכרטיס הראשון בצד ימין
-    doc.addImage(_bcPdfCell(card).toDataURL('image/png'),'PNG',x,TOP+row*CH,CW,CH);
+    doc.addImage(_bcPdfCell(card).toDataURL('image/png'),'PNG',x,TOP+row*CH,CW,CH,undefined,'FAST');
   });
   doc.save('מדבקות_תחנות.pdf');
 }
@@ -17876,7 +17876,7 @@ async function bcDownloadPDF(share){
       {t:code,mm:2.8,bold:false,color:'#555'}]});
   });
   if(!cards.length){alert('בחר לפחות ברקוד אחד להדפסה');return;}
-  const doc=new J({unit:'mm',format:'a4',orientation:'portrait'});
+  const doc=new J({unit:'mm',format:'a4',orientation:'portrait',compress:true}); // 🗜 (26/10/2026) דחיסה — 3.2 מ"ב ⇒ ~40 ק"ב ל-4 מדבקות, אותם פיקסלים
   const CW=105,CH=56,TOP=(297-5*CH)/2; // 8.5 מ"מ שוליים עליון/תחתון, 0 בצדדים
   cards.forEach((card,i)=>{
     const pos=i%10;
@@ -17884,7 +17884,7 @@ async function bcDownloadPDF(share){
     const row=Math.floor(pos/2),col=pos%2;
     const x=col===0?CW:0; // RTL: הכרטיס הראשון בצד ימין
     const y=TOP+row*CH;
-    doc.addImage(_bcPdfCell(card).toDataURL('image/png'),'PNG',x,y,CW,CH);
+    doc.addImage(_bcPdfCell(card).toDataURL('image/png'),'PNG',x,y,CW,CH,undefined,'FAST');
   });
   if(!share){doc.save('מדבקות_'+cust+'_'+prod+'.pdf');return;}
   // 💬 שם קובץ באנגלית — וואטסאפ במחשב מציג שם עברי כג'יבריש (כמו בתעודת המשלוח, 13/10)
