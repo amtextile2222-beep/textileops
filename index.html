@@ -2897,6 +2897,9 @@ function openCutReport(pid){
   _cr.markers.forEach(m=>(m.sz||[]).forEach(z=>sz.add(String(z.s))));
   _cr.sizes=[...sz].sort();if(!_cr.sizes.length)_cr.sizes=['1','2','3','4','5'];
   _cr.markers.sort((a,b)=>(+b.len||0)-(+a.len||0)); // הארוכה (הציור המלא) ראשונה
+  // 🎯 כמה צריך — נשמר בדוח (טבלת הכמויות מוחלפת בשמירה במה שנגזר, אז היא לא יכולה להיות היעד). בפתיחה ראשונה — מטבלת הכמויות
+  _cr.need=Array.isArray(r.need)?JSON.parse(JSON.stringify(r.need)):(p.quantities||[]).filter(q=>+q.qty>0&&q.color&&/^\d$/.test(String(q.size))).map(q=>({c:String(q.color),s:String(q.size),n:+q.qty}));
+  _cr.pcols=[...new Set((p.quantities||[]).map(q=>String(q.color||'')).filter(Boolean))];
   if(!_cr.markers.length)_cr.markers.push({id:_crId(),len:'',sz:[]});
   if(!_cr.rolls.length)_cr.rolls.push(_crNewRoll(p));
   document.getElementById('cr-wrap')?.remove();
@@ -2976,6 +2979,12 @@ function renderCutReport(){
       <button class="btn" style="font-size:12px;padding:4px 10px" onclick="crClose()">✕</button>
     </div>
     <div style="font-size:12px;color:var(--txt3);margin-bottom:10px">${esc(p.name||'')}${at}</div>
+    <div style="font-size:14px;font-weight:700">🎯 כמה צריך לגזור · المطلوب</div>
+    <div style="font-size:11px;color:var(--txt3);margin-bottom:6px">לפי ההזמנה — מכל מידה, בכל צבע.</div>
+    ${_crCols().map(col=>`<div style="${box}"><div style="font-size:13px;font-weight:700;margin-bottom:4px">${_crColName(col)}</div>
+      <div style="display:flex;flex-wrap:wrap;gap:4px">${_cr.sizes.map(s=>`<label style="display:flex;flex-direction:column;align-items:center;font-size:12px;color:var(--txt3)">${esc(s)}
+        <input type="number" min="0" inputmode="numeric" value="${_crNeed(col,s)||''}" placeholder="0" oninput="_crSetNeed('${col}','${s}',this.value)" style="${inp};width:46px;padding:7px 2px;text-align:center"/></label>`).join('')}</div></div>`).join('')}
+    <select onchange="crAddNeedCol(this.value)" style="${fld};margin-bottom:12px"><option value="">➕ צבע · لون</option>${Object.entries(COLORS).filter(([k])=>!_crCols().includes(k)).map(([k,v])=>`<option value="${k}">${k} · ${esc(v)} · ${esc(COLORS_AR?.[k]||'')}</option>`).join('')}</select>
     <div style="font-size:14px;font-weight:700">📐 ציור ומדרגות · الرسمة والدرجات</div>
     <div style="font-size:11px;color:var(--txt3);margin-bottom:6px">אורך מלא = כל המידות. פריסה קצרה יותר = רק המידות עד המדרגה.</div>
     ${markers}
@@ -2992,7 +3001,9 @@ function renderCutReport(){
       <button class="btn" style="font-size:12px" onclick="_cr.strips.splice(${ti},1);renderCutReport()">✕</button>
     </div>`).join('')}
     <button class="btn" style="width:100%;font-size:13px;margin-bottom:12px" onclick="_cr.strips.push({id:_crId(),name:'',w:'',per:1});renderCutReport()">➕ סרט · شريط</button>
-    <div style="font-size:14px;font-weight:700;margin-bottom:6px">🧵 גלילים · الرولات</div>
+    <div style="font-size:14px;font-weight:700;margin-bottom:6px">📋 מה נשאר לפרוס · ما تبقى للفرد</div>
+    <div id="cr-plan"></div>
+    <div style="font-size:14px;font-weight:700;margin:12px 0 6px">🧵 גלילים · الرولات</div>
     ${rolls}
     <button class="btn" style="width:100%;font-size:13px;margin-bottom:12px" onclick="crAddRoll()">➕ גליל · رول</button>
     <div id="cr-sum"></div>
@@ -3007,6 +3018,22 @@ function crDelRoll(ri){const o=_cr.rolls[ri];if(((o.lay||[]).length||o.m||o.no)&
 function crAddRoll(){const p=(S.products||[]).find(x=>String(x.id)===String(document.getElementById('cr-wrap')?.dataset.pid));_cr.rolls.push(_crNewRoll(p));renderCutReport();}
 function crClose(){if(confirm('לסגור בלי לשמור? · إغلاق بدون حفظ؟')){document.getElementById('cr-wrap')?.remove();_cr=null;}}
 // עדכון החישובים בלבד (בלי לבנות מחדש — הפוקוס נשאר בשדה)
+const _crNeed=(c,s)=>+(_cr.need.find(x=>x.c===c&&x.s===s)?.n)||0;
+function _crSetNeed(c,s,v){const n=Math.max(0,parseInt(v)||0);_cr.need=_cr.need.filter(x=>!(x.c===c&&x.s===s));if(n)_cr.need.push({c,s,n});crCalcView();}
+function _crCols(){return [...new Set([..._cr.pcols,..._cr.need.map(x=>x.c),..._cr.rolls.map(o=>o.color)].filter(Boolean))];}
+function crAddNeedCol(c){if(c&&!_cr.pcols.includes(c))_cr.pcols.push(c);renderCutReport();}
+// 📋 תוכנית פריסה לצבע: מה שנשאר (צריך − נגזר) מחולק למדרגות מהארוכה לקצרה — בכל מדרגה פורסים
+// כמה שאפשר בלי לחרוג מאף מידה שבה (מינימום של נשאר÷כמות). מה שלא מתחלק — אין מדרגה שמתאימה בדיוק.
+function _crPlan(col,c){
+  const steps=[..._cr.markers].filter(m=>+m.len>0&&(m.sz||[]).some(z=>+z.n>0)).sort((a,b)=>(+b.len)-(+a.len));
+  const rem={};_cr.sizes.forEach(s=>{rem[s]=Math.max(0,_crNeed(col,s)-(c.units[s+'|'+col]||0));});
+  const rows=steps.map(m=>{const z=(m.sz||[]).filter(x=>+x.n>0);
+    const n=Math.max(0,Math.min(...z.map(x=>Math.floor((rem[x.s]||0)/x.n))));
+    z.forEach(x=>rem[x.s]=(rem[x.s]||0)-n*x.n);
+    const done=_cr.rolls.filter(o=>o.color===col).reduce((a,o)=>a+_crLayN(o,m.id),0);
+    return{m,n,done};});
+  return{rows,rem};
+}
 function crCalcView(){
   if(!_cr)return;
   const c=_crCalc(_cr);
@@ -3020,6 +3047,21 @@ function crCalcView(){
   const sizes=[...new Set(Object.keys(c.units).map(k=>k.split('|')[0]))].sort();
   const used=c.rolls.reduce((a,x)=>a+x.used,0),tot=Object.values(c.units).reduce((a,b)=>a+b,0);
   const left=_cr.rolls.reduce((a,o,i)=>a+(o.m!==''&&+o.m>0?c.rolls[i].left:0),0),bad=c.rolls.reduce((a,x)=>a+x.bad,0);
+  const pl=document.getElementById('cr-plan');
+  if(pl){const cols=_crCols().filter(col=>_cr.sizes.some(s=>_crNeed(col,s)>0));
+    pl.innerHTML=cols.map(col=>{const{rows,rem}=_crPlan(col,c);
+      const sz=_cr.sizes.filter(s=>_crNeed(col,s)>0||(c.units[s+'|'+col]||0)>0).map(s=>{const nd=_crNeed(col,s),ct=c.units[s+'|'+col]||0,d=ct-nd;
+        return`<span style="white-space:nowrap">מידה ${esc(s)}: <b>${ct}</b> מתוך ${nd}${d<0?` <span style="color:var(--red-txt)">(חסר ${-d})</span>`:d>0?` <span style="color:var(--amber-txt)">(+${d})</span>`:' ✅'}</span>`;}).join(' · ');
+      const left=Object.entries(rem).filter(([s,n])=>n>0);
+      const todo=rows.reduce((a,x)=>a+x.n,0);
+      return`<div style="border:1px solid var(--blue-txt);border-radius:10px;padding:10px;margin-bottom:8px">
+        <div style="font-size:13px;font-weight:700;margin-bottom:4px">${_crColName(col)} — ${todo?`נשאר לפרוס · باقي <b>${todo}</b> פרסות`:'<span style="color:var(--green-txt)">✅ אין מה לפרוס</span>'}</div>
+        ${rows.filter(x=>x.n||x.done).map(x=>`<div style="display:flex;gap:6px;font-size:13px;padding:3px 0;border-top:1px solid var(--brd)">
+          <b style="min-width:44px">${_crM(+x.m.len)}</b><bdi dir="ltr" style="color:var(--txt3);min-width:40px">${_crSzTxt(x.m)}</bdi>
+          <span style="flex:1">נפרס · تم <b>${x.done}</b></span><span>נשאר · باقي <b style="color:${x.n?'var(--blue-txt)':'var(--green-txt)'}">${x.n}</b></span></div>`).join('')}
+        <div style="font-size:12px;margin-top:4px;color:var(--txt2)">נגזר · مقصوص: ${sz}</div>
+        ${left.length?`<div style="font-size:11px;color:var(--red-txt);margin-top:2px">⚠ אין מדרגה מתאימה ל: ${left.map(([s,n])=>'מידה '+esc(s)+' × '+n).join(' · ')}</div>`:''}
+      </div>`;}).join('')||'<div style="font-size:12px;color:var(--txt3)">הזן כמה צריך מכל מידה כדי לראות תוכנית פריסה</div>';}
   const el=document.getElementById('cr-sum');if(!el)return;
   const th='padding:3px 6px';
   el.innerHTML=tot?`<div style="border:1px solid var(--green-txt);border-radius:10px;padding:10px">
@@ -3045,7 +3087,8 @@ async function saveCutReport(){
   Object.entries(c.units).forEach(([k,n])=>{const[s,col]=k.split('|');if(!quantities.some(q=>q.size===s&&q.color===col))quantities.push({size:s,color:col,qty:n});});
   const before=_prodQty(p);
   const strips=(_cr.strips||[]).filter(t=>+t.w>0).map(t=>({id:t.id,name:String(t.name||''),w:+t.w,per:Math.max(1,+t.per||1)}));
-  const upd={cutReport:{markers,rolls,strips,by:S.user?.id||'',byName:S.user?.name||'',at:Date.now()},quantities};
+  const need=_cr.need.filter(x=>+x.n>0).map(x=>({c:x.c,s:x.s,n:+x.n}));
+  const upd={cutReport:{markers,rolls,strips,need,by:S.user?.id||'',byName:S.user?.name||'',at:Date.now()},quantities};
   if(!await fbUpdateOnly('products',p.id,upd)){alert('השמירה נכשלה — בדוק חיבור · فشل الحفظ');return;}
   Object.assign(p,upd);saveLS();
   wrap.remove();_cr=null;
