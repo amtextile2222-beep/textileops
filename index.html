@@ -2855,7 +2855,7 @@ async function saveCountEntry(){
   sendTelegram('📝 ספירה/גזירה — '+(S.user?.name||'')+'\n🏷 '+p.cust+'/'+p.prod+((parseInt(p.orderNo,10)||0)?' #'+String(p.orderNo).padStart(3,'0'):'')+' '+(p.name||'')
     +(qChanged?'\n📦 כמות: '+before+' ← '+after+" יח'":'')
     +(addSteps.length?'\n✂️ '+addSteps.length+' שלבים חדשים ממתינים לתחנה וזמן: '+addSteps.join(', '):'')
-    +(nImg?'\n📷 '+nImg+' תמונות נוספו לכרטיס':'')).catch(()=>{});
+    +(nImg?'\n📷 '+(nImg===1?'תמונה אחת נוספה':nImg+' תמונות נוספו')+' לכרטיס':'')).catch(()=>{});
 }
 const bcRetiredMsg=why=>{const T=LANGS[currentLang];return why==='cut'?T.bc_ret_cut:T.bc_ret_ship;};
 // שורה אדומה בתצוגה המקדימה של שלושת הסורקים — העובד רואה מיד, לא רק בלחיצה על "התחל"
