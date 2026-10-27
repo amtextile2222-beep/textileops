@@ -58,6 +58,9 @@ body{font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',sans-serif;backgrou
 .g3{display:grid;grid-template-columns:repeat(3,1fr);gap:1rem}
 .g4{display:grid;grid-template-columns:repeat(4,minmax(0,1fr));gap:10px;margin-bottom:1rem}
 @media(max-width:600px){.g2,.g3{grid-template-columns:1fr}.g4{grid-template-columns:1fr 1fr}}
+/* 📱 כרטיס מוצר בטלפון (27/10/2026): שורת הכפתורים יורדת מתחת לפרטים ונשברת — אחרת היא תפסה את
+   רוב הרוחב והכמויות נדחסו לעמודה צרה (נשברו מילה-מילה) */
+@media(max-width:700px){.pcard-row{flex-direction:column;align-items:stretch}.pcard-btns{flex-wrap:wrap;margin-top:8px;padding-top:8px;border-top:1px solid var(--brd)}}
 .card{background:var(--bg);border:0.5px solid var(--b);border-radius:var(--rl);padding:1rem 1.25rem}
 .sec{font-size:14px;font-weight:600;color:var(--txt);margin-bottom:.75rem}
 .mlbl{font-size:11px;color:var(--txt2);margin-bottom:3px}
@@ -18264,12 +18267,12 @@ function renderProducts(){
       pricingHtml=`<div style="margin-top:6px;font-size:11px;color:var(--txt3)">💰 מחיר <b style="color:var(--txt)">₪${price.toFixed(2)}</b> · רווח יעד ${pct}% (₪${(price*pct/100).toFixed(2)}) · חומרים ₪${mat.toFixed(2)}${+p.extraMatPrice?` · 🧵 בתוספת ₪${(+p.extraMatPrice).toFixed(2)}`:''} · תקציב עבודה <b style="color:${budget>0?'var(--green-txt)':'var(--red-txt)'}">₪${budget.toFixed(2)}</b>${budget<=0?' ⚠':''}</div>`;
     }
     return`<div class="card" style="margin-bottom:10px">
-      <div style="display:flex;align-items:flex-start;justify-content:space-between;gap:8px">
-        <div style="flex:1">
+      <div class="pcard-row" style="display:flex;align-items:flex-start;justify-content:space-between;gap:8px">
+        <div style="flex:1;min-width:0">
           <div style="font-size:14px;font-weight:700;color:var(--txt)">מוצר ${esc(p.prod)} &nbsp;·&nbsp; לקוח ${esc(p.cust)}${(parseInt(p.orderNo,10)||0)?` &nbsp;·&nbsp; <span style="color:var(--green-txt,#16a34a)" title="${p.bcLen===BC_LEN_NEW?'ברקודים בני 16 ספרות':'הזמנה מלפני השינוי — ברקודים בני 13 ספרות'}">הזמנה #${String(p.orderNo).padStart(3,'0')}${p.bcLen===BC_LEN_NEW?'':' <span style="color:var(--txt3);font-weight:400">(13)</span>'}</span>`:''}${p.name?` &nbsp;·&nbsp; <span style="color:var(--txt3)">${esc(p.name)}</span>`:''}${p.isSample?` &nbsp;·&nbsp; <span style="color:var(--blue-txt)">${SAMPLE_STEP}</span>`:''}</div>
           ${stageHtml}${pendHtml}${pricingHtml}${qtyRows}${imgHtml}${docHtml}
         </div>
-        <div style="display:flex;gap:6px;flex-shrink:0">
+        <div class="pcard-btns" style="display:flex;gap:6px;flex-shrink:0">
           ${(p.workSteps||[]).some(s=>stepLevel(s)&&stepStation(s))?`<button class="btn" style="font-size:11px;padding:4px 10px;color:var(--blue-txt)" onclick="showProductPlan('${p.id}')">🎯 שיבוץ</button>`:''}
           ${isDone?(prodShipments(p).length>1
             ?`<button class="btn" style="font-size:11px;padding:4px 10px;color:var(--green-txt,#16a34a)" onclick="showShipments('${p.id}')">📄 ${prodShipments(p).length} תעודות</button>`
