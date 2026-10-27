@@ -18798,8 +18798,10 @@ async function printWorkSteps(){
   })).filter(s=>s.name);
   if(!steps.length){showToast('⚠ אין שלבי עבודה להדפסה','var(--red-txt)');return;}
   const stn=k=>k?stationNameOfKey(k):'—';
+  const dpt=k=>k?String(k).split('::')[0]||'—':'—'; // 🏭 המחלקה מתוך מפתח התחנה ("מחלקה::תחנה")
   const rows=steps.map((s,i)=>`<tr><td class="n">${i+1}</td><td><b>${s.cut?'✂ ':''}${esc(s.name)}</b>${s.nameAr?`<div class="ar" dir="rtl">${esc(s.nameAr)}</div>`:''}</td>
-    <td><b>${esc(stn(s.station))}</b>${s.alt.length?`<div class="alt">+ ${s.alt.map(a=>esc(stn(a))).join(' · ')}</div>`:''}</td></tr>`).join('');
+    <td><b>${esc(stn(s.station))}</b>${s.alt.length?`<div class="alt">+ ${s.alt.map(a=>esc(stn(a))).join(' · ')}</div>`:''}</td>
+    <td>${esc(dpt(s.station))}${(()=>{const o=[...new Set(s.alt.map(dpt))].filter(d=>d!==dpt(s.station));return o.length?`<div class="alt">+ ${o.map(esc).join(' · ')}</div>`:'';})()}</td></tr>`).join('');
   const{n:units,est}=_pmUnitsForTime();
   let dept='';
   if(_pmOrdMin.length&&units){
@@ -18818,7 +18820,7 @@ async function printWorkSteps(){
     table.d td.t{width:130px;font-weight:700;white-space:nowrap}tr.tot td{background:#eee;font-weight:700}.note{margin-top:14px;font-size:12px;color:#555}
     tr{page-break-inside:avoid}</style></head><body>
     <h2>${esc(title)}</h2><div class="sub">${name?esc(name)+' · ':''}${steps.length} שלבים · הודפס ${new Date().toLocaleDateString('he-IL')}</div>
-    <table><thead><tr><th>#</th><th>שלב</th><th>תחנה</th></tr></thead><tbody>${rows}</tbody></table>
+    <table><thead><tr><th>#</th><th>שלב</th><th>תחנה</th><th>מחלקה</th></tr></thead><tbody>${rows}</tbody></table>
     ${dept}</body></html>`;
   if(!_isIOS()){printViaIframe(html);return;}
   // 🍎 אייפון: כמו תעודת המשלוח — PDF (עד 15% מעל עמוד מתכווץ לעמוד אחד) ⇒ שיתוף ⇒ הדפסה
