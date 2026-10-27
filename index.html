@@ -18319,8 +18319,9 @@ function openProductModal(id){
     ${imgPrev}
     <div style="display:flex;gap:8px;margin-bottom:12px;flex-wrap:wrap">
       <button type="button" class="btn" onclick="document.getElementById('pm-img-file').click()" style="font-size:12px">📁 העלה תמונה</button>
-      <button type="button" class="btn" onclick="openProdCamera()" style="font-size:12px">📷 צלם</button>
+      <button type="button" class="btn" onclick="prodCamBtn()" style="font-size:12px">📷 צלם</button>
       <input id="pm-img-file" type="file" accept="image/*" multiple class="hidden" onchange="addProdImages(this)">
+      <input id="pm-img-cam" type="file" accept="image/*" capture="environment" class="hidden" onchange="addProdImages(this)">
     </div>
     <div id="pm-camera-wrap" class="hidden" style="margin-bottom:10px">
       <video id="pm-camera-video" autoplay playsinline style="width:100%;border-radius:8px;max-height:220px;background:#000"></video>
@@ -19007,6 +19008,10 @@ function refreshDocPreview(){
 
 function removeProdDoc(i){_prodDocs.splice(i,1);refreshDocPreview();}
 
+// 📷 בטלפון — מצלמת המכשיר עצמה (איכות מלאה, פוקוס/פלאש), כמו בחלון הספירה; במחשב — מצלמת הרשת בתוך החלון
+function prodCamBtn(){
+  if(matchMedia('(pointer:coarse)').matches)document.getElementById('pm-img-cam').click();else openProdCamera();
+}
 async function openProdCamera(){
   document.getElementById('pm-camera-wrap').classList.remove('hidden');
   try{
