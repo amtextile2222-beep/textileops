@@ -18806,9 +18806,9 @@ async function printWorkSteps(){
   let dept='';
   if(_pmOrdMin.length&&units){
     const{by,order}=_orderDeptAgg(_pmOrdMin);let tot=0;
-    dept=`<h3>⏱ זמן עבודה להזמנה כולה (${est?'~':''}${units} יח'${est?' משוער':''}) — לפי מחלקה</h3><table class="d">${order.map(k=>{const m=by[k]*units;tot+=m;
+    dept=`<div class="keep"><h3>⏱ זמן עבודה להזמנה כולה (${est?'~':''}${units} יח'${est?' משוער':''}) — לפי מחלקה</h3><table class="d">${order.map(k=>{const m=by[k]*units;tot+=m;
       return`<tr><td>${esc(k)}</td><td class="t">${fmtExpMin(m)}</td></tr>`;}).join('')}
-      <tr class="tot"><td>סה"כ להזמנה</td><td class="t">${fmtExpMin(tot)}</td></tr></table>`;
+      <tr class="tot"><td>סה"כ להזמנה</td><td class="t">${fmtExpMin(tot)}</td></tr></table></div>`;
   }else dept=`<div class="note">⏱ זמן לפי מחלקה לא חושב — ${units?'חסרים מחיר / רמות קושי / דקות לשלבים':'לא הוזנו כמויות או כמות משוערת'}</div>`;
   const prod=v('pm-prod'),cust=v('pm-cust'),name=v('pm-name');
   const title=`שלבי עבודה — מוצר ${prod}${cust?' · לקוח '+cust:''}`;
@@ -18818,7 +18818,7 @@ async function printWorkSteps(){
     table{width:100%;border-collapse:collapse}td,th{border:1px solid #888;padding:6px 8px;text-align:right;vertical-align:top}
     th{background:#eee}td.n{width:28px;text-align:center;color:#555}.ar{font-size:12px;color:#333;margin-top:2px}.alt{font-size:11px;color:#555;margin-top:2px}
     table.d td.t{width:130px;font-weight:700;white-space:nowrap}tr.tot td{background:#eee;font-weight:700}.note{margin-top:14px;font-size:12px;color:#555}
-    tr{page-break-inside:avoid}</style></head><body>
+    tr{page-break-inside:avoid}.keep{page-break-inside:avoid;break-inside:avoid}</style></head><body>
     <h2>${esc(title)}</h2><div class="sub">${name?esc(name)+' · ':''}${steps.length} שלבים · הודפס ${new Date().toLocaleDateString('he-IL')}</div>
     <table><thead><tr><th>#</th><th>שלב</th><th>תחנה</th><th>מחלקה</th></tr></thead><tbody>${rows}</tbody></table>
     ${dept}</body></html>`;
