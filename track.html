@@ -1,0 +1,343 @@
+<!DOCTYPE html>
+<html lang="he" dir="rtl">
+<head>
+<meta charset="UTF-8"/>
+<meta name="viewport" content="width=device-width,initial-scale=1"/>
+<meta name="robots" content="noindex,nofollow"/>
+<meta name="referrer" content="no-referrer"/>
+<meta name="theme-color" content="#185FA5"/>
+<title>מעקב הזמנות</title>
+<link rel="icon" href="icon-192.png"/>
+<link rel="apple-touch-icon" href="icon-180.png"/>
+<meta name="apple-mobile-web-app-title" content="מעקב הזמנות"/>
+<style>
+/* 📦 דף מעקב הזמנות ללקוח (10/10/2026). כניסה עם קישור במייל (Firebase Email Link), פעם אחת למכשיר.
+   הנתונים מ-Cloud Function customerTrack, שבודקת שהמייל המאומת מורשה ללקוח — ראה functions/index.js */
+:root{--bg:#f5f5f3;--card:#fff;--txt:#1c1c1a;--txt2:#555;--txt3:#888;--brd:rgba(0,0,0,.1);
+  --blue:#185FA5;--blue-bg:#e6f0fa;--green:#16a34a;--green-bg:#dcfce7;--track:#e5e5e2;--red:#dc2626;--red-bg:#fee2e2}
+@media (prefers-color-scheme:dark){:root{--bg:#1c1c1a;--card:#252523;--txt:#f0f0ee;--txt2:#bbb;--txt3:#888;
+  --brd:rgba(255,255,255,.12);--blue:#6aa8e8;--blue-bg:#1d3047;--green:#4ade80;--green-bg:#173a24;--track:#3a3a37;--red:#f87171;--red-bg:#3f1d1d}}
+*{box-sizing:border-box}
+body{margin:0;background:var(--bg);color:var(--txt);font-family:system-ui,-apple-system,"Segoe UI",Arial,sans-serif;line-height:1.45}
+.wrap{max-width:720px;margin:0 auto;padding:16px}
+header{display:flex;align-items:center;gap:10px;margin:4px 0 14px}
+header .logo{font-size:28px}
+h1{font-size:20px;margin:0}
+.sub{font-size:13px;color:var(--txt3)}
+h2{font-size:14px;color:var(--txt2);margin:20px 0 8px}
+.card{background:var(--card);border:1px solid var(--brd);border-radius:12px;padding:12px 14px;margin-bottom:10px}
+.top{display:flex;justify-content:space-between;align-items:flex-start;gap:8px}
+.nm{font-weight:700;font-size:15px}
+.meta{font-size:12px;color:var(--txt3);margin-top:2px}
+.badge{flex:0 0 auto;font-size:12px;font-weight:700;padding:3px 10px;border-radius:999px;background:var(--blue-bg);color:var(--blue);white-space:nowrap}
+.badge.done{background:var(--green-bg);color:var(--green)}
+.bar{display:flex;gap:3px;margin:10px 0 4px}
+.bar span{flex:1;min-width:0;text-align:center}
+.bar i{display:block;height:6px;border-radius:3px;background:var(--track)}
+.bar .on i{background:var(--blue)}
+.bar.done i{background:var(--green)}
+.bar em{display:block;font-style:normal;font-size:10px;line-height:1.2;margin-top:4px;color:var(--txt3)}
+.bar .on em{color:var(--txt2)}
+.bar .cur em{color:var(--blue);font-weight:700}
+.bar.done em{color:var(--txt2);font-weight:400}
+.bar small{display:block;font-size:9px;line-height:1.2;color:var(--txt3);direction:ltr}
+/* 🎨 (25/10/2026) שלב שהסתיים — ירוק · השלב הנוכחי — כחול · שלב עם חוסר פתוח — אדום (גם שלב עתידי) */
+.bar .ok i{background:var(--green)}
+.bar .ok em{color:var(--txt2)}
+.bar .bad i{background:var(--red)}
+.bar .bad em{color:var(--red);font-weight:700}
+.short{font-size:12px;margin-top:4px;padding:5px 8px;border-radius:8px;background:var(--red-bg);color:var(--red)}
+.short.res{background:none;color:var(--txt3);padding:2px 8px}
+@media (max-width:420px){.bar{gap:2px}.bar em{font-size:9px}}
+.pct{height:6px;border-radius:3px;background:var(--track);overflow:hidden;margin-top:6px}
+.pct b{display:block;height:100%;background:var(--blue)}
+.stage{font-size:12px;color:var(--txt2)}
+.msg{text-align:center;color:var(--txt3);padding:40px 10px;font-size:14px}
+/* 📦 מלאי חומר האריזה (23/10/2026): במסך רחב — עמודה צרה משמאל לצד ההזמנות (נשארת גלויה בגלילה);
+   בטלפון — למעלה, לפני ההזמנות. בלי מלאי הדף נשאר בעמודה אחת ברוחב הרגיל */
+.wrap.wide{max-width:1000px}
+/* 🔔 התראות Push (23/10/2026) */
+.pbar{display:flex;align-items:center;gap:10px;flex-wrap:wrap;font-size:13px;color:var(--txt2);background:var(--card);border:1px solid var(--brd);border-radius:12px;padding:9px 12px;margin-bottom:12px}
+.pbar.on{background:var(--green-bg);color:var(--green);border-color:transparent}
+.pbar span{font-size:12px;color:var(--txt3)}
+.pbar .pbtn{font-size:14px;font-weight:700;padding:8px 14px;border-radius:10px;border:0;background:var(--blue);color:#fff;cursor:pointer}
+.pbar .pbtn:disabled{opacity:.6}
+.pbar #poff{background:none;border:0;color:inherit;text-decoration:underline;font:inherit;cursor:pointer;padding:0}
+.lay.has-stk{display:grid;grid-template-columns:minmax(0,1fr) 250px;gap:16px;align-items:start}
+.lay.has-stk aside{position:sticky;top:12px}
+@media (max-width:760px){.lay.has-stk{display:flex;flex-direction:column;gap:0}.lay.has-stk aside{order:-1;position:static}}
+footer{font-size:11px;color:var(--txt3);text-align:center;margin:20px 0 8px}
+footer button{background:none;border:0;color:var(--blue);font:inherit;cursor:pointer;text-decoration:underline;padding:0}
+.login{max-width:380px;margin:30px auto;text-align:center}
+.login p{font-size:14px;color:var(--txt2);margin:0 0 14px}
+.login input{width:100%;font-size:16px;padding:12px;border-radius:10px;border:1px solid var(--brd);background:var(--card);color:var(--txt);text-align:left}
+.login button{width:100%;margin-top:10px;font-size:16px;font-weight:700;padding:12px;border-radius:10px;border:0;background:var(--blue);color:#fff;cursor:pointer}
+.login button:disabled{opacity:.6}
+.login .err{color:#dc2626;font-size:13px;margin-top:8px;min-height:1em}
+</style>
+</head>
+<body>
+<div class="wrap">
+  <header><span class="logo">✂️</span><div><h1 id="ttl">מעקב הזמנות</h1><div class="sub" id="sub"></div></div></header>
+  <div id="pushbar"></div>
+  <div id="app"><div class="msg">⏳ טוען…</div></div>
+  <footer id="ft"></footer>
+</div>
+<script type="module">
+import{initializeApp}from'https://www.gstatic.com/firebasejs/10.12.0/firebase-app.js';
+import{getAuth,onAuthStateChanged,sendSignInLinkToEmail,isSignInWithEmailLink,signInWithEmailLink,signOut}from'https://www.gstatic.com/firebasejs/10.12.0/firebase-auth.js';
+import{getMessaging,getToken,onMessage,isSupported}from'https://www.gstatic.com/firebasejs/10.12.0/firebase-messaging.js';
+// אותו פרויקט כמו index.html. ⚠️ **שם אפליקציה נפרד ('track') בכוונה:** ההתחברות נשמרת לפי שם האפליקציה,
+// ובלעדיו כניסת לקוח באותו דפדפן הייתה דורסת את הכניסה של המנהל/עובד לאפליקציה (אותו origin)
+const FB_CFG={apiKey:"AIzaSyCN9AlUZFX6tODyClzopC9BrRi-Oj7oSv8",projectId:"textileops-aef4a",appId:"1:570030273525:web:ff4a7d125a40066a4826bc",authDomain:"textileops-aef4a.firebaseapp.com",messagingSenderId:"570030273525"};
+const app0=initializeApp(FB_CFG,'track');
+const auth=getAuth(app0);auth.languageCode='he';
+// 👁 תצוגת לקוח למנהל (22/10/2026): ?as=קוד לקוח, נפתח מחלון "פרטי לקוח". משתמש בכניסה של האפליקציה
+// הראשית (שם האפליקציה 'txops3' כמו ב-initFb ב-index.html ⇒ אותה התחברות שמורה בדפדפן). השרת בודק role=manager
+const AS=(new URLSearchParams(location.search).get('as')||'').trim();
+const mAuth=AS?getAuth(initializeApp(FB_CFG,'txops3')):null;
+// ⚠️ השמות והסדר חייבים להתאים ל-TRACK_LISTS ב-functions/index.js (= PIPE_LISTS בלוח מצב הזמנות)
+// השמות = עמודות "לוח מצב הזמנות" (22/10/2026), מוצגים בתג ומתחת לכל קטע בפס
+const STAGES=['ההזמנה התקבלה','ספירה וגזירה','מוכן לתפירה','בתפירה','מוכן לאריזה','באריזה','מוכן ליציאה','יצא ללקוח'];
+const URL_FN='https://us-central1-textileops-aef4a.cloudfunctions.net/customerTrack';
+const PAGE=location.origin+location.pathname;
+const LS_MAIL='trk_email';
+// 📱 נפתח מאייקון במסך הבית. באייפון זו אפליקציה עם אחסון נפרד מ-Safari — לחיצה על הקישור במייל
+// מתחברת ב-Safari ולא כאן ⇒ במצב הזה מציעים להדביק את הקישור (signInWithEmailLink מקבל אותו ישירות)
+const STANDALONE=navigator.standalone===true||matchMedia('(display-mode: standalone)').matches;
+const esc=s=>String(s??'').replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;');
+const fmtD=d=>{const m=/^(\d{4})-(\d{2})-(\d{2})/.exec(d||'');return m?m[3]+'/'+m[2]+'/'+m[1]:'';};
+const fmtDM=d=>{const m=/^\d{4}-(\d{2})-(\d{2})/.exec(d||'');return m?m[2]+'/'+m[1]:'';}; // 📅 תאריך שלב בפס
+const ls={get:k=>{try{return localStorage.getItem(k)||''}catch(e){return''}},set:(k,v)=>{try{localStorage.setItem(k,v)}catch(e){}},del:k=>{try{localStorage.removeItem(k)}catch(e){}}};
+// 📱 מזהה מכשיר (16/10/2026) — השרת מגביל מכשירים לכל מייל; מכשיר חדש מעל ההגבלה ממתין לאישור המפעל.
+// localStorage בלבד: מחיקת נתוני הדפדפן (או ספארי אחרי 7 ימים בלי ביקור) = מכשיר חדש
+const devId=()=>{let d=ls.get('trk_dev');if(!/^[A-Za-z0-9-]{8,64}$/.test(d)){d=crypto.randomUUID?crypto.randomUUID():(Date.now().toString(36)+'-'+Math.random().toString(36).slice(2,12));ls.set('trk_dev',d);}return d;};
+const $=id=>document.getElementById(id);
+const appEl=$('app'),ft=$('ft');
+let busy=false,reauthMsg=false,pendT=0; // reauth = המייל הוסר והוסף מחדש ⇒ כל המכשירים נדרשים לקישור חדש
+
+function card(o){
+  const last=STAGES.length-1,done=o.stage===last;
+  const pct=o.stage===3?o.sewPct:o.stage===5?o.packPct:null;
+  const no=o.no?'הזמנה #'+String(o.no).padStart(3,'0')+' · ':'';
+  // ✂️ פיצול: חלק באריזה והתפירה עוד לא הסתיימה ⇒ "מוכן לאריזה" לא מסומן, ושורת אחוז נוספת לתפירה
+  const sp=!!o.split&&o.sewPct!=null;
+  // ⚠ חוסרים (25/10/2026): פתוחים צובעים את השלב שלהם באדום; שלב שעבר — ירוק, הנוכחי — כחול
+  const sh=Array.isArray(o.short)?o.short:[],openSt=new Set(sh.filter(x=>!x.res).map(x=>x.st));
+  const segCls=i=>openSt.has(i)?'bad':!(i<=o.stage&&!(sp&&i===4))?'':(i<o.stage||done)?'ok':'on';
+  const segs=STAGES.map((s,i)=>`<span class="${segCls(i)}${i===o.stage?' cur':''}" "><i></i><em>${esc(s)}</em>${o.dates&&o.dates[i]?`<small>${esc(fmtDM(o.dates[i]))}</small>`:''}</span>`).join('');
+  const dm=ms=>{const d=new Date(+ms);return String(d.getDate()).padStart(2,'0')+'/'+String(d.getMonth()+1).padStart(2,'0');}; // תאריך מקומי
+  const shHtml=sh.slice().sort((a,b)=>(!!a.res-!!b.res)||(b.at-a.at)).map(x=>x.res
+    ?`<div class="short res">✓ ${esc(STAGES[x.st]||'')}: ${esc(x.txt)} · ${dm(x.at)} · נפתר ${dm(x.res)}</div>`
+    :`<div class="short">⚠ חוסר · ${esc(STAGES[x.st]||'')}: ${esc(x.txt)} · ${dm(x.at)}</div>`).join('');
+  return `<div class="card">
+    <div class="top"><div><div class="nm">${esc(o.name||('דגם '+o.prod))}</div>
+      <div class="meta">${no}${o.qty?o.qty+" יח' · ":o.est?'~'+o.est+" יח' (משוער) · ":''}${done?'נשלח '+fmtD(o.ship):'התקבל '+fmtD(o.entry)}</div></div>
+      <span class="badge ${done?'done':''}">${esc(STAGES[o.stage]||'')}${pct!=null?' '+pct+'%':''}</span></div>
+    <div class="bar ${done?'done':''}">${segs}</div>
+    <div class="stage">שלב ${o.stage+1} מתוך ${STAGES.length}</div>
+    ${sp?`<div class="stage">בתפירה ${o.sewPct}%</div><div class="pct" title="${o.sewPct}%"><b style="width:${Math.max(0,Math.min(100,o.sewPct))}%"></b></div><div class="stage">באריזה ${pct??0}%</div>`:''}
+    ${pct!=null?`<div class="pct" title="${pct}%"><b style="width:${Math.max(0,Math.min(100,pct))}%"></b></div>`:''}
+    ${o.out>0?`<div class="stage">🚚 נשלחו ${o.out} יח' · השאר: ${esc(STAGES[o.stage]||'בייצור')}</div>`:''}
+    ${shHtml}
+  </div>`;
+}
+const outBtn=()=>'<button id="out">התנתקות</button>';
+// התנתקות ⇒ גם ביטול ההתראות במכשיר (אחרת מכשיר שהתנתק היה ממשיך לקבל עדכונים)
+const bindOut=()=>{const b=$('out');if(b)b.onclick=async()=>{if(pushSt?.on)try{await pushCall('POST',{off:true});}catch(e){}pushSt=null;$('pushbar').innerHTML='';signOut(auth);};};
+
+// ── 🔔 התראות Push (23/10/2026) — שרת: customerPush (רישום) + customerNotify (שליחה כל 15 דק' בשעות
+// העבודה). SW נפרד (track-sw.js, scope './track') — לא נוגע ברישום של האפליקציה באותו דפדפן.
+// באייפון עובד רק מהאייקון במסך הבית (iOS 16.4+). תצוגת מנהל — בלי (הטוקן היה של המנהל)
+const URL_PUSH='https://us-central1-textileops-aef4a.cloudfunctions.net/customerPush';
+const IOS=/iP(hone|ad|od)/.test(navigator.userAgent);
+let pushSt=null,fgOn=false; // {vapid,on} מהשרת
+async function pushCall(method,body){
+  const u=auth.currentUser;if(!u)throw new Error('auth');
+  const r=await fetch(URL_PUSH,{method,headers:{Authorization:'Bearer '+await u.getIdToken(),'X-Dev':devId(),...(body?{'Content-Type':'application/json'}:{})},body:body?JSON.stringify(body):undefined});
+  if(!r.ok)throw new Error('server '+r.status);
+  return r.json();
+}
+async function pushOk(){try{return 'Notification' in window&&'serviceWorker' in navigator&&await isSupported();}catch(e){return false;}}
+async function pushInit(){
+  if(AS||pushSt)return;
+  try{pushSt=await pushCall('GET');}catch(e){return;}
+  await pushUi();
+  if(pushSt.on&&await pushOk()&&Notification.permission==='granted')pushFg();
+}
+async function pushUi(){
+  const el=$('pushbar');if(!el)return;
+  if(!pushSt||!pushSt.vapid){el.innerHTML='';return;}
+  if(!await pushOk()){
+    el.innerHTML=IOS&&!STANDALONE?'<div class="pbar">🔔 לקבלת התראות באייפון: לחצו על <b>שיתוף</b> ← <b>הוסף למסך הבית</b>, ופתחו את הדף מהאייקון.</div>':'';
+    return;
+  }
+  if(Notification.permission==='denied'){el.innerHTML='<div class="pbar">🔕 ההתראות חסומות בדפדפן הזה — אפשר לאשר אותן בהגדרות האתר.</div>';return;}
+  el.innerHTML=pushSt.on&&Notification.permission==='granted'
+    ?'<div class="pbar on">🔔 תקבלו התראה כשהזמנה עוברת שלב, או כשחומר שלכם עומד להיגמר · <button id="poff">כיבוי</button></div>'
+    :'<div class="pbar"><button id="pon" class="pbtn">🔔 קבלו התראות על ההזמנות</button><span>מעבר שלב בהזמנה, וחומר שעומד להיגמר — בשעות העבודה</span></div>';
+  const on=$('pon'),off=$('poff');
+  if(on)on.onclick=pushOn;
+  if(off)off.onclick=async()=>{off.disabled=true;try{await pushCall('POST',{off:true});pushSt.on=false;}catch(e){}pushUi();};
+}
+async function pushOn(){
+  const b=$('pon');if(b){b.disabled=true;b.textContent='⏳ רגע…';}
+  try{
+    // requestPermission ישירות מהלחיצה — אחרת ספארי/אייפון דוחים את הבקשה
+    if(await Notification.requestPermission()!=='granted'){await pushUi();return;}
+    const reg=await navigator.serviceWorker.register('track-sw.js',{scope:'./track'});
+    const token=await getToken(getMessaging(app0),{vapidKey:pushSt.vapid,serviceWorkerRegistration:reg});
+    if(!token)throw new Error('no token');
+    await pushCall('POST',{token});
+    pushSt.on=true;pushFg();
+  }catch(e){alert('לא הצלחנו להפעיל התראות: '+(e?.message||e));}
+  await pushUi();
+}
+// הדף פתוח ובפוקוס ⇒ ההודעה מגיעה לדף ולא ל-SW: מציגים אותה בכל זאת ומרעננים את הנתונים
+function pushFg(){
+  if(fgOn)return;fgOn=true;
+  try{onMessage(getMessaging(app0),p=>{
+    const d=p.data||{};load();
+    navigator.serviceWorker.getRegistration('./track').then(r=>r&&r.showNotification(d.title||'מעקב הזמנות',{body:d.body||'',icon:'icon-192.png',dir:'rtl',lang:'he',tag:'track-update',data:{link:d.link}})).catch(()=>{});
+  });}catch(e){}
+}
+
+// ── מסך כניסה: מייל ← קישור למייל ──
+function showLogin(msg,confirmMode){
+  ft.textContent='';$('sub').textContent='';
+  if(!msg&&reauthMsg){msg='מטעמי אבטחה יש להיכנס מחדש.<br>הזינו את המייל ונשלח קישור כניסה חדש.';reauthMsg=false;}
+  appEl.innerHTML=`<div class="login"><p>${msg||'הזינו את כתובת המייל שלכם ונשלח אליה קישור כניסה.<br>הכניסה נדרשת פעם אחת בכל מכשיר.'}</p>
+    <form id="lf"><input type="email" id="em" dir="ltr" autocomplete="email" required placeholder="name@example.com" value="${esc(ls.get(LS_MAIL))}"/>
+    <button id="lb">${confirmMode?'כניסה':'שלחו לי קישור כניסה'}</button><div class="err" id="er"></div></form></div>`;
+  $('lf').onsubmit=async e=>{
+    e.preventDefault();
+    const em=$('em').value.trim().toLowerCase(),b=$('lb');
+    if(!em)return;
+    b.disabled=true;$('er').textContent='';
+    try{
+      if(confirmMode){await finishLink(em);return;}
+      await sendSignInLinkToEmail(auth,em,{url:PAGE,handleCodeInApp:true});
+      ls.set(LS_MAIL,em);
+      appEl.innerHTML=`<div class="login"><p>📧 שלחנו קישור כניסה אל<br><b dir="ltr">${esc(em)}</b></p>
+        ${STANDALONE?`<p>פתחתם ממסך הבית? <b>אל תלחצו</b> על הקישור במייל — לחצו עליו לחיצה ארוכה ← <b>העתק</b>, והדביקו כאן:</p>
+        <form id="pf"><input id="pl" dir="ltr" placeholder="https://…" autocomplete="off"/><button>כניסה</button><div class="err" id="per"></div></form>`
+        :'<p>פתחו את המייל ולחצו על הקישור.</p>'}<p>לא הגיע? בדקו בתיקיית הספאם.</p></div>`;
+      if(STANDALONE)$('pf').onsubmit=async ev=>{
+        ev.preventDefault();const u=$('pl').value.trim();
+        if(!isSignInWithEmailLink(auth,u)){$('per').textContent='זה לא קישור הכניסה מהמייל';return;}
+        await finishLink(em,u);
+      };
+    }catch(err){
+      b.disabled=false;
+      $('er').textContent=/invalid-email/.test(err.code)?'כתובת המייל אינה תקינה':
+        /too-many|quota/.test(err.code)?'יותר מדי ניסיונות. נסו שוב מאוחר יותר.':'השליחה נכשלה. נסו שוב.';
+    }
+  };
+}
+// חזרה מהקישור שבמייל. במכשיר אחר אין את המייל השמור ⇒ מבקשים להקליד אותו שוב (דרישת Firebase)
+async function finishLink(em,link){
+  try{
+    await signInWithEmailLink(auth,em,link||location.href);
+    ls.set(LS_MAIL,em);
+    history.replaceState(null,'',PAGE);
+  }catch(err){
+    history.replaceState(null,'',PAGE);
+    showLogin(/invalid-email/.test(err.code)?'המייל שהוזן לא תואם לקישור. הזינו את המייל שאליו נשלח הקישור, או בקשו קישור חדש.':
+      'הקישור פג תוקף או כבר נוצל. בקשו קישור חדש.');
+  }
+}
+
+async function load(){
+  const u=(AS?mAuth:auth).currentUser;if(!u||busy)return;
+  busy=true;
+  try{
+    const r=await fetch(URL_FN+(AS?'?cust='+encodeURIComponent(AS):''),{cache:'no-store',headers:{Authorization:'Bearer '+await u.getIdToken(),'X-Dev':devId()}});
+    if(AS&&!r.ok){appEl.innerHTML=`<div class="msg">🔒 תצוגת לקוח זמינה למנהל בלבד.<br>היכנסו לאפליקציה כמנהל ופתחו שוב מחלון "פרטי לקוח".</div>`;return;}
+    if(r.status===401){const j=await r.json().catch(()=>({}));if(j.error==='reauth')reauthMsg=true;await signOut(auth);return;}
+    if(r.status===403){
+      const j=await r.json().catch(()=>({}));
+      $('sub').textContent='';
+      appEl.innerHTML=j.error==='pending'?`<div class="msg">⏳ המכשיר הזה עדיין לא אושר לצפייה בהזמנות.<br>שלחנו בקשת אישור למפעל — הדף יתעדכן לבד אחרי האישור.<br><br><button id="rt" style="font-size:14px;padding:8px 16px;border-radius:10px;border:0;background:var(--blue);color:#fff;cursor:pointer">🔄 בדיקה שוב</button></div>`
+        :j.error==='blocked'?`<div class="msg">⛔ הגישה מהמכשיר הזה נחסמה.<br>פנו אלינו לפרטים.</div>`
+        :`<div class="msg">🔒 המייל <b dir="ltr">${esc(u.email)}</b> אינו מורשה לצפות בהזמנות.<br>פנו אלינו כדי להוסיף אותו.</div>`;
+      const rt=$('rt');if(rt)rt.onclick=()=>{appEl.innerHTML='<div class="msg">⏳ בודק…</div>';load();};
+      // ממתין לאישור ⇒ בדיקה כל 30 שנ' (ולא כל 5 דק') כדי שהאישור ייראה מיד
+      if(j.error==='pending'&&!pendT)pendT=setTimeout(()=>{pendT=0;if(!document.hidden)load();},30000);
+      ft.innerHTML=outBtn();bindOut();return;
+    }
+    if(!r.ok)throw new Error(r.status);
+    const d=await r.json();
+    if(d.name){$('sub').textContent=d.name;document.title='מעקב הזמנות — '+d.name;}
+    const act=d.orders.filter(o=>o.stage<STAGES.length-1),shp=d.orders.filter(o=>o.stage===STAGES.length-1);
+    // 📦 חומר האריזה שהלקוח סיפק ונמצא במפעל (23/10/2026) — רק חומר שהמפעל סופר; שרת ישן = אין stock
+    const stk=Array.isArray(d.stock)?d.stock:[];
+    // 🧵 (23/10/2026) גם פריטי גזירה/תפירה (תוויות, פלזלין…) — מקובצים לפי מחלקה, עם יחידה (מטר/גליל…)
+    const DEPT={cut:'✂️ גזירה',sew:'🧵 תפירה',pack:'📦 אריזה'},multi=new Set(stk.map(s=>s.dept||'pack')).size>1;
+    // 📋 (25/10/2026) נדרש להזמנות שלכם שבמפעל וכמה חסר — מהשרת (need); בלי need — כמו קודם
+    const stkRow=s=>{const nd=Number(s.need)||0,n=Number(s.n)||0,miss=nd>0&&n<nd,u=s.unit&&s.unit!=="יח'"?' '+esc(s.unit):'';
+      return `<div style="padding:3px 0"><div class="top">
+        <span>${esc(s.name)}</span><span><b style="${n<0||s.low||miss?'color:#dc2626':''}">${n}</b>${u?' <span class="meta" style="display:inline">'+u.trim()+'</span>':''}${s.low||miss?' <span class="badge" style="background:#fee2e2;color:#dc2626">⚠ כדאי לשלוח עוד</span>':''}</span></div>
+        ${nd>0?`<div class="meta" style="${miss?'color:#dc2626;font-weight:600':''}">נדרש להזמנות שלכם ${Math.round(nd*100)/100}${u}${miss?' · חסר '+(Math.round((nd-n)*100)/100)+u:' · יש מספיק'}</div>`:''}
+      </div>`;};
+    const stkHtml=stk.length?`<h2>📦 החומרים שלכם במפעל</h2><div class="card">${multi
+        ?Object.keys(DEPT).map(d=>{const l=stk.filter(s=>(s.dept||'pack')===d);return l.length?`<div class="meta" style="font-weight:700;margin-top:6px">${DEPT[d]}</div>`+l.map(stkRow).join(''):'';}).join('')
+        :stk.map(stkRow).join('')}<div class="meta">מתעדכן אוטומטית עם כל משלוח שיוצא אליכם.</div></div>`:'';
+    appEl.closest('.wrap')?.classList.toggle('wide',!!stk.length);
+    appEl.innerHTML=`<div class="lay${stk.length?' has-stk':''}"><main>`+(!d.orders.length?'<div class="msg">אין כרגע הזמנות פעילות.</div>':
+      (act.length?`<h2>🏭 בייצור (${act.length})</h2>`+act.map(card).join(''):'')+
+      (shp.length?`<h2>✅ נשלחו ב-30 הימים האחרונים (${shp.length})</h2>`+shp.map(card).join(''):''))+
+      `</main>${stk.length?'<aside>'+stkHtml+'</aside>':''}</div>`;
+    const t=new Date(d.at);
+    const upd=' · עודכן '+t.toLocaleString('he-IL',{day:'2-digit',month:'2-digit',hour:'2-digit',minute:'2-digit'});
+    if(AS){ft.innerHTML='👁 תצוגת מנהל — כך הלקוח רואה את הדף'+upd;return;}
+    ft.innerHTML=esc(u.email)+upd+' · '+outBtn();
+    bindOut();
+    pushInit(); // 🔔 פעם אחת אחרי טעינה מוצלחת (pushSt שמור — לא קורא שוב לשרת בכל רענון)
+  }catch(e){
+    if(!appEl.querySelector('.card'))appEl.innerHTML='<div class="msg">⚠️ לא ניתן לטעון כרגע. נסו שוב בעוד רגע.</div>';
+  }finally{busy=false;}
+}
+
+let confirmPending=false; // מכשיר אחר — מחכים שהלקוח יקליד את המייל; האזנת ה-auth לא תדרוס את הטופס
+async function start(){
+  if(AS){
+    onAuthStateChanged(mAuth,u=>{
+      if(u){appEl.innerHTML='<div class="msg">⏳ טוען…</div>';load();}
+      else appEl.innerHTML='<div class="msg">🔒 תצוגת לקוח זמינה למנהל בלבד.<br>היכנסו לאפליקציה כמנהל ופתחו שוב מחלון "פרטי לקוח".</div>';
+    });
+    return;
+  }
+  if(isSignInWithEmailLink(auth,location.href)){
+    appEl.innerHTML='<div class="msg">⏳ מתחבר…</div>';
+    const em=ls.get(LS_MAIL);
+    if(em)await finishLink(em);
+    else{confirmPending=true;showLogin('לאישור הכניסה, הזינו שוב את כתובת המייל שאליה נשלח הקישור.',true);}
+  }
+  onAuthStateChanged(auth,u=>{
+    if(u){confirmPending=false;appEl.innerHTML='<div class="msg">⏳ טוען…</div>';load();}
+    else if(!confirmPending&&!appEl.querySelector('.login'))showLogin();
+  });
+}
+// 🔄 גרסה חדשה של הדף (22/10/2026) — דף שנשאר פתוח (לשונית/אפליקציה במחשב) מרענן את עצמו לבד.
+// טביעה מכותרות HEAD כמו _verFingerprint ב-index.html: בסיס נפרד לכל סוג טביעה (רפליקות CDN שונות
+// מחזירות ETag או לא — השוואה בין סוגים = רענון שווא). לא בזמן טופס כניסה (המייל שהוקלד היה נמחק)
+const verBase={};
+async function checkVer(){
+  try{
+    const r=await fetch(location.pathname+'?v='+Date.now(),{method:'HEAD',cache:'no-store'});if(!r.ok)return;
+    const et=(r.headers.get('etag')||'').replace(/^W\//,'').replace(/"/g,''),cl=r.headers.get('content-length');
+    // ETag של Pages = "mtime-גודל"; כל דחיפה משנה mtime לכל הקבצים ⇒ משווים רק את הגודל (רענון רק כשהדף עצמו השתנה)
+    const m=et.match(/^[0-9a-f]+-([0-9a-f]+)$/);
+    const tag=m?{k:'et',v:parseInt(m[1],16)}:et?{k:'etx',v:et}:cl?{k:'cl',v:+cl}:null;if(!tag)return;
+    if(!verBase[tag.k]){verBase[tag.k]=tag.v;return;}
+    if(tag.v!==verBase[tag.k]&&!appEl.querySelector('.login'))location.reload();
+  }catch(e){}
+}
+const tick=()=>{if(!document.hidden){load();checkVer();}};
+start();checkVer();
+// כל דקה (23/10/2026, היה 5) — רק כשהדף על המסך; ההזמנות עצמן שמורות בשרת 3 דק', המלאי מחושב בכל פעם
+setInterval(tick,60000);
+document.addEventListener('visibilitychange',tick);
+</script>
+</body>
+</html>

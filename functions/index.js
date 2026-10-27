@@ -1,4 +1,6 @@
-const functions = require('firebase-functions');
+// firebase-functions 6: הייבוא הרגיל מפנה ל-API של הדור השני — כל הפונקציות כאן דור ראשון.
+// ⚠️ לא לשדרג ל-7: הוא מסיר את functions.config() שבו יושבים כל הסודות (טלגרם/חירום/AI).
+const functions = require('firebase-functions/v1');
 const admin = require('firebase-admin');
 const https = require('https');
 const crypto = require('crypto');
@@ -252,6 +254,14 @@ const loginImpl = async (data, context) => {
   } else if (Array.isArray(d.registerDescriptors) && d.registerDescriptors.length) {
     // ── רישום פנים מחדש בכניסה — רק אם המנהל אישר מראש ──
     if (!w.faceUpdateAllowed) throw new functions.https.HttpsError('permission-denied', 'no-face-update');
+    // 🔒 אישור המנהל לבדו אינו הזדהות: בלי סיסמה, כל מי שידע את שם המשתמש של עובד מאושר
+    // היה רושם את פניו שלו ונכנס בשמו (נסגר 25/09/2026). אותה בדיקה כמו במסלול הסיסמה למטה.
+    const rp = String(d.pass || '');
+    const rStored = creds.pass !== undefined ? creds.pass : (w.pass || '');
+    if (!rp || !(rStored === hashPass(rp) || (rStored && !String(rStored).startsWith('$h:') && rStored === rp))) {
+      await regFail(credRef, creds);
+      throw new functions.https.HttpsError('permission-denied', 'wrong');
+    }
     await credRef.set({ faceDescriptors: Object.fromEntries(d.registerDescriptors.map((s, i) => [i, s.map(Number)])), faceDescriptor: FieldValue.delete() }, { merge: true });
     await wDoc.ref.set({ faceUpdateAllowed: false, faceRegistered: true, faceDescriptor: FieldValue.delete(), faceDescriptors: FieldValue.delete() }, { merge: true });
   } else if (d.empBarcode !== undefined) {
@@ -504,13 +514,17 @@ exports.calcTaskExpected = functions.https.onCall(async (data, context) => {
   if (pq.empty) return { ok: false, reason: 'no-product' };
   // כמו findProd בלקוח: בכפילות (מוצר ישן+חדש עם אותו cust/prod) בחר את הרשומה העדכנית ביותר
   // (createdAt מקסימלי, fallback למספר ב-id) — אחרת הצפי מחושב מרשומה ישנה עם שלבים/תמחור שונים ולא מופיע
-  let p = null, mx = -1;
+  let p = null, mx = -1, pId = null;
   for (const doc of pq.docs) {
     const x = doc.data();
     const c = +x.createdAt || parseInt(String(x.id || doc.id).replace(/\D/g, '')) || 0;
-    if (c > mx) { mx = c; p = x; }
+    if (c > mx) { mx = c; p = x; pId = doc.id; }
   }
   if (!p) return { ok: false, reason: 'no-product' };
+  // 💲 התמחור עבר ל-productPricing/{id} (25/09/2026) — מוסתר מטלפוני העובדות. ערך שם גובר;
+  // מוצר שעוד לא עבר מיגרציה נושא את השדות במסמך עצמו ⇒ נופלים אליו.
+  const prSnap = await db.collection('productPricing').doc(pId).get();
+  if (prSnap.exists) p = { ...p, ...prSnap.data() };
   const price = +p.unitPrice || 0, profit = +p.targetProfitPct || 0, mats = +p.directMaterialsCost || 0;
   if (!price) return { ok: false, reason: 'no-pricing' };
   const budget = price * (1 - profit / 100) - mats;
@@ -622,12 +636,12 @@ exports.sendPush = functions.https.onCall(async (data, context) => {
 
     // שלח לכל הטוקנים שעברו סינון
     const results = await Promise.allSettled(tokenList.map(token =>
-      admin.messaging().send({
+      admin.messaging().send(withTtl({
         token,
         notification: { title, body },
         android: { priority: 'high', notification: { sound: 'default', channelId: 'textileops' } },
         webpush: { notification: { icon: 'https://amtextile2222-beep.github.io/textileops/icon-192.png', requireInteraction: false, vibrate: [200, 100, 200] } }
-      })
+      }, PUSH_TTL_FEED))
     ));
 
     const sent = results.filter(r => r.status === 'fulfilled').length;
@@ -647,13 +661,13 @@ exports.sendPushToWorker = functions.https.onCall(async (data, context) => {
     if (!workerSnap.exists) return { sent: false, reason: 'worker not found' };
     const token = workerSnap.data().fcmToken;
     if (!token) return { sent: false, reason: 'no fcm token' };
-    await admin.messaging().send({
+    await admin.messaging().send(withTtl({
       token,
       notification: { title, body },
       android: { priority: 'high', notification: { sound: 'default', channelId: 'textileops' } },
       apns: { payload: { aps: { sound: 'default', badge: 1, contentAvailable: true } }, headers: { 'apns-priority': '10', 'apns-push-type': 'alert' } },
       webpush: { notification: { icon: 'https://amtextile2222-beep.github.io/textileops/icon-192.png', requireInteraction: true, vibrate: [200, 100, 200] } }
-    });
+    }, PUSH_TTL_ALERT));
     return { sent: true };
   } catch (e) {
     console.error('sendPushToWorker error:', e);
@@ -699,53 +713,6 @@ exports.tgSend = functions.https.onCall(async (data, context) => {
   }
 });
 
-// עוזר AI — proxy מאובטח ל-AnythingLLM (רץ עכשיו על שרת Railway קבוע, לא על Tunnel מקומי)
-// כתובת/מפתח/slug מגיעים מ-`firebase functions:config:set anythingllm.*` — לא מקודדים בקובץ הזה
-exports.aiChat = functions.https.onCall(async (data, context) => {
-  const role = callerRole(context);
-  if (!role) throw new functions.https.HttpsError('unauthenticated', 'יש להתחבר תחילה');
-  if (role !== 'manager') {
-    // אחראי מורשה רק אם המנהל הפעיל זאת בהגדרות
-    let supervisorAllowed = false;
-    if (role === 'supervisor') {
-      try {
-        const ai = await db.collection('appSettings').doc('aiSettings').get();
-        supervisorAllowed = !!(ai.exists && ai.data().supervisorAccess);
-      } catch (e) {}
-    }
-    if (!supervisorAllowed) throw new functions.https.HttpsError('permission-denied', 'עוזר AI זמין למנהל בלבד');
-  }
-  const message = String(data && data.message || '').slice(0, 8000);
-  if (!message) throw new functions.https.HttpsError('invalid-argument', 'הודעה ריקה');
-  try {
-    const cfg = cfgSection('anythingllm');
-    const aiUrl = cfg.url || '';
-    const aiKey = cfg.key || '';
-    const aiSlug = cfg.slug || '';
-    if (!aiUrl || !aiKey || !aiSlug) throw new functions.https.HttpsError('failed-precondition', 'הגדרות שרת AI חסרות');
-    // /chat (לא-סטרימינג) מחזיר textResponse ריק בהתקנה הזו — משתמשים ב-/stream-chat
-    // ומרכיבים את הטקסט מה-chunks בצד השרת (בלי לחשוף streaming ללקוח)
-    const res = await fetch(`${aiUrl.replace(/\/$/, '')}/api/v1/workspace/${aiSlug}/stream-chat`, {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json', 'Authorization': 'Bearer ' + aiKey },
-      body: JSON.stringify({ message, mode: 'chat' })
-    });
-    const raw = await res.text();
-    let full = '';
-    for (const line of raw.split('\n')) {
-      if (!line.startsWith('data:')) continue;
-      try {
-        const obj = JSON.parse(line.slice(5).trim());
-        if (obj.textResponse && obj.type === 'textResponseChunk') full += obj.textResponse;
-      } catch (e) {}
-    }
-    return { textResponse: full || 'לא התקבלה תשובה' };
-  } catch (e) {
-    console.error('aiChat error:', e);
-    throw new functions.https.HttpsError('internal', e.message || 'שגיאת AI');
-  }
-});
-
 // ─── שמירת פונקציית login "חמה" בשעות העבודה (מונע cold-start / "מאמת..." ארוך) ───
 // רץ כל 2 דקות בין 06:00-15:59 שעון ישראל (מכסה 6:10-15:20). מחוץ לחלון login מתקררת כרגיל.
 // שולח ping ל-login עצמה כדי להשאיר מופע חי; ה-ping מזוהה בתחילת login וחוזר מיד.
@@ -762,6 +729,155 @@ exports.keepLoginWarm = functions.pubsub.schedule('*/2 6-15 * * *').timeZone('As
     req.write(body);
     req.end();
   });
+});
+
+// קודי FCM שמשמעותם "הרישום הזה מת לתמיד" (טלפון הוחלף / דפדפן נוקה / התראות בוטלו) —
+// לא תקלה זמנית, ולכן מוחקים את הרישום במקום לנסות שוב כל 5 דקות
+const DEAD_FCM_CODES = ['messaging/registration-token-not-registered', 'messaging/invalid-registration-token'];
+// ⏳ תוקף להתראה (23/10/2026): בלי TTL גוגל שומרת הודעה עד 4 שבועות — מחשב/דפדפן שהיה כבוי קיבל
+// בהתחברות את כל ההתראות של אתמול בבת אחת. אחרי התוקף הודעה שלא נמסרה פשוט נזרקת.
+// PUSH_TTL_FEED — זרם האירועים למנהל/אחראי (כניסה, משימה התחילה/הסתיימה…); PUSH_TTL_ALERT — התראה אישית/חריגה
+const PUSH_TTL_FEED = 30 * 60, PUSH_TTL_ALERT = 60 * 60;
+function withTtl(msg, sec) {
+  const wp = msg.webpush || {};
+  return {
+    ...msg,
+    android: { ...(msg.android || {}), ttl: sec * 1000 },
+    webpush: { ...wp, headers: { ...(wp.headers || {}), TTL: String(sec) } },
+    ...(msg.apns ? { apns: { ...msg.apns, headers: { ...(msg.apns.headers || {}), 'apns-expiration': String(Math.floor(Date.now() / 1000) + sec) } } } : {})
+  };
+}
+
+// Push לאחראים שרשמו טלפון (appSettings/pushSettings.tokens, role=supervisor). סדר העדפה:
+// 1) האחראי שפתח את המשימה (scannedBy — מי שעומד ליד העובדת ומכיר אותה)
+// 2) מי שסומן "אחראי על" מחלקת המשימה/העובדת (מסך העלויות)  3) אחראי שרשום באותה מחלקה
+// 4) כל האחראים. dept = שם מחלקה או מערך שמות. מחזיר את שמות האחראים שקיבלו.
+// opts.exclude = מזהים שלא יקבלו (מי שלחץ) · opts.onlyOpeners = בלי נפילה לשאר האחראים
+async function pushSupervisors(pushSnap, dept, title, body, openerIds, opts = {}) {
+  const tokens = (pushSnap && pushSnap.exists && pushSnap.data().tokens) || {};
+  const entries = Object.entries(tokens)
+    .map(([key, t]) => ({ key, ...(typeof t === 'string' ? { token: t } : (t || {})) }))
+    .filter(e => e.token && e.role === 'supervisor' && e.workerId);
+  if (!entries.length) return [];
+  const sups = {};
+  await Promise.all([...new Set(entries.map(e => e.workerId))].map(async id => {
+    const s = await db.collection('workers').doc(id).get();
+    sups[id] = s.exists ? s.data() : null;
+  }));
+  const live = entries.filter(e => sups[e.workerId] && !sups[e.workerId].disabled && !(opts.exclude || []).includes(e.workerId));
+  const depts = (Array.isArray(dept) ? dept : [dept]).filter(Boolean);
+  const openers = (openerIds || []).length ? live.filter(e => openerIds.includes(e.workerId)) : [];
+  // "אחראי על מחלקות" במסך העלויות (adminSettings/costs.oversightDepts: {workerId: [שמות מחלקות]})
+  // קובע על מה האחראי ממונה — לא המחלקה שבה הוא עצמו רשום. נופל למחלקה שלו רק אם אין הגדרה.
+  let responsible = [];
+  if (depts.length) {
+    const cs = await db.collection('adminSettings').doc('costs').get();
+    const ov = (cs.exists && cs.data().oversightDepts) || {};
+    responsible = live.filter(e => (ov[e.workerId] || []).some(d => depts.includes(d)));
+  }
+  const sameDept = depts.length ? live.filter(e => depts.includes(sups[e.workerId].dept)) : [];
+  const targets = (openers.length || opts.onlyOpeners) ? openers : responsible.length ? responsible : (sameDept.length ? sameDept : live);
+  const reached = new Set();
+  await Promise.all(targets.map(async e => {
+    try {
+      // title/body יכולים להיות פונקציה של שפת האחראי (workers.lang) — כמו בתזכורת הידנית
+      const lg = sups[e.workerId].lang;
+      await admin.messaging().send(withTtl({
+        token: e.token,
+        notification: { title: typeof title === 'function' ? title(lg) : title, body: typeof body === 'function' ? body(lg) : body },
+        android: { priority: 'high', notification: { sound: 'default', channelId: 'textileops' } },
+        webpush: { notification: { icon: 'https://amtextile2222-beep.github.io/textileops/icon-192.png', requireInteraction: true } }
+      }, PUSH_TTL_ALERT));
+      reached.add(sups[e.workerId].name || e.workerId);
+    } catch (err) {
+      if (DEAD_FCM_CODES.includes(err.code)) {
+        // FieldPath — מפתח המכשיר עלול להכיל נקודות
+        await pushSnap.ref.update(new admin.firestore.FieldPath('tokens', e.key), FieldValue.delete()).catch(() => {});
+      }
+    }
+  }));
+  return [...reached];
+}
+
+// 🔔 תזכורת ידנית על משימה שחרגה מהצפי — כפתור בכרטיס המשימה (מנהל).
+// ההתראה האוטומטית (longTaskMonitor) נשלחת פעם אחת בלבד, ולא תמיד שמים לב אליה.
+// נשלח לעובדת (אם יש לה טלפון) + לאחראית שפתחה את המשימה; מנהל — גם לפי סדר ההעדפה הרגיל.
+// הגבלת קצב: תזכורת אחת לדקה לכל קבוצת משימות (taskAlerts/remind_<id>, בטרנזקציה).
+const REMIND_COOLDOWN_MS = 60 * 1000;
+exports.remindLateTask = functions.https.onCall(async (data, context) => {
+  const role = callerRole(context);
+  // בינתיים מנהל בלבד (27/09/2026). פתיחה לאחראים = להוסיף כאן 'supervisor' ובלקוח (remindBtn) —
+  // הלוגיקה של "אחראי שלוחץ" למטה כבר קיימת ונבדקה
+  if (role !== 'manager') throw new functions.https.HttpsError('permission-denied', 'למנהל בלבד');
+  const ids = [...new Set((Array.isArray(data && data.taskIds) ? data.taskIds : []).map(String).filter(Boolean))].slice(0, 20);
+  if (!ids.length) throw new functions.https.HttpsError('invalid-argument', 'לא נבחרה משימה');
+  const snaps = await Promise.all(ids.map(id => db.collection('activeTasks').doc(id).get()));
+  const tasks = snaps.filter(s => s.exists).map(s => s.data());
+  if (!tasks.length) return { ok: false, reason: 'gone' };
+  const lead = tasks[0];
+  const now = Date.now();
+  const lockRef = db.collection('taskAlerts').doc('remind_' + ids.slice().sort()[0]);
+  const waitMs = await db.runTransaction(async tx => {
+    const l = await tx.get(lockRef);
+    const last = l.exists ? (l.data().ts || 0) : 0;
+    if (now - last < REMIND_COOLDOWN_MS) return REMIND_COOLDOWN_MS - (now - last);
+    tx.set(lockRef, { ts: now, by: context.auth.uid, taskIds: ids });
+    return 0;
+  });
+  if (waitMs > 0) return { ok: false, reason: 'cooldown', waitSec: Math.ceil(waitMs / 1000) };
+
+  const workerSnap = await db.collection('workers').doc(lead.workerId).get();
+  const workerData = workerSnap.exists ? workerSnap.data() : {};
+  const who = lead.workerName || workerData.name || lead.workerId;
+  const expSum = tasks.reduce((s, t) => s + ((typeof t.expectedMin === 'number' && t.expectedMin > 0) ? t.expectedMin : 0), 0);
+  // הדקות מגיעות מהטיימר שעל מסך המנהל (בלי ההפסקה — כמו שהוא רואה). שעון קיר רק כגיבוי:
+  // הוא כולל את ההפסקה ולכן הראה עד 30 דק' יותר מהמסך.
+  const cm = data && data.elapsedMin;
+  const mins = (typeof cm === 'number' && isFinite(cm) && cm >= 0 && cm < 24 * 60) ? Math.round(cm)
+    : Math.round(Math.max(...tasks.map(t => (t.accumulatedSec || 0) * 1000 + (t.startTime && !t.paused ? now - new Date(t.startTime).getTime() : 0))) / 60000);
+  const stepsTxt = [...new Set(tasks.map(t => t.taskType).filter(Boolean))].join(', ');
+  const prodsTxt = [...new Set(tasks.map(t => t.prod || ''))].join(', ');
+  // טקסט לפי שפת הממשק של הנמען (workers.lang, נשמר מהלקוח); בלי שדה — עברית.
+  // נוסח ניטרלי (בלי "חורגת") — מתאים לעובד ולעובדת.
+  const RT = {
+    he: { wTitle: '⏰ תזכורת — חריגה מהזמן המוקצב', sTitle: n => '⏰ תזכורת — ' + n + ': חריגה מהזמן', exp: x => 'הוקצבו ' + x + ' דק\'', el: x => 'עברו ' + x + ' דק\'' },
+    ar: { wTitle: '⏰ تذكير — تجاوز الوقت المحدد', sTitle: n => '⏰ تذكير — ' + n + ': تجاوز الوقت', exp: x => 'الوقت المحدد ' + x + ' د', el: x => 'مضى ' + x + ' د' }
+  };
+  const rt = lg => RT[lg] || RT.he;
+  const bodyOf = lg => (stepsTxt ? stepsTxt + ' · ' : '') + prodsTxt + ' · ' +
+    (expSum > 0 ? rt(lg).exp(Math.round(expSum)) + (lg === 'ar' ? '، ' : ', ') : '') + rt(lg).el(mins);
+
+  let worker = false;
+  if (workerData.fcmToken) {
+    try {
+      await admin.messaging().send(withTtl({
+        token: workerData.fcmToken,
+        notification: { title: rt(workerData.lang).wTitle, body: bodyOf(workerData.lang) },
+        android: { priority: 'high', notification: { sound: 'default', channelId: 'textileops' } },
+        apns: { payload: { aps: { sound: 'default', badge: 1, contentAvailable: true } }, headers: { 'apns-priority': '10', 'apns-push-type': 'alert' } },
+        webpush: { notification: { icon: 'https://amtextile2222-beep.github.io/textileops/icon-192.png', requireInteraction: true, vibrate: [200, 100, 200] } }
+      }, PUSH_TTL_ALERT));
+      worker = true;
+    } catch (e) {
+      console.warn('remindLateTask: push לעובד נכשל', lead.workerId, e.code || e.message);
+      if (DEAD_FCM_CODES.includes(e.code)) await workerSnap.ref.set({ fcmToken: FieldValue.delete() }, { merge: true }).catch(() => {});
+    }
+  }
+  // אחראים: מי שלחץ לא מקבל על עצמו. אחראי שלוחץ — רק לאחראית אחרת שפתחה (אם יש),
+  // כדי לא להציף את כל האחראים; מנהל — לפי סדר ההעדפה המלא של pushSupervisors.
+  const openerIds = [...new Set(tasks.map(t => t.scannedBy).filter(id => id && id !== lead.workerId && id !== context.auth.uid))];
+  let sups = [];
+  if (role === 'manager' || openerIds.length) {
+    const pushSnap = await db.collection('appSettings').doc('pushSettings').get();
+    sups = await pushSupervisors(pushSnap, [...new Set([lead.dept, workerData.dept].filter(Boolean))],
+      lg => rt(lg).sTitle(who), bodyOf,
+      openerIds, { exclude: [context.auth.uid], onlyOpeners: role !== 'manager' }
+    ).catch(e => { console.warn('remindLateTask: push לאחראים נכשל', e.message); return []; });
+  }
+  // אף אחד לא קיבל — משחררים את הנעילה כדי שאפשר יהיה לנסות שוב מיד
+  if (!worker && !sups.length) await lockRef.delete().catch(() => {});
+  console.log('remindLateTask:', ids.join(','), 'by', context.auth.uid, 'worker:', worker, 'sups:', sups.join(','));
+  return { ok: true, worker, sups };
 });
 
 // בדיקת משימות ארוכות כל 5 דקות
@@ -789,6 +905,7 @@ exports.longTaskMonitor = functions.pubsub.schedule('every 5 minutes').onRun(asy
       units[key].tasks.push(t);
     }
     for (const unit of Object.values(units)) {
+      try {
       const tasks = unit.tasks;
       const lead = tasks[0];
       const start = Math.min(...tasks.map(t => new Date(t.startTime).getTime()));
@@ -841,23 +958,53 @@ exports.longTaskMonitor = functions.pubsub.schedule('every 5 minutes').onRun(asy
         }
       }
 
+      // 🔔 Push לעובד. ⚠️ עד 26/09/2026 כשל כאן (טלפון שהרישום שלו פג) זרק מחוץ ללולאה:
+      // הבדיקה נעצרה על המשימה הזו, taskAlerts לא נכתב — ולכן הטלגרם שלמעלה נשלח שוב כל 5 דק'
+      // ושאר המשימות שחרגו לא נבדקו כלל. עכשיו הכשל נבלע, והרישום המת נמחק מכרטיס העובד.
       const fcmToken = workerData.fcmToken;
       const pushPrefs = workerData.pushPrefs || {};
+      let workerReached = false;
       if (fcmToken && pushPrefs.task_long !== false) {
-        await admin.messaging().send({
-          token: fcmToken,
-          notification: {
-            title: hasExpected ? '⏱ חריגה מהזמן המוקצב' : '⚠️ משימה ארוכה',
-            body: hasExpected
-              ? 'הוקצבו ' + Math.round(expSum) + ' דקות' + (tasks.length > 1 ? ' ל-' + tasks.length + ' המשימות' : ' למשימה') + ' — עברו כבר ' + mins + ' דקות'
-              : 'המשימה שלך פעילה כבר ' + mins + ' דקות'
-          },
-          android: { priority: 'high', notification: { sound: 'default', channelId: 'textileops' } },
-          webpush: { notification: { icon: 'https://amtextile2222-beep.github.io/textileops/icon-192.png', requireInteraction: true } }
-        });
+        try {
+          await admin.messaging().send(withTtl({
+            token: fcmToken,
+            notification: {
+              title: hasExpected ? '⏱ חריגה מהזמן המוקצב' : '⚠️ משימה ארוכה',
+              body: hasExpected
+                ? 'הוקצבו ' + Math.round(expSum) + ' דקות' + (tasks.length > 1 ? ' ל-' + tasks.length + ' המשימות' : ' למשימה') + ' — עברו כבר ' + mins + ' דקות'
+                : 'המשימה שלך פעילה כבר ' + mins + ' דקות'
+            },
+            android: { priority: 'high', notification: { sound: 'default', channelId: 'textileops' } },
+            webpush: { notification: { icon: 'https://amtextile2222-beep.github.io/textileops/icon-192.png', requireInteraction: true } }
+          }, PUSH_TTL_ALERT));
+          workerReached = true;
+        } catch (e) {
+          console.warn('longTaskMonitor: push לעובד נכשל', lead.workerId, e.code || e.message);
+          if (DEAD_FCM_CODES.includes(e.code)) {
+            await workerSnap.ref.set({ fcmToken: FieldValue.delete() }, { merge: true }).catch(() => {});
+          }
+        }
       }
-      await db.collection('taskAlerts').doc(alertKey).set({ sent: true, ts: now, taskId: unit.docId, batchId: lead.batchId || null, expected: hasExpected ? expSum : null });
-      console.log('longTaskMonitor: sent alert for', alertKey);
+      // 👔 חלק גדול מהעובדות בלי טלפון — האחראי פותח להן משימות בסורק. מי שלא קיבלה Push,
+      // ההתראה עוברת לאחראים (מעדיפים את אחראי המחלקה של העובדת; אם אין — לכל האחראים).
+      if (!workerReached) {
+        const who = lead.workerName || workerData.name || lead.workerId;
+        // מי פתח את המשימות (סורק המשימות שומר scannedBy) — בלי העובדת עצמה
+        const openerIds = [...new Set(tasks.map(t => t.scannedBy).filter(id => id && id !== lead.workerId))];
+        // מחלקת המשימה (איפה העבודה נעשית) וגם מחלקת העובדת
+        await pushSupervisors(pushSnap, [...new Set([lead.dept, workerData.dept].filter(Boolean))],
+          hasExpected ? '⏱ חריגה מהזמן — ' + who : '⚠️ משימה ארוכה — ' + who,
+          (stepsTxt ? stepsTxt + ' · ' : '') + prodsTxt +
+            (hasExpected ? ' · הוקצבו ' + Math.round(expSum) + ' דק\', עברו ' + mins : ' · פעילה ' + mins + ' דק\''),
+          openerIds
+        ).catch(e => console.warn('longTaskMonitor: push לאחראים נכשל', e.message));
+      }
+      await db.collection('taskAlerts').doc(alertKey).set({ sent: true, ts: now, taskId: unit.docId, batchId: lead.batchId || null, expected: hasExpected ? expSum : null, workerReached });
+      console.log('longTaskMonitor: sent alert for', alertKey, workerReached ? '(worker)' : '(supervisors)');
+      } catch (e) {
+        // משימה אחת שנכשלה לא עוצרת את בדיקת האחרות
+        console.error('longTaskMonitor unit error:', unit.docId, e);
+      }
     }
   } catch (e) {
     console.error('longTaskMonitor error:', e);
@@ -937,8 +1084,10 @@ exports.wifiMonitor = functions.pubsub.schedule('every 5 minutes').onRun(async (
 
 // ─── ארכוב היסטוריית משימות ישנה — חודשי (1 בחודש, 03:00) ───
 // שולף משימות מעל ARCHIVE_AFTER_DAYS יום, שולח CSV לטלגרם, ומוחק רק אחרי אישור שליחה.
-// חלון חי בלקוח = 14 יום; שמירה ב-Firestore עד 60 יום; מעבר לכך — בקבצי CSV אצל המנהל.
-const ARCHIVE_AFTER_DAYS = 60;
+// חלון חי בלקוח = 14 יום; שמירה ב-Firestore עד 365 יום; מעבר לכך — בקבצי CSV אצל המנהל.
+// ⚠️ היה 60 עד 25/09/2026: הארכוב של 01/10 היה מוחק את כל יולי (~2,400 משימות, ~1,960 שע')
+// ודוחות הרווח של הזמנות יולי-אוגוסט היו מאבדים את השעות = רווח מנופח בשקט.
+const ARCHIVE_AFTER_DAYS = 365;
 const ARCHIVE_MAX_DOCS = 8000;
 async function runArchive() {
   const { token, chatId } = tgCfg();
@@ -1073,12 +1222,16 @@ async function runAttendanceCloser() {
     const histSnap = await histRef.get();
     if (histSnap.exists && histSnap.data().checkout) continue; // יש יציאה אמיתית
     const baseSessions = (w.sessions && w.sessions.length) ? w.sessions : [{ in: firstIn, out: null }];
+    // checkout = היציאה האחרונה בפועל. עד 04/10/2026 נכתב תמיד סוף המשמרת — גם לעובדת שכבר
+    // יצאה ב-10:09 — ודוח הנוכחות הראה 15:00 לכולן (ה-netMs עצמו היה נכון).
+    const closedSessions = baseSessions.map(s => s.out ? s : { ...s, out: cutISO });
+    const lastOut = closedSessions.map(s => s.out).sort().pop() || cutISO;
     const rec = {
       workerId: w.id, workerName: w.name || '', dept: w.dept || '', date: day,
-      sessions: baseSessions.map(s => s.out ? s : { ...s, out: cutISO }),
-      checkin: baseSessions[0].in, checkout: cutISO,
+      sessions: closedSessions,
+      checkin: baseSessions[0].in, checkout: lastOut,
       breakStart: w.breakStart || '', breakEnd: w.breakEnd || '', breakActive: !!w.breakActive,
-      autoClosed: true,
+      autoClosed: baseSessions.some(s => s.in && !s.out),
       netMs: calcNetCapped({ ...w, sessions: baseSessions }, cutMs)
     };
     await histRef.set(rec);
@@ -1106,15 +1259,35 @@ async function runAttendanceCloser() {
   }
 
   // 2.5) רישומי תחנה (stationLog) שנשארו פתוחים — סגירה בשעת סוף המשמרת של יום ההתחלה
+  // 🔑 **וגם ניקוי `workers.currentStation`** — סגירת הרישום לבדה לא מספיקה. עד 21/09
+  // השיוך על מסמך העובד נשאר, ולכן הוא נכנס למחרת עם התחנה של אתמול: `stationGate`
+  // מאשר לו להתחיל משימה בלי שסרק כלום, והמשימה נחתמת במכונה שלא ישב עליה.
+  // נמדד אצל ابوزكي — אפס רשומות stationLog ב-21/09, ומשימה מ-06:30 עם station:"درزه 1".
+  let stationsCleared = 0;
   try {
+    const clearWorkerStation = async (workerId, logId) => {
+      if (!workerId) return;
+      // ⚠️ מנקים **רק** אם זה עדיין הרישום הפעיל של העובד. בלי הבדיקה, סגירת רישום
+      // ישן הייתה מוחקת שיוך חדש ותקף שנסרק אחריו.
+      const wRef = db.collection('workers').doc(workerId);
+      const wSnap = await wRef.get();
+      if (!wSnap.exists || wSnap.data().stationLogId !== logId) return;
+      await wRef.set({ currentStation: null, stationLogId: null }, { merge: true });
+      stationsCleared++;
+    };
     const openLogs = await db.collection('stationLog').where('to', '==', null).get();
     for (const doc of openLogs.docs) {
       const r = doc.data();
-      if (!r.from) { await doc.ref.set({ to: new Date().toISOString() }, { merge: true }); continue; }
+      if (!r.from) {
+        await doc.ref.set({ to: new Date().toISOString() }, { merge: true });
+        await clearWorkerStation(r.workerId, doc.id).catch(() => {});
+        continue;
+      }
       const day = ilDateOf(r.from);
       const cutISO = ilDateTime(day, shiftEnd).toISOString();
       if (Date.now() < new Date(cutISO).getTime()) continue; // המשמרת עוד לא נגמרה
       await doc.ref.set({ to: cutISO, autoClosed: true }, { merge: true });
+      await clearWorkerStation(r.workerId, doc.id).catch(() => {});
     }
   } catch (e) { console.error('attendanceCloser stationLog:', e); }
 
@@ -1245,10 +1418,11 @@ async function runAttendanceCloser() {
       if (pausedNames.length) msg += '\n⏸ משימות הושהו (' + pausedNames.length + '): ' + pausedNames.join(', ');
       if (fixedDur) msg += '\n⏱ תוקן משך מנופח ב-' + fixedDur + ' משימות בהיסטוריה';
       if (fixedBatch) msg += '\n🧮 תוקן זמן batch מנופח ב-' + fixedBatch + ' משימות';
+      if (stationsCleared) msg += '\n📍 נוקו ' + stationsCleared + ' שיוכי תחנה שנשארו פתוחים';
       await sendTelegram(token, chatId, msg).catch(() => {});
     }
   }
-  return { closed: closed.length, repaired, paused: pausedNames.length, fixedDur, fixedBatch };
+  return { closed: closed.length, repaired, paused: pausedNames.length, fixedDur, fixedBatch, stationsCleared };
 }
 
 exports.attendanceCloser = functions.pubsub.schedule('30 23 * * *').timeZone('Asia/Jerusalem').onRun(async () => {
@@ -1270,4 +1444,555 @@ exports.attendanceCloserNow = functions.https.onRequest(async (req, res) => {
     console.error('attendanceCloserNow error:', e);
     res.status(500).json({ error: String(e.message || e) });
   }
+});
+
+// ─── 📦 מעקב הזמנות ללקוח (10/10/2026) ─────────────────────────────
+// דף track.html — הלקוח נכנס עם קישור במייל (Firebase Email Link, פעם אחת למכשיר) ורואה רק את ההזמנות שלו.
+// 🔐 הזיהוי = המייל המאומת שב-ID token. המיילים המורשים נשמרים ע"י מנהל ב-adminSettings/custLinks.emails =
+// {קוד לקוח: [מיילים]} — מסמך שעובד לא קורא ולא כותב (בפרטי הלקוח ב-appSettings כל עובד יכול לכתוב,
+// והיה מכניס את המייל של עצמו). הסרת מייל = חסימה מיידית, גם במכשיר שכבר מחובר (נבדק בכל בקשה).
+// משתמש מייל אין לו role ⇒ ה-Rules וכל ה-callables חוסמים אותו; הלקוח לא נוגע במסד בכלל.
+// מוחזרים **רק** שדות תצוגה: מס' הזמנה, שם, כמות, תאריכים, שלב ואחוזים. בלי מחירים/עובדים/ברקודים.
+//
+// ⚠️ חייב להישאר זהה ל-pipeStateOf / taskOrderStamp / taskUnits / coverKey ב-index.html —
+// הלקוח צריך לראות בדיוק את מה שהמנהל רואה ב"לוח מצב הזמנות". שינוי שם ⇒ שינוי כאן.
+const TRACK_LISTS = ['intake', 'countcut', 'ready_sew', 'sewing', 'ready_pack', 'packing', 'ready_ship', 'shipped'];
+const TRACK_SHIP_DAYS = 30;
+const _trackCache = new Map(); // קוד לקוח → {at, body}, 3 דק' — מגן מפני רענון חוזר שקורא שוב את כל ההיסטוריה
+function trackFamOfDept(d) {
+  const s = String(d || '').toLowerCase();
+  if (/استقبال|قص|קבל|חית|גזיר/.test(s)) return 'recv';
+  if (/خياط|خيط|תפיר/.test(s)) return 'sew';
+  if (/اريز|تغليف|كوي|فحص|אריז|גיהו|ניקו|ביקור/.test(s)) return 'pack';
+  return '';
+}
+const trackStepName = s => typeof s === 'string' ? s : (s && s.name) || '';
+const trackStepStation = s => (s && typeof s === 'object' && s.station) ? s.station : '';
+const trackStamp = p => +p.createdAt || parseInt(String(p.id).replace(/\D/g, '')) || 0;
+const trackOrderNoOf = raw => { const s = String(raw || ''); return s.length >= 16 ? (parseInt(s.slice(13, 16), 10) || 0) : 0; };
+const trackQty = p => (p.quantities || []).reduce((s, q) => s + (parseInt(q.qty) || 0), 0);
+const trackBc = t => t.bc || String(t.cust) + String(t.prod) + String(t.size || '0') + String(t.qty).padStart(3, '0') + String(t.col);
+const trackCoverKey = t => trackBc(t) + '|' + String(t.taskType || '').trim().toLowerCase() + (t.splitId ? '|' + t.splitId : '');
+// תאריך התעודה. היציאה עצמה — departedAt (סימון בלוח); ראה pipeDnDate/pipeShipDate ב-index.html
+const TRACK_DEPART_FROM = '2026-10-10';
+function trackShipDate(p) {
+  if (p.departedAt) return String(p.departedAt).slice(0, 10);
+  return trackDnDate(p);
+}
+function trackDnDate(p) {
+  const s = (p.stageLog || []).find(e => e.id === 'shipped');
+  if (s && s.date) return s.date;
+  return p.shippedAt ? String(p.shippedAt).slice(0, 10) : '';
+}
+function trackEntryDate(p) {
+  if (+p.createdAt) return new Date(+p.createdAt).toISOString().slice(0, 10);
+  const r = (p.stageLog || []).find(e => e.id === 'receive');
+  return (r && r.date) || '';
+}
+// 🚚 משלוחים — העתק של החישוב ב-pipeStateOf (index.html), כולל prodShipments/shUnsewn. ⚠️ שינוי שם מחייב שינוי כאן.
+// יציאה פר תעודה: הופקה (at) עד departedAt = יצאה. חלקי = יצא פחות מהכמות, מתעודה מ-TRACK_PARTIAL_FROM,
+// ובלי דחיפה ידנית ל"מוכן ליציאה"/הלאה (= סגירה בחוסר)
+const TRACK_PARTIAL_FROM = '2026-10-20';
+function trackShipInfo(p, qty) {
+  const shipped = (p.stageLog || []).some(e => e.id === 'shipped') || +p.shippedQty > 0;
+  let shL = [];
+  if (shipped) {
+    if (Array.isArray(p.shipments) && p.shipments.length) shL = p.shipments;
+    else if (p.shippedQty != null) shL = [{ date: p.dnDate || (p.shippedAt ? String(p.shippedAt).slice(0, 10) : ''), at: p.shippedAt || '', rows: Array.isArray(p.shippedRows) ? p.shippedRows : [], total: Math.max(0, +p.shippedQty || 0) }];
+  }
+  const shU = s => (+s.total || 0) + ((s && s.rows) || []).reduce((t, r) => t + ((r && r.grade) === 'לא תפור' ? (parseInt(r.qty) || 0) : 0), 0);
+  const depT = p.departedAt ? Date.parse(p.departedAt) : NaN;
+  const shDep = s => { const d = String(s.date || '').slice(0, 10); if (d && d < TRACK_DEPART_FROM) return true; if (isNaN(depT)) return false;
+    const a = Date.parse((s.restoredAt || s.backdatedAt) ? d : (s.at || d)); return !(a > depT); };
+  const outU = shL.reduce((t, s) => t + shU(s), 0), depU = shL.reduce((t, s) => t + (shDep(s) ? shU(s) : 0), 0);
+  const lastD = shL.reduce((m, s) => String(s.date || '') > m ? String(s.date || '') : m, '');
+  const ovShip = !!p.pipeOverride && TRACK_LISTS.indexOf(p.pipeOverride.list) >= TRACK_LISTS.indexOf('ready_ship');
+  const partial = shipped && qty > 0 && shL.length > 0 && outU < qty && lastD >= TRACK_PARTIAL_FROM && !ovShip;
+  const departed = shipped && !partial && (shL.length ? depU >= outU : (!!p.departedAt || String(trackDnDate(p) || '9999') < TRACK_DEPART_FROM));
+  return { shipped, partial, departed, outU, depU };
+}
+// 📦 מלאי החומרים שהלקוח סיפק (23/10/2026) — ⚠️ העתק של pstkCalc ב-index.html, רק למלאי של הלקוח הזה:
+// תנועות appSettings/packStock (in/out/count) פחות מה שיצא בתעודות, מהתנועה הראשונה של כל חומר ואילך:
+// חומר אריזה מובנה — mats עם own; פריט שהלקוח מספק (items[].own) — p.cons × יחידות התעודה.
+// מחזיר רק חומר שנספר: [{k, name, unit, dept, n, low}]. low = מתחת למינימום (בלי לחשוף את המינימום).
+// ⚠️ זהה ל-PACK_MATS ב-index.html (מפתחות; השמות כאן בלשון רבים לדף הלקוח)
+const TRACK_MATS = [['hanger', 'קולבים'], ['clip', 'קולבי קליפס'], ['nylon', 'ניילון'], ['cello', 'ניילון צלופן']];
+function trackPackStock(cust, prods, ps) {
+  const moves = (Array.isArray(ps.moves) ? ps.moves : []).filter(m => m && m.pool === cust && m.k);
+  if (!moves.length) return [];
+  const own = new Map((Array.isArray(ps.items) ? ps.items : []).filter(i => i && i.own && (!i.cust || i.cust === cust)).map(i => [i.id, i]));
+  const start = {};
+  moves.forEach(m => { if (start[m.k] == null || +m.at < start[m.k]) start[m.k] = +m.at || 0; });
+  const ev = moves.map(m => ({ at: +m.at || 0, k: m.k, t: m.t, n: +m.n || 0 }));
+  const shMs = s => { const t = Date.parse((s && s.at) || ''); return isNaN(t) ? (Date.parse(((s && s.date) || '') + 'T12:00:00') || 0) : t; };
+  prods.forEach(p => {
+    const cons = (Array.isArray(p.cons) ? p.cons : []).filter(c => c && own.has(c.id) && (+c.n || 0) > 0);
+    (Array.isArray(p.shipments) ? p.shipments : []).forEach(s => {
+      const at = shMs(s), u = +(s && s.total) || 0;
+      (Array.isArray(s && s.mats) ? s.mats : []).forEach(m => {
+        if (m && m.own && (+m.n || 0) > 0 && start[m.k] != null && at >= start[m.k]) ev.push({ at, k: m.k, t: 'use', n: +m.n || 0 });
+      });
+      if (u) cons.forEach(c => { if (start[c.id] != null && at >= start[c.id]) ev.push({ at, k: c.id, t: 'use', n: (+c.n) * u }); });
+    });
+  });
+  ev.sort((a, b) => a.at - b.at || (a.t === 'use') - (b.t === 'use'));
+  const bal = {};
+  ev.forEach(e => { if (e.t === 'count') bal[e.k] = e.n; else bal[e.k] = (bal[e.k] || 0) + (e.t === 'in' ? e.n : -e.n); });
+  // 📋 נדרש להזמנות הפתוחות של הלקוח (25/10/2026) — ⚠️ העתק של pstkNeed ב-index.html, רק לחומר שהלקוח
+  // מספק: יחידות שעוד לא יצאו (כמות, או משוערת) × צריכה ליחידה (p.cons; חומר אריזה מובנה — לפי c.own).
+  // פתוחה = לא דגם, לא נדחפה ל"מוכן ליציאה"/"יצא" (סגירה בחוסר), ותעודה אחרונה לא לפני יותר מ-21 יום
+  const need = {}, cutMs = Date.now() - 21 * 86400000;
+  prods.forEach(p => {
+    if (p.isSample) return;
+    const cons = (Array.isArray(p.cons) ? p.cons : []).filter(c => c && (+c.n || 0) > 0);
+    if (!cons.length) return;
+    const shL = Array.isArray(p.shipments) && p.shipments.length ? p.shipments
+      : (p.shippedQty != null ? [{ total: +p.shippedQty || 0, at: p.shippedAt || '', date: p.dnDate || '' }] : []);
+    const out = shL.reduce((t, s) => t + (+(s && s.total) || 0), 0), last = shL.reduce((m, s) => Math.max(m, shMs(s)), 0);
+    const ov = p.pipeOverride && p.pipeOverride.list;
+    if (ov === 'ready_ship' || ov === 'shipped' || (out > 0 && last && last < cutMs)) return;
+    const rem = Math.max(0, (trackQty(p) || Math.max(0, parseInt(p.estQty) || 0)) - out);
+    if (!rem) return;
+    cons.forEach(c => {
+      const builtin = TRACK_MATS.some(([k]) => k === c.id);
+      if (builtin ? !c.own : !own.has(c.id)) return;
+      need[c.id] = (need[c.id] || 0) + (+c.n) * rem;
+    });
+  });
+  const min = ps.min || {};
+  const DEPT_ORD = { cut: 0, sew: 1, pack: 2 };
+  const list = TRACK_MATS.map(([k, name]) => ({ k, name, unit: "יח'", dept: 'pack' }))
+    .concat([...own.values()].map(i => ({ k: i.id, name: String(i.name || ''), unit: String(i.unit || "יח'"), dept: i.dept || '' })));
+  return list.filter(x => x.k in bal).sort((a, b) => (DEPT_ORD[a.dept] ?? 3) - (DEPT_ORD[b.dept] ?? 3)).map(x => {
+    const mn = +min[cust + '|' + x.k] || 0, n = Math.round(bal[x.k] * 100) / 100;
+    return { ...x, n, low: mn > 0 && bal[x.k] < mn, need: Math.round((need[x.k] || 0) * 100) / 100 };
+  });
+}
+// prods = כל רשומות המוצר של הלקוח (prodByOrderNo/findProd/prodStampOldest מסננים ממילא לפי לקוח)
+function trackStates(prods, tasks) {
+  const byNo = (prod, no) => no ? prods.find(p => p.prod === prod && (parseInt(p.orderNo, 10) || 0) === no) || null : null;
+  const newest = prod => { let b = null, mx = -1; for (const p of prods) { if (p.prod !== prod) continue; const c = trackStamp(p); if (c > mx) { mx = c; b = p; } } return b; };
+  const oldest = prod => { let mn = Infinity; for (const p of prods) { if (p.prod !== prod) continue; const c = trackStamp(p); if (c < mn) mn = c; } return isFinite(mn) ? mn : 0; };
+  const orderStamp = t => {
+    const no = trackOrderNoOf(t.bc);
+    if (no) { const r = byNo(t.prod, no); if (r) return trackStamp(r); }
+    if (t.prodStamp != null) return t.prodStamp;
+    return oldest(t.prod);
+  };
+  const units = t => {
+    const q = +t.qty || 0;
+    if (q > 0) return q;
+    if (!t.isTotal) return 0;
+    const r = byNo(t.prod, trackOrderNoOf(t.bc)) || newest(t.prod);
+    return r ? trackQty(r) : 0;
+  };
+  const byOrder = {};
+  for (const t of tasks) { const k = t.prod + '|' + orderStamp(t); (byOrder[k] || (byOrder[k] = [])).push(t); }
+  return prods.map(p => {
+    const ts = byOrder[p.prod + '|' + trackStamp(p)] || [];
+    const qty = trackQty(p);
+    const scans = { recv: 0, sew: 0, pack: 0 };
+    for (const t of ts) { const f = trackFamOfDept(t.dept); if (f) scans[f]++; }
+    const steps = { recv: [], sew: [], pack: [], none: [] };
+    for (const s of (p.workSteps || [])) { const nm = trackStepName(s); if (!nm) continue; steps[trackFamOfDept(String(trackStepStation(s)).split('::')[0]) || 'none'].push(nm); }
+    const seen = new Set(), done = {};
+    for (const t of ts) {
+      if (!(t.duration > 0)) continue;
+      const k = trackCoverKey(t); if (seen.has(k)) continue; seen.add(k);
+      const nm = String(t.taskType || '').trim(); done[nm] = (done[nm] || 0) + units(t);
+    }
+    // ✔ שלב שסומן ידנית כגמור (products.stepMarks) = כל הכמות — כמו pipeStateOf
+    for (const m of (p.stepMarks || [])) if (m && m.n) done[m.n] = Math.max(done[m.n] || 0, qty);
+    // full/of כמו בלוח (קובע את המצב) + pct = יחידות שבוצעו מתוך כמות×שלבים (לתצוגת הלקוח בלבד)
+    const fam = f => {
+      const ss = steps[f]; if (!ss.length) return null;
+      return { full: ss.filter(nm => qty > 0 && (done[nm] || 0) >= qty).length, of: ss.length,
+        pct: qty > 0 ? Math.round(100 * ss.reduce((s, nm) => s + Math.min(done[nm] || 0, qty), 0) / (qty * ss.length)) : 0 };
+    };
+    const sew = fam('sew'), pack = fam('pack');
+    // 🚚 תעודה ⇒ "מוכן למשלוח"; "נשלח" רק אחרי סימון יציאה (תעודה לפני TRACK_DEPART_FROM = יצאה).
+    // משלוח חלקי (20/10/2026) — ההזמנה נשארת במצב הייצור של היתרה; out = יחידות שיצאו
+    const { shipped, partial, departed, depU, outU } = trackShipInfo(p, qty);
+    let id;
+    if (departed) id = 'shipped';
+    else if (shipped && !partial) id = 'ready_ship';
+    else if (pack && pack.of > 0 && pack.full === pack.of) id = 'ready_ship';
+    else if (scans.pack > 0) id = 'packing';
+    else if (sew && sew.of > 0 && sew.full === sew.of) id = 'ready_pack';
+    else if (scans.sew > 0) id = 'sewing';
+    else if (qty > 0 && scans.recv > 0) id = 'ready_sew';
+    else if (scans.recv > 0) id = 'countcut';
+    else id = 'intake';
+    // דחיפה ידנית של מנהל — קדימה בלבד, כמו בלוח
+    const nat = id;
+    const ov = p.pipeOverride && TRACK_LISTS.indexOf(p.pipeOverride.list) >= 0 ? p.pipeOverride.list : null;
+    if (ov && id !== 'shipped' && TRACK_LISTS.indexOf(ov) > TRACK_LISTS.indexOf(id)) id = ov;
+    const st = TRACK_LISTS.indexOf(id);
+    // ✂️ פיצול (18/10/2026): חלק באריזה והתפירה עוד לא הסתיימה ⇒ הלקוח רואה את שני האחוזים. כמו split בלוח
+    // יחידות שעוד בתפירה = qty − max(sewDone = השלב הנמוך בתפירה, packIn = השלב הגבוה באריזה כולל רצות)
+    let split = id === 'packing' && nat === 'packing' && !!sew && sew.full < sew.of && qty > 0;
+    if (split) {
+      const sewDone = Math.min(...steps.sew.map(nm => Math.min(done[nm] || 0, qty)));
+      const inn = {}, sn = new Set();
+      for (const t of ts) { if (trackFamOfDept(t.dept) !== 'pack') continue; const k = trackCoverKey(t); if (sn.has(k)) continue; sn.add(k);
+        const nm = String(t.taskType || '').trim(); inn[nm] = (inn[nm] || 0) + units(t); }
+      split = Math.max(sewDone, Math.min(qty, Math.max(0, ...Object.values(inn)))) < qty;
+    }
+    // אחוז בשלב הנוכחי בלבד; שלב שכבר עבר = 100 (חוץ מתפירה בפיצול)
+    const sewPct = split ? sew.pct : st > 3 ? 100 : (st === 3 && sew ? sew.pct : null);
+    const packPct = st > 5 ? 100 : (st === 5 && pack ? pack.pct : null);
+    // 📅 תאריך לכל שלב שהגיעו אליו (22/10/2026) — מהסריקות עצמן, לתצוגת הלקוח בלבד:
+    // התחלת שלב = הסריקה הראשונה במשפחה; "מוכן ל…" = היום שבו כל שלבי המשפחה הגיעו לכמות
+    // (או סימון ✔ ידני); מוכן ליציאה = אריזה הושלמה / התעודה הראשונה; יצא = תאריך היציאה.
+    const dOf = iso => { if (!iso || isNaN(new Date(iso))) return ''; return ilDateOf(iso); };
+    const minD = a => a.filter(Boolean).sort()[0] || '';
+    const famT = (f, k) => ts.filter(t => trackFamOfDept(t.dept) === f).map(t => dOf(t[k]));
+    const doneAt = f => {
+      if (!steps[f].length || !(qty > 0)) return '';
+      let last = '';
+      for (const nm of steps[f]) {
+        const sn = new Set(); let sum = 0, at = '';
+        const list = ts.filter(t => t.duration > 0 && t.endTime && String(t.taskType || '').trim() === nm).sort((a, b) => String(a.endTime).localeCompare(String(b.endTime)));
+        for (const t of list) { const k = trackCoverKey(t); if (sn.has(k)) continue; sn.add(k); sum += units(t); if (sum >= qty) { at = dOf(t.endTime); break; } }
+        const m = (p.stepMarks || []).find(x => x && x.n === nm);
+        if (!at && m) at = dOf(m.at);
+        if (!at) return '';
+        if (at > last) last = at;
+      }
+      return last;
+    };
+    const firstDn = minD(Array.isArray(p.shipments) && p.shipments.length ? p.shipments.map(s => String(s.date || '').slice(0, 10)) : [trackDnDate(p)]);
+    const dates = [trackEntryDate(p), minD(famT('recv', 'startTime')), minD(famT('recv', 'endTime')), minD(famT('sew', 'startTime')),
+      doneAt('sew'), minD(famT('pack', 'startTime')), minD([doneAt('pack'), shipped ? firstDn : '']), departed ? trackShipDate(p) : '']
+      .map((d, i) => i > st ? '' : (i === st && !d && ov === id ? dOf(p.pipeOverride.at) : d));
+    // est = כמות משוערת (products.estQty) כשאין עדיין כמות בטבלה — כמו "~N משוער" בלוח
+    return { no: parseInt(p.orderNo, 10) || 0, prod: p.prod, name: p.name || '', qty, est: qty ? 0 : Math.max(0, parseInt(p.estQty) || 0), entry: trackEntryDate(p),
+      ship: departed ? trackShipDate(p) : '', stage: st, sewPct, packPct, split, dates,
+      // out = יחידות שיצאו: משלוח חלקי, או כמה תעודות שרק חלקן סומנו כיציאה (A251, 22/10/2026 — כמו parts בלוח)
+      out: partial || (shipped && depU > 0 && depU < outU) ? depU : 0,
+      // ⚠ הערות חוסרים לפי שלב (25/10/2026, products.shortages — נכתב מלוח מצב הזמנות). פתוחות — כולן,
+      // שנפתרו — 30 יום אחרונים. st = אינדקס ב-TRACK_LISTS
+      short: (Array.isArray(p.shortages) ? p.shortages : []).filter(x => x && x.txt && (!x.res || Date.now() - x.res < 30 * 86400000))
+        .map(x => ({ id: String(x.id || ''), st: Math.max(0, Math.min(7, parseInt(x.st, 10) || 0)), txt: String(x.txt).slice(0, 200), at: +x.at || 0, res: +x.res || 0 })) };
+  });
+}
+// רשומת מייל מורשה: {e, at, max} — at = מתי נוסף (ms), max = מכשירים מותרים (0/חסר = ללא הגבלה).
+// מחרוזת = רשומה מלפני 10/10/2026 בלי at
+const trackEmailEnt = x => typeof x === 'string' ? { e: x.toLowerCase(), at: 0, max: 0 }
+  : { e: String((x && x.e) || '').toLowerCase(), at: +(x && x.at) || 0, max: Math.max(0, parseInt(x && x.max, 10) || 0) };
+
+// 📱 מכשירים מורשים למעקב (16/10/2026). adminSettings/custDevices.entries = {devId: {e, cust, dev, at, seen, st}}
+// devId = UUID שהדף יוצר ושומר ב-localStorage (כותרת X-Dev). st: ok | pending (ממתין לאישור מנהל) | blocked.
+// מכשיר חדש: יש מקום (max) ⇒ ok אוטומטית; אין ⇒ pending + טלגרם, והמנהל מאשר/חוסם בחלון "פרטי לקוח".
+// רשומה מלפני הוספת המייל מחדש (at < ent.at) לא נחשבת — הוספה מחדש מאפסת גם את המכשירים.
+// השרת כותב רק רשומות חדשות/שינוי מצב, ו-seen לכל היותר פעם ב-6 שעות (כדי לא לרענן את חלון המנהל בכל טעינה).
+const TRACK_DEV_RE = /^[A-Za-z0-9-]{8,64}$/;
+async function trackDeviceGate(email, cust, ent, devId, req) {
+  if (!TRACK_DEV_RE.test(devId)) return ent.max ? 'pending' : 'ok'; // דף ישן בלי מזהה — חוסם רק כשיש הגבלה
+  const ref = db.doc('adminSettings/custDevices');
+  const now = Date.now();
+  const res = await db.runTransaction(async tx => {
+    const s = await tx.get(ref);
+    const all = (s.data() || {}).entries || {};
+    const cur = all[devId];
+    const valid = cur && cur.e === email && (+cur.at || 0) >= ent.at - 120000;
+    if (valid && cur.st === 'ok') {
+      if (now - (+cur.seen || 0) > 6 * 3600000) tx.update(ref, { ['entries.' + devId + '.seen']: now });
+      return { st: 'ok' };
+    }
+    if (valid && cur.st === 'blocked') return { st: 'blocked' };
+    const okCnt = Object.entries(all).filter(([k, x]) => k !== devId && x && x.e === email && x.st === 'ok' && (+x.at || 0) >= ent.at - 120000).length;
+    const st = !ent.max || okCnt < ent.max ? 'ok' : 'pending';
+    if (valid && cur.st === 'pending' && st === 'pending') return { st };
+    const rec = { e: email, cust, dev: trackDevice(req.get('user-agent')), at: now, seen: now, st };
+    if (!s.exists) tx.set(ref, { entries: { [devId]: rec } });
+    else {
+      const upd = { ['entries.' + devId]: rec };
+      // גיזום: 300 רשומות לכל היותר — קודם חסומות/ממתינות, אחר כך הכי פחות נראו
+      const keys = Object.keys(all).filter(k => k !== devId);
+      if (keys.length >= 300) keys.sort((a, b) => ((all[a].st === 'ok') - (all[b].st === 'ok')) || ((+all[a].seen || 0) - (+all[b].seen || 0)))
+        .slice(0, keys.length - 299).forEach(k => { upd['entries.' + k] = FieldValue.delete(); });
+      tx.update(ref, upd);
+    }
+    return { st, isNew: true, rec };
+  });
+  if (res.isNew && res.st === 'pending') {
+    const { token: tgT, chatId: tgC } = tgCfg();
+    if (tgT && tgC) {
+      const nm = (((await db.doc('appSettings/customerNames').get()).data() || {})[cust]) || cust;
+      await sendTelegram(tgT, tgC, `⏳ <b>מעקב הזמנות — מכשיר חדש ממתין לאישור</b>\nלקוח: ${escTg(nm)}\nמייל: ${escTg(email)}\nמכשיר: ${escTg(res.rec.dev)}\nמותר: ${ent.max} מכשירים — כולם בשימוש.\nלאישור: ניהול ← פרטי לקוח ← מכשירים.\nשעה: ${ilTime()}`).catch(() => {});
+    }
+  }
+  return res.st;
+}
+function trackDevice(ua) {
+  ua = String(ua || '');
+  const os = /iPad/.test(ua) ? 'iPad' : /iPhone/.test(ua) ? 'iPhone' : /Android/.test(ua) ? 'Android'
+    : /Windows/.test(ua) ? 'Windows' : /Macintosh|Mac OS X/.test(ua) ? 'Mac' : /Linux/.test(ua) ? 'Linux' : 'לא ידוע';
+  const br = /Edg\//.test(ua) ? 'Edge' : /SamsungBrowser/.test(ua) ? 'Samsung' : /CriOS|Chrome\//.test(ua) ? 'Chrome'
+    : /FxiOS|Firefox\//.test(ua) ? 'Firefox' : /Safari\//.test(ua) ? 'Safari' : '';
+  return os + (br ? ' · ' + br : '');
+}
+const escTg = s => String(s || '').replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
+// 🕘 יומן כניסות + טלגרם. כניסה = session חדש (uid + auth_time) — רענונים של אותו מכשיר לא נרשמים.
+// adminSettings/custTrackLog.entries = {uid_authTime: {cust, email, at, dev, ip, ok}} — מנהל בלבד ב-Rules
+// (מסמך ב-adminSettings ⇒ אין שינוי ב-Rules). נשמרות 300 האחרונות. cust='' ⇒ מייל לא מורשה (ok:false).
+const _trackSeen = new Set();
+async function trackLogSignIn(tok, email, cust, req) {
+  const key = tok.uid + '_' + (Number(tok.auth_time) || 0);
+  if (_trackSeen.has(key)) return;
+  try {
+    const ref = db.doc('adminSettings/custTrackLog');
+    const rec = { cust, email, at: Date.now(), dev: trackDevice(req.get('user-agent')), ip: callerIp({ rawRequest: req }), ok: !!cust };
+    const isNew = await db.runTransaction(async tx => {
+      const s = await tx.get(ref);
+      const ent = (s.data() || {}).entries || {};
+      if (ent[key]) return false;
+      const upd = { ['entries.' + key]: rec };
+      const old = Object.keys(ent).sort((a, b) => (ent[a].at || 0) - (ent[b].at || 0));
+      for (const k of old.slice(0, Math.max(0, old.length - 299))) upd['entries.' + k] = FieldValue.delete();
+      if (s.exists) tx.update(ref, upd); else tx.set(ref, { entries: { [key]: rec } });
+      return true;
+    });
+    _trackSeen.add(key);
+    if (!isNew) return;
+    const { token: tgT, chatId: tgC } = tgCfg();
+    if (!tgT || !tgC) return;
+    const nm = cust ? (((await db.doc('appSettings/customerNames').get()).data() || {})[cust] || cust) : '';
+    const txt = cust
+      ? `🔐 <b>כניסה למעקב הזמנות</b>\nלקוח: ${escTg(nm)}\nמייל: ${escTg(email)}\nמכשיר: ${escTg(rec.dev)}\nשעה: ${ilTime()}`
+      : `⚠️ <b>ניסיון כניסה למעקב הזמנות — מייל לא מורשה</b>\nמייל: ${escTg(email)}\nמכשיר: ${escTg(rec.dev)}\nשעה: ${ilTime()}`;
+    await sendTelegram(tgT, tgC, txt).catch(() => {});
+  } catch (e) { console.error('trackLogSignIn error:', e); } // היומן לא מפיל את הצגת ההזמנות
+}
+
+// 🔐 אימות דף הלקוח — משותף ל-customerTrack ול-customerPush. מחזיר {cust, email, asCust, tok}
+// או null אחרי שכבר נשלחה תשובת שגיאה. סדר הבדיקות זהה למה שהיה ב-customerTrack (23/10/2026 הוצא לפונקציה)
+async function trackAuth(req, res) {
+  const m = /^Bearer (.+)$/.exec(String(req.get('Authorization') || ''));
+  if (!m) { res.status(401).json({ error: 'auth' }); return null; }
+  let tok;
+  try {
+    tok = await admin.auth().verifyIdToken(m[1]);
+  } catch (e) { res.status(401).json({ error: 'auth' }); return null; }
+  // 👁 תצוגת לקוח למנהל (22/10/2026): טוקן האפליקציה עם role=manager + ?cust=קוד ⇒ אותו מידע שהלקוח רואה,
+  // בלי מייל, בלי יומן כניסות ובלי שער מכשירים
+  const asCust = tok.role === 'manager' ? String(req.query.cust || '') : '';
+  if (!asCust && (!tok.email || !tok.email_verified)) { res.status(401).json({ error: 'auth' }); return null; }
+  if (asCust && !/^\d{1,4}$/.test(asCust)) { res.status(400).json({ error: 'cust' }); return null; }
+  const email = asCust ? '' : String(tok.email).toLowerCase();
+  if (asCust) return { cust: asCust, email, asCust, tok };
+  // נקרא בכל בקשה (גם כשיש מטמון) — כך הסרת מייל חוסמת מיד
+  const map = ((await db.doc('adminSettings/custLinks').get()).data() || {}).emails || {};
+  let cust = '', ent = null;
+  for (const c of Object.keys(map)) {
+    const x = (map[c] || []).map(trackEmailEnt).find(x => x.e === email);
+    if (x) { cust = c; ent = x; break; }
+  }
+  if (!cust) { await trackLogSignIn(tok, email, '', req); res.status(403).json({ error: 'denied', email }); return null; }
+  // 🔐 הוספה מחדש של מייל מנתקת כל מכשיר שנכנס לפניה: auth_time = רגע הכניסה עם הקישור (לא מתאפס
+  // ברענון טוקן). 2 דק' סובלנות לשעון של מחשב המנהל (at נחתם בלקוח). 401 ⇒ הדף מתנתק ומבקש קישור חדש
+  if (ent.at && (Number(tok.auth_time) || 0) * 1000 < ent.at - 120000) { res.status(401).json({ error: 'reauth' }); return null; }
+  await trackLogSignIn(tok, email, cust, req);
+  const dst = await trackDeviceGate(email, cust, ent, String(req.get('x-dev') || ''), req);
+  if (dst !== 'ok') { res.status(403).json({ error: dst }); return null; } // pending | blocked
+  return { cust, email, asCust: '', tok };
+}
+
+// מצב ההזמנות + המלאי של לקוח — מה שדף הלקוח מציג. משותף ל-customerTrack ול-customerNotify
+async function trackBuild(cust) {
+  const t0 = Date.now();
+  const [pS, aS, nS, kS] = await Promise.all([
+    db.collection('products').where('cust', '==', cust).get(),
+    db.collection('activeTasks').where('cust', '==', cust).get(),
+    db.doc('appSettings/customerNames').get(),
+    db.doc('appSettings/packStock').get()
+  ]);
+  const prods = pS.docs.map(d => ({ id: d.id, ...d.data() }));
+  const from = new Date(Date.now() - TRACK_SHIP_DAYS * 86400000).toISOString().slice(0, 10);
+  // ⚡ היסטוריה רק של הדגמים שמוצגים (פתוחים / נשלחו ב-30 יום) — "נשלח" נקבע מהמוצר בלבד, ולכן
+  // הסינון לא משנה אף מצב שמוצג. כל ההיסטוריה של הלקוח לקחה 17-25 שנ' (נמדד 10/10/2026).
+  // where('prod','in') בלבד (בלי cust) — לא דורש אינדקס מורכב; הלקוח מסונן בזיכרון
+  const shipOf = p => trackShipInfo(p, trackQty(p)).departed ? (trackShipDate(p) || '0') : '';
+  const codes = [...new Set(prods.filter(p => { const s = shipOf(p); return !s || s >= from; }).map(p => p.prod))];
+  const chunks = [];
+  for (let i = 0; i < codes.length; i += 30) chunks.push(codes.slice(i, i + 30));
+  const hSs = await Promise.all(chunks.map(c => db.collection('histTasks').where('prod', 'in', c).get()));
+  const tasks = [...hSs.flatMap(s => s.docs), ...aS.docs].map(d => d.data()).filter(t => t.cust === cust);
+  // פעילות לפי סדר כניסה (הוותיקה ראשונה), ואחריהן שנשלחו — החדשה ראשונה
+  const orders = trackStates(prods, tasks)
+    .filter(o => o.stage < 7 || (o.ship && o.ship >= from))
+    .sort((a, b) => ((a.stage === 7) - (b.stage === 7)) ||
+      (a.stage === 7 ? String(b.ship).localeCompare(String(a.ship)) : String(a.entry || '9999').localeCompare(String(b.entry || '9999'))));
+  console.log(`trackBuild ${cust}: ${tasks.length} tasks, ${codes.length} models, ${Date.now() - t0} ms`);
+  return { name: (nS.data() || {})[cust] || '', at: new Date().toISOString(), orders,
+    stock: trackPackStock(cust, prods, kS.data() || {}) };
+}
+
+// ⚡ 1GB: בדור הראשון המעבד גדל עם הזיכרון — עיבוד אלפי משימות על ברירת המחדל (256MB) לקח 11 שנ'
+// (נמדד 10/10/2026). רק לפונקציה הזו; נקראת לעיתים רחוקות, כך שהעלות זניחה
+exports.customerTrack = functions.runWith({ memory: '1GB' }).https.onRequest(async (req, res) => {
+  res.set('Access-Control-Allow-Origin', '*');
+  res.set('Cache-Control', 'no-store');
+  if (req.method === 'OPTIONS') {
+    res.set('Access-Control-Allow-Methods', 'GET');
+    res.set('Access-Control-Allow-Headers', 'Authorization, X-Dev');
+    res.status(204).send(''); return;
+  }
+  try {
+    const a = await trackAuth(req, res);
+    if (!a) return;
+    const { cust, asCust } = a;
+    // ⏱ (23/10/2026) המטמון של 3 דק' רק למצב ההזמנות (החלק הכבד). המלאי מחושב מחדש גם כשיש מטמון —
+    // מסמך אחד + המוצרים של הלקוח, והדף מרענן כל דקה ⇒ תיקון מלאי מגיע ללקוח תוך דקה.
+    // תצוגת המנהל (asCust) לא משתמשת במטמון בכלל — רואה תמיד את המצב העדכני.
+    const hit = asCust ? null : _trackCache.get(cust);
+    if (hit && Date.now() - hit.at < 180000) {
+      const [hp, hk] = await Promise.all([db.collection('products').where('cust', '==', cust).get(), db.doc('appSettings/packStock').get()]);
+      res.json({ ...hit.body, stock: trackPackStock(cust, hp.docs.map(d => ({ id: d.id, ...d.data() })), hk.data() || {}) });
+      return;
+    }
+    const body = await trackBuild(cust);
+    _trackCache.set(cust, { at: Date.now(), body });
+    res.json(body);
+  } catch (e) {
+    console.error('customerTrack error:', e);
+    res.status(500).json({ error: 'server' });
+  }
+});
+
+// 🔔 התראות Push ללקוח (23/10/2026). adminSettings/custPush.tokens = {devId: {token, cust, e, at}} — מכשיר
+// של לקוח שלחץ "קבלו התראות" בדף המעקב. GET ⇒ {vapid, on} · POST {token} ⇒ רישום · POST {off:true} ⇒ ביטול.
+// אותו אימות כמו customerTrack (מייל מורשה + שער מכשירים); תצוגת המנהל לא נרשמת (הטוקן הוא של המנהל).
+// המייל מוסר / המכשיר נחסם ⇒ customerNotify לא שולח אליו (בודק מחדש מול custLinks ו-custDevices)
+exports.customerPush = functions.https.onRequest(async (req, res) => {
+  res.set('Access-Control-Allow-Origin', '*');
+  res.set('Cache-Control', 'no-store');
+  if (req.method === 'OPTIONS') {
+    res.set('Access-Control-Allow-Methods', 'GET, POST');
+    res.set('Access-Control-Allow-Headers', 'Authorization, X-Dev, Content-Type');
+    res.status(204).send(''); return;
+  }
+  try {
+    const a = await trackAuth(req, res);
+    if (!a) return;
+    if (a.asCust) { res.status(403).json({ error: 'manager' }); return; }
+    const devId = String(req.get('x-dev') || '');
+    if (!TRACK_DEV_RE.test(devId)) { res.status(400).json({ error: 'dev' }); return; }
+    const ref = db.doc('adminSettings/custPush');
+    if (req.method === 'GET') {
+      const [ps, cp] = await Promise.all([db.doc('appSettings/pushSettings').get(), ref.get()]);
+      const cur = ((cp.data() || {}).tokens || {})[devId];
+      res.json({ vapid: (ps.data() || {}).vapidKey || '', on: !!(cur && cur.cust === a.cust) }); return;
+    }
+    if (req.method !== 'POST') { res.status(405).json({ error: 'method' }); return; }
+    const b = (req.body && typeof req.body === 'object') ? req.body : {};
+    const token = String(b.token || '');
+    if (!b.off && !/^[\w:.-]{20,4096}$/.test(token)) { res.status(400).json({ error: 'token' }); return; }
+    await db.runTransaction(async tx => {
+      const s = await tx.get(ref);
+      const all = (s.data() || {}).tokens || {};
+      const upd = {};
+      // אותו טוקן תחת מזהה מכשיר אחר (נתוני הדפדפן נמחקו) — רשומה כפולה שהייתה שולחת פעמיים
+      Object.keys(all).forEach(k => { if (k !== devId && token && all[k] && all[k].token === token) upd['tokens.' + k] = FieldValue.delete(); });
+      upd['tokens.' + devId] = b.off ? FieldValue.delete() : { token, cust: a.cust, e: a.email, at: Date.now() };
+      if (s.exists) tx.update(ref, upd);
+      else if (!b.off) tx.set(ref, { tokens: { [devId]: upd['tokens.' + devId] } });
+    });
+    res.json({ ok: true, on: !b.off });
+  } catch (e) {
+    console.error('customerPush error:', e);
+    res.status(500).json({ error: 'server' });
+  }
+});
+
+// 🔔 שליחת העדכונים ללקוחות — כל 15 דק', לכל לקוח רק בתוך שעות ההתראות שלו (adminSettings/custNotifyCfg =
+// {def:{יום:[מ,עד]}, cust:{קוד:{...}}}, יום 0=א'…6=ש', נערך בחלון "פרטי לקוח"; בלי הגדרה — NOTIFY_DEF_WIN).
+// מחוץ לחלון הלקוח לא מעובד ולכן גם המצב השמור לא מתקדם ⇒ מה שקרה בינתיים נשלח מאוחד בתחילת החלון הבא.
+// לכל לקוח עם מכשיר רשום: trackBuild ⇒ השוואה למצב ששמרנו בריצה הקודמת (adminSettings/custNotifyState)
+// ⇒ הודעה אחת מאוחדת. נשלח רק על: הזמנה חדשה, מעבר לשלב מרכזי (תפירה/אריזה/מוכן ליציאה/יצא),
+// וחומר שירד עכשיו מתחת למינימום. ריצה ראשונה ללקוח רק שומרת מצב (בלי הודעה על כל מה שכבר קיים).
+// ⚠️ מספרי השלבים = TRACK_LISTS (0 התקבלה … 7 יצא ללקוח)
+const NOTIFY_STAGES = { 3: 'התחילה תפירה 🧵', 5: 'התחילה אריזה 📦', 6: 'מוכנה ליציאה ✅', 7: 'יצאה אליכם 🚚' };
+const NOTIFY_LINK = 'https://amtextile2222-beep.github.io/textileops/track.html';
+// שמות השלבים בדף הלקוח (STAGES ב-track.html) — לשורת "חוסר ב…"
+const NOTIFY_STAGE_NAMES = ['קבלת ההזמנה', 'ספירה וגזירה', 'מוכן לתפירה', 'תפירה', 'מוכן לאריזה', 'אריזה', 'מוכן ליציאה', 'יציאה ללקוח'];
+// ⚠️ זהה ל-NOTIFY_DEF_WIN ב-index.html: א'-ה' 07:00-18:00, ו' 07:00-13:00
+const NOTIFY_DEF_WIN = { 0: ['07:00', '18:00'], 1: ['07:00', '18:00'], 2: ['07:00', '18:00'], 3: ['07:00', '18:00'], 4: ['07:00', '18:00'], 5: ['07:00', '13:00'] };
+function notifyInWin(win, il) {
+  const w = win && win[il.getDay()];
+  if (!Array.isArray(w) || w.length < 2) return false;
+  const hm = String(il.getHours()).padStart(2, '0') + ':' + String(il.getMinutes()).padStart(2, '0');
+  return hm >= w[0] && hm < w[1];
+}
+exports.customerNotify = functions.runWith({ memory: '1GB', timeoutSeconds: 300 }).pubsub
+  .schedule('*/15 * * * *').timeZone('Asia/Jerusalem').onRun(async () => {
+  const il = new Date(new Date().toLocaleString('en-US', { timeZone: 'Asia/Jerusalem' }));
+  const pushRef = db.doc('adminSettings/custPush'), stRef = db.doc('adminSettings/custNotifyState');
+  // שתי קריאות קלות קודם — רוב הריצות (לילה/שבת) נעצרות כאן
+  const [pS, cS] = await Promise.all([pushRef.get(), db.doc('adminSettings/custNotifyCfg').get()]);
+  const toks = (pS.data() || {}).tokens || {};
+  const cfg = cS.data() || {}, winOf = c => (cfg.cust && cfg.cust[c]) || cfg.def || NOTIFY_DEF_WIN;
+  if (!Object.values(toks).some(t => t && t.cust && notifyInWin(winOf(t.cust), il))) return null;
+  const [lS, dS, sS] = await Promise.all([db.doc('adminSettings/custLinks').get(),
+    db.doc('adminSettings/custDevices').get(), stRef.get()]);
+  const links = (lS.data() || {}).emails || {}, devs = (dS.data() || {}).entries || {};
+  const state = sS.data() || {};
+  // מכשיר תקף = המייל עדיין מורשה לאותו לקוח, והמכשיר לא נחסם/ממתין בשער המכשירים
+  const byCust = {};
+  Object.entries(toks).forEach(([devId, t]) => {
+    if (!t || !t.token || !t.cust || !notifyInWin(winOf(t.cust), il)) return;
+    const ent = (links[t.cust] || []).map(trackEmailEnt).find(x => x.e === t.e);
+    if (!ent || (ent.at && (+t.at || 0) < ent.at - 120000)) return;
+    const dv = devs[devId];
+    if (dv && dv.st !== 'ok') return;
+    (byCust[t.cust] = byCust[t.cust] || []).push({ devId, token: t.token });
+  });
+  const dead = [];
+  for (const cust of Object.keys(byCust)) {
+    try {
+      const body = await trackBuild(cust);
+      const prev = state[cust], cur = { o: {}, low: [], sh: [], at: Date.now() };
+      const lines = [];
+      body.orders.forEach(o => {
+        const key = o.prod + '#' + (o.no || 0), nm = o.name || ('דגם ' + o.prod);
+        cur.o[key] = o.stage;
+        // ⚠ חוסר חדש (פתוח, לא היה בריצה הקודמת) ⇒ שורה בהודעה
+        (o.short || []).filter(x => !x.res && x.id).forEach(x => {
+          cur.sh.push(x.id);
+          if (prev && !(prev.sh || []).includes(x.id)) lines.push('⚠️ ' + nm + ': חוסר ב' + NOTIFY_STAGE_NAMES[x.st] + ' — ' + x.txt);
+        });
+        if (!prev) return;
+        const was = prev.o ? prev.o[key] : undefined;
+        if (was == null) { if (o.stage < 7) lines.push('🆕 ' + nm + ': הזמנה חדשה התקבלה'); return; }
+        // השלב המרכזי הגבוה ביותר שעברו מאז הריצה הקודמת (קפיצה של כמה שלבים = הודעה אחת)
+        const hit = Object.keys(NOTIFY_STAGES).map(Number).filter(s => s > was && s <= o.stage).pop();
+        if (hit != null) lines.push(nm + ': ' + NOTIFY_STAGES[hit]);
+      });
+      (body.stock || []).forEach(s => {
+        if (!s.low) return;
+        cur.low.push(s.k);
+        if (prev && !(prev.low || []).includes(s.k))
+          lines.push('⚠️ ' + s.name + ': נשארו ' + s.n + (s.unit && s.unit !== "יח'" ? ' ' + s.unit : '') + ' — כדאי לשלוח עוד');
+      });
+      // החלפה מלאה של שדה הלקוח (update) — set עם merge היה ממזג ומשאיר הזמנות ישנות לנצח
+      if (sS.exists) await stRef.update({ [cust]: cur }); else await stRef.set({ [cust]: cur }, { merge: true });
+      if (!lines.length) continue;
+      const title = '📦 ' + (body.name ? body.name + ' — ' : '') + 'עדכון הזמנות';
+      const text = lines.slice(0, 4).join('\n') + (lines.length > 5 ? '\nועוד ' + (lines.length - 4) + ' עדכונים' : lines.length === 5 ? '\nועוד עדכון אחד' : '');
+      // data בלבד: track-sw.js מציג את ההתראה בעצמו ופותח את דף המעקב בלחיצה (בלי הצגה כפולה של ה-SDK)
+      const rs = await Promise.allSettled(byCust[cust].map(d => admin.messaging().send(withTtl({
+        token: d.token,
+        data: { title, body: text, link: NOTIFY_LINK },
+        webpush: { headers: { Urgency: 'high' } }
+      }, 2 * 3600))));
+      rs.forEach((r, i) => { if (r.status === 'rejected' && DEAD_FCM_CODES.includes(r.reason && r.reason.code)) dead.push(byCust[cust][i].devId); });
+      console.log(`customerNotify ${cust}: ${lines.length} updates → ${rs.filter(r => r.status === 'fulfilled').length}/${rs.length} devices`);
+    } catch (e) { console.error('customerNotify ' + cust + ':', e); }
+  }
+  if (dead.length) {
+    const upd = {}; dead.forEach(k => { upd['tokens.' + k] = FieldValue.delete(); });
+    await pushRef.update(upd).catch(() => {});
+  }
+  return null;
 });

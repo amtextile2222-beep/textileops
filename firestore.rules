@@ -13,6 +13,11 @@ service cloud.firestore {
         && ('role' in request.auth.token)
         && request.auth.token.role == 'manager';
     }
+    function isSup() {
+      return request.auth != null
+        && ('role' in request.auth.token)
+        && request.auth.token.role == 'supervisor';
+    }
 
     // סודות כניסה (hash סיסמה, תבניות פנים, מזהה מכשיר) — אין גישת לקוח בכלל,
     // רק Cloud Functions דרך Admin SDK
@@ -51,7 +56,9 @@ service cloud.firestore {
     // שפונקציות login/wifiMonitor/attendanceCloser מסתמכות עליהם
     match /appSettings/{docId} {
       allow read: if hasRole();
-      allow write: if isMgr() || (hasRole() && docId != 'telegramSettings');
+      allow create, update: if isMgr() || (hasRole() && docId != 'telegramSettings');
+      // מחיקת מסמך הגדרות (לקוחות/מחלקות/צבעים) משבשת את כולם — האפליקציה לא מוחקת אף אחד
+      allow delete: if isMgr();
     }
 
     // תחנות עבודה (מצלמות/DVR): עובד קורא (לזיהוי סריקת STN), מנהל מגדיר
@@ -74,15 +81,94 @@ service cloud.firestore {
       allow update, delete: if isMgr();
     }
 
+    // 🗑 הגנה ממחיקה (25/09/2026): קריאה/יצירה/עדכון נשארים לכל מחובר — האפליקציה עצמה
+    // כותבת רשומות של אחרים מכל מכשיר (סגירת נוכחות בבוקר, איפוס חצות, משימות משותפות).
+    // מחיקה — רק מי שיש לו אותה במסך: נוכחות אינה נמחקת מהאפליקציה בכלל (מנהל בלבד);
+    // היסטוריית משימות ומוצרים נמחקים ממסכי מנהל/אחראי (deleteHistTask/restoreHistTask/deleteProduct).
+    match /attHistory/{id} {
+      allow read, create, update: if hasRole();
+      allow delete: if isMgr();
+    }
+    match /histTasks/{id} {
+      allow read, create, update: if hasRole();
+      allow delete: if isMgr() || isSup();
+    }
+    match /products/{id} {
+      allow read, create, update: if hasRole();
+      allow delete: if isMgr() || isSup();
+    }
+
+    // 💲 תמחור מוצרים (25/09/2026): מחיר ללקוח, אחוז רווח, עלות חומרים, גזירה — הוצאו ממסמכי
+    // products (שנטענים לכל טלפון) לאוסף נפרד. רשאים: מנהל · מי שסומן לו "מוצרים" או
+    // "תעודות משלוח" · אחראי בלי הרשאות מפורשות (ברירת המחדל שלו כוללת "מוצרים").
+    // ⚠️ חייב להישאר זהה ל-_canPricing ב-index.html. חישוב הצפי בשרת (calcTaskExpected) קורא
+    // דרך Admin SDK ולא תלוי בזה — עובדת ממשיכה לקבל צפי בלי לראות מחיר.
+    function me() {
+      return get(/databases/$(database)/documents/workers/$(request.auth.uid)).data;
+    }
+    function canPricing() {
+      return isMgr() || (hasRole() && (
+        ('permissions' in me() && me().permissions.hasAny(['products', 'dnotes']))
+        || (!('permissions' in me()) && request.auth.token.role == 'supervisor')));
+    }
+    // 🧾 חשבוניות עסקה (04/10/2026) — מכילות מחירים ⇒ אותה הרשאה כמו התמחור.
+    // יצירה (בהפקה) ועדכון (סימון "מבוטלת") — לא מוחקים: המספר לא חוזר לשימוש.
+    // ✍ חתימת העסק (05/10/2026) — מי שמדפיס תעודות/חשבוניות קורא; רק מנהל מחליף/מוחק.
+    match /bizSignature/{id} {
+      allow read: if canPricing();
+      allow write: if isMgr();
+    }
+    match /proformaInvoices/{id} {
+      allow read, create, update: if canPricing();
+      allow delete: if false;
+    }
+    // 💳 צילומי שיקים (08/10/2026) — מספרי חשבון בנק ⇒ רק מי שרואה חשבוניות. מחיקה — מנהל
+    match /checkImages/{id} {
+      allow read, create, update: if canPricing();
+      allow delete: if isMgr();
+    }
+    match /productPricing/{id} {
+      allow read, create, update: if canPricing();
+      // כמו מחיקת מוצר — מנהל/אחראי (deleteProduct מוחק גם את התמחור, שלא יישאר יתום)
+      allow delete: if isMgr() || isSup();
+    }
+
+    // 💸 הוצאות עובדים (25/09/2026): עובד/עוזר רואה ורושם **רק את שלו**; אחראי ומנהל רואים הכל.
+    // עריכה ומחיקה — מנהל בלבד. עד כה האוסף נפל ל-catch-all: כל מחובר קרא, ערך ומחק
+    // הוצאות של כולם (כולל תמונות קבלה), וההסתרה במסך לא הייתה אכיפה.
+    // ⚠️ Rules אינם מסננים: הלקוח של עובד חייב להאזין עם where('workerId','==',uid),
+    // אחרת כל ההאזנה נדחית. uid בטוקן = מזהה העובד (createCustomToken(w.id)).
+    match /workerExpenses/{id} {
+      allow read: if isMgr() || isSup()
+        || (hasRole() && resource.data.workerId == request.auth.uid);
+      allow create: if isMgr() || (hasRole()
+        && request.resource.data.workerId == request.auth.uid
+        && request.resource.data.amount is number
+        && request.resource.data.amount > 0);
+      allow update, delete: if isMgr();
+    }
+
     // שאר האוספים — כל משתמש מחובר עם role
     // (stationLog נשאר כאן בכוונה — עובדים כותבים רשומות שיוך לתחנה)
+    // ⚠️ כל אוסף שמקבל חוקים משלו חייב להופיע כאן ברשימת ההחרגה — Rules מאשרים
+    // אם **איזשהו** match מאשר, ולכן בלי ההחרגה ה-catch-all היה עוקף את החוק הייעודי.
     match /{collection}/{docId} {
       allow read, write: if hasRole()
         && collection != 'credentials'
         && collection != 'adminSettings'
         && collection != 'workers'
         && collection != 'appSettings'
-        && collection != 'stations';
+        && collection != 'stations'
+        && collection != 'workerExpenses'
+        && collection != 'attHistory'
+        && collection != 'histTasks'
+        && collection != 'products'
+        && collection != 'productPricing'
+        && collection != 'proformaInvoices'
+        && collection != 'bizSignature'
+        && collection != 'checkImages'
+        // עד 25/09/2026 חסר כאן — וחוק הקופה הייעודי (לקיחה בלבד, על שמך) לא נאכף בפועל
+        && collection != 'cashbox';
     }
   }
 }
