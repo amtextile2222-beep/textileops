@@ -3008,7 +3008,10 @@ function renderCutReport(){
     <button class="btn" style="width:100%;font-size:13px;margin-bottom:12px" onclick="crAddRoll()">➕ גליל · رول</button>
     <div id="cr-sum"></div>
     <div style="font-size:11px;color:var(--txt3);margin-top:6px">בשמירה טבלת הכמויות של ההזמנה מתעדכנת לפי מה שנגזר (רק בצבעים שנגזרו).</div>
-    <button class="btn primary" style="width:100%;margin-top:10px;font-size:15px" onclick="saveCutReport()">💾 שמור · حفظ</button>
+    <div style="display:flex;gap:6px;margin-top:10px">
+      <button class="btn primary" style="flex:1;font-size:15px" onclick="saveCutReport()">💾 שמור · حفظ</button>
+      <button class="btn" style="font-size:14px" onclick="printCutReport()">🖨 הדפס · طباعة</button>
+    </div>
   </div>`;
   crCalcView();
 }
@@ -3069,6 +3072,46 @@ function crCalcView(){
     <div style="overflow-x:auto"><table style="border-collapse:collapse;font-size:12px;width:100%"><tr><th style="text-align:right;${th}">צבע</th>${sizes.map(s=>`<th style="${th}">${esc(s)}</th>`).join('')}<th style="${th}">סה"כ</th></tr>
     ${cols.map(col=>{let t=0;return`<tr style="border-top:1px solid var(--brd)"><td style="${th};white-space:nowrap">${_crColName(col)}</td>${sizes.map(s=>{const n=c.units[s+'|'+col]||0;t+=n;return`<td style="text-align:center;${th}">${n||'—'}</td>`;}).join('')}<td style="text-align:center;${th}"><b>${t}</b></td></tr>`;}).join('')}</table></div>
     <div style="font-size:13px;margin-top:6px">סה"כ <b>${tot}</b> יח' · נוצל <b>${_crM(used)} מ'</b> · <b>${_crM(used/tot)}</b> מ' ליחידה${left?` · שארית <b>${_crM(left)} מ'</b>`:''}${bad?` · סוג ב <b style="color:var(--amber-txt)">${_crM(bad)} מ'</b>`:''}</div></div>`:'';
+}
+// 🖨 הדפסת הדוח (27/10/2026) — מהחלון הפתוח, כולל שינויים שלא נשמרו. A4; באייפון PDF ⇒ שיתוף, כמו דף השלבים
+async function printCutReport(){
+  const p=(S.products||[]).find(x=>String(x.id)===String(document.getElementById('cr-wrap')?.dataset.pid));if(!p||!_cr)return;
+  const c=_crCalc(_cr),steps=_cr.markers.filter(m=>+m.len>0),cn=c=>esc((COLORS[c]||c)+'');
+  const sizes=[...new Set([...Object.keys(c.units).map(k=>k.split('|')[0]),..._cr.need.map(x=>x.s)])].sort();
+  const cols=[...new Set([...Object.keys(c.units).map(k=>k.split('|')[1]),..._cr.need.filter(x=>+x.n>0).map(x=>x.c)])];
+  const ord=(parseInt(p.orderNo,10)||0)?' · הזמנה #'+String(p.orderNo).padStart(3,'0'):'';
+  const title='דוח גזירה — מוצר '+p.prod+' · לקוח '+p.cust+ord;
+  const stepTbl=steps.length?`<h3>ציור ומדרגות</h3><table><tr><th>אורך (מ')</th><th>מידות</th></tr>${steps.map((m,i)=>`<tr><td>${_crM(+m.len)}${i?'':' (מלא)'}</td><td dir="ltr" style="text-align:right">${_crSzTxt(m)}</td></tr>`).join('')}</table>`:'';
+  const strips=(_cr.strips||[]).filter(t=>+t.w>0);
+  const stripTxt=strips.length?`<div class="note">סרט מהבד: ${strips.map(t=>esc(t.name||'סרט')+' — '+t.w+' ס"מ, רצועה ל-'+(+t.per||1)+" יח'").join(' · ')}</div>`:'';
+  const rolls=_cr.rolls.map((o,i)=>({o,x:c.rolls[i],i})).filter(r=>r.x.tot||r.o.m!==''||r.o.no);
+  const rollTbl=rolls.length?`<h3>גלילים</h3><table><tr><th>#</th><th>צבע</th><th>מס' גליל</th><th>אצווה</th><th>מטר</th><th>ק"ג</th>${steps.map(m=>`<th>${_crM(+m.len)}</th>`).join('')}<th>נוצל</th><th>סוג ב</th><th>שארית</th><th>יח'</th></tr>
+    ${rolls.map(({o,x,i})=>`<tr><td>${i+1}</td><td>${cn(o.color)}</td><td>${esc(o.no||'')}</td><td>${esc(o.batch||'')}</td><td>${o.m===''?'':_crM(+o.m)}</td><td>${o.kg===''||o.kg==null?'':esc(o.kg)}</td>
+      ${steps.map(m=>`<td>${_crLayN(o,m.id)||''}</td>`).join('')}<td><b>${_crM(x.used)}</b>${x.strip?`<div class="s">סרט ${x.strip.toFixed(3)}</div>`:''}</td><td>${x.bad?_crM(x.bad):''}</td>
+      <td${x.left<0?' class="neg"':''}>${o.m!==''&&+o.m>0?_crM(x.left):''}</td><td><b>${x.tot}</b></td></tr>`).join('')}</table>`:'';
+  let gt=0,gn=0;
+  const sumTbl=cols.length?`<h3>סיכום לפי צבע ומידה (נגזר / צריך)</h3><table><tr><th>צבע</th>${sizes.map(s=>`<th>${esc(s)}</th>`).join('')}<th>סה"כ</th></tr>
+    ${cols.map(col=>{let t=0,tn=0;const tds=sizes.map(s=>{const n=c.units[s+'|'+col]||0,nd=_crNeed(col,s);t+=n;tn+=nd;
+      return`<td${nd&&n<nd?' class="neg"':''}>${n}${nd?`<span class="s"> / ${nd}</span>`:''}</td>`;}).join('');gt+=t;gn+=tn;
+      return`<tr><td>${cn(col)}</td>${tds}<td><b>${t}</b>${tn?`<span class="s"> / ${tn}</span>`:''}</td></tr>`;}).join('')}</table>`:'';
+  const used=c.rolls.reduce((a,x)=>a+x.used,0),bad=c.rolls.reduce((a,x)=>a+x.bad,0);
+  const left=_cr.rolls.reduce((a,o,i)=>a+(o.m!==''&&+o.m>0?c.rolls[i].left:0),0);
+  const plan=cols.map(col=>({col,rows:_crPlan(col,c).rows})).filter(x=>x.rows.some(r=>r.n));
+  const html=`<!DOCTYPE html><html dir="rtl" lang="he"><head><meta charset="utf-8"><title>${esc(title)}</title><style>
+    @page{size:A4;margin:0}body{font-family:Arial,sans-serif;color:#000;margin:0;padding:12mm;font-size:12px}
+    h2{margin:0 0 2px;font-size:18px}h3{font-size:14px;margin:14px 0 5px}.sub{color:#444;font-size:12px;margin-bottom:6px}
+    table{width:100%;border-collapse:collapse}td,th{border:1px solid #888;padding:4px 5px;text-align:center;vertical-align:top}th{background:#eee}
+    .s{font-size:10px;color:#555}.neg{color:#b91c1c;font-weight:700}.note{margin-top:6px;font-size:12px}.tot{margin-top:10px;font-size:13px;font-weight:700}
+    tr{page-break-inside:avoid}</style></head><body>
+    <h2>${esc(title)}</h2><div class="sub">${p.name?esc(p.name)+' · ':''}הודפס ${new Date().toLocaleString('he-IL',{day:'2-digit',month:'2-digit',year:'numeric',hour:'2-digit',minute:'2-digit'})}${p.cutReport?.byName?' · נשמר ע"י '+esc(p.cutReport.byName):''}</div>
+    ${stepTbl}${stripTxt}${rollTbl}${sumTbl}
+    <div class="tot">סה"כ ${Object.values(c.units).reduce((a,b)=>a+b,0)} יח'${gn?' מתוך '+gn:''} · נוצל ${_crM(used)} מ'${gt?' · '+_crM(used/gt)+" מ' ליחידה":''}${left?' · שארית '+_crM(left)+" מ'":''}${bad?' · סוג ב '+_crM(bad)+" מ'":''}</div>
+    ${plan.length?`<h3>נשאר לפרוס (פרסות)</h3><table><tr><th>צבע</th>${steps.map(m=>`<th>${_crM(+m.len)}</th>`).join('')}</tr>${plan.map(x=>`<tr><td>${cn(x.col)}</td>${steps.map(m=>{const r=x.rows.find(y=>y.m.id===m.id);return`<td>${r&&r.n?'<b>'+r.n+'</b>':''}</td>`;}).join('')}</tr>`).join('')}</table>`:''}
+    </body></html>`;
+  if(!_isIOS()){printViaIframe(html);return;}
+  showToast('⏳ מכין PDF…','var(--txt3)',4000);
+  let blob;try{blob=await _dnPdfBlob(html);}catch(e){alert('הכנת ה-PDF נכשלה: '+(e?.message||e));return;}
+  await _printPdfBlob(blob,'cut-report-'+(p.prod||'0')+'.pdf');
 }
 async function saveCutReport(){
   const wrap=document.getElementById('cr-wrap');
