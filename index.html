@@ -3384,7 +3384,7 @@ function listenFb(){
   onSnapshot(collection(db,'workers'),snap=>{
     if(snap.empty)return;
     S.workers=snap.docs.map(d=>({id:d.id,...d.data()}));
-    migrateBreaks();
+    migrateBreaks(!snap.metadata.fromCache);
     // אם הנתונים מגיעים מה-cache המקומי — לא לאפס, רק לרנדר
     // (cache עלול להכיל sessions מאתמול ולגרום לאיפוס שגוי)
     if(snap.metadata.fromCache){renderAll();return;}
@@ -3424,7 +3424,7 @@ function listenFb(){
         // ניקוי שיוך תחנה מאתמול + סגירת רשומת ה-stationLog הפתוחה
         if(w.stationLogId){try{fbSet('stationLog',w.stationLogId,{to:shiftEndDate(sessionDate).toISOString()});}catch(e){}}
         w.currentStation=null;w.stationLogId=null;
-        fbSet('workers',w.id,w);
+        fbSet('workers',w.id,{...attFields(w),currentStation:null,stationLogId:null});
       }
     });
     Promise.all(cleanupPromises).then(()=>renderAll());
@@ -3591,6 +3591,23 @@ async function fbUpdateOnly(col,id,data){
 }
 // משימה שכבר נסגרה (קיימת בהיסטוריה המקומית) לא תיכתב חזרה לפעילות
 function _isClosedTask(id){return (S.histTasks||[]).some(h=>String(h.id)===String(id));}
+
+// ─── כתיבת כרטיס עובד: שדות, לא אובייקט שלם ─────────────────
+// fbSet הוא setDoc(merge), ולכן כתיבת `w` כולו דורסת *כל* שדה בכרטיס בערך
+// שהיה בזיכרון של המכשיר הכותב. כשעובדת חותמת כניסה במכשיר אחד בזמן שמכשיר
+// אחר מחזיק עותק בן כמה דקות — החתימה נמחקת בלי שום סימן. בדיוק כך נעלמו
+// הכניסות של ندوه (06:19) ו-ميرفت (06:20) ב-27/10: הטלגרם יצא, והכרטיס חזר
+// לאחור. מכאן והלאה: נוכחות נכתבת בשדות הנוכחות, והשאר לא נוגע בהם.
+const ATT_FIELDS=['sessions','status','checkin','checkout','currentStation','stationLogId'];
+function attFields(w){
+  return{sessions:w.sessions||[],status:w.status||'out',checkin:w.checkin||null,checkout:w.checkout||null};
+}
+// כתיבת כרטיס שאינה קשורה לנוכחות (עריכת עובד, דגלים, הפסקות) — בלי שדות הנוכחות
+function workerNoAtt(w){
+  const out={...w};
+  ATT_FIELDS.forEach(k=>delete out[k]);
+  return out;
+}
 
 // init firebase if config saved
 document.addEventListener('fbSDKReady',()=>{
@@ -3967,7 +3984,7 @@ schedulePunchOutAlert();
 
 migratePasswords();
 migrateToSessions();
-migrateBreaks();
+migrateBreaks(false); // מקור: localStorage — לא אמת שרת, אסור לכתוב ממנו
 
 // ─── PERMISSIONS ────────────────────────────────────────────
 function applyPerms(w){
@@ -4834,7 +4851,7 @@ async function autoPunchIn(){
   w.status='in';
   w.checkin=w.sessions[0].in;
   saveLS(); // שמור מקומי תחילה — לא תלוי ב-Firebase
-  try{if(S.fbConnected)await fbSet('workers',w.id,w);}catch(e){}
+  try{if(S.fbConnected)await fbSet('workers',w.id,attFields(w));}catch(e){}
   if(w.requireFactoryIP&&S.fbConnected){try{const r=await fetch('https://api.ipify.org?format=json');const ip=(await r.json()).ip||'';await fbSet('workerWifi',w.id,{ip,lastSeen:Date.now(),name:w.name,dept:w.dept});}catch(e){}}
   tgPunch(w.name,w.dept,true,now,w.id);
   const autoResumed=await resumeWorkerTasksOnPunchIn(w.id,now);
@@ -4867,10 +4884,24 @@ async function punchIn(){
   if(w.sessions.find(s=>!s.out)){document.getElementById('att-msg').textContent='כבר רשום/ת כנוכח/ת';return;}
   const nowRaw=srvNow();
   const now=roundAttTime(nowRaw,true);
+  const prevSessions=w.sessions.slice(),prevStatus=w.status,prevCheckin=w.checkin;
   w.sessions.push({in:now.toISOString(),out:null});
   w.status='in';
   w.checkin=w.sessions[0].in;
-  if(S.fbConnected)await fbSet('workers',w.id,w);
+  // סימטרי ל-punchOut: כשל כתיבה מחזיר את המצב המקומי לאחור ואומר את זה. בלי
+  // זה העובדת ראתה "✅ כניסה" מול שרת שלא קיבל כלום, והמנהל ראה אותה כנעדרת.
+  if(S.fbConnected){
+    try{
+      await fbSet('workers',w.id,attFields(w));
+    }catch(e){
+      w.sessions=prevSessions;w.status=prevStatus;w.checkin=prevCheckin;
+      console.error('punchIn: fbSet workers failed:',e.message);
+      document.getElementById('att-msg').textContent='⚠️ חתימת הכניסה לא נשמרה בשרת — נסה שוב';
+      sendTelegram('⚠️ חתימת כניסה נכשלה!\n👤 עובד: '+w.name+'\n🏭 מחלקה: '+w.dept+'\n🕐 שעה: '+pad2(now.getHours())+':'+pad2(now.getMinutes())+'\nשגיאה: '+(e.message||'')).catch(()=>{});
+      renderAtt();
+      return;
+    }
+  }
   if(w.requireFactoryIP&&S.fbConnected){try{const r=await fetch('https://api.ipify.org?format=json');const ip=(await r.json()).ip||'';await fbSet('workerWifi',w.id,{ip,lastSeen:Date.now(),name:w.name,dept:w.dept});}catch(e){}}
   tgPunch(w.name,w.dept,true,now,w.id);
   const resumedCount=await resumeWorkerTasksOnPunchIn(w.id,now);
@@ -4896,7 +4927,7 @@ async function punchOut(){
   w.checkout=now.toISOString();
   if(S.fbConnected){
     try{
-      await fbSet('workers',w.id,w);
+      await fbSet('workers',w.id,attFields(w));
     }catch(e){
       // הכתיבה נדחתה/נכשלה בשרת — לבטל את השינוי המקומי כדי שהמסך לא ישקר שחתמה יציאה בזמן שהשרת עדיין מראה 'נוכח'
       w.sessions[openIdx].out=prevOut;w.status=prevStatus;w.checkout=prevCheckout;
@@ -5832,19 +5863,22 @@ function migrateToSessions(){
     }
   });
 }
-function migrateBreaks(){
-  let changed=false;
+// canWrite=false כשהמקור הוא cache/localStorage — ברירות המחדל נקבעות בזיכרון
+// בלבד. קודם נכתב כאן אובייקט העובד *כולו*, לכל העובדים, גם מ-snapshot של
+// ה-cache: עובד אחד ישן בלי שדה הפסקה הספיק כדי שמכשיר שנפתח עם cache בן כמה
+// דקות יחזיר את כל כרטיסי העובדים לאחור וימחק חתימות כניסה טריות ממכשירים
+// אחרים. עכשיו נכתבים שדות ההפסקה בלבד, ורק לעובד שבאמת חסרים לו.
+function migrateBreaks(canWrite){
+  const fixed=[];
   S.workers.forEach(w=>{
-    if(!w.breakStart){w.breakStart='13:00';changed=true;}
-    if(!w.breakEnd){w.breakEnd='13:45';changed=true;}
-    if(w.breakActive===undefined||w.breakActive===null){w.breakActive=true;changed=true;}
+    let fix=false;
+    if(!w.breakStart){w.breakStart='13:00';fix=true;}
+    if(!w.breakEnd){w.breakEnd='13:45';fix=true;}
+    if(w.breakActive===undefined||w.breakActive===null){w.breakActive=true;fix=true;}
+    if(fix)fixed.push(w);
   });
-  if(changed&&S.fbConnected){
-    S.workers.forEach(w=>{
-      if(!w.breakStart||!w.breakEnd||w.breakActive===undefined||w.breakActive===null)return;
-      fbSet('workers',w.id,w);
-    });
-  }
+  if(!canWrite||!fixed.length||!S.fbConnected)return;
+  fixed.forEach(w=>fbSet('workers',w.id,{breakStart:w.breakStart,breakEnd:w.breakEnd,breakActive:w.breakActive}));
 }
 function fmtNetH(ms){
   if(!ms)return '—';
@@ -9615,7 +9649,7 @@ async function mgrBulkPunchIn(){
     const dt=new Date(today+'T'+pad2(hh)+':'+pad2(mm)+':00');
     w.sessions.push({in:dt.toISOString(),out:null});
     w.status='in';w.checkin=w.sessions[0].in;
-    if(S.fbConnected)await fbSet('workers',w.id,w);
+    if(S.fbConnected)await fbSet('workers',w.id,attFields(w));
     bulkResumed+=await resumeWorkerTasksOnPunchIn(w.id,dt,0);
   }
   if(bulkResumed)showToast('▶ '+bulkResumed+' '+(LANGS[currentLang].tasks_resumed_msg||'משימות חודשו אוטומטית'),'var(--green-txt)',5000);
@@ -9630,7 +9664,7 @@ async function mgrPunchIn(wId){
   const now=roundAttTime(srvNow(),true);
   w.sessions.push({in:now.toISOString(),out:null});
   w.status='in';w.checkin=w.sessions[0].in;
-  if(S.fbConnected)await fbSet('workers',w.id,w);
+  if(S.fbConnected)await fbSet('workers',w.id,attFields(w));
   tgPunch(w.name,w.dept,true,now,w.id);
   const mgrResumed=await resumeWorkerTasksOnPunchIn(w.id,now);
   if(mgrResumed)showToast('▶ '+mgrResumed+' '+(LANGS[currentLang].tasks_resumed_msg||'משימות חודשו אוטומטית'),'var(--green-txt)',5000);
@@ -9649,7 +9683,7 @@ async function mgrPunchOut(wId){
   const netMs=calcNetWork(w);
   const rec={workerId:w.id,workerName:w.name,dept:w.dept,date:todayStr(),sessions:w.sessions,checkin:w.sessions[0]?.in||'',checkout:now.toISOString(),breakStart:w.breakStart||'',breakEnd:w.breakEnd||'',breakActive:!!w.breakActive,netMs};
   S.attHistory.unshift(rec);
-  if(S.fbConnected){await fbSet('workers',w.id,w);await fbSet('attHistory',w.id+'_'+todayStr(),rec);try{await fbDel('workerWifi',w.id);}catch(e){}}
+  if(S.fbConnected){await fbSet('workers',w.id,attFields(w));await fbSet('attHistory',w.id+'_'+todayStr(),rec);try{await fbDel('workerWifi',w.id);}catch(e){}}
   tgPunch(w.name,w.dept,false,now,w.id);
   saveLS();renderMgrTasks();renderAtt();
 }
@@ -9833,13 +9867,13 @@ async function mgrEndTask(taskId){
 async function mgrUpdateBreak(wId,field,val){
   const w=S.workers.find(x=>x.id===wId);if(!w)return;
   w[field]=val;
-  if(S.fbConnected)await fbSet('workers',w.id,w);
+  if(S.fbConnected)await fbSet('workers',w.id,{[field]:val});
   saveLS();
 }
 async function mgrToggleBreak(wId){
   const w=S.workers.find(x=>x.id===wId);if(!w)return;
   w.breakActive=!w.breakActive;
-  if(S.fbConnected)await fbSet('workers',w.id,w);
+  if(S.fbConnected)await fbSet('workers',w.id,{breakActive:w.breakActive});
   saveLS();renderMgrTasks();
 }
 
@@ -10239,7 +10273,7 @@ function openModal(action,id){
 async function allowFaceUpdateByAdmin(id){
   const w=S.workers.find(x=>x.id===id);if(!w)return;
   w.faceUpdateAllowed=true;
-  if(S.fbConnected)await fbSet('workers',w.id,w);
+  if(S.fbConnected)await fbSet('workers',w.id,{faceUpdateAllowed:true});
   saveLS();renderAdmin();
   alert('✅ '+w.name+' יכול עכשיו לעדכן פנים מהטלפון שלו\nהעובד יראה כפתור "עדכן פנים" במסך הכניסה');
 }
@@ -10257,7 +10291,7 @@ async function resetDeviceBinding(id){
 async function toggleFaceUpdate(id){
   const w=S.workers.find(x=>x.id===id);if(!w)return;
   w.faceUpdateAllowed=!w.faceUpdateAllowed;
-  if(S.fbConnected)await fbSet('workers',w.id,w);
+  if(S.fbConnected)await fbSet('workers',w.id,{faceUpdateAllowed:w.faceUpdateAllowed});
   saveLS();renderAdmin();
 }
 async function workerUpdateFace(){
@@ -10373,7 +10407,7 @@ async function confirmModal(){
         const checkoutTime=w.checkout?new Date(w.checkout):new Date();
         await reanchorWorkerTasks(w.id,checkoutTime);
       }
-      if(S.fbConnected)await fbSet('workers',w.id,w);
+      if(S.fbConnected)await fbSet('workers',w.id,attFields(w));
     } else {
       // עדכון רשומה היסטורית — שמור נתוני הפסקה מקוריים
       const idx=S.attHistory.findIndex(r=>r.workerId===wId&&r.date===date);
@@ -10529,7 +10563,7 @@ async function confirmModal(){
       w.pushPrefs={task_long:!!document.getElementById('mf-push-long')?.checked,manager_msg:!!document.getElementById('mf-push-msg')?.checked,task_assigned:!!document.getElementById('mf-push-task')?.checked,own_checkin:!!document.getElementById('mf-push-checkin')?.checked,own_checkout:!!document.getElementById('mf-push-checkout')?.checked,own_task_start:!!document.getElementById('mf-push-tstart')?.checked,own_task_end:!!document.getElementById('mf-push-tend')?.checked};
     }
     if(pass){try{await _setWorkerPassword(w.id,pass);}catch(e){alert('שמירת הסיסמה נכשלה: '+e.message);}}
-    if(S.fbConnected)await fbSet('workers',w.id,w);}
+    if(S.fbConnected)await fbSet('workers',w.id,workerNoAtt(w));}
   }
   saveLS();closeModal();renderAdmin();
 }
