@@ -2845,7 +2845,7 @@ async function saveCountEntry(){
     try{
       delete _prodImgCache[p.id];
       const imgs=(await fetchProdImgs(p.id)).concat(_ceImgs);
-      await fbSet('productImages',String(p.id),{images:imgs,count:imgs.length,srcCust:p.cust,srcProd:p.prod});
+      await saveProdImgs(p.id,imgs,{srcCust:p.cust,srcProd:p.prod});
       _prodImgCache[p.id]=imgs;upd.imgCount=imgs.length;
     }catch(e){alert('שמירת התמונות נכשלה · فشل حفظ الصور: '+(e.message||e));return;}
   }
@@ -18959,13 +18959,38 @@ async function recropProdImg(i){
 // ⚠️ Firestore מחזיר מסמך שלם ב-onSnapshot — אין דרך לבקש "products בלי images".
 // לכן ההפרדה לאוסף נפרד היא הפתרון היחיד ששומר על העדכון החי של כרטיס המוצר.
 const _prodImgCache={};
+// 📦 מסמך Firestore מוגבל ל-1MB (27/10/2026 — נכשל ב-~8 תמונות): התמונות מתחלקות לחלקים של עד ~900KB.
+// productImages/{id} = חלק 0 + parts (כמה חלקים); החלקים הנוספים ב-productImages/{id}__1, __2…
+// מסמך ישן בלי parts = חלק אחד — תואם אחורה.
+const IMG_PART_MAX=900000;
+function _imgChunks(imgs){
+  const out=[[]];let sz=0;
+  for(const im of imgs){const n=String(im).length;
+    if(sz+n>IMG_PART_MAX&&out[out.length-1].length){out.push([]);sz=0;}
+    out[out.length-1].push(im);sz+=n;}
+  return out;
+}
 async function fetchProdImgs(id){
   if(_prodImgCache[id])return _prodImgCache[id];
   if(!S.fbConnected)return [];
   try{const d=await fbGet('productImages',String(id));
-    const arr=(d&&Array.isArray(d.images))?d.images:[];
+    let arr=(d&&Array.isArray(d.images))?d.images:[];
+    const parts=+(d&&d.parts)||1;
+    if(parts>1){const more=await Promise.all(Array.from({length:parts-1},(_,i)=>fbGet('productImages',String(id)+'__'+(i+1))));
+      more.forEach(m=>{if(m&&Array.isArray(m.images))arr=arr.concat(m.images);});}
     _prodImgCache[id]=arr;return arr;
   }catch(e){return [];}
+}
+// שמירת כל התמונות של מוצר (מחליפה את הקיימות). החלקים הנוספים נכתבים לפני הראשי (שקובע כמה לקרוא),
+// ואחרי — מחיקת חלקים עודפים מהשמירה הקודמת. extra = שדות נוספים למסמך הראשי.
+async function saveProdImgs(id,imgs,extra){
+  id=String(id);
+  let old=1;try{const d=await fbGet('productImages',id);old=+(d&&d.parts)||1;}catch(e){}
+  if(!imgs.length){for(let i=0;i<old;i++){try{await fbDel('productImages',i?id+'__'+i:id);}catch(e){}}return;}
+  const ch=_imgChunks(imgs);
+  for(let i=1;i<ch.length;i++)await fbSet('productImages',id+'__'+i,{images:ch[i],part:i,of:id});
+  await fbSet('productImages',id,{...(extra||{}),images:ch[0],count:imgs.length,parts:ch.length});
+  for(let i=ch.length;i<old;i++){try{await fbDel('productImages',id+'__'+i);}catch(e){}}
 }
 // כמה תמונות יש למוצר, בלי להוריד אותן. imgCount נכתב בשמירה; לרשומות שטרם עברו
 // מיגרציה נופלים חזרה ל-p.images שעדיין קיים — ולכן הקוד עובד גם לפני שלב הניקוי.
@@ -19229,8 +19254,8 @@ async function saveProduct(){
       // ⚠️ fbSet הוא setDoc(merge:true) ולכן **אינו מוחק** שדה images קיים —
       // הניקוי של הרשומות הישנות נעשה במיגרציה, לא כאן.
       const imgs=Array.isArray(p.images)?p.images:[];
-      if(imgs.length)await fbSet('productImages',String(p.id),{images:imgs,count:imgs.length,migratedAt:Date.now(),srcCust:p.cust,srcProd:p.prod});
-      else{try{await fbDel('productImages',String(p.id));}catch(e){}}
+      try{await saveProdImgs(p.id,imgs,{migratedAt:Date.now(),srcCust:p.cust,srcProd:p.prod});}
+      catch(e){alert('שמירת התמונות נכשלה: '+(e.message||e));}
       _prodImgCache[p.id]=imgs;
       const out={...p,imgCount:imgs.length,docs:(p.docs||[]).map(d=>({name:d.name,data:d.data}))};
       delete out.images;
@@ -19254,7 +19279,7 @@ async function deleteProduct(id){
   S.products=S.products.filter(x=>x.id!==id);
   if(S.fbConnected){
     await fbDel('products',id);
-    try{await fbDel('productImages',String(id));}catch(e){} // אחרת נשארות תמונות יתומות
+    try{await saveProdImgs(id,[]);}catch(e){} // אחרת נשארות תמונות יתומות (כולל החלקים הנוספים)
     try{await fbDel('productPricing',String(id));}catch(e){} // וגם תמחור יתום
   }
   delete _prodImgCache[id];
