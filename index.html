@@ -2866,6 +2866,8 @@ async function saveCountEntry(){
 // גלילים: צבע, מס' גליל, אצווה, מטרים ומשקל לפי המדבקה, וכמה פרסות מכל מדרגה.
 // מחושב: מטרים שנוצלו (פרסות × אורך המדרגה), שארית, ויחידות לפי מידה+צבע (פרסות × כמות המידה במדרגה).
 // השדה נקרא markers מהגרסה הראשונה (ציורים נפרדים) — כל איבר הוא מדרגה.
+// 🎀 סרט מהבד (צווארון / פס / צברון) — strips:[{id,name,w,per}]: רוחב הסרט בס"מ, ורצועה אחת מספיקה ל-per יח'.
+// לכל גליל: ⌈יח' של הגליל ÷ per⌉ × רוחב ÷ 100 = מטרים שנוצלו לסרט (63 יח' × 3.2 ס"מ = 2.016 מ').
 // products.cutReport = {markers:[{id,len,sz:[{s,n}]}], rolls:[{id,color,no,batch,m,kg,lay:[{k,n}]}], by,byName,at}
 // ⚠️ מערכים ולא מפות — שמירת כרטיס המוצר היא fbSet (merge) שממזג מפות ולא מוחק מפתח שהוסר.
 // בשמירה טבלת הכמויות מתעדכנת: לכל צבע שנגזר — כל מידה = מה שחושב (מידה שלא נגזרה = 0); צבע שעוד לא נגזר — לא נוגעים.
@@ -2877,7 +2879,10 @@ function _crCalc(r){
     (o.lay||[]).forEach(x=>{const m=L[x.k],n=+x.n||0;if(!m||n<=0)return;used+=n*(+m.len||0);
       (m.sz||[]).forEach(z=>{if(+z.n>0)u[z.s]=(u[z.s]||0)+n*z.n;});});
     if(o.color)Object.entries(u).forEach(([s,n])=>{const k=s+'|'+o.color;units[k]=(units[k]||0)+n;});
-    return{used,left:(+o.m||0)-used,units:u,tot:Object.values(u).reduce((a,b)=>a+b,0)};});
+    const tot=Object.values(u).reduce((a,b)=>a+b,0);
+    const strip=(r.strips||[]).reduce((a,t)=>a+(+t.w>0&&tot?Math.ceil(tot/Math.max(1,+t.per||1))*(+t.w)/100:0),0);
+    used+=strip;
+    return{used,strip,left:(+o.m||0)-used,units:u,tot};});
   return{rolls,units};
 }
 // בסורק — גם אחרי שברקוד הספירה נסגר: הגזירה ממשיכה בצבעים אחרים כשהתפירה כבר התחילה
@@ -2885,7 +2890,7 @@ const cutReportBtnHtml=v=>bcOrderProd(v)?`<button class="btn" style="width:100%;
 function openCutReport(pid){
   const p=(S.products||[]).find(x=>String(x.id)===String(pid));if(!p){showToast('⚠ ההזמנה לא נמצאה','var(--red-txt)');return;}
   const r=p.cutReport||{};
-  _cr={markers:JSON.parse(JSON.stringify(r.markers||[])),rolls:JSON.parse(JSON.stringify(r.rolls||[]))};
+  _cr={markers:JSON.parse(JSON.stringify(r.markers||[])),rolls:JSON.parse(JSON.stringify(r.rolls||[])),strips:JSON.parse(JSON.stringify(r.strips||[]))};
   const sz=new Set((p.quantities||[]).map(q=>String(q.size||'')).filter(s=>/^\d$/.test(s)));
   _cr.markers.forEach(m=>(m.sz||[]).forEach(z=>sz.add(String(z.s))));
   _cr.sizes=[...sz].sort();if(!_cr.sizes.length)_cr.sizes=['1','2','3','4','5'];
@@ -2975,6 +2980,15 @@ function renderCutReport(){
       <button class="btn" style="flex:1;font-size:13px" onclick="_cr.markers.push({id:_crId(),len:'',sz:[]});renderCutReport()">➕ מדרגה · درجة</button>
       <button class="btn" style="font-size:13px" onclick="crAddSize()">➕ מידה · مقاس</button>
     </div>
+    <div style="font-size:14px;font-weight:700">🎀 סרט מהבד · شريط من القماش</div>
+    <div style="font-size:11px;color:var(--txt3);margin-bottom:6px">בד שנשאר לתפירה (צווארון, פס…): רוחב הסרט ליחידה, ולכמה יח' מספיקה רצועה אחת.</div>
+    ${(_cr.strips||[]).map((t,ti)=>`<div style="${box};display:flex;gap:6px;align-items:flex-end;flex-wrap:wrap">
+      <label style="${lbl};flex:1;min-width:110px">שם · الاسم<input value="${esc(t.name||'')}" placeholder="צווארון" oninput="_cr.strips[${ti}].name=this.value" style="${fld}"/></label>
+      <label style="${lbl};width:80px">רוחב ס"מ · عرض<input type="number" step="0.1" min="0" inputmode="decimal" value="${_crNum(t.w)}" oninput="_cr.strips[${ti}].w=this.value===''?'':(+this.value||0);crCalcView()" style="${fld}"/></label>
+      <label style="${lbl};width:80px">יח' לרצועה · قطع<select onchange="_cr.strips[${ti}].per=+this.value;crCalcView()" style="${fld}">${[1,2,3,4].map(n=>`<option value="${n}"${(+t.per||1)===n?' selected':''}>${n}</option>`).join('')}</select></label>
+      <button class="btn" style="font-size:12px" onclick="_cr.strips.splice(${ti},1);renderCutReport()">✕</button>
+    </div>`).join('')}
+    <button class="btn" style="width:100%;font-size:13px;margin-bottom:12px" onclick="_cr.strips.push({id:_crId(),name:'',w:'',per:1});renderCutReport()">➕ סרט · شريط</button>
     <div style="font-size:14px;font-weight:700;margin-bottom:6px">🧵 גלילים · الرولات</div>
     ${rolls}
     <button class="btn" style="width:100%;font-size:13px;margin-bottom:12px" onclick="crAddRoll()">➕ גליל · رول</button>
@@ -2997,7 +3011,7 @@ function crCalcView(){
     _cr.markers.forEach((m,mi)=>{const l=document.getElementById('cr-ml-'+ri+'-'+mi);if(l)l.textContent=+m.len?_crM(+m.len):'?';});
     const el=document.getElementById('cr-rc-'+ri);if(!el)return;
     const o=_cr.rolls[ri],hasM=o.m!==''&&+o.m>0;
-    el.innerHTML=x.used||x.tot?`נוצל · مستعمل <b>${_crM(x.used)} מ'</b>${hasM?` · שארית · باقي <b style="color:${x.left<0?'var(--red-txt)':'var(--green-txt)'}">${_crM(x.left)} מ'</b>${x.left<0?' ⚠ יותר מהמדבקה':''}`:''}
+    el.innerHTML=x.used||x.tot?`נוצל · مستعمل <b>${_crM(x.used)} מ'</b>${x.strip?` <span style="color:var(--txt3)">(כולל סרט ${(Math.round(x.strip*1000)/1000).toFixed(3)} מ')</span>`:''}${hasM?` · שארית · باقي <b style="color:${x.left<0?'var(--red-txt)':'var(--green-txt)'}">${_crM(x.left)} מ'</b>${x.left<0?' ⚠ יותר מהמדבקה':''}`:''}
       <br>יח' · قطع <b>${x.tot}</b>${x.tot?' — '+Object.entries(x.units).sort().map(([s,n])=>'מידה '+esc(s)+': '+n).join(' · '):''}${!o.color?' <b style="color:var(--red-txt)">· בחר צבע</b>':''}`:'<span style="color:var(--txt3)">עוד אין פרסות</span>';});
   const cols=[...new Set(Object.keys(c.units).map(k=>k.split('|')[1]))];
   const sizes=[...new Set(Object.keys(c.units).map(k=>k.split('|')[0]))].sort();
@@ -3027,7 +3041,8 @@ async function saveCutReport(){
     return{size:s,color:col,qty:cut.has(col)?(c.units[s+'|'+col]||0):(parseInt(q.qty)||0)};});
   Object.entries(c.units).forEach(([k,n])=>{const[s,col]=k.split('|');if(!quantities.some(q=>q.size===s&&q.color===col))quantities.push({size:s,color:col,qty:n});});
   const before=_prodQty(p);
-  const upd={cutReport:{markers,rolls,by:S.user?.id||'',byName:S.user?.name||'',at:Date.now()},quantities};
+  const strips=(_cr.strips||[]).filter(t=>+t.w>0).map(t=>({id:t.id,name:String(t.name||''),w:+t.w,per:Math.max(1,+t.per||1)}));
+  const upd={cutReport:{markers,rolls,strips,by:S.user?.id||'',byName:S.user?.name||'',at:Date.now()},quantities};
   if(!await fbUpdateOnly('products',p.id,upd)){alert('השמירה נכשלה — בדוק חיבור · فشل الحفظ');return;}
   Object.assign(p,upd);saveLS();
   wrap.remove();_cr=null;
