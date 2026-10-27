@@ -2860,6 +2860,176 @@ async function saveCountEntry(){
     +(addSteps.length?'\n✂️ '+addSteps.length+' שלבים חדשים ממתינים לתחנה וזמן: '+addSteps.join(', '):'')
     +(nImg?'\n📷 '+(nImg===1?'תמונה אחת נוספה':nImg+' תמונות נוספו')+' לכרטיס':'')).catch(()=>{});
 }
+// ─── ✂️ דוח גזירה (27/10/2026 — במקום הדף הידני של הגוזר) ──────────────────────
+// ציורים (שבלונות): אורך במטרים + כמה מכל מידה יש בציור (לרוב 1, לפעמים 2).
+// גלילים: צבע, מס' גליל, אצווה, מטרים ומשקל לפי המדבקה, וכמה פרסות מכל ציור.
+// מחושב: מטרים שנוצלו (פרסות × אורך הציור), שארית, ויחידות לפי מידה+צבע (פרסות × כמות המידה בציור).
+// products.cutReport = {markers:[{id,len,sz:[{s,n}]}], rolls:[{id,color,no,batch,m,kg,lay:[{k,n}]}], by,byName,at}
+// ⚠️ מערכים ולא מפות — שמירת כרטיס המוצר היא fbSet (merge) שממזג מפות ולא מוחק מפתח שהוסר.
+// בשמירה טבלת הכמויות מתעדכנת: לכל צבע שנגזר — כל מידה = מה שחושב (מידה שלא נגזרה = 0); צבע שעוד לא נגזר — לא נוגעים.
+let _cr=null;
+const _crId=()=>Date.now().toString(36)+Math.random().toString(36).slice(2,6);
+const _crLetter=i=>String.fromCharCode(65+(i%26));
+function _crCalc(r){
+  const L={};r.markers.forEach(m=>L[m.id]=m);
+  const units={},rolls=r.rolls.map(o=>{let used=0;const u={};
+    (o.lay||[]).forEach(x=>{const m=L[x.k],n=+x.n||0;if(!m||n<=0)return;used+=n*(+m.len||0);
+      (m.sz||[]).forEach(z=>{if(+z.n>0)u[z.s]=(u[z.s]||0)+n*z.n;});});
+    if(o.color)Object.entries(u).forEach(([s,n])=>{const k=s+'|'+o.color;units[k]=(units[k]||0)+n;});
+    return{used,left:(+o.m||0)-used,units:u,tot:Object.values(u).reduce((a,b)=>a+b,0)};});
+  return{rolls,units};
+}
+// בסורק — גם אחרי שברקוד הספירה נסגר: הגזירה ממשיכה בצבעים אחרים כשהתפירה כבר התחילה
+const cutReportBtnHtml=v=>bcOrderProd(v)?`<button class="btn" style="width:100%;margin-top:6px;font-size:14px;font-weight:700;border-color:var(--blue-txt);color:var(--blue-txt)" onclick="openCutReport('${escj(String(bcOrderProd(v).id))}')">✂️ דוח גזירה · تقرير القص</button>`:'';
+function openCutReport(pid){
+  const p=(S.products||[]).find(x=>String(x.id)===String(pid));if(!p){showToast('⚠ ההזמנה לא נמצאה','var(--red-txt)');return;}
+  const r=p.cutReport||{};
+  _cr={markers:JSON.parse(JSON.stringify(r.markers||[])),rolls:JSON.parse(JSON.stringify(r.rolls||[]))};
+  const sz=new Set((p.quantities||[]).map(q=>String(q.size||'')).filter(s=>/^\d$/.test(s)));
+  _cr.markers.forEach(m=>(m.sz||[]).forEach(z=>sz.add(String(z.s))));
+  _cr.sizes=[...sz].sort();if(!_cr.sizes.length)_cr.sizes=['1','2','3','4','5'];
+  if(!_cr.markers.length)_cr.markers.push({id:_crId(),len:'',sz:[]});
+  if(!_cr.rolls.length)_cr.rolls.push(_crNewRoll(p));
+  document.getElementById('cr-wrap')?.remove();
+  const wrap=document.createElement('div');wrap.id='cr-wrap';wrap.dataset.pid=p.id;
+  wrap.style.cssText='position:fixed;inset:0;background:rgba(0,0,0,.5);display:flex;align-items:flex-start;justify-content:center;z-index:9999;padding:12px;overflow-y:auto';
+  document.body.appendChild(wrap);
+  renderCutReport();
+}
+function _crNewRoll(p){
+  const last=_cr?.rolls?.[_cr.rolls.length-1];
+  const col=last?.color||((p?.quantities||[]).map(q=>String(q.color||'')).find(Boolean))||'';
+  return{id:_crId(),color:col,no:'',batch:'',m:'',kg:'',lay:[]};
+}
+const _crSzN=(m,s)=>+((m.sz||[]).find(z=>String(z.s)===String(s))?.n)||0;
+function _crSetSz(mi,s,v){const m=_cr.markers[mi];const n=Math.max(0,parseInt(v)||0);
+  m.sz=(m.sz||[]).filter(z=>String(z.s)!==String(s));if(n)m.sz.push({s:String(s),n});m.sz.sort((a,b)=>a.s.localeCompare(b.s));crCalcView();}
+const _crLayN=(o,k)=>+((o.lay||[]).find(x=>x.k===k)?.n)||0;
+function _crSetLay(ri,k,v){const o=_cr.rolls[ri];const n=Math.max(0,parseInt(v)||0);
+  o.lay=(o.lay||[]).filter(x=>x.k!==k);if(n)o.lay.push({k,n});crCalcView();}
+function crAddSize(){
+  const s=(prompt('מספר המידה (ספרה אחת) · رقم المقاس')||'').trim();
+  if(!/^\d$/.test(s)){if(s)alert('מידה = ספרה אחת · المقاس رقم واحد');return;}
+  if(!_cr.sizes.includes(s)){_cr.sizes.push(s);_cr.sizes.sort();}
+  renderCutReport();
+}
+const _crM=n=>(Math.round(n*100)/100).toFixed(2);
+const _crColName=c=>c?esc(c)+' · '+esc(COLORS[c]||'')+(COLORS_AR?.[c]?' · '+esc(COLORS_AR[c]):''):'—';
+const _crNum=v=>v===''||v==null?'':esc(v);
+function renderCutReport(){
+  const wrap=document.getElementById('cr-wrap');if(!wrap||!_cr)return;
+  const p=(S.products||[]).find(x=>String(x.id)===String(wrap.dataset.pid));if(!p){wrap.remove();return;}
+  const inp='font-size:14px;padding:7px;border-radius:8px;border:1px solid var(--brd);background:var(--bg);color:var(--txt)';
+  const fld=inp+';width:100%;box-sizing:border-box';
+  const box='border:1px solid var(--brd);border-radius:10px;padding:10px;margin-bottom:8px;background:var(--bg2)';
+  const lbl='font-size:11px;color:var(--txt3)';
+  const colOpts=c=>`<option value="">-- צבע · لون --</option>`+Object.entries(COLORS).map(([k,v])=>`<option value="${k}"${k===c?' selected':''}>${k} · ${esc(v)} · ${esc(COLORS_AR?.[k]||'')}</option>`).join('');
+  const markers=_cr.markers.map((m,mi)=>`<div style="${box}">
+    <div style="display:flex;gap:6px;align-items:center;margin-bottom:6px">
+      <b style="font-size:15px;min-width:22px">${_crLetter(mi)}</b>
+      <span style="font-size:12px;color:var(--txt3)">אורך · الطول</span>
+      <input type="number" step="0.01" min="0" inputmode="decimal" value="${_crNum(m.len)}" placeholder="מטר" oninput="_cr.markers[${mi}].len=this.value===''?'':(+this.value||0);crCalcView()" style="${inp};width:90px"/>
+      <span style="font-size:12px;color:var(--txt3)">מ'</span>
+      <span style="flex:1"></span>
+      ${_cr.markers.length>1?`<button class="btn" style="font-size:12px" onclick="crDelMarker(${mi})">✕</button>`:''}
+    </div>
+    <div style="font-size:12px;color:var(--txt3);margin-bottom:4px">כמה מכל מידה בציור · كم من كل مقاس بالرسمة</div>
+    <div style="display:flex;flex-wrap:wrap;gap:4px">${_cr.sizes.map(s=>`<label style="display:flex;flex-direction:column;align-items:center;font-size:12px;color:var(--txt3)">מידה ${esc(s)}
+      <input type="number" min="0" inputmode="numeric" value="${_crSzN(m,s)||''}" placeholder="0" oninput="_crSetSz(${mi},'${s}',this.value)" style="${inp};width:42px;padding:7px 2px;text-align:center"/></label>`).join('')}</div>
+  </div>`).join('');
+  const rolls=_cr.rolls.map((o,ri)=>`<div style="${box}">
+    <div style="display:flex;gap:6px;align-items:center;margin-bottom:6px">
+      <b style="font-size:14px">🧵 גליל ${ri+1} · رول ${ri+1}</b><span style="flex:1"></span>
+      <button class="btn" style="font-size:12px" onclick="crDelRoll(${ri})">✕</button>
+    </div>
+    <select onchange="_cr.rolls[${ri}].color=this.value;crCalcView()" style="${fld};margin-bottom:6px">${colOpts(o.color)}</select>
+    <div style="display:grid;grid-template-columns:1fr 1fr;gap:6px;margin-bottom:6px">
+      <label style="${lbl}">מס' גליל · رقم الرول<input value="${esc(o.no||'')}" oninput="_cr.rolls[${ri}].no=this.value" style="${fld}"/></label>
+      <label style="${lbl}">אצווה · Batch<input value="${esc(o.batch||'')}" oninput="_cr.rolls[${ri}].batch=this.value" style="${fld}"/></label>
+      <label style="${lbl}">מטר במדבקה · متر<input type="number" step="0.01" min="0" inputmode="decimal" value="${_crNum(o.m)}" oninput="_cr.rolls[${ri}].m=this.value===''?'':(+this.value||0);crCalcView()" style="${fld}"/></label>
+      <label style="${lbl}">משקל ק"ג · وزن<input type="number" step="0.01" min="0" inputmode="decimal" value="${_crNum(o.kg)}" oninput="_cr.rolls[${ri}].kg=this.value===''?'':(+this.value||0)" style="${fld}"/></label>
+    </div>
+    <div style="font-size:12px;color:var(--txt3);margin-bottom:4px">פרסות מכל ציור · عدد الطبقات من كل رسمة</div>
+    <div style="display:flex;flex-wrap:wrap;gap:6px">${_cr.markers.map((m,mi)=>`<label style="display:flex;flex-direction:column;align-items:center;font-size:12px;color:var(--txt3)"><span><b style="color:var(--txt)">${_crLetter(mi)}</b> <span id="cr-ml-${ri}-${mi}"></span></span>
+      <input type="number" min="0" inputmode="numeric" value="${_crLayN(o,m.id)||''}" placeholder="0" oninput="_crSetLay(${ri},'${m.id}',this.value)" style="${inp};width:60px;text-align:center"/></label>`).join('')}</div>
+    <div id="cr-rc-${ri}" style="font-size:12px;margin-top:6px"></div>
+  </div>`).join('');
+  const at=p.cutReport?.at?' · נשמר '+new Date(p.cutReport.at).toLocaleString('he-IL',{day:'2-digit',month:'2-digit',hour:'2-digit',minute:'2-digit'})+(p.cutReport.byName?' — '+esc(p.cutReport.byName):''):'';
+  wrap.innerHTML=`<div style="background:var(--card);border-radius:14px;padding:16px;max-width:520px;width:100%;box-shadow:0 10px 40px rgba(0,0,0,.3);margin:auto">
+    <div style="display:flex;justify-content:space-between;align-items:center">
+      <div style="font-size:16px;font-weight:800">✂️ דוח גזירה · ${esc(p.cust)}/${esc(p.prod)}${(parseInt(p.orderNo,10)||0)?' #'+String(p.orderNo).padStart(3,'0'):''}</div>
+      <button class="btn" style="font-size:12px;padding:4px 10px" onclick="crClose()">✕</button>
+    </div>
+    <div style="font-size:12px;color:var(--txt3);margin-bottom:10px">${esc(p.name||'')}${at}</div>
+    <div style="font-size:14px;font-weight:700;margin-bottom:6px">📐 ציורים · الرسمات</div>
+    ${markers}
+    <div style="display:flex;gap:6px;margin-bottom:12px">
+      <button class="btn" style="flex:1;font-size:13px" onclick="_cr.markers.push({id:_crId(),len:'',sz:[]});renderCutReport()">➕ ציור · رسمة</button>
+      <button class="btn" style="font-size:13px" onclick="crAddSize()">➕ מידה · مقاس</button>
+    </div>
+    <div style="font-size:14px;font-weight:700;margin-bottom:6px">🧵 גלילים · الرولات</div>
+    ${rolls}
+    <button class="btn" style="width:100%;font-size:13px;margin-bottom:12px" onclick="crAddRoll()">➕ גליל · رول</button>
+    <div id="cr-sum"></div>
+    <div style="font-size:11px;color:var(--txt3);margin-top:6px">בשמירה טבלת הכמויות של ההזמנה מתעדכנת לפי מה שנגזר (רק בצבעים שנגזרו).</div>
+    <button class="btn primary" style="width:100%;margin-top:10px;font-size:15px" onclick="saveCutReport()">💾 שמור · حفظ</button>
+  </div>`;
+  crCalcView();
+}
+function crDelMarker(mi){const m=_cr.markers[mi];if(_cr.rolls.some(o=>_crLayN(o,m.id))&&!confirm('לציור יש פרסות בגלילים — למחוק? · حذف؟'))return;
+  _cr.markers.splice(mi,1);_cr.rolls.forEach(o=>o.lay=(o.lay||[]).filter(x=>x.k!==m.id));renderCutReport();}
+function crDelRoll(ri){const o=_cr.rolls[ri];if(((o.lay||[]).length||o.m||o.no)&&!confirm('למחוק את גליל '+(ri+1)+'? · حذف الرول؟'))return;_cr.rolls.splice(ri,1);renderCutReport();}
+function crAddRoll(){const p=(S.products||[]).find(x=>String(x.id)===String(document.getElementById('cr-wrap')?.dataset.pid));_cr.rolls.push(_crNewRoll(p));renderCutReport();}
+function crClose(){if(confirm('לסגור בלי לשמור? · إغلاق بدون حفظ؟')){document.getElementById('cr-wrap')?.remove();_cr=null;}}
+// עדכון החישובים בלבד (בלי לבנות מחדש — הפוקוס נשאר בשדה)
+function crCalcView(){
+  if(!_cr)return;
+  const c=_crCalc(_cr);
+  c.rolls.forEach((x,ri)=>{
+    _cr.markers.forEach((m,mi)=>{const l=document.getElementById('cr-ml-'+ri+'-'+mi);if(l)l.textContent=+m.len?_crM(+m.len)+"מ'":'';});
+    const el=document.getElementById('cr-rc-'+ri);if(!el)return;
+    const o=_cr.rolls[ri],hasM=o.m!==''&&+o.m>0;
+    el.innerHTML=x.used||x.tot?`נוצל · مستعمل <b>${_crM(x.used)} מ'</b>${hasM?` · שארית · باقي <b style="color:${x.left<0?'var(--red-txt)':'var(--green-txt)'}">${_crM(x.left)} מ'</b>${x.left<0?' ⚠ יותר מהמדבקה':''}`:''}
+      <br>יח' · قطع <b>${x.tot}</b>${x.tot?' — '+Object.entries(x.units).sort().map(([s,n])=>'מידה '+esc(s)+': '+n).join(' · '):''}${!o.color?' <b style="color:var(--red-txt)">· בחר צבע</b>':''}`:'<span style="color:var(--txt3)">עוד אין פרסות</span>';});
+  const cols=[...new Set(Object.keys(c.units).map(k=>k.split('|')[1]))];
+  const sizes=[...new Set(Object.keys(c.units).map(k=>k.split('|')[0]))].sort();
+  const used=c.rolls.reduce((a,x)=>a+x.used,0),tot=Object.values(c.units).reduce((a,b)=>a+b,0);
+  const left=_cr.rolls.reduce((a,o,i)=>a+(o.m!==''&&+o.m>0?c.rolls[i].left:0),0);
+  const el=document.getElementById('cr-sum');if(!el)return;
+  const th='padding:3px 6px';
+  el.innerHTML=tot?`<div style="border:1px solid var(--green-txt);border-radius:10px;padding:10px">
+    <div style="font-size:14px;font-weight:700;margin-bottom:6px">📊 סיכום · الملخص</div>
+    <div style="overflow-x:auto"><table style="border-collapse:collapse;font-size:12px;width:100%"><tr><th style="text-align:right;${th}">צבע</th>${sizes.map(s=>`<th style="${th}">${esc(s)}</th>`).join('')}<th style="${th}">סה"כ</th></tr>
+    ${cols.map(col=>{let t=0;return`<tr style="border-top:1px solid var(--brd)"><td style="${th};white-space:nowrap">${_crColName(col)}</td>${sizes.map(s=>{const n=c.units[s+'|'+col]||0;t+=n;return`<td style="text-align:center;${th}">${n||'—'}</td>`;}).join('')}<td style="text-align:center;${th}"><b>${t}</b></td></tr>`;}).join('')}</table></div>
+    <div style="font-size:13px;margin-top:6px">סה"כ <b>${tot}</b> יח' · נוצל <b>${_crM(used)} מ'</b> · <b>${_crM(used/tot)}</b> מ' ליחידה${left?` · שארית <b>${_crM(left)} מ'</b>`:''}</div></div>`:'';
+}
+async function saveCutReport(){
+  const wrap=document.getElementById('cr-wrap');
+  const p=(S.products||[]).find(x=>String(x.id)===String(wrap?.dataset.pid));if(!p||!_cr)return;
+  if(_cr.markers.some(m=>_cr.rolls.some(o=>_crLayN(o,m.id))&&(!(+m.len>0)||!(m.sz||[]).length))){alert('לכל ציור עם פרסות צריך אורך ומידות · لكل رسمة طول ومقاسات');return;}
+  const c=_crCalc(_cr);
+  if(_cr.rolls.some((o,i)=>c.rolls[i].tot&&!o.color)){alert('לכל גליל עם פרסות צריך צבע · لكل رول لون');return;}
+  if(!S.fbConnected){alert('אין חיבור — לא נשמר · لا يوجد اتصال');return;}
+  const markers=_cr.markers.filter(m=>+m.len>0||(m.sz||[]).length).map(m=>({id:m.id,len:+m.len||0,sz:(m.sz||[]).map(z=>({s:String(z.s),n:+z.n}))}));
+  const ids=new Set(markers.map(m=>m.id));
+  const rolls=_cr.rolls.filter(o=>(o.lay||[]).length||o.m!==''||o.no||o.batch).map(o=>({id:o.id,color:o.color||'',no:String(o.no||''),batch:String(o.batch||''),m:o.m===''?'':+o.m,kg:o.kg===''?'':+o.kg,lay:(o.lay||[]).filter(x=>ids.has(x.k)).map(x=>({k:x.k,n:+x.n}))}));
+  // כמויות: צבע שנגזר — לפי הדוח (מידה שלא נגזרה = 0); צבע שלא נגזר — כמו שהיה; מידה+צבע חדשים — נוספים
+  const cut=new Set(Object.keys(c.units).map(k=>k.split('|')[1]));
+  const quantities=(p.quantities||[]).map(q=>{const s=String(q.size||''),col=String(q.color||'');
+    return{size:s,color:col,qty:cut.has(col)?(c.units[s+'|'+col]||0):(parseInt(q.qty)||0)};});
+  Object.entries(c.units).forEach(([k,n])=>{const[s,col]=k.split('|');if(!quantities.some(q=>q.size===s&&q.color===col))quantities.push({size:s,color:col,qty:n});});
+  const before=_prodQty(p);
+  const upd={cutReport:{markers,rolls,by:S.user?.id||'',byName:S.user?.name||'',at:Date.now()},quantities};
+  if(!await fbUpdateOnly('products',p.id,upd)){alert('השמירה נכשלה — בדוק חיבור · فشل الحفظ');return;}
+  Object.assign(p,upd);saveLS();
+  wrap.remove();_cr=null;
+  const after=_prodQty(p),used=c.rolls.reduce((a,x)=>a+x.used,0),cutN=Object.values(c.units).reduce((a,b)=>a+b,0);
+  showToast('✅ דוח גזירה נשמר · '+after+" יח'",'var(--green-txt)',4000);
+  try{renderProducts();}catch(e){}
+  sendTelegram('✂️ דוח גזירה — '+(S.user?.name||'')+'\n🏷 '+p.cust+'/'+p.prod+((parseInt(p.orderNo,10)||0)?' #'+String(p.orderNo).padStart(3,'0'):'')+' '+(p.name||'')
+    +'\n🧵 '+rolls.length+' גלילים · '+_crM(used)+" מ' נוצלו"+(cutN?' · '+cutN+" יח' · "+_crM(used/cutN)+" מ' ליח'":'')
+    +'\n📦 כמות: '+before+' ← '+after+" יח'").catch(()=>{});
+}
 const bcRetiredMsg=why=>{const T=LANGS[currentLang];return why==='cut'?T.bc_ret_cut:T.bc_ret_ship;};
 // שורה אדומה בתצוגה המקדימה של שלושת הסורקים — העובד רואה מיד, לא רק בלחיצה על "התחל"
 const bcRetiredHtml=v=>{const w=bcRetiredWhy(v);return w?`<div style="margin-top:6px;padding:8px;border-radius:8px;background:var(--red-bg,#fee2e2);color:var(--red-txt);font-size:13px;font-weight:700">${esc(bcRetiredMsg(w))}</div>`:'';};
@@ -6837,7 +7007,7 @@ function parseBc(v){
         <span class="bc-seg bc-col">צבע: ${COLORS[col]||col||'__'}</span>
       </div>`;
   if(isBcLen(v.length))el.innerHTML+=bcRetiredHtml(v); // 🔒 ברקוד שסיים את תפקידו
-  if(isBcLen(v.length)&&isTotalBc(v))el.innerHTML+=countEntryBtnHtml(v); // 📝 כמויות ושלבים מהסורק
+  if(isBcLen(v.length)&&isTotalBc(v))el.innerHTML+=countEntryBtnHtml(v)+cutReportBtnHtml(v); // 📝 כמויות ושלבים + ✂️ דוח גזירה מהסורק
   if(isBcLen(v.length)){
     // 🔢 לפי **ההזמנה שבברקוד** ולא לפי הרשומה העדכנית: למוצר יכולות להיות כמה
     // הזמנות עם שלבים שונים, ו-findProd היה מחזיר תמיד את האחרונה (ראה gotcha_duplicate_prod_records).
@@ -9627,7 +9797,7 @@ function parseMgrBc(v){
         <span class="bc-seg" style="background:var(--amber-bg);color:var(--amber-txt)">מידה: ${sz||'_'}</span>
         <span class="bc-seg bc-q">כמות: ${q.padEnd(3,'_')}</span><span class="bc-seg bc-col">צבע: ${COLORS[col]||col||'__'}</span></div>`;
   if(isBcLen(v.length))el.innerHTML+=bcRetiredHtml(v); // 🔒 ברקוד שסיים את תפקידו
-  if(isBcLen(v.length)&&isTotalBc(v))el.innerHTML+=countEntryBtnHtml(v); // 📝 כמויות ושלבים מהסורק
+  if(isBcLen(v.length)&&isTotalBc(v))el.innerHTML+=countEntryBtnHtml(v)+cutReportBtnHtml(v); // 📝 כמויות ושלבים + ✂️ דוח גזירה מהסורק
   if(isBcLen(v.length)){
     // 🔢 לפי **ההזמנה שבברקוד** ולא לפי הרשומה העדכנית: למוצר יכולות להיות כמה
     // הזמנות עם שלבים שונים, ו-findProd היה מחזיר תמיד את האחרונה (ראה gotcha_duplicate_prod_records).
@@ -10499,7 +10669,7 @@ function tsParseBc(v){
         <span class="bc-seg" style="background:var(--amber-bg);color:var(--amber-txt)">מידה: ${sz||'_'}</span>
         <span class="bc-seg bc-q">כמות: ${q.padEnd(3,'_')}</span><span class="bc-seg bc-col">צבע: ${COLORS[col]||col||'__'}</span></div>`;
   if(isBcLen(v.length))el.innerHTML+=bcRetiredHtml(v); // 🔒 ברקוד שסיים את תפקידו
-  if(isBcLen(v.length)&&isTotalBc(v))el.innerHTML+=countEntryBtnHtml(v); // 📝 כמויות ושלבים מהסורק
+  if(isBcLen(v.length)&&isTotalBc(v))el.innerHTML+=countEntryBtnHtml(v)+cutReportBtnHtml(v); // 📝 כמויות ושלבים + ✂️ דוח גזירה מהסורק
   // אם המוצר מוגדר עם שלבי עבודה — הצג checkboxes
   if(isBcLen(v.length)){
     // 🔢 לפי **ההזמנה שבברקוד** ולא לפי הרשומה העדכנית: למוצר יכולות להיות כמה
@@ -18279,6 +18449,7 @@ function renderProducts(){
             :`<button class="btn" style="font-size:11px;padding:4px 10px;color:var(--green-txt,#16a34a)" onclick="printDeliveryNote('${p.id}')">📄 תעודת משלוח</button>`):''}
           <button class="btn" style="font-size:11px;padding:4px 10px" title="פותח את חלון יצא ללקוח של ההזמנה הזו — כמו סריקת ברקוד יצא ללקוח" onclick="shipFromProduct('${p.id}')">🚚 יצא ללקוח</button>
           <button class="btn" style="font-size:11px;padding:4px 10px" onclick="bcFromProduct('${p.id}')">🏷️ ברקודים</button>
+          ${canShort()?`<button class="btn" style="font-size:11px;padding:4px 10px" onclick="openCutReport('${p.id}')">✂️ גזירה${p.cutReport?.rolls?.length?' ('+p.cutReport.rolls.length+')':''}</button>`:''}
           <button class="btn" style="font-size:11px;padding:4px 10px" onclick="openProductModal('${p.id}')">✏️ עריכה</button>
           <button class="btn danger" style="font-size:11px;padding:4px 8px;opacity:.7" onclick="deleteProduct('${p.id}')">🗑</button>
         </div>
