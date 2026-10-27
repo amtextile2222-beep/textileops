@@ -2765,12 +2765,17 @@ function orderInSewing(p){
 }
 // הכפתור רק כשהברקוד עדיין פתוח — הזמנה שכבר בתפירה לא נפתחת לסופר (נצפה 26/10 ב-03017 #002)
 const countEntryBtnHtml=v=>bcOrderProd(v)&&!bcRetiredWhy(v)?`<button class="btn" style="width:100%;margin-top:6px;font-size:14px;font-weight:700;border-color:var(--amber-txt);color:var(--amber-txt)" onclick="openCountEntry('${escj(v)}')">📝 כמויות ושלבים · الكميات والمراحل</button>`:'';
-let _ceRows=[],_ceSteps=[];
+let _ceRows=[],_ceSteps=[],_ceImgs=[];
+// 📷 (27/10/2026) צילום/העלאה מהסורק — עובר בעורך החיתוך, ובשמירה מצטרף לתמונות המוצר (productImages)
+async function ceAddImgs(input){
+  const files=[...input.files];input.value='';
+  for(const f of files){const out=await _imgPipeline(await _readFileUrl(f));if(out){_ceImgs.push(out);renderCountEntry();}}
+}
 function openCountEntry(raw){
   const p=bcOrderProd(raw);if(!p){showToast('⚠ ההזמנה לא נמצאה','var(--red-txt)');return;}
   // fromMgr = שורה שהמנהל הקים — מידה וצבע קבועים, רק הכמות נפתחת. lock = כבר יש כמות — קריאה בלבד
   _ceRows=(p.quantities||[]).map(q=>({size:String(q.size||''),color:String(q.color||''),qty:parseInt(q.qty)||0,lock:(parseInt(q.qty)||0)>0,fromMgr:true}));
-  _ceSteps=[];
+  _ceSteps=[];_ceImgs=[];
   document.getElementById('ce-wrap')?.remove();
   const wrap=document.createElement('div');wrap.id='ce-wrap';wrap.dataset.pid=p.id;
   wrap.style.cssText='position:fixed;inset:0;background:rgba(0,0,0,.5);display:flex;align-items:flex-start;justify-content:center;z-index:9999;padding:12px;overflow-y:auto';
@@ -2804,6 +2809,12 @@ function renderCountEntry(){
       <button class="btn" style="font-size:12px" onclick="_ceSteps.splice(${i},1);renderCountEntry()">✕</button></div>`).join('')}
     <button class="btn" style="width:100%;font-size:13px" onclick="_ceSteps.push('');renderCountEntry()">➕ שלב חדש · مرحلة جديدة</button>
     <div style="font-size:11px;color:var(--txt3);margin-top:4px">רק שם השלב — התחנה והזמן מושלמים אחר כך במשרד.</div>
+    <div style="font-size:14px;font-weight:700;margin:14px 0 6px">📷 תמונות · صور <span style="font-weight:400;color:var(--txt3);font-size:12px">— ${prodImgCount(p)?prodImgCount(p)+' כבר בכרטיס':'אין עדיין בכרטיס'}</span></div>
+    <div style="display:flex;gap:6px;flex-wrap:wrap;margin-bottom:6px">${_ceImgs.map((im,i)=>`<div style="position:relative"><img src="${im}" style="width:64px;height:64px;object-fit:cover;border-radius:6px;border:1px solid var(--brd)"><button onclick="_ceImgs.splice(${i},1);renderCountEntry()" style="position:absolute;top:-5px;right:-5px;background:var(--red);color:#fff;border:none;border-radius:50%;width:20px;height:20px;font-size:11px;cursor:pointer">✕</button></div>`).join('')}</div>
+    <div style="display:flex;gap:6px">
+      <label class="btn" style="flex:1;font-size:13px;justify-content:center;cursor:pointer">📷 צלם · تصوير<input type="file" accept="image/*" capture="environment" onchange="ceAddImgs(this)" style="display:none"/></label>
+      <label class="btn" style="flex:1;font-size:13px;justify-content:center;cursor:pointer">📁 העלה · رفع<input type="file" accept="image/*" multiple onchange="ceAddImgs(this)" style="display:none"/></label>
+    </div>
     <button class="btn primary" style="width:100%;margin-top:14px;font-size:15px" onclick="saveCountEntry()">💾 שמור · حفظ</button>
   </div>`;
 }
@@ -2821,18 +2832,30 @@ async function saveCountEntry(){
   const quantities=rows.map(r=>({size:r.size,color:r.color,qty:+r.qty||0}));
   const before=_prodQty(p);
   const qChanged=JSON.stringify(quantities)!==JSON.stringify((p.quantities||[]).map(q=>({size:String(q.size||''),color:String(q.color||''),qty:parseInt(q.qty)||0})));
-  if(!qChanged&&!addSteps.length){wrap.remove();return;}
+  const nImg=_ceImgs.length;
+  if(!qChanged&&!addSteps.length&&!nImg){wrap.remove();return;}
   const workSteps=(p.workSteps||[]).concat(addSteps.map(n=>({name:n,nameAr:'',level:0,station:'',altStations:[],manualMin:0,quick:false,merge:false,cut:false})));
   const upd={...(qChanged?{quantities}:{}),...(addSteps.length?{workSteps}:{}),countBy:S.user?.name||'',countAt:Date.now()};
+  // 📷 התמונות מצטרפות לקיימות ב-productImages (נקרא קודם מהשרת — לא לדרוס תמונות שהמנהל העלה)
+  if(nImg){
+    if(!S.fbConnected){alert('אין חיבור — התמונות לא נשמרו · لا يوجد اتصال');return;}
+    try{
+      delete _prodImgCache[p.id];
+      const imgs=(await fetchProdImgs(p.id)).concat(_ceImgs);
+      await fbSet('productImages',String(p.id),{images:imgs,count:imgs.length,srcCust:p.cust,srcProd:p.prod});
+      _prodImgCache[p.id]=imgs;upd.imgCount=imgs.length;
+    }catch(e){alert('שמירת התמונות נכשלה · فشل حفظ الصور: '+(e.message||e));return;}
+  }
   if(S.fbConnected&&!await fbUpdateOnly('products',p.id,upd)){alert('השמירה נכשלה — בדוק חיבור · فشل الحفظ');return;}
   Object.assign(p,upd);saveLS();
   wrap.remove();
   const after=_prodQty(p);
-  showToast('✅ נשמר · تم الحفظ'+(after?' · '+after+" יח'":'')+(addSteps.length?' · '+addSteps.length+' שלבים':''),'var(--green-txt)',4000);
+  showToast('✅ נשמר · تم الحفظ'+(after?' · '+after+" יח'":'')+(addSteps.length?' · '+addSteps.length+' שלבים':'')+(nImg?' · '+(nImg===1?'תמונה אחת':nImg+' תמונות'):''),'var(--green-txt)',4000);
   try{renderProducts();}catch(e){}
   sendTelegram('📝 ספירה/גזירה — '+(S.user?.name||'')+'\n🏷 '+p.cust+'/'+p.prod+((parseInt(p.orderNo,10)||0)?' #'+String(p.orderNo).padStart(3,'0'):'')+' '+(p.name||'')
     +(qChanged?'\n📦 כמות: '+before+' ← '+after+" יח'":'')
-    +(addSteps.length?'\n✂️ '+addSteps.length+' שלבים חדשים ממתינים לתחנה וזמן: '+addSteps.join(', '):'')).catch(()=>{});
+    +(addSteps.length?'\n✂️ '+addSteps.length+' שלבים חדשים ממתינים לתחנה וזמן: '+addSteps.join(', '):'')
+    +(nImg?'\n📷 '+nImg+' תמונות נוספו לכרטיס':'')).catch(()=>{});
 }
 const bcRetiredMsg=why=>{const T=LANGS[currentLang];return why==='cut'?T.bc_ret_cut:T.bc_ret_ship;};
 // שורה אדומה בתצוגה המקדימה של שלושת הסורקים — העובד רואה מיד, לא רק בלחיצה על "התחל"
@@ -18827,16 +18850,95 @@ function compressImage(dataUrl, maxW, maxH, quality){
   });
 }
 
+// ✂️ עורך חיתוך לפני שמירת תמונה (27/10/2026): מסגרת עם 4 פינות לגרירה (מגע ועכבר), גרירת המסגרת כולה,
+// 🔄 סיבוב 90°. מחזיר dataURL של החלק שנבחר ברזולוציה המקורית (הדחיסה ל-800 אחרי — כך מסמך שנחתך
+// נשאר קריא יותר), או null בביטול. "בלי חיתוך" = התמונה כולה (אחרי סיבוב, אם היה).
+function cropImage(dataUrl){
+  return new Promise(resolve=>{
+    const img=new Image();
+    img.onload=()=>{
+      let src=document.createElement('canvas');src.width=img.width;src.height=img.height;src.getContext('2d').drawImage(img,0,0);
+      const ov=document.createElement('div');
+      ov.style.cssText='position:fixed;inset:0;background:rgba(0,0,0,.92);z-index:10050;display:flex;flex-direction:column;align-items:center;justify-content:center;gap:10px;padding:10px;touch-action:none';
+      const bs='font-size:15px;padding:9px 14px;border-radius:10px;border:0;cursor:pointer;font-weight:700';
+      ov.innerHTML=`<div style="color:#fff;font-size:14px">✂️ גרור את הפינות לבחירת החלק לשמירה · اسحب الزوايا</div>
+        <div id="crp-box" style="position:relative;touch-action:none;user-select:none"><canvas id="crp-cv" style="display:block"></canvas>
+          <div id="crp-r" style="position:absolute;border:2px solid #fff;box-shadow:0 0 0 9999px rgba(0,0,0,.55);cursor:move"></div></div>
+        <div style="display:flex;gap:8px;flex-wrap:wrap;justify-content:center">
+          <button data-a="ok" style="${bs};background:#16a34a;color:#fff">✅ שמור · حفظ</button>
+          <button data-a="rot" style="${bs};background:#444;color:#fff">🔄 סובב</button>
+          <button data-a="full" style="${bs};background:#444;color:#fff">בלי חיתוך</button>
+          <button data-a="no" style="${bs};background:#7f1d1d;color:#fff">ביטול</button></div>`;
+      document.body.appendChild(ov);
+      const cv=ov.querySelector('#crp-cv'),box=ov.querySelector('#crp-box'),R=ov.querySelector('#crp-r');
+      ['nw','ne','sw','se'].forEach(k=>{const h=document.createElement('div');h.dataset.h=k;
+        h.style.cssText='position:absolute;width:26px;height:26px;transform:translate(-50%,-50%);background:#fff;border-radius:50%;border:3px solid #16a34a;top:'+(k[0]==='n'?'0':'100%')+';left:'+(k[1]==='w'?'0':'100%');R.appendChild(h);});
+      let dw,dh,r;
+      const layout=()=>{
+        const mw=Math.min(window.innerWidth-30,900),mh=window.innerHeight-170,sc=Math.min(mw/src.width,mh/src.height,1);
+        dw=Math.round(src.width*sc);dh=Math.round(src.height*sc);
+        cv.width=dw;cv.height=dh;cv.getContext('2d').drawImage(src,0,0,dw,dh);
+        r={x:dw*0.05,y:dh*0.05,w:dw*0.9,h:dh*0.9};draw();
+      };
+      const draw=()=>{Object.assign(R.style,{left:r.x+'px',top:r.y+'px',width:r.w+'px',height:r.h+'px'});};
+      let drag=null;const MIN=30;
+      box.addEventListener('pointerdown',e=>{
+        const b=box.getBoundingClientRect(),px=e.clientX-b.left,py=e.clientY-b.top;
+        const h=e.target.dataset?.h;
+        if(!h&&e.target!==R)return;
+        drag={h:h||'move',px,py,r0:{...r}};box.setPointerCapture(e.pointerId);e.preventDefault();
+      });
+      box.addEventListener('pointermove',e=>{
+        if(!drag)return;
+        const b=box.getBoundingClientRect(),dx=e.clientX-b.left-drag.px,dy=e.clientY-b.top-drag.py,o=drag.r0;
+        let{x,y,w,h}=o;
+        if(drag.h==='move'){x=Math.max(0,Math.min(dw-w,o.x+dx));y=Math.max(0,Math.min(dh-h,o.y+dy));}
+        else{
+          if(drag.h.includes('w')){const nx=Math.max(0,Math.min(o.x+o.w-MIN,o.x+dx));w=o.w+(o.x-nx);x=nx;}
+          if(drag.h.includes('e')){w=Math.max(MIN,Math.min(dw-o.x,o.w+dx));}
+          if(drag.h.includes('n')){const ny=Math.max(0,Math.min(o.y+o.h-MIN,o.y+dy));h=o.h+(o.y-ny);y=ny;}
+          if(drag.h.includes('s')){h=Math.max(MIN,Math.min(dh-o.y,o.h+dy));}
+        }
+        r={x,y,w,h};draw();
+      });
+      box.addEventListener('pointerup',()=>{drag=null;});
+      const done=v=>{ov.remove();window.removeEventListener('resize',layout);resolve(v);};
+      ov.querySelectorAll('[data-a]').forEach(b=>b.onclick=()=>{
+        const a=b.dataset.a;
+        if(a==='no')return done(null);
+        if(a==='full')return done(src.toDataURL('image/jpeg',0.92));
+        if(a==='rot'){const n=document.createElement('canvas');n.width=src.height;n.height=src.width;const c=n.getContext('2d');
+          c.translate(n.width,0);c.rotate(Math.PI/2);c.drawImage(src,0,0);src=n;layout();return;}
+        const k=src.width/dw,out=document.createElement('canvas');
+        out.width=Math.max(1,Math.round(r.w*k));out.height=Math.max(1,Math.round(r.h*k));
+        out.getContext('2d').drawImage(src,r.x*k,r.y*k,r.w*k,r.h*k,0,0,out.width,out.height);
+        done(out.toDataURL('image/jpeg',0.92));
+      });
+      window.addEventListener('resize',layout);
+      layout();
+    };
+    img.onerror=()=>resolve(dataUrl);
+    img.src=dataUrl;
+  });
+}
+const _readFileUrl=file=>new Promise(res=>{const r=new FileReader();r.onload=e=>res(e.target.result);r.onerror=()=>res(null);r.readAsDataURL(file);});
+// קובץ/צילום ⇒ עורך חיתוך ⇒ דחיסה (800px, כמו קודם). null = בוטל
+async function _imgPipeline(dataUrl){
+  if(!dataUrl)return null;
+  const c=await cropImage(dataUrl);
+  return c?await compressImage(c,800,800,0.7):null;
+}
 async function addProdImages(input){
-  for(const file of input.files){
-    const reader=new FileReader();
-    await new Promise(res=>{reader.onload=async e=>{
-      const compressed=await compressImage(e.target.result,800,800,0.7);
-      _prodImgs.push(compressed);res();
-    };reader.readAsDataURL(file);});
+  const files=[...input.files];input.value='';
+  for(const file of files){
+    const out=await _imgPipeline(await _readFileUrl(file));
+    if(out){_prodImgs.push(out);refreshImgPreview();}
   }
-  input.value='';
-  refreshImgPreview();
+}
+// ✂ חיתוך מחדש של תמונה שכבר בטופס (לפני השמירה)
+async function recropProdImg(i){
+  const out=await _imgPipeline(_prodImgs[i]);
+  if(out){_prodImgs[i]=out;refreshImgPreview();}
 }
 
 // ─── תמונות מוצר — נטענות לפי דרישה ─────────────────────────────────────
@@ -18877,7 +18979,7 @@ async function loadProdImgs(id){
 function refreshImgPreview(){
   const el=document.getElementById('prod-img-preview');
   if(!el)return;
-  el.innerHTML=_prodImgs.map((img,i)=>`<div style="position:relative"><img src="${img}" style="width:72px;height:72px;object-fit:cover;border-radius:6px;border:1px solid var(--brd)"><button type="button" onclick="removeProdImg(${i})" style="position:absolute;top:-4px;right:-4px;background:var(--red);color:#fff;border:none;border-radius:50%;width:18px;height:18px;font-size:11px;cursor:pointer;line-height:1">✕</button></div>`).join('');
+  el.innerHTML=_prodImgs.map((img,i)=>`<div style="position:relative"><img src="${img}" title="לחיצה — חיתוך" onclick="recropProdImg(${i})" style="width:72px;height:72px;object-fit:cover;border-radius:6px;border:1px solid var(--brd);cursor:pointer"><button type="button" onclick="removeProdImg(${i})" style="position:absolute;top:-4px;right:-4px;background:var(--red);color:#fff;border:none;border-radius:50%;width:18px;height:18px;font-size:11px;cursor:pointer;line-height:1">✕</button><button type="button" title="חיתוך" onclick="recropProdImg(${i})" style="position:absolute;bottom:-4px;right:-4px;background:#333;color:#fff;border:none;border-radius:50%;width:20px;height:20px;font-size:11px;cursor:pointer;line-height:1">✂</button></div>`).join('');
 }
 
 function removeProdImg(i){_prodImgs.splice(i,1);refreshImgPreview();}
@@ -18915,9 +19017,8 @@ async function snapProdPhoto(){
   const canvas=document.getElementById('pm-camera-canvas');
   canvas.width=video.videoWidth;canvas.height=video.videoHeight;
   canvas.getContext('2d').drawImage(video,0,0);
-  const compressed=await compressImage(canvas.toDataURL('image/jpeg',0.9),800,800,0.7);
-  _prodImgs.push(compressed);
-  refreshImgPreview();
+  const out=await _imgPipeline(canvas.toDataURL('image/jpeg',0.92)); // ✂️ חיתוך לפני ההוספה
+  if(out){_prodImgs.push(out);refreshImgPreview();}
 }
 
 function closeProdCamera(){
