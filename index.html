@@ -2894,7 +2894,8 @@ const cutReportBtnHtml=v=>bcOrderProd(v)?`<button class="btn" style="width:100%;
 function openCutReport(pid){
   const p=(S.products||[]).find(x=>String(x.id)===String(pid));if(!p){showToast('⚠ ההזמנה לא נמצאה','var(--red-txt)');return;}
   const r=p.cutReport||{};
-  _cr={markers:JSON.parse(JSON.stringify(r.markers||[])),rolls:JSON.parse(JSON.stringify(r.rolls||[])),strips:JSON.parse(JSON.stringify(r.strips||[])),baseAt:+r.at||0};
+  _cr={markers:JSON.parse(JSON.stringify(r.markers||[])),rolls:JSON.parse(JSON.stringify(r.rolls||[])),strips:JSON.parse(JSON.stringify(r.strips||[])),baseAt:+r.at||0,extra:{}};
+  (r.extra||[]).forEach(x=>{if(+x.m>0)_cr.extra[x.c]=+x.m;});
   const sz=new Set((p.quantities||[]).map(q=>String(q.size||'')).filter(s=>/^\d$/.test(s)));
   _cr.markers.forEach(m=>(m.sz||[]).forEach(z=>sz.add(String(z.s))));
   _cr.sizes=[...sz].sort();if(!_cr.sizes.length)_cr.sizes=['1','2','3','4','5'];
@@ -3006,6 +3007,12 @@ function renderCutReport(){
     <button class="btn" style="width:100%;font-size:13px;margin-bottom:12px" onclick="_cr.strips.push({id:_crId(),name:'',w:'',per:1});renderCutReport()">➕ סרט · شريط</button>
     <div style="font-size:14px;font-weight:700;margin-bottom:6px">📋 מה נשאר לפרוס · ما تبقى للفرد</div>
     <div id="cr-plan"></div>
+    <div style="font-size:14px;font-weight:700;margin:12px 0 2px">🧮 בד שנשאר — כמה עוד אפשר · القماش الباقي</div>
+    <div style="font-size:11px;color:var(--txt3);margin-bottom:6px">אחרי שהגעתם לכמות ההזמנה: כמה מטר בד נשאר מהצבע — החישוב מחלק את היחידות לפי היחס של ההזמנה.</div>
+    ${_crCols().filter(col=>_cr.sizes.some(s=>_crNeed(col,s)>0)).map(col=>`<div style="${box}">
+      <div style="display:flex;gap:6px;align-items:center"><b style="font-size:13px;flex:1">${_crColName(col)}</b>
+        <input type="number" step="0.01" min="0" inputmode="decimal" value="${_crNum(_cr.extra[col])}" placeholder="מטר" oninput="if(this.value==='')delete _cr.extra['${col}'];else _cr.extra['${col}']=+this.value||0;crCalcView()" style="${inp};width:90px"/><span style="font-size:12px;color:var(--txt3)">מ'</span></div>
+      <div id="cr-ex-${col}" style="font-size:12px;margin-top:6px"></div></div>`).join('')||'<div style="font-size:12px;color:var(--txt3);margin-bottom:6px">הזן קודם כמה צריך מכל מידה</div>'}
     <div style="font-size:14px;font-weight:700;margin:12px 0 6px">🧵 גלילים · الرولات</div>
     ${rolls}
     <button class="btn" style="width:100%;font-size:13px;margin-bottom:12px" onclick="crAddRoll()">➕ גליל · رول</button>
@@ -3031,14 +3038,38 @@ function crAddNeedCol(c){if(c&&!_cr.pcols.includes(c))_cr.pcols.push(c);renderCu
 // 📋 תוכנית פריסה לצבע: מה שנשאר (צריך − נגזר) מחולק למדרגות מהארוכה לקצרה — בכל מדרגה פורסים
 // כמה שאפשר בלי לחרוג מאף מידה שבה (מינימום של נשאר÷כמות). מה שלא מתחלק — אין מדרגה שמתאימה בדיוק.
 function _crPlan(col,c){
-  const steps=[..._cr.markers].filter(m=>+m.len>0&&(m.sz||[]).some(z=>+z.n>0)).sort((a,b)=>(+b.len)-(+a.len));
   const rem={};_cr.sizes.forEach(s=>{rem[s]=Math.max(0,_crNeed(col,s)-(c.units[s+'|'+col]||0));});
+  return _crPlanRem(rem,col);
+}
+// rem = {מידה: כמה יח'} — מתעדכן למה שלא נכנס לאף מדרגה
+function _crPlanRem(rem,col){
+  const steps=[..._cr.markers].filter(m=>+m.len>0&&(m.sz||[]).some(z=>+z.n>0)).sort((a,b)=>(+b.len)-(+a.len));
   const rows=steps.map(m=>{const z=(m.sz||[]).filter(x=>+x.n>0);
     const n=Math.max(0,Math.min(...z.map(x=>Math.floor((rem[x.s]||0)/x.n))));
     z.forEach(x=>rem[x.s]=(rem[x.s]||0)-n*x.n);
-    const done=_cr.rolls.filter(o=>o.color===col).reduce((a,o)=>a+_crLayN(o,m.id),0);
+    const done=col==null?0:_cr.rolls.filter(o=>o.color===col).reduce((a,o)=>a+_crLayN(o,m.id),0);
     return{m,n,done};});
   return{rows,rem};
+}
+// 🧮 בד שנשאר אחרי שהגיעו לכמות ההזמנה (28/10/2026): כמה עוד יח' אפשר להוציא מ-meters מטר, ביחס של ההזמנה (כמה צריך).
+// לכל N: מחלקים N יח' לפי היחס (שארית גדולה), מתכננים פריסה במדרגות (כמו "מה נשאר לפרוס") + סרט — לוקחים את ה-N הגדול שנכנס במטרים.
+function _crExtra(col,meters){
+  const sz=_cr.sizes.filter(s=>_crNeed(col,s)>0),T=sz.reduce((a,s)=>a+_crNeed(col,s),0);
+  if(!T||!(meters>0))return null;
+  const strip=u=>(_cr.strips||[]).reduce((a,t)=>a+(+t.w>0&&u?Math.ceil(u/Math.max(1,+t.per||1))*(+t.w)/100:0),0);
+  let best=null;
+  for(let N=1;N<=5000;N++){
+    const raw=sz.map(s=>N*_crNeed(col,s)/T),fl=raw.map(Math.floor);
+    raw.map((x,i)=>[x-fl[i],i]).sort((a,b)=>b[0]-a[0]).slice(0,N-fl.reduce((a,b)=>a+b,0)).forEach(([,i])=>fl[i]++);
+    const rem={};sz.forEach((s,i)=>rem[s]=fl[i]);
+    const{rows}=_crPlanRem(rem,null);
+    const units={};sz.forEach((s,i)=>{const n=fl[i]-(rem[s]||0);if(n)units[s]=n;});
+    const u=Object.values(units).reduce((a,b)=>a+b,0);
+    const len=rows.reduce((a,x)=>a+x.n*(+x.m.len),0)+strip(u);
+    if(len>meters){if(len>meters*1.5+7)break;continue;}
+    if(u&&(!best||u>best.u))best={u,units,rows:rows.filter(x=>x.n),len};
+  }
+  return best;
 }
 function crCalcView(){
   if(!_cr)return;
@@ -3068,6 +3099,15 @@ function crCalcView(){
         <div style="font-size:12px;margin-top:4px;color:var(--txt2)">נגזר · مقصوص: ${sz}</div>
         ${left.length?`<div style="font-size:11px;color:var(--red-txt);margin-top:2px">⚠ אין מדרגה מתאימה ל: ${left.map(([s,n])=>'מידה '+esc(s)+' × '+n).join(' · ')}</div>`:''}
       </div>`;}).join('')||'<div style="font-size:12px;color:var(--txt3)">הזן כמה צריך מכל מידה כדי לראות תוכנית פריסה</div>';}
+  Object.keys(_cr.extra).concat(_crCols()).forEach(col=>{const ex=document.getElementById('cr-ex-'+col);if(!ex)return;
+    const m=+_cr.extra[col]||0;
+    const rl=_cr.rolls.reduce((a,o,i)=>a+(o.color===col&&+o.m>0&&!o.fin&&c.rolls[i].left>0?c.rolls[i].left:0),0);
+    if(!m){ex.innerHTML=`<span style="color:var(--txt3)">הזן כמה מטר נשאר${rl?` · לפי הגלילים ~${_crM(rl)} מ'`:''}</span>`;return;}
+    const r=_crExtra(col,m);
+    ex.innerHTML=r?`אפשר עוד · ممكن <b style="font-size:14px;color:var(--green-txt)">${r.u}</b> יח' — ${Object.entries(r.units).sort().map(([s,n])=>'מידה '+esc(s)+': <b>'+n+'</b>').join(' · ')}
+      <br>פריסה · الفرد: ${r.rows.map(x=>`<b>${_crM(+x.m.len)}</b> <bdi dir="ltr" style="color:var(--txt3)">${_crSzTxt(x.m)}</bdi> × <b>${x.n}</b>`).join(' · ')}
+      <br><span style="color:var(--txt3)">נוצל ~${_crM(r.len)} מ' · נשאר ~${_crM(m-r.len)} מ'</span>`
+      :'<span style="color:var(--red-txt)">הבד לא מספיק אפילו לפריסה אחת · القماش لا يكفي</span>';});
   const el=document.getElementById('cr-sum');if(!el)return;
   const th='padding:3px 6px';
   el.innerHTML=tot?`<div style="border:1px solid var(--green-txt);border-radius:10px;padding:10px">
@@ -3101,6 +3141,8 @@ async function printCutReport(){
   const used=c.rolls.reduce((a,x)=>a+x.used,0),bad=c.rolls.reduce((a,x)=>a+x.bad,0),short=c.rolls.reduce((a,x)=>a+Math.max(0,x.short),0);
   const left=_cr.rolls.reduce((a,o,i)=>a+(o.m!==''&&+o.m>0?c.rolls[i].left:0),0);
   const plan=cols.map(col=>({col,rows:_crPlan(col,c).rows})).filter(x=>x.rows.some(r=>r.n));
+  const ex=Object.entries(_cr.extra).filter(([,m])=>+m>0).map(([col,m])=>({col,m:+m,r:_crExtra(col,+m)}));
+  const exTbl=ex.length?`<h3>בד שנשאר — כמה עוד אפשר (לפי יחס ההזמנה)</h3><table><tr><th>צבע</th><th>מטר שנשאר</th><th>עוד יח'</th><th>לפי מידה</th><th>פריסה</th></tr>${ex.map(({col,m,r})=>`<tr><td>${cn(col)}</td><td>${_crM(m)}</td><td><b>${r?r.u:0}</b></td><td>${r?Object.entries(r.units).sort().map(([s,n])=>esc(s)+': '+n).join(' · '):'—'}</td><td>${r?r.rows.map(x=>_crM(+x.m.len)+' × '+x.n).join(' · '):'—'}</td></tr>`).join('')}</table>`:'';
   const html=`<!DOCTYPE html><html dir="rtl" lang="he"><head><meta charset="utf-8"><title>${esc(title)}</title><style>
     @page{size:A4;margin:0}body{font-family:Arial,sans-serif;color:#000;margin:0;padding:12mm;font-size:12px}
     h2{margin:0 0 2px;font-size:18px}h3{font-size:14px;margin:14px 0 5px}.sub{color:#444;font-size:12px;margin-bottom:6px}
@@ -3110,6 +3152,7 @@ async function printCutReport(){
     <h2>${esc(title)}</h2><div class="sub">${p.name?esc(p.name)+' · ':''}הודפס ${new Date().toLocaleString('he-IL',{day:'2-digit',month:'2-digit',year:'numeric',hour:'2-digit',minute:'2-digit'})}${p.cutReport?.byName?' · נשמר ע"י '+esc(p.cutReport.byName):''}</div>
     ${stepTbl}${stripTxt}${rollTbl}${sumTbl}
     <div class="tot">סה"כ ${Object.values(c.units).reduce((a,b)=>a+b,0)} יח'${gn?' מתוך '+gn:''} · נוצל ${_crM(used)} מ'${gt?' · '+_crM(used/gt)+" מ' ליחידה":''}${left?' · שארית '+_crM(left)+" מ'":''}${bad?' · סוג ב '+_crM(bad)+" מ'":''}${short?' · חסר מהמדבקות '+_crM(short)+" מ'":''}</div>
+    ${exTbl}
     ${plan.length?`<h3>נשאר לפרוס (פרסות)</h3><table><tr><th>צבע</th>${steps.map(m=>`<th>${_crM(+m.len)}</th>`).join('')}</tr>${plan.map(x=>`<tr><td>${cn(x.col)}</td>${steps.map(m=>{const r=x.rows.find(y=>y.m.id===m.id);return`<td>${r&&r.n?'<b>'+r.n+'</b>':''}</td>`;}).join('')}</tr>`).join('')}</table>`:''}
     </body></html>`;
   if(!_isIOS()){printViaIframe(html);return;}
@@ -3141,7 +3184,8 @@ async function saveCutReport(){
   const before=_prodQty(p);
   const strips=(_cr.strips||[]).filter(t=>+t.w>0).map(t=>({id:t.id,name:String(t.name||''),w:+t.w,per:Math.max(1,+t.per||1)}));
   const need=_cr.need.filter(x=>+x.n>0).map(x=>({c:x.c,s:x.s,n:+x.n}));
-  const upd={cutReport:{markers,rolls,strips,need,by:S.user?.id||'',byName:S.user?.name||'',at:Date.now()},quantities};
+  const extra=Object.entries(_cr.extra||{}).filter(([,m])=>+m>0).map(([c,m])=>({c,m:+m}));
+  const upd={cutReport:{markers,rolls,strips,need,extra,by:S.user?.id||'',byName:S.user?.name||'',at:Date.now()},quantities};
   if(!await fbUpdateOnly('products',p.id,upd)){alert('השמירה נכשלה — בדוק חיבור · فشل الحفظ');return;}
   Object.assign(p,upd);saveLS();
   wrap.remove();_cr=null;
