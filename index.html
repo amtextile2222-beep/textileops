@@ -2894,7 +2894,7 @@ const cutReportBtnHtml=v=>bcOrderProd(v)?`<button class="btn" style="width:100%;
 function openCutReport(pid){
   const p=(S.products||[]).find(x=>String(x.id)===String(pid));if(!p){showToast('⚠ ההזמנה לא נמצאה','var(--red-txt)');return;}
   const r=p.cutReport||{};
-  _cr={markers:JSON.parse(JSON.stringify(r.markers||[])),rolls:JSON.parse(JSON.stringify(r.rolls||[])),strips:JSON.parse(JSON.stringify(r.strips||[]))};
+  _cr={markers:JSON.parse(JSON.stringify(r.markers||[])),rolls:JSON.parse(JSON.stringify(r.rolls||[])),strips:JSON.parse(JSON.stringify(r.strips||[])),baseAt:+r.at||0};
   const sz=new Set((p.quantities||[]).map(q=>String(q.size||'')).filter(s=>/^\d$/.test(s)));
   _cr.markers.forEach(m=>(m.sz||[]).forEach(z=>sz.add(String(z.s))));
   _cr.sizes=[...sz].sort();if(!_cr.sizes.length)_cr.sizes=['1','2','3','4','5'];
@@ -2968,7 +2968,7 @@ function renderCutReport(){
       <label style="${lbl}">מטר במדבקה · متر<input type="number" step="0.01" min="0" inputmode="decimal" value="${_crNum(o.m)}" oninput="_cr.rolls[${ri}].m=this.value===''?'':(+this.value||0);crCalcView()" style="${fld}"/></label>
       <label style="${lbl}">משקל ק"ג · وزن<input type="number" step="0.01" min="0" inputmode="decimal" value="${_crNum(o.kg)}" oninput="_cr.rolls[${ri}].kg=this.value===''?'':(+this.value||0)" style="${fld}"/></label>
       <label style="${lbl}">⚠ בד סוג ב (מ') · قماش معيوب<input type="number" step="0.01" min="0" inputmode="decimal" value="${_crNum(o.bad)}" oninput="_cr.rolls[${ri}].bad=this.value===''?'':(+this.value||0);crCalcView()" style="${fld}"/></label>
-      <label style="display:flex;align-items:center;gap:6px;font-size:13px;font-weight:700;padding:8px;border:1px solid var(--brd);border-radius:8px;cursor:pointer"><input type="checkbox"${o.fin?' checked':''} onchange="_cr.rolls[${ri}].fin=this.checked;crCalcView()" style="width:18px;height:18px"/>✅ הגליל נגמר — לא נשאר בד · خلص الرول</label>
+      <label style="display:flex;align-items:center;gap:6px;font-size:13px;font-weight:700;padding:8px;border:1px solid var(--brd);border-radius:8px;cursor:pointer"><input type="checkbox"${o.fin?' checked':''} onchange="_cr.rolls[${ri}].fin=this.checked;crCalcView()" style="width:18px;height:18px"/>הגליל נגמר — לא נשאר בד · خلص الرول</label>
     </div>
     <div style="font-size:12px;color:var(--txt3);margin-bottom:4px">כמה פרסות בכל אורך · عدد الطبقات لكل طول</div>
     <div style="display:flex;flex-wrap:wrap;gap:6px">${_cr.markers.map((m,mi)=>`<label style="display:flex;flex-direction:column;align-items:center;font-size:12px;color:var(--txt3)"><b style="color:var(--txt)" id="cr-ml-${ri}-${mi}"></b><bdi dir="ltr" style="font-size:11px">${_crSzTxt(m)||'—'}</bdi>
@@ -3124,6 +3124,12 @@ async function saveCutReport(){
   const c=_crCalc(_cr);
   if(_cr.rolls.some((o,i)=>c.rolls[i].tot&&!o.color)){alert('לכל גליל עם פרסות צריך צבע · لكل رول لون');return;}
   if(!S.fbConnected){alert('אין חיבור — לא נשמר · لا يوجد اتصال');return;}
+  // 🛡 שמירה מעותק ישן (חלון שנפתח לפני שמישהו אחר שמר / מכשיר אחר) דורסת גלילים — כך נמחקו גלילים 3-4 ב-14775 (28/10/2026)
+  let srv=null;try{srv=(await fbGet('products',String(p.id)))?.cutReport||null;}catch(e){}
+  if(srv&&(+srv.at||0)!==_cr.baseAt){
+    const t=new Date(+srv.at).toLocaleString('he-IL',{day:'2-digit',month:'2-digit',hour:'2-digit',minute:'2-digit'});
+    if(!confirm('⚠ הדוח נשמר בינתיים ('+t+(srv.byName?' — '+srv.byName:'')+', '+((srv.rolls||[]).length)+' גלילים).\nשמירה עכשיו תדרוס אותו עם '+_cr.rolls.length+' גלילים מהחלון הזה.\n\nלדרוס בכל זאת? (ביטול = לסגור ולפתוח מחדש)\nتم حفظ التقرير من قبل — الحفظ سيمحو التغييرات'))return;
+  }
   const markers=_cr.markers.filter(m=>+m.len>0||(m.sz||[]).length).map(m=>({id:m.id,len:+m.len||0,sz:(m.sz||[]).map(z=>({s:String(z.s),n:+z.n}))}));
   const ids=new Set(markers.map(m=>m.id));
   const rolls=_cr.rolls.filter(o=>(o.lay||[]).length||o.m!==''||o.no||o.batch||+o.bad||o.fin).map(o=>({id:o.id,color:o.color||'',no:String(o.no||''),batch:String(o.batch||''),m:o.m===''?'':+o.m,kg:o.kg===''?'':+o.kg,bad:o.bad===''||o.bad==null?'':+o.bad,fin:!!o.fin,lay:(o.lay||[]).filter(x=>ids.has(x.k)).map(x=>({k:x.k,n:+x.n}))}));
