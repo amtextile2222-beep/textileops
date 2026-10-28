@@ -3858,7 +3858,8 @@ async function passMergeGate(cust,prod,bc,stepNames,workerId){
 }
 // ⏸ ברקוד+שלב שמושהה אצל עובד **אחר** (28/10/2026 — נצפה: هنيه מושהית מ-27/10 על 04323 كسر سحاب,
 // ו-ابوزكي פתח את אותו שלב למחרת). stepAlreadyTaken מחריג מושהות כדי שהעובדת עצמה תחדש בסריקה —
-// אבל זה פתח את השלב לכולם. עובד/עוזר נחסם; מנהל/אחראי נשאל. חלק (splitId) — כבר קיבל רק את היתרה.
+// אבל זה פתח את השלב לכולם. עובד/עוזר/אחראי נחסמים — אחראי מעביר דרך 🔄 העברה בכרטיס המשימה
+// (החלטת המשתמש); רק מנהל נשאל. חלק (splitId) — כבר קיבל רק את היתרה.
 async function passPausedOtherGate(w,items){
   const hits=[];
   for(const b of items){
@@ -3869,7 +3870,7 @@ async function passPausedOtherGate(w,items){
   }
   if(!hits.length)return true;
   const msg='⏸ השלב מושהה אצל עובד אחר · المرحلة موقوفة عند عامل آخر:\n'+hits.join('\n');
-  if(!['manager','supervisor'].includes(S.user?.role)){showToast(msg,'var(--red-txt)',8000);return false;}
+  if(S.user?.role!=='manager'){showToast(msg+(S.user?.role==='supervisor'?'\n🔄 להעברה — כפתור ההעברה בכרטיס המשימה בלשונית משימות':''),'var(--red-txt)',9000);return false;}
   return await showConfirm('⏸ מושהה אצל עובד אחר',esc(msg+'\n\nלפתוח בכל זאת ל-'+(w.name||'')+'?'),'פתח בכל זאת','ביטול');
 }
 // ─── בדיקה חוזרת של כל הסל ברגע ההתחלה ────────────────────────────
