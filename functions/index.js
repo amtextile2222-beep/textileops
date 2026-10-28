@@ -1458,7 +1458,8 @@ exports.attendanceCloserNow = functions.https.onRequest(async (req, res) => {
 // הלקוח צריך לראות בדיוק את מה שהמנהל רואה ב"לוח מצב הזמנות". שינוי שם ⇒ שינוי כאן.
 const TRACK_LISTS = ['intake', 'countcut', 'ready_sew', 'sewing', 'ready_pack', 'packing', 'ready_ship', 'shipped'];
 const TRACK_SHIP_DAYS = 30;
-const _trackCache = new Map(); // קוד לקוח → {at, body}, 3 דק' — מגן מפני רענון חוזר שקורא שוב את כל ההיסטוריה
+const _trackCache = new Map(); // קוד לקוח → {at, body, prods}, 3 דק' — מגן מפני רענון חוזר שקורא שוב את כל ההיסטוריה
+const TRACK_CACHE_MS = 180000;
 function trackFamOfDept(d) {
   const s = String(d || '').toLowerCase();
   if (/استقبال|قص|קבל|חית|גזיר/.test(s)) return 'recv';
@@ -1825,8 +1826,18 @@ async function trackBuild(cust) {
     .sort((a, b) => ((a.stage === 7) - (b.stage === 7)) ||
       (a.stage === 7 ? String(b.ship).localeCompare(String(a.ship)) : String(a.entry || '9999').localeCompare(String(b.entry || '9999'))));
   console.log(`trackBuild ${cust}: ${tasks.length} tasks, ${codes.length} models, ${Date.now() - t0} ms`);
-  return { name: (nS.data() || {})[cust] || '', at: new Date().toISOString(), orders,
+  const body = { name: (nS.data() || {})[cust] || '', at: new Date().toISOString(), orders,
     stock: trackPackStock(cust, prods, kS.data() || {}) };
+  _trackCache.set(cust, { at: Date.now(), body, prods });
+  return body;
+}
+// 💰 (28/10/2026) במטמון: רק מסמך המלאי נקרא מחדש, והמלאי מחושב מהמוצרים שבמטמון — עד 23/10 נקראו כל המוצרים
+// של הלקוח בכל רענון (כל דקה לכל דף פתוח) ⇒ רוב 21M הקריאות של אוקטובר. משלוח חדש משפיע על המלאי תוך 3 דק'.
+async function trackBody(cust) {
+  const hit = _trackCache.get(cust);
+  if (!hit || Date.now() - hit.at >= TRACK_CACHE_MS) return trackBuild(cust);
+  const hk = await db.doc('appSettings/packStock').get();
+  return { ...hit.body, stock: trackPackStock(cust, hit.prods, hk.data() || {}) };
 }
 
 // ⚡ 1GB: בדור הראשון המעבד גדל עם הזיכרון — עיבוד אלפי משימות על ברירת המחדל (256MB) לקח 11 שנ'
@@ -1843,18 +1854,9 @@ exports.customerTrack = functions.runWith({ memory: '1GB' }).https.onRequest(asy
     const a = await trackAuth(req, res);
     if (!a) return;
     const { cust, asCust } = a;
-    // ⏱ (23/10/2026) המטמון של 3 דק' רק למצב ההזמנות (החלק הכבד). המלאי מחושב מחדש גם כשיש מטמון —
-    // מסמך אחד + המוצרים של הלקוח, והדף מרענן כל דקה ⇒ תיקון מלאי מגיע ללקוח תוך דקה.
+    // ⏱ מטמון 3 דק' (trackBody): הדף מרענן כל דקה; תנועת מלאי (מסמך packStock) מגיעה ללקוח תוך דקה.
     // תצוגת המנהל (asCust) לא משתמשת במטמון בכלל — רואה תמיד את המצב העדכני.
-    const hit = asCust ? null : _trackCache.get(cust);
-    if (hit && Date.now() - hit.at < 180000) {
-      const [hp, hk] = await Promise.all([db.collection('products').where('cust', '==', cust).get(), db.doc('appSettings/packStock').get()]);
-      res.json({ ...hit.body, stock: trackPackStock(cust, hp.docs.map(d => ({ id: d.id, ...d.data() })), hk.data() || {}) });
-      return;
-    }
-    const body = await trackBuild(cust);
-    _trackCache.set(cust, { at: Date.now(), body });
-    res.json(body);
+    res.json(asCust ? await trackBuild(cust) : await trackBody(cust));
   } catch (e) {
     console.error('customerTrack error:', e);
     res.status(500).json({ error: 'server' });
