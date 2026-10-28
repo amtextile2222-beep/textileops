@@ -3856,6 +3856,22 @@ async function passMergeGate(cust,prod,bc,stepNames,workerId){
   logGateEvent('order',ok?'override':'cancel',info);
   return ok;
 }
+// ⏸ ברקוד+שלב שמושהה אצל עובד **אחר** (28/10/2026 — נצפה: هنيه מושהית מ-27/10 על 04323 كسر سحاب,
+// ו-ابوزكي פתח את אותו שלב למחרת). stepAlreadyTaken מחריג מושהות כדי שהעובדת עצמה תחדש בסריקה —
+// אבל זה פתח את השלב לכולם. עובד/עוזר נחסם; מנהל/אחראי נשאל. חלק (splitId) — כבר קיבל רק את היתרה.
+async function passPausedOtherGate(w,items){
+  const hits=[];
+  for(const b of items){
+    if(b.splitId)continue;
+    const tt=b.taskType||'';
+    const t=(S.activeTasks||[]).find(t=>t.paused&&String(t.workerId)!==String(w.id)&&String(taskBc(t))===String(b.raw)&&(t.taskType||'')===tt&&(()=>{const s=taskStampOf(t);return s==null||s===b.prodStamp;})());
+    if(t)hits.push((tt||'—')+' — '+(t.workerName||t.worker||''));
+  }
+  if(!hits.length)return true;
+  const msg='⏸ השלב מושהה אצל עובד אחר · المرحلة موقوفة عند عامل آخر:\n'+hits.join('\n');
+  if(!['manager','supervisor'].includes(S.user?.role)){showToast(msg,'var(--red-txt)',8000);return false;}
+  return await showConfirm('⏸ מושהה אצל עובד אחר',esc(msg+'\n\nלפתוח בכל זאת ל-'+(w.name||'')+'?'),'פתח בכל זאת','ביטול');
+}
 // ─── בדיקה חוזרת של כל הסל ברגע ההתחלה ────────────────────────────
 // משותף לשלושת הסורקים. הבדיקה בזמן **ההוספה** לסל אינה מספיקה: בין ההוספה
 // לבין הלחיצה על "התחל" התחנה יכולה להתחלף, העובד הנבחר יכול להתחלף, והסל עצמו
@@ -3866,6 +3882,7 @@ async function passBatchGates(w,batch){
   const items=(batch||[]).filter(b=>b&&!b.isSample);
   if(!items.length)return true;
   if(!await passRetiredGate(items.map(b=>b.raw)))return false; // 🔒 ברקוד שסיים את תפקידו
+  if(!await passPausedOtherGate(w,items))return false; // ⏸ מושהה אצל עובד אחר
   // 🔢 קיבוץ לפי **רשומת ההזמנה** ולא לפי לקוח+מוצר: לשתי הזמנות של אותו מוצר
   // יכולים להיות שלבים ותחנות שונים לגמרי, ואיחודן היה בודק אותן מול רשומה אחת.
   // עדיין אישור אחד לכל רשומה, ולא חמישה על אותה חריגה.
