@@ -12476,13 +12476,14 @@ function _shipQtySum(){
   return inps.filter(i=>!i.classList.contains('ship-u')).reduce((s,i)=>s+Math.max(0,parseInt(i.value)||0),0); // ✂ לא תפור — לא לחיוב
 }
 function _shipUnsewnSum(){return [...document.querySelectorAll('.ship-row-inp.ship-u')].reduce((s,i)=>s+Math.max(0,parseInt(i.value)||0),0);}
-// אריזה תואמת = שווה ליחידות לחיוב, או לכולל ה"לא תפור" (שגם הוא נארז לפעמים)
-const _packsMatch=(u,q)=>u===q||u===q+_shipUnsewnSum();
+// אריזה תואמת = שווה ליחידות לחיוב, או לכולל ה"לא תפור" (שגם הוא נארז לפעמים), ועם/בלי הדגם המקורי שחוזר באותה חבילה
+const _packsMatchN=(u,q,x,o)=>[q,q+x].some(v=>u===v||u===v+o);
+const _packsMatch=(u,q)=>_packsMatchN(u,q,_shipUnsewnSum(),_shipOrigVal());
 // 👕 דגם מקורי של הלקוח שחוזר עם הסחורה — מודפס בתעודה בלבד, לא ביחידות ולא בהתחשבנות
 const _shipOrigVal=()=>Math.max(0,parseInt(document.getElementById('ship-orig')?.value)||0);
 const shipOrigHtml=v=>`<div style="margin-top:9px;display:flex;align-items:center;gap:8px">
       <label style="font-size:12px;font-weight:600;flex:1">👕 דגם מקורי שחוזר ללקוח <span style="font-size:10px;font-weight:400;color:var(--txt3)">(מודפס בתעודה, לא בהתחשבנות)</span></label>
-      <input id="ship-orig" type="number" inputmode="numeric" min="0" value="${v||''}" placeholder="0" style="width:70px;font-size:13px;padding:6px;border-radius:8px;border:1px solid var(--brd);background:var(--bg);color:var(--txt)"/>
+      <input id="ship-orig" type="number" inputmode="numeric" min="0" value="${v||''}" placeholder="0" oninput="shipPackTotal()" style="width:70px;font-size:13px;padding:6px;border-radius:8px;border:1px solid var(--brd);background:var(--bg);color:var(--txt)"/>
     </div>`;
 function _shipRowsCollect(){
   return [...document.querySelectorAll('.ship-row-inp')]
@@ -18202,7 +18203,7 @@ ${packs.length?`<table class="pk">
   <tfoot><tr><td class="c">${packCount} חבילות</td><td class="c">—</td><td class="n">${packUnits}</td></tr>
     ${outer?`<tr><td colspan="3" class="c">🛍 ארוז ${esc(outerIn(outer))}</td></tr>`:''}</tfoot>
 </table>
-${packUnits!==total&&packUnits!==total+unsewn?`<div class="warn">⚠ סכום האריזה (${packUnits}) שונה מהכמות שיצאה במשלוח (${total}).</div>`:''}`:''}
+${!_packsMatchN(packUnits,total,unsewn,+sh?.orig||0)?`<div class="warn">⚠ סכום האריזה (${packUnits}) שונה מהכמות שיצאה במשלוח (${total}).</div>`:''}`:''}
 ${dnote?`<div class="note"><b>הערות:</b> ${esc(dnote)}</div>`:''}
 <div class="sign">
   <div><b>שם וחתימת המוסר</b><span class="sig-slot"></span>____________________</div>
