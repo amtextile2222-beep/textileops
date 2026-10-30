@@ -1522,9 +1522,13 @@ function trackPackStock(cust, prods, ps) {
   const moves = (Array.isArray(ps.moves) ? ps.moves : []).filter(m => m && m.pool === cust && m.k);
   if (!moves.length) return [];
   const own = new Map((Array.isArray(ps.items) ? ps.items : []).filter(i => i && i.own && (!i.cust || i.cust === cust)).map(i => [i.id, i]));
+  // 📐 פריט לפי מידה (i.bySize, 30/10/2026) — מפתח פריט|מידה; ההוצאה לפי יחידות המידה בשורות התעודה (בלי "לא תפור")
+  const bySz = k => !!(own.get(k) || {}).bySize;
+  const mk = m => m.k + (bySz(m.k) ? '|' + (m.s == null ? '' : m.s) : '');
+  const szUnits = rows => { const o = {}; (Array.isArray(rows) ? rows : []).forEach(r => { if (!r || r.grade === 'לא תפור') return; const q = parseInt(r.qty) || 0; if (q > 0) { const z = String(r.size == null ? '' : r.size); o[z] = (o[z] || 0) + q; } }); return o; };
   const start = {};
-  moves.forEach(m => { if (start[m.k] == null || +m.at < start[m.k]) start[m.k] = +m.at || 0; });
-  const ev = moves.map(m => ({ at: +m.at || 0, k: m.k, t: m.t, n: +m.n || 0 }));
+  moves.forEach(m => { const k = mk(m); if (start[k] == null || +m.at < start[k]) start[k] = +m.at || 0; });
+  const ev = moves.map(m => ({ at: +m.at || 0, k: mk(m), t: m.t, n: +m.n || 0 }));
   const shMs = s => { const t = Date.parse((s && s.at) || ''); return isNaN(t) ? (Date.parse(((s && s.date) || '') + 'T12:00:00') || 0) : t; };
   prods.forEach(p => {
     const cons = (Array.isArray(p.cons) ? p.cons : []).filter(c => c && own.has(c.id) && (+c.n || 0) > 0);
@@ -1533,7 +1537,10 @@ function trackPackStock(cust, prods, ps) {
       (Array.isArray(s && s.mats) ? s.mats : []).forEach(m => {
         if (m && m.own && (+m.n || 0) > 0 && start[m.k] != null && at >= start[m.k]) ev.push({ at, k: m.k, t: 'use', n: +m.n || 0 });
       });
-      if (u) cons.forEach(c => { if (start[c.id] != null && at >= start[c.id]) ev.push({ at, k: c.id, t: 'use', n: (+c.n) * u }); });
+      if (u) cons.forEach(c => {
+        if (bySz(c.id)) { Object.entries(szUnits(s && s.rows)).forEach(([z, q]) => { const k = c.id + '|' + z; if (start[k] != null && at >= start[k]) ev.push({ at, k, t: 'use', n: (+c.n) * q }); }); return; }
+        if (start[c.id] != null && at >= start[c.id]) ev.push({ at, k: c.id, t: 'use', n: (+c.n) * u });
+      });
     });
   });
   ev.sort((a, b) => a.at - b.at || (a.t === 'use') - (b.t === 'use'));
@@ -1554,16 +1561,30 @@ function trackPackStock(cust, prods, ps) {
     if (ov === 'ready_ship' || ov === 'shipped' || (out > 0 && last && last < cutMs)) return;
     const rem = Math.max(0, (trackQty(p) || Math.max(0, parseInt(p.estQty) || 0)) - out);
     if (!rem) return;
+    let remSz = null;
     cons.forEach(c => {
       const builtin = TRACK_MATS.some(([k]) => k === c.id);
       if (builtin ? !c.own : !own.has(c.id)) return;
+      if (!builtin && bySz(c.id)) {
+        if (!remSz) {
+          remSz = {}; (p.quantities || []).forEach(q => { const z = String(q.size == null ? '' : q.size), n = parseInt(q.qty) || 0; if (n > 0) remSz[z] = (remSz[z] || 0) + n; });
+          shL.forEach(sh => Object.entries(szUnits(sh && sh.rows)).forEach(([z, n]) => { if (z in remSz) remSz[z] -= n; }));
+        }
+        Object.entries(remSz).forEach(([z, n]) => { if (n > 0) { const k = c.id + '|' + z; need[k] = (need[k] || 0) + (+c.n) * n; } });
+        return;
+      }
       need[c.id] = (need[c.id] || 0) + (+c.n) * rem;
     });
   });
   const min = ps.min || {};
   const DEPT_ORD = { cut: 0, sew: 1, pack: 2 };
   const list = TRACK_MATS.map(([k, name]) => ({ k, name, unit: "יח'", dept: 'pack' }))
-    .concat([...own.values()].map(i => ({ k: i.id, name: String(i.name || ''), unit: String(i.unit || "יח'"), dept: i.dept || '' })));
+    .concat([...own.values()].flatMap(i => {
+      const b = { name: String(i.name || ''), unit: String(i.unit || "יח'"), dept: i.dept || '' };
+      if (!i.bySize) return [{ k: i.id, ...b }];
+      const pre = i.id + '|';
+      return Object.keys(bal).filter(k => k.startsWith(pre)).sort().map(k => ({ ...b, k, name: b.name + ' · מידה ' + k.slice(pre.length) }));
+    }));
   return list.filter(x => x.k in bal).sort((a, b) => (DEPT_ORD[a.dept] ?? 3) - (DEPT_ORD[b.dept] ?? 3)).map(x => {
     const mn = +min[cust + '|' + x.k] || 0, n = Math.round(bal[x.k] * 100) / 100;
     return { ...x, n, low: mn > 0 && bal[x.k] < mn, need: Math.round((need[x.k] || 0) * 100) / 100 };

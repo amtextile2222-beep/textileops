@@ -17407,6 +17407,15 @@ function pstkItem(k){
 }
 function pstkItemName(k){return pstkItem(k)?.name||k;}
 function pstkUnit(k){const u=pstkItem(k)?.unit||"יח'";return u==="יח'"?'':' '+u;}
+// 📐 פריט לפי מידה (30/10/2026) — תווית שם+מידה / תווית מידה: i.bySize ⇒ יתרה, מינימום ו"נדרש" לכל מידה
+// בנפרד. מפתח = מלאי|פריט|מידה, תנועה נושאת s, וההוצאה בתעודה = הצריכה ליחידה × יחידות **המידה** (שורות
+// התעודה בלי "לא תפור"). תעודה ישנה בלי שורות לא יורדת ממלאי לפי מידה.
+// ⚠️ trackPackStock בשרת — אותו חישוב; שינוי כאן ⇒ שינוי שם.
+const pstkBySize=k=>!!pstkItem(k)?.bySize;
+const PSTK_SIZES=['0','1','2','3','4','5','6','7','8','9'];
+function pstkSizeUnits(rows){const m={};(rows||[]).forEach(r=>{if(isUnsewn(r))return;const q=parseInt(r.qty)||0;if(q>0){const z=String(r.size??'');m[z]=(m[z]||0)+q;}});return m;}
+// שם להצגה של מפתח (מלאי|פריט[|מידה])
+function pstkKeyName(key){const[,k,z]=String(key).split('|');return pstkItemName(k)+(z!=null?' · מידה '+z:'');}
 // אילו חומרים שייכים למלאי: אריזה מובנית — לשניהם (own נקבע בתעודה); פריט שהלקוח מספק (own) — רק
 // למלאי לקוח, ורק ללקוח שלו אם הוגדר; פריט שהמפעל קונה — רק למלאי המפעל
 function pstkItemsFor(pool,dept){
@@ -17415,16 +17424,18 @@ function pstkItemsFor(pool,dept){
 }
 function pstkCalc(){
   const moves=((S.packStock||{}).moves||[]).filter(m=>m&&m.pool&&m.k);
-  const start={};moves.forEach(m=>{const key=m.pool+'|'+m.k;if(start[key]==null||m.at<start[key])start[key]=+m.at||0;});
-  const ev=moves.map(m=>({at:+m.at||0,key:m.pool+'|'+m.k,t:m.t,n:+m.n||0}));
+  const mk=m=>m.pool+'|'+m.k+(pstkBySize(m.k)?'|'+(m.s??''):'');
+  const start={};moves.forEach(m=>{const key=mk(m);if(start[key]==null||m.at<start[key])start[key]=+m.at||0;});
+  const ev=moves.map(m=>({at:+m.at||0,key:mk(m),t:m.t,n:+m.n||0}));
   const its=new Map(pstkItems().map(i=>[i.id,i]));
   (S.products||[]).forEach(p=>{
     const cons=(Array.isArray(p.cons)?p.cons:[]).filter(c=>c&&its.has(c.id)&&(+c.n||0)>0);
-    prodShipments(p).forEach(s=>{const at=_shipMs(s),u=+s.total||0;
+    prodShipments(p).forEach(s=>{const at=_shipMs(s),u=+s.total||0,su=cons.some(c=>its.get(c.id).bySize)?pstkSizeUnits(s.rows):null;
       shipMats(s).forEach(m=>{const key=(m.own?p.cust:PSTK_F)+'|'+m.k;
         if(start[key]!=null&&at>=start[key])ev.push({at,key,t:'use',n:+m.n||0});});
-      if(u)cons.forEach(c=>{const key=(its.get(c.id).own?p.cust:PSTK_F)+'|'+c.id;
-        if(start[key]!=null&&at>=start[key])ev.push({at,key,t:'use',n:(+c.n)*u});});
+      if(u)cons.forEach(c=>{const it=its.get(c.id),base=(it.own?p.cust:PSTK_F)+'|'+c.id;
+        if(it.bySize){Object.entries(su).forEach(([z,q])=>{const key=base+'|'+z;if(start[key]!=null&&at>=start[key])ev.push({at,key,t:'use',n:(+c.n)*q});});return;}
+        if(start[base]!=null&&at>=start[base])ev.push({at,key:base,t:'use',n:(+c.n)*u});});
     });
   });
   // באותו רגע — התנועה הידנית קודם (ספירה שנרשמה לפני היציאה)
@@ -17447,9 +17458,16 @@ function pstkNeed(){
     const ov=p.pipeOverride?.list;
     if(ov==='ready_ship'||ov==='shipped'||(out>0&&last&&last<cut))return;
     const rem=Math.max(0,(_prodQty(p)||estQtyOf(p))-out);if(!rem)return;
+    let remSz=null; // 📐 לפי מידה: כמות לכל מידה פחות מה שיצא בה (בלי כמות לפי מידה — לא נספר)
     cons.forEach(c=>{
       const it=pstkItem(c.id);if(!it)return;
       const own=it.builtin?!!c.own:!!it.own,key=(own?p.cust:PSTK_F)+'|'+c.id;
+      if(it.bySize){
+        if(!remSz){remSz={};(p.quantities||[]).forEach(q=>{const z=String(q.size??''),n=parseInt(q.qty)||0;if(n>0)remSz[z]=(remSz[z]||0)+n;});
+          sh.forEach(s=>Object.entries(pstkSizeUnits(s.rows)).forEach(([z,n])=>{if(z in remSz)remSz[z]-=n;}));}
+        Object.entries(remSz).forEach(([z,n])=>{if(n>0){const kz=key+'|'+z;need[kz]=(need[kz]||0)+(+c.n)*n;cnt[kz]=(cnt[kz]||0)+1;}});
+        return;
+      }
       need[key]=(need[key]||0)+(+c.n)*rem;cnt[key]=(cnt[key]||0)+1;
     });
   });
@@ -17469,8 +17487,8 @@ function pstkAlert(before){
     const fresh=pstkLowKeys(after).filter(k=>!(k in (before||{}))||before[k]>=+min[k]);
     pstkBadge();
     if(!fresh.length)return;
-    const lines=fresh.map(k=>{const[pool,mk]=k.split('|');return '• '+pstkItemName(mk)+' — '+pstkPoolName(pool)+': נשארו '+pstkFmt(after[k])+pstkUnit(mk)+' (מינימום '+min[k]+')';});
-    showToast('⚠ מלאי נמוך: '+fresh.map(k=>pstkItemName(k.split('|')[1])).join(', '),'var(--amber-txt)',6000);
+    const lines=fresh.map(k=>{const[pool,mk]=k.split('|');return '• '+pstkKeyName(k)+' — '+pstkPoolName(pool)+': נשארו '+pstkFmt(after[k])+pstkUnit(mk)+' (מינימום '+min[k]+')';});
+    showToast('⚠ מלאי נמוך: '+fresh.map(pstkKeyName).join(', '),'var(--amber-txt)',6000);
     sendTelegram('📦 מלאי חומרים נמוך\n'+lines.join('\n'));
   }catch(e){}
 }
@@ -17525,7 +17543,8 @@ function openPackStock(dept){
       <div id="pstk-ftl" style="font-size:13px;font-weight:700;margin-bottom:7px">➕ רישום תנועה</div>
       <div style="display:grid;grid-template-columns:1fr 1fr;gap:6px">
         <select id="pstk-pool" onchange="pstkFillItems()" style="${inp}"><option value="${PSTK_F}">🏭 המפעל (קנינו)</option>${custs.map(c=>`<option value="${esc(c)}">👤 ${esc(S.customerNames[c])} (${esc(c)})</option>`).join('')}</select>
-        <select id="pstk-k" style="${inp}"></select>
+        <select id="pstk-k" onchange="pstkSzShow()" style="${inp}"></select>
+        <select id="pstk-s" style="${inp};display:none;grid-column:1/-1"><option value="">📐 בחר מידה…</option>${PSTK_SIZES.map(z=>`<option value="${z}">מידה ${z}</option>`).join('')}</select>
         <select id="pstk-t" style="${inp}">${Object.entries(PSTK_T).filter(([t])=>mgr||t==='in').map(([t,l])=>`<option value="${t}">${l}${t==='count'?' — כמה יש בפועל':''}</option>`).join('')}</select>
         <input id="pstk-n" type="number" inputmode="decimal" min="0" step="any" placeholder="כמות" style="${inp}"/>
       </div>
@@ -17555,7 +17574,10 @@ function pstkFillItems(){
   sel.innerHTML=list.length?list.map(i=>`<option value="${esc(i.id)}">${esc(i.name)}${i.unit&&i.unit!=="יח'"?' ('+esc(i.unit)+')':''}</option>`).join('')
     :`<option value="">— אין פריטים ל${pool===PSTK_F?'מפעל':'לקוח הזה'} —</option>`;
   if(list.some(i=>i.id===cur))sel.value=cur;
+  pstkSzShow();
 }
+// 📐 בורר המידה מוצג רק לפריט לפי מידה
+function pstkSzShow(){const el=document.getElementById('pstk-s');if(el)el.style.display=pstkBySize(document.getElementById('pstk-k')?.value)?'':'none';}
 function renderPackStock(){
   const box=document.getElementById('pstk-bal'),mv=document.getElementById('pstk-moves');
   if(!box||!mv)return;
@@ -17568,19 +17590,24 @@ function renderPackStock(){
   const pools=[PSTK_F,...custPools].filter(pool=>pstkItemsFor(pool,dept).length);
   box.innerHTML=pools.length?pools.map(pool=>`<div style="border:1px solid var(--brd);border-radius:10px;margin-bottom:8px;overflow:hidden">
     <div style="font-size:13px;font-weight:700;padding:6px 10px;background:var(--bg)">${esc(pstkPoolName(pool))}</div>
-    ${pstkItemsFor(pool,dept).map(m=>{const key=pool+'|'+m.id,has=key in bal,b=bal[key],mn=+min[key]||0,nd=need[key]||0,miss=has&&nd>0&&b<nd-0.0001,low=has&&mn>0&&b<mn||miss;
+    ${pstkItemsFor(pool,dept).flatMap(m=>{
+      // 📐 לפי מידה — שורה לכל מידה שנספרה / נדרשת / יש לה מינימום (בלי אף אחת — שורה אחת "לא נספר")
+      if(!m.bySize)return [[pool+'|'+m.id,m.name]];
+      const pre=pool+'|'+m.id+'|',zs=[...new Set([...Object.keys(bal),...Object.keys(need),...Object.keys(min)].filter(k=>k.startsWith(pre)).map(k=>k.slice(pre.length)))].sort();
+      return zs.length?zs.map(z=>[pre+z,m.name+' · מידה '+z]):[[pre+'?',m.name+' (לפי מידה — רשום ספירה לכל מידה)']];
+    }).map(([key,label])=>{const m={id:key.split('|')[1]},has=key in bal,b=bal[key],mn=+min[key]||0,nd=need[key]||0,miss=has&&nd>0&&b<nd-0.0001,low=has&&mn>0&&b<mn||miss;
       return `<div style="display:flex;align-items:center;gap:8px;padding:6px 10px;border-top:1px solid var(--brd);font-size:13px${low?';background:var(--red-bg,#fee2e2)':''}">
-        <span style="flex:1">${esc(m.name)}${nd>0?`<div style="font-size:11px;font-weight:600;color:${miss?'var(--red-txt)':'var(--txt3)'}">📋 נדרש ${pstkFmt(nd)}${esc(pstkUnit(m.id))} ${cnt[key]===1?'להזמנה פתוחה אחת':'ל-'+cnt[key]+' הזמנות פתוחות'}${miss?' · חסר '+pstkFmt(nd-b):has?' · יש מספיק':''}</div>`:''}</span>
+        <span style="flex:1">${esc(label)}${nd>0?`<div style="font-size:11px;font-weight:600;color:${miss?'var(--red-txt)':'var(--txt3)'}">📋 נדרש ${pstkFmt(nd)}${esc(pstkUnit(m.id))} ${cnt[key]===1?'להזמנה פתוחה אחת':'ל-'+cnt[key]+' הזמנות פתוחות'}${miss?' · חסר '+pstkFmt(nd-b):has?' · יש מספיק':''}</div>`:''}</span>
         <b style="min-width:70px;text-align:center;color:${!has?'var(--txt3)':b<0||low?'var(--red-txt)':'var(--txt)'}">${has?pstkFmt(b)+esc(pstkUnit(m.id)):'לא נספר'}</b>
         <span style="font-size:11px;color:var(--txt3)">מינימום</span>
-        ${mgr?`<input type="number" min="0" step="any" value="${mn||''}" placeholder="—" onchange="pstkSetMin('${escj(key)}',this.value)" style="width:64px;font-size:12px;padding:4px;border-radius:6px;border:1px solid var(--brd);background:var(--bg);color:var(--txt)"/>`
+        ${mgr&&!key.endsWith('|?')?`<input type="number" min="0" step="any" value="${mn||''}" placeholder="—" onchange="pstkSetMin('${escj(key)}',this.value)" style="width:64px;font-size:12px;padding:4px;border-radius:6px;border:1px solid var(--brd);background:var(--bg);color:var(--txt)"/>`
           :`<span style="width:40px;text-align:center;font-size:12px">${mn||'—'}</span>`}
       </div>`;}).join('')}
   </div>`).join(''):`<div style="font-size:12px;color:var(--txt3);padding:6px 2px">${mgr?'עדיין לא הוגדרו פריטים במחלקה הזו — הוסף אותם ב"⚙️ פריטים" למטה.':'עדיין לא הוגדרו פריטים במחלקה הזו.'}</div>`;
   const moves=(st.moves||[]).filter(m=>inDept(m.k)).sort((a,b)=>b.at-a.at).slice(0,30);
   const fmt=t=>{const d=new Date(+t);return pad2(d.getDate())+'/'+pad2(d.getMonth()+1)+' '+pad2(d.getHours())+':'+pad2(d.getMinutes());};
   mv.innerHTML=moves.length?moves.map(m=>`<div style="display:flex;align-items:center;gap:6px;font-size:12px;padding:5px 2px;border-bottom:1px solid var(--brd)">
-      <span style="flex:1">${fmt(m.at)} · ${PSTK_T[m.t]||m.t} <b dir="ltr" style="unicode-bidi:isolate">${m.t==='out'?'−':m.t==='in'?'+':''}${pstkFmt(m.n)}</b>${esc(pstkUnit(m.k))} ${esc(pstkItemName(m.k))} · ${esc(pstkPoolName(m.pool))}${m.note?' · '+esc(m.note):''}<span style="color:var(--txt3)"> · ${esc(m.byName||'')}</span>${pstkEditTip(m)}</span>
+      <span style="flex:1">${fmt(m.at)} · ${PSTK_T[m.t]||m.t} <b dir="ltr" style="unicode-bidi:isolate">${m.t==='out'?'−':m.t==='in'?'+':''}${pstkFmt(m.n)}</b>${esc(pstkUnit(m.k))} ${esc(pstkItemName(m.k))}${m.s!=null&&pstkBySize(m.k)?' · מידה '+esc(m.s):''} · ${esc(pstkPoolName(m.pool))}${m.note?' · '+esc(m.note):''}<span style="color:var(--txt3)"> · ${esc(m.byName||'')}</span>${pstkEditTip(m)}</span>
       ${pstkCanEdit(m)?`<button class="btn" style="font-size:11px;padding:3px 7px" title="תיקון" onclick="pstkStartEdit('${escj(m.id)}')">✏️</button>`:''}
       ${mgr?`<button class="btn" style="font-size:11px;padding:3px 7px" onclick="pstkDel('${escj(m.id)}')">🗑</button>`:''}
     </div>`).join(''):'<div style="font-size:12px;color:var(--txt3)">עדיין לא נרשמה שום תנועה. התחל בספירה של מה שיש היום במלאי.</div>';
@@ -17605,6 +17632,7 @@ function renderPstkItems(){
         <label style="display:flex;align-items:center;gap:3px;white-space:nowrap;cursor:pointer"><input type="checkbox"${i.own?' checked':''} onchange="pstkItemSet('${escj(i.id)}','own',this.checked)" style="width:14px;height:14px;margin:0"/> 👤 הלקוח מספק</label>
         ${i.own?custSel(i.cust||'',`onchange="pstkItemSet('${escj(i.id)}','cust',this.value)"`):'<span style="color:var(--txt3)">🏭 המפעל קונה</span>'}
       </div>
+      <label style="display:flex;align-items:center;gap:3px;margin-top:4px;font-size:12px;cursor:pointer"><input type="checkbox"${i.bySize?' checked':''} onchange="pstkItemSet('${escj(i.id)}','bySize',this.checked)" style="width:14px;height:14px;margin:0"/> 📐 לפי מידה <span style="color:var(--txt3)">(תווית מידה / שם+מידה — יתרה לכל מידה)</span></label>
     </div>`).join('')+`<div style="padding-top:8px">
       <div style="font-size:12px;font-weight:700;margin-bottom:4px">➕ פריט חדש</div>
       <input id="pstk-ni-name" placeholder="שם הפריט — למשל תווית ראשית" style="${sl};display:block;width:100%;box-sizing:border-box;font-size:13px;padding:7px"/>
@@ -17615,6 +17643,7 @@ function renderPstkItems(){
         <label style="display:flex;align-items:center;gap:3px;white-space:nowrap;cursor:pointer"><input id="pstk-ni-own" type="checkbox" checked style="width:14px;height:14px;margin:0"/> 👤 הלקוח מספק</label>
         ${custSel('','id="pstk-ni-cust"')}
       </div>
+      <label style="display:flex;align-items:center;gap:3px;margin-top:4px;font-size:12px;cursor:pointer"><input id="pstk-ni-sz" type="checkbox" style="width:14px;height:14px;margin:0"/> 📐 לפי מידה <span style="color:var(--txt3)">(תווית מידה / שם+מידה)</span></label>
       <button class="btn" style="width:100%;margin-top:6px;font-size:13px" onclick="pstkItemAdd()">➕ הוסף פריט</button>
     </div>`;
 }
@@ -17624,12 +17653,15 @@ async function pstkItemAdd(){
   if(!name){alert('הזן שם לפריט');return;}
   const own=!!document.getElementById('pstk-ni-own')?.checked;
   const it={id:'i'+Date.now().toString(36)+Math.random().toString(36).slice(2,5),name,dept:_pstkDept,
-    unit:document.getElementById('pstk-ni-unit')?.value||"יח'",own,cust:own?(document.getElementById('pstk-ni-cust')?.value||''):''};
+    unit:document.getElementById('pstk-ni-unit')?.value||"יח'",own,cust:own?(document.getElementById('pstk-ni-cust')?.value||''):'',
+    ...(document.getElementById('pstk-ni-sz')?.checked?{bySize:true}:{})};
   if(await pstkWrite(d=>({...d,items:d.items.concat([it])}))){showToast('✅ נוסף: '+name);pstkFillItems();renderPackStock();}
 }
 async function pstkItemSet(id,f,v){
   if(S.user?.role!=='manager')return;
   if(f==='name'&&!String(v).trim()){renderPackStock();return;}
+  if(f==='bySize'&&((S.packStock||{}).moves||[]).some(m=>m.k===id)
+    &&!await showConfirm('ספירה לפי מידה',v?'לפריט כבר יש תנועות בלי מידה — הן לא ייספרו בספירה לפי מידה. אחרי השינוי רשום ספירה לכל מידה. להמשיך?':'התנועות לפי מידה יתחברו ליתרה אחת. להמשיך?','המשך','ביטול')){renderPackStock();return;}
   if(f==='own'&&((S.packStock||{}).moves||[]).some(m=>m.k===id)
     &&!await showConfirm('שינוי מי מספק','לפריט כבר יש תנועות במלאי '+(v?'המפעל':'הלקוח')+'. אחרי השינוי הוא ייספר במלאי '+(v?'הלקוח':'המפעל')+', והתנועות הקודמות יישארו בצד. להמשיך?','המשך','ביטול')){renderPackStock();return;}
   if(await pstkWrite(d=>({...d,items:d.items.map(i=>i.id!==id?i:{...i,[f]:f==='name'?String(v).trim():v,...(f==='own'&&!v?{cust:''}:{})})}))){pstkFillItems();renderPackStock();}
@@ -17658,7 +17690,7 @@ function pstkStartEdit(id){
   if(!m||!pstkCanEdit(m))return;
   _pstkEditId=id;
   const set=(i,v)=>{const el=document.getElementById(i);if(el)el.value=v;};
-  set('pstk-pool',m.pool);pstkFillItems();set('pstk-k',m.k);set('pstk-t',m.t);set('pstk-n',+m.n||0);set('pstk-note',m.note||'');
+  set('pstk-pool',m.pool);pstkFillItems();set('pstk-k',m.k);pstkSzShow();set('pstk-s',m.s??'');set('pstk-t',m.t);set('pstk-n',+m.n||0);set('pstk-note',m.note||'');
   document.getElementById('pstk-ftl').textContent='✏️ תיקון תנועה מ-'+new Date(+m.at).toLocaleDateString('he-IL',{day:'2-digit',month:'2-digit'});
   document.getElementById('pstk-save').textContent='💾 שמור תיקון';
   document.getElementById('pstk-cancel').style.display='';
@@ -17676,6 +17708,8 @@ async function pstkAdd(){
   const n=Math.round(Math.max(0,parseFloat(document.getElementById('pstk-n')?.value)||0)*1000)/1000,note=(document.getElementById('pstk-note')?.value||'').trim();
   if(t!=='in'&&S.user?.role!=='manager')return;
   if(!k||!pstkItem(k)){alert('בחר חומר');return;}
+  const sz=pstkBySize(k)?(document.getElementById('pstk-s')?.value||''):null;
+  if(sz==='')return alert('בחר מידה — הפריט נספר לפי מידה');
   // תיקון ל-0 = התנועה כולה נרשמה בטעות ⇒ מציעים למחוק אותה (גם אחראי — רק את מה שמותר לו לתקן)
   if(!n&&t!=='count'&&_pstkEditId){
     const id=_pstkEditId,old=((S.packStock||{}).moves||[]).find(x=>x.id===id);
@@ -17691,10 +17725,11 @@ async function pstkAdd(){
   if(_pstkEditId){
     const id=_pstkEditId,old=((S.packStock||{}).moves||[]).find(x=>x.id===id);
     if(!old||!pstkCanEdit(old)){pstkEditReset();return;}
-    const ed={at:Date.now(),by:S.user?.id||'',byName:S.user?.name||'',pool:old.pool,k:old.k,t:old.t,n:+old.n||0};
+    const ed={at:Date.now(),by:S.user?.id||'',byName:S.user?.name||'',pool:old.pool,k:old.k,t:old.t,n:+old.n||0,...(old.s!=null?{s:old.s}:{})};
     if(!await pstkWrite(d=>({...d,moves:d.moves.map(m=>{
       if(m.id!==id)return m;
       const x={...m,pool,k,t,n,edits:(Array.isArray(m.edits)?m.edits:[]).concat([ed]).slice(-10)};
+      if(sz!=null)x.s=sz;else delete x.s;
       if(note)x.note=note;else delete x.note;
       return x;})})))return;
     pstkEditReset();
@@ -17703,10 +17738,10 @@ async function pstkAdd(){
     return;
   }
   const mv={id:Date.now().toString(36)+Math.random().toString(36).slice(2,6),at:Date.now(),pool,k,t,n,
-    ...(note?{note}:{}),by:S.user?.id||'',byName:S.user?.name||''};
+    ...(sz!=null?{s:sz}:{}),...(note?{note}:{}),by:S.user?.id||'',byName:S.user?.name||''};
   if(!await pstkWrite(d=>({...d,moves:d.moves.concat([mv])})))return;
   document.getElementById('pstk-n').value='';document.getElementById('pstk-note').value='';
-  showToast('✅ '+PSTK_T[t]+' · '+pstkFmt(n)+pstkUnit(k)+' '+pstkItemName(k)+' · '+pstkPoolName(pool));
+  showToast('✅ '+PSTK_T[t]+' · '+pstkFmt(n)+pstkUnit(k)+' '+pstkItemName(k)+(sz!=null?' · מידה '+sz:'')+' · '+pstkPoolName(pool));
   renderPackStock();pstkAlert(before);
 }
 async function pstkDel(id){
@@ -17737,7 +17772,7 @@ function pmConsHtml(cust,cons){
       <span style="color:var(--txt3);min-width:60px">יח' ליחידה</span>
     </div>`;}).join('');
   const rowsOf=l=>l.map(i=>`<div style="display:flex;align-items:center;gap:6px;margin-bottom:4px;font-size:12px">
-      <span style="flex:1">${esc(i.name)}${i.own?' <span style="color:var(--txt3)">👤</span>':''}</span>
+      <span style="flex:1">${esc(i.name)}${i.own?' <span style="color:var(--txt3)">👤</span>':''}${i.bySize?' <span style="color:var(--txt3)" title="נספר לפי מידה">📐</span>':''}</span>
       <input class="pm-cons" data-id="${esc(i.id)}" type="number" min="0" step="any" value="${cur.get(i.id)?(+cur.get(i.id).n||''):''}" placeholder="0" style="${inp}"/>
       <span style="color:var(--txt3);min-width:60px">${esc(i.unit||"יח'")} ליחידה</span>
     </div>`).join('');
