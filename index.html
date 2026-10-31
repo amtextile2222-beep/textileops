@@ -16684,36 +16684,39 @@ function _loadH2C(){
     sc.onload=ok;sc.onerror=()=>{_h2cP=null;no(new Error('html2canvas לא נטען'));};document.head.appendChild(sc);});
 }
 const _waPhone=ph=>{let d=String(ph||'').replace(/\D/g,'');if(d.startsWith('0'))d='972'+d.slice(1);return d.length>=11?d:'';};
+// html = מסמך אחד או מערך מסמכים (💬 כמה תעודות — 31/10/2026): כל מסמך מתחיל בעמוד חדש באותו PDF
 async function _dnPdfBlob(html){
   await _loadH2C();
   const J=window.jspdf&&window.jspdf.jsPDF;if(!J)throw new Error('ספריית PDF עדיין נטענת — נסה שוב עוד רגע');
-  const fr=document.createElement('iframe');
-  fr.style.cssText='position:fixed;left:-10000px;top:0;width:794px;height:1123px;border:0';
-  document.body.appendChild(fr);
-  try{
-    const d=fr.contentWindow.document;d.open();d.write(html);d.close();
-    await new Promise(ok=>setTimeout(ok,500));
-    d.body.style.padding='10mm'; // כמו בהדפסה (@media print)
-    const cv=await html2canvas(d.body,{scale:2,backgroundColor:'#ffffff',windowWidth:794,useCORS:true});
-    const doc=new J({unit:'mm',format:'a4',orientation:'portrait'});
-    const pagePx=Math.floor(cv.width*297/210); // גובה עמוד A4 בפיקסלים של הצילום
-    // 📱 באייפון הצילום יוצא מעט גבוה מעמוד (גובה ה-iframe/ריפוד) ⇒ נוצר עמוד 2 ריק (נצפה 13/10 ב-0698).
-    // עד 15% מעל עמוד — מכווצים לעמוד אחד; פרוסה אחרונה של פחות מ-8% (שוליים לבנים) — מדלגים.
-    if(cv.height<=pagePx*1.15){
-      const w=Math.min(210,297*cv.width/cv.height);
-      doc.addImage(cv.toDataURL('image/jpeg',0.92),'JPEG',(210-w)/2,0,w,w*cv.height/cv.width);
-      return doc.output('blob');
-    }
-    for(let y=0,pg=0;y<cv.height;y+=pagePx,pg++){
-      const h=Math.min(pagePx,cv.height-y);
-      if(pg&&h<pagePx*0.08)break;
-      const c=document.createElement('canvas');c.width=cv.width;c.height=h;
-      const x=c.getContext('2d');x.fillStyle='#fff';x.fillRect(0,0,c.width,h);x.drawImage(cv,0,y,cv.width,h,0,0,cv.width,h);
-      if(pg)doc.addPage();
-      doc.addImage(c.toDataURL('image/jpeg',0.92),'JPEG',0,0,210,h*210/cv.width);
-    }
-    return doc.output('blob');
-  }finally{fr.remove();}
+  const doc=new J({unit:'mm',format:'a4',orientation:'portrait'});
+  let pages=0;const add=(...a)=>{if(pages++)doc.addPage();doc.addImage(...a);};
+  for(const one of [].concat(html)){
+    const fr=document.createElement('iframe');
+    fr.style.cssText='position:fixed;left:-10000px;top:0;width:794px;height:1123px;border:0';
+    document.body.appendChild(fr);
+    try{
+      const d=fr.contentWindow.document;d.open();d.write(one);d.close();
+      await new Promise(ok=>setTimeout(ok,500));
+      d.body.style.padding='10mm'; // כמו בהדפסה (@media print)
+      const cv=await html2canvas(d.body,{scale:2,backgroundColor:'#ffffff',windowWidth:794,useCORS:true});
+      const pagePx=Math.floor(cv.width*297/210); // גובה עמוד A4 בפיקסלים של הצילום
+      // 📱 באייפון הצילום יוצא מעט גבוה מעמוד (גובה ה-iframe/ריפוד) ⇒ נוצר עמוד 2 ריק (נצפה 13/10 ב-0698).
+      // עד 15% מעל עמוד — מכווצים לעמוד אחד; פרוסה אחרונה של פחות מ-8% (שוליים לבנים) — מדלגים.
+      if(cv.height<=pagePx*1.15){
+        const w=Math.min(210,297*cv.width/cv.height);
+        add(cv.toDataURL('image/jpeg',0.92),'JPEG',(210-w)/2,0,w,w*cv.height/cv.width);
+        continue;
+      }
+      for(let y=0,pg=0;y<cv.height;y+=pagePx,pg++){
+        const h=Math.min(pagePx,cv.height-y);
+        if(pg&&h<pagePx*0.08)break;
+        const c=document.createElement('canvas');c.width=cv.width;c.height=h;
+        const x=c.getContext('2d');x.fillStyle='#fff';x.fillRect(0,0,c.width,h);x.drawImage(cv,0,y,cv.width,h,0,0,cv.width,h);
+        add(c.toDataURL('image/jpeg',0.92),'JPEG',0,0,210,h*210/cv.width);
+      }
+    }finally{fr.remove();}
+  }
+  return doc.output('blob');
 }
 // 🍎 הדפסה באייפון — Safari מתעלם מ-@page (כתובת + עמודים מיותרים) ⇒ PDF ⇒ חלון השיתוף ⇒ "הדפסה";
 // בלי שיתוף — פותחים את ה-PDF בלשונית. משותף לתעודת משלוח ולדף שלבי העבודה.
@@ -16787,6 +16790,32 @@ body{padding:0!important}
 </style></head><body>${bodies}</body></html>`);
   try{renderDNotes();}catch(e){}
 }
+// 💬 כמה תעודות בוואטסאפ (31/10/2026) — PDF אחד, כל תעודה בעמוד משלה (אותו סדר ומספור כמו בהדפסה).
+// חתימת העסק — שאלה אחת לכולן; לקוח אחד בלבד ⇒ wa.me לטלפון שלו
+async function shareDeliveryNotes(rows){
+  if(!rows.length){showToast('⚠ לא סומנו תעודות','var(--red-txt)');return;}
+  const sorted=rows.slice().sort((a,b)=>((+a.s.no||1e9)-(+b.s.no||1e9))||String(a.s.date||'').localeCompare(String(b.s.date||'')));
+  const got=[];
+  for(const r of sorted){const x=await dnEnsureNo(r.p.id,r.i);if(x)got.push(x);}
+  if(!got.length)return;
+  let parts=got.map(x=>deliveryNoteHtml(x.p,x.list[x.i],x.i,x.list.length));
+  const slot='<span class="sig-slot"></span>';
+  if(parts.some(h=>h.includes(slot))){
+    let img=null;
+    try{const sig=await bizSigGet();if(sig&&await showConfirm('✍ חתימה','להפיק את התעודות עם חתימת העסק?','✍ עם חתימה','בלי חתימה'))img=sig;}catch(e){}
+    parts=parts.map(h=>h.split(slot).join(img?`<img src="${img}" alt="" style="display:block;max-height:58px;max-width:180px;margin:-6px 0 -20px"/>`:''));
+  }
+  showToast('⏳ מכין PDF ('+parts.length+' תעודות)…','var(--txt3)',6000);
+  let blob;
+  try{blob=await _dnPdfBlob(parts);}catch(e){alert('הכנת ה-PDF נכשלה: '+(e?.message||e));return;}
+  try{renderDNotes();}catch(e){}
+  const nos=got.map(x=>String(x.list[x.i].no||0).padStart(4,'0'));
+  const name=parts.length===1?'delivery-note-'+nos[0]+'.pdf':'delivery-notes-'+nos[0]+'-'+nos[nos.length-1]+'.pdf';
+  const units=got.reduce((t,x)=>t+(+x.list[x.i].total||0),0);
+  const text=(parts.length===1?'תעודת משלוח ':'תעודות משלוח ')+nos.join(', ')+' · '+units+" יח'";
+  const custs=[...new Set(got.map(x=>x.p.cust))];
+  await _waSharePdf(blob,name,text,custs.length===1?_waPhone((S.customerInfo||{})[custs[0]]?.phone):'');
+}
 // חלון ההדפסה בלשונית תעודות משלוח: תעודות מסומנות (כל אחת בעמוד) / התחשבנות.
 function dnPrintDialog(){
   document.getElementById('dnp-wrap')?.remove();
@@ -16800,6 +16829,7 @@ function dnPrintDialog(){
     <div style="font-size:16px;font-weight:800;margin-bottom:4px">🖨 הדפסה</div>
     <div style="font-size:12px;color:var(--txt3);margin-bottom:12px">${sel?`סומנו <b style="color:var(--txt)">${sel}</b> תעודות מתוך ${all} שבסינון`:'לא סומנו תעודות — סמן ☑ בטבלה כדי להדפיס כמה תעודות יחד'}</div>
     ${b("document.getElementById('dnp-wrap')?.remove();printDeliveryNotes(dnFiltered(true).rows)",'📄',sel?`הדפס ${sel===1?'תעודה אחת':sel+' תעודות'} מסומנות`:'הדפס תעודות מסומנות','כל תעודה בעמוד נפרד, בהדפסה אחת',!sel)}
+    ${b("document.getElementById('dnp-wrap')?.remove();shareDeliveryNotes(dnFiltered(true).rows)",'💬',sel?`שלח ${sel===1?'תעודה אחת':sel+' תעודות'} מסומנות בוואטסאפ`:'שלח תעודות מסומנות בוואטסאפ','PDF אחד — כל תעודה בעמוד משלה',!sel)}
     ${b("document.getElementById('dnp-wrap')?.remove();printSettlement(true)",'🧾','התחשבנות — רק המסומנות','דוח אחד עם שורה לכל תעודה מסומנת',!sel)}
     ${b("document.getElementById('dnp-wrap')?.remove();printSettlement()",'🧾','התחשבנות — כל התעודות שבסינון',all+' תעודות לפי הסינון במסך',!all)}
     ${b(`document.getElementById('dnp-wrap')?.remove();printProforma(${sel?'true':'false'})`,'🧾','חשבונית עסקה'+(sel?' — רק המסומנות':' — כל שבסינון'),'מספר חשבונית + מע"מ '+(S.settings?.vatPct??18)+'% · ללקוח אחד',!(sel||all))}
