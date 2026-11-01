@@ -16437,7 +16437,7 @@ function bcGenerateOpenQty(){
       </div>
     </div>`;
   new QRCode(document.getElementById('bc-openqty-qr'),{text:bcQr(code),width:150,height:150,colorDark:'#000000',colorLight:'#ffffff',correctLevel:QRCode.CorrectLevel.M});
-  setTimeout(()=>{const im=document.getElementById('bc-openqty-qr')?.querySelector('img');if(im)im.style.display='none';},50);
+  _qrOne(document.getElementById('bc-openqty-qr'));
 }
 function bcPrintOpenQty(cust,prod,code,pname,pdate){
   const canvas=document.querySelector('#bc-openqty-qr canvas');
@@ -16487,8 +16487,12 @@ function bcGenerateShip(){
       </div>
     </div>`;
   new QRCode(document.getElementById('bc-ship-qr'),{text:bcQr(code),width:150,height:150,colorDark:'#000000',colorLight:'#ffffff',correctLevel:QRCode.CorrectLevel.M});
-  setTimeout(()=>{const im=document.getElementById('bc-ship-qr')?.querySelector('img');if(im)im.style.display='none';},50);
+  _qrOne(document.getElementById('bc-ship-qr'));
 }
+// qrcodejs מצייר canvas וגם img, ואחרי בדיקת data-URI (אסינכרונית) מסתיר את ה-canvas ומציג img. ההסתרה הישנה של
+// ה-img אחרי 50ms נפלה לפעמים **אחרי** ההחלפה ⇒ שניהם מוסתרים, כרטיס בלי QR (נצפה 01/11). משאירים תמיד את ה-canvas
+// (ההדפסה וה-PDF לוקחים ממנו) — כמה פעמים, כדי לנצח את ההחלפה גם כשהיא מאחרת.
+function _qrOne(el){const f=()=>{const c=el?.querySelector('canvas'),im=el?.querySelector('img');if(c){c.style.display='block';if(im)im.style.display='none';}};f();[50,300,1500].forEach(t=>setTimeout(f,t));}
 function bcPrintShip(cust,prod,code,pname,pdate){
   const canvas=document.querySelector('#bc-ship-qr canvas');
   const img=canvas?`<img src="${canvas.toDataURL('image/png')}" style="width:150px;height:150px"/>`:'';
@@ -16577,7 +16581,7 @@ function bcGenerate(){
     _bcNfcBtn(div,totalCode,'📦 כל הכמות · '+totalQtyAll+' יח׳');
     printArea.appendChild(div);
     new QRCode(qrWrap,{text:bcQr(totalCode),width:150,height:150,colorDark:'#000000',colorLight:'#ffffff',correctLevel:QRCode.CorrectLevel.M});
-    setTimeout(()=>{const im=qrWrap.querySelector('img');if(im)im.style.display='none';},50);
+    _qrOne(qrWrap);
   })();
   items.forEach((it,idx)=>{
     const code=cust+prod+it.size+it.qty+it.col+sfx;
@@ -16605,7 +16609,7 @@ function bcGenerate(){
     _bcNfcBtn(div,code,'מידה '+it.size+' · '+parseInt(it.qty)+' יח׳ · '+colName);
     printArea.appendChild(div);
     new QRCode(qrWrap,{text:bcQr(code),width:150,height:150,colorDark:'#000000',colorLight:'#ffffff',correctLevel:QRCode.CorrectLevel.M});
-    setTimeout(()=>{const im=qrWrap.querySelector('img');if(im)im.style.display='none';},50);
+    _qrOne(qrWrap);
   });
 }
 // 👕 כרטיס ברקוד דגם בודד. הכמות מהמוצר (מקור האמת), ובהיעדרה מהשורות במחולל.
@@ -16647,7 +16651,7 @@ function bcGenerateSample(cust,prod,t){
   _bcNfcBtn(div,code,SAMPLE_STEP+' · '+qty+' יח׳');
   document.getElementById('bc-print-area').appendChild(div);
   new QRCode(qrWrap,{text:bcQr(code),width:150,height:150,colorDark:'#000000',colorLight:'#ffffff',correctLevel:QRCode.CorrectLevel.M});
-  setTimeout(()=>{const im=qrWrap.querySelector('img');if(im)im.style.display='none';},50);
+  _qrOne(qrWrap);
 }
 // הדפסה דרך iframe נסתר במקום window.open — ב-PWA במסך הבית (standalone) window.open נתקע על דף ההדפסה ואי אפשר לסגור אותו אלא בסגירת האפליקציה כולה
 // ✍ מסמך עם מקום לחתימת העסק (sig-slot) ⇒ שואלים אם לחתום, ומכניסים את התמונה.
