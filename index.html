@@ -1439,6 +1439,11 @@ code{background:var(--bg2);border:0.5px solid var(--b);border-radius:4px;padding
       <div id="worker-bc-output" style="margin-top:1rem"></div>
     </div>
     <div class="card" style="margin-top:1rem">
+      <div style="font-size:15px;font-weight:700;margin-bottom:6px">🔐 רק ברקודים מהאפליקציה</div>
+      <div style="font-size:12px;color:var(--txt3);margin-bottom:10px;line-height:1.6">כל מדבקת משימה שהאפליקציה מדפיסה (וגם NFC) מקבלת סימון סודי בתוך ה-QR. כשהאכיפה פעילה, עובד ואחראי יכולים להתחיל משימה רק מסריקה של מדבקה כזו. QR שהוכן מחוץ לאפליקציה, מדבקה ישנה בלי סימון והקלדה ידנית של המספר — מנהל בלבד.</div>
+      <div id="bcsign-box"></div>
+    </div>
+    <div class="card" style="margin-top:1rem">
       <div style="font-size:15px;font-weight:700;margin-bottom:10px">🏭 תחנות עבודה (מצלמות)</div>
       <div style="font-size:12px;color:var(--txt3);margin-bottom:10px">עובד סורק את ברקוד התחנה כשהוא מתיישב בעמדה — השיוך למחלקה ולתחנה נעשה אוטומטית ונרשם על המשימות. סריקת תחנה חדשה סוגרת את הקודמת; חתימת יציאה סוגרת הכל. הרשימה נלקחת מהמחלקות והתחנות שבלשונית <b>ניהול</b> — ערוץ DVR נקבע כאן (אותו ערוץ יכול לשמש כמה תחנות)</div>
       <button class="btn" style="font-size:13px;margin-bottom:10px" onclick="syncStationsFromDepts()">🔄 סנכרן תחנות מלשונית הניהול</button>
@@ -1805,6 +1810,7 @@ const LANGS={
     ph_task_type:'לדוגמה: תפירה, חיתוך, גימור...',
     err_sel_worker:'⚠ בחר עובד',
     err_barcode_13:'⚠ ברקוד חייב להיות 13 או 16 ספרות',
+    bc_unsigned:'⛔ ברקוד לא מוכר — סרוק מדבקה שהודפסה מהאפליקציה (הקלדה ידנית — מנהל בלבד)',
     err_scan_one:'⚠ סרוק לפחות ברקוד אחד',
     err_sel_step:'⚠ בחר לפחות שלב עבודה אחד',
     lim_steps:'⚠ ניתן לבחור עד 2 שלבים לכל ברקוד',
@@ -2085,6 +2091,7 @@ const LANGS={
     ph_task_type:'مثال: خياطة، قص، تشطيب...',
     err_sel_worker:'⚠ اختر عاملاً',
     err_barcode_13:'⚠ الباركود يجب أن يكون 13 أو 16 رقماً',
+    bc_unsigned:'⛔ باركود غير معروف — امسح ملصقاً مطبوعاً من التطبيق (الإدخال اليدوي — للمدير فقط)',
     err_scan_one:'⚠ امسح باركوداً واحداً على الأقل',
     err_sel_step:'⚠ اختر مرحلة عمل واحدة على الأقل',
     lim_steps:'⚠ يمكن اختيار مرحلتين كحد أقصى لكل باركود',
@@ -2324,6 +2331,7 @@ const LANGS={
     ph_task_type:'e.g. sewing, cutting, finishing...',
     err_sel_worker:'⚠ Select a worker',
     err_barcode_13:'⚠ Barcode must be 13 or 16 digits',
+    bc_unsigned:'⛔ Unknown barcode — scan a label printed by the app (manual entry — manager only)',
     err_scan_one:'⚠ Scan at least one barcode',
     err_sel_step:'⚠ Select at least one work step',
     lim_steps:'⚠ Up to 2 steps per barcode',
@@ -2495,6 +2503,22 @@ function bcFromScan(text){
   if(d.length>=BC_LEN_OLD)return d.slice(0,BC_LEN_OLD);
   return '';
 }
+// 🔐 ברקוד חתום (01/11/2026) — רק מדבקה שהאפליקציה הדפיסה עוברת בסורק. ה-QR = הספרות + '-' + 6 אותיות
+// (sha256 של מפתח+ספרות). אותיות בלבד ⇒ כל מסלול שמוריד את מה שאינו ספרה (bcFromScan וכו') מקבל את
+// אותן ספרות כמו קודם. המפתח והמתג ב-telegramSettings (bcKey/bcSignOn — כתיבה מנהל, קריאה לכולם).
+// אכיפה: עובד/אחראי — רק ברקוד שנסרק (מצלמה/NFC) עם חתימה תקינה. הקלדה ידנית / מדבקה ישנה / QR
+// שהוכן בחוץ — מנהל בלבד. מדבקה שהודפסה לפני יצירת המפתח — להדפיס מחדש. ⚠️ החלפת מפתח = כל המדבקות נפסלות.
+function bcSig(d){const k=S.settings?.bcKey;if(!k)return '';const h=sha256(k+'|'+d);let r='';for(let i=0;i<6;i++)r+=String.fromCharCode(65+parseInt(h.slice(i*4,i*4+4),16)%26);return r;}
+function bcQr(code){const c=String(code??'');if(!/^\d{13}(\d{3})?$/.test(c))return c;const g=bcSig(c);return g?c+'-'+g:c;}
+const _bcOk={}; // שדה (bc/ts/mgr) ⇒ הספרות האחרונות שנסרקו עם חתימה תקינה
+function bcScanMark(f,text,bc){const m=String(text||'').match(/-([A-Z]{6})\s*$/);_bcOk[f]=m&&bc&&m[1]===bcSig(bc)?bc:'';}
+function bcSignOn(){return !!(S.settings?.bcSignOn&&S.settings?.bcKey);}
+function bcSignGate(f,raw){
+  if(!bcSignOn()||S.user?.role==='manager'||(raw&&_bcOk[f]===raw))return true;
+  const T=LANGS[currentLang]||{};
+  showToast(T.bc_unsigned||'⛔ ברקוד לא מוכר — סרוק מדבקה שהודפסה מהאפליקציה (הקלדה ידנית — מנהל בלבד)','var(--red-txt)',7000);
+  return false;
+}
 // ─── 📶 מדבקות NFC — חלופה לברקוד המודפס, לא במקומו ─────────────────────
 // המדבקה מכילה רשומת NDEF טקסט עם **אותן ספרות** של הברקוד — אין טבלת שיוך ב-Firebase.
 // הקריאה נכנסת בדיוק למסלול של המצלמה (bcFromScan → parseBc/submitBc וכו').
@@ -2577,6 +2601,7 @@ function nfcScanTo(where){
     }
     const bc=bcFromScan(txt);
     if(!bc){showToast('⚠ המדבקה ריקה או שאינה ברקוד משימה','var(--red-txt)');return;}
+    bcScanMark(where,txt,bc);
     if(where==='bc'){
       try{stopCam();}catch(e){}
       document.getElementById('bc-inp').value=bc;parseBc(bc);
@@ -2611,7 +2636,7 @@ async function bcNfcWriteOne(code,lbl){
   try{
     // סריקה במקביל לכתיבה — כדי שאנדרואיד לא יפתח את מסך המערכת על המדבקה (ראה _nfcLinger)
     const r=new NDEFReader();r.onreading=()=>{};r.scan({signal:ac.signal}).catch(()=>{});
-    await r.write({records:[{recordType:'text',lang:'en',data:code}]},{signal:ac.signal});
+    await r.write({records:[{recordType:'text',lang:'en',data:bcQr(code)}]},{signal:ac.signal});
     _nfcLinger(ac);
     if(navigator.vibrate)navigator.vibrate(80);
     showToast('✅ נכתב למדבקה: '+code,'var(--green-txt)');
@@ -2656,7 +2681,7 @@ async function _nfcWriteSeq(cards,hint,copies){
     busy=true;
     const c=seq[i].c;
     try{
-      await r.write({records:[{recordType:'text',lang:'en',data:c.dataset.code}]},{signal:ac.signal});
+      await r.write({records:[{recordType:'text',lang:'en',data:bcQr(c.dataset.code)}]},{signal:ac.signal});
       last=sn;c.style.outline='3px solid #16a34a';
       if(navigator.vibrate)navigator.vibrate(80);
       i++;
@@ -4755,6 +4780,9 @@ function listenFb(){
         // 🔒 מתג האכיפה של נעילת התחנה — מסונכרן לכל המכשירים דרך אותו מסמך הגדרות,
         // כדי שכיבוי חירום מהניהול ישחרר את כל רצפת הייצור מיד ולא מכשיר-מכשיר.
         if(data.stationLock!==undefined)S.settings.stationLock=!!data.stationLock;
+        if(data.bcKey!==undefined)S.settings.bcKey=String(data.bcKey||''); // 🔐 ברקוד חתום
+        if(data.bcSignOn!==undefined)S.settings.bcSignOn=!!data.bcSignOn;
+        try{renderBcSignState();}catch(e){}
         // 🔧 רשימת המחלקות הבלעדיות — שמות מחלקה, ולכן renameDept מעדכן גם אותה.
         if(Array.isArray(data.exclusiveDepts))S.settings.exclusiveDepts=data.exclusiveDepts.slice();
         if(data.stepOrderLock!==undefined)S.settings.stepOrderLock=!!data.stepOrderLock;
@@ -7231,6 +7259,7 @@ async function submitBc(){
   const T=LANGS[currentLang];
   if(!raw&&_bcBatch.length){await bcStartBatch();return;} // שדה ריק + סל ממתין = התחל את כל הסל
   if(!isBcLen(raw.length)){alert('ברקוד חייב להיות 13 או 16 ספרות');return;}
+  if(!bcSignGate('bc',raw))return;
   if(!S.user){alert('יש להתחבר תחילה');return;}
   if(isShipBc(raw)){openShipModal(raw.slice(0,2),raw.slice(2,7),orderNoOf(raw));document.getElementById('bc-inp').value='';parseBc('');return;} // ברקוד "יצא ללקוח" — לא משימה
   if(isSampleScan(raw)){await bcStartSample(raw);return;} // 👕 דגם ראשון — התחלה מיידית, בלי שלבים ושערים
@@ -10047,6 +10076,7 @@ function mgrStartDecoding(video,status){
         const text=code.data.replace(/\D/g,'');
         const bc=bcFromScan(text);
         if(bc){
+          bcScanMark('mgr',code.data,bc);
           document.getElementById('mgr-bc-inp').value=bc;
           parseMgrBc(bc);
           status.textContent=(T.sc_scanned||'✅ נסרק: ')+bc;
@@ -10344,6 +10374,7 @@ async function closeWorkerStation(w,when){
   }
 }
 function renderStationsAdmin(){
+  try{renderBcSignState();}catch(e){}
   renderStationLockState(); // לפני ה-return המוקדם — המתג מוצג גם כשעדיין אין תחנות
   renderStepOrderLockState();
   renderStationExclusive();
@@ -10388,6 +10419,37 @@ async function setStationLock(on){
     S.settings.stationLock=!on;if(el)el.checked=!on;
     showToast('❌ '+e.message,'var(--red-txt)');
   }
+}
+// 🔐 ברקוד חתום — שלב 1: יצירת מפתח (מכאן כל הדפסה מסומנת); שלב 2: אכיפה (אחרי הדפסה מחדש של המדבקות בייצור)
+function renderBcSignState(){
+  const el=document.getElementById('bcsign-box');if(!el)return;
+  const mgr=S.user?.role==='manager',key=!!S.settings?.bcKey,on=bcSignOn();
+  if(!key){el.innerHTML=mgr?`<button class="btn primary" style="width:100%;justify-content:center;font-size:14px" onclick="bcSignInit()">🔑 התחל לסמן ברקודים</button>
+    <div style="font-size:11px;color:var(--txt3);margin-top:6px">מהרגע הזה כל מדבקה שתודפס תהיה מסומנת. אחרי שתדפיס מחדש את המדבקות של ההזמנות שבייצור — הפעל את האכיפה.</div>`
+    :'<div style="font-size:12px;color:var(--txt3)">לא הופעל</div>';return;}
+  el.innerHTML=`<div style="font-size:12px;color:var(--green-txt);font-weight:700;margin-bottom:8px">✅ המדבקות שמודפסות מסומנות</div>
+    <label style="display:flex;align-items:center;gap:8px;cursor:pointer;font-size:13px;font-weight:600">
+      <input type="checkbox" id="bcsign-on" style="width:17px;height:17px" ${on?'checked':''} ${mgr?'':'disabled'} onchange="setBcSign(this.checked)">
+      🔐 אכיפה: עובד/אחראי — רק מדבקה מסומנת
+    </label>
+    <div style="font-size:12px;font-weight:700;margin-top:6px;color:${on?'var(--amber-txt)':'var(--txt3)'}">${on?'🔒 האכיפה פעילה — מדבקה בלי סימון והקלדה ידנית: מנהל בלבד':'🔓 האכיפה כבויה — כל ברקוד עובד כמו קודם'}</div>`;
+}
+async function bcSignInit(){
+  if(S.user?.role!=='manager'||S.settings?.bcKey)return;
+  if(!S.fbConnected){alert('אין חיבור לשרת');return;}
+  if(!await showConfirm('🔑 סימון ברקודים',esc('מעכשיו כל מדבקה שתודפס תהיה מסומנת.\n\nמדבקות שכבר הודפסו לא מסומנות — לפני הפעלת האכיפה צריך להדפיס מחדש את המדבקות של ההזמנות שבייצור.'),'🔑 התחל','ביטול'))return;
+  const a=new Uint8Array(16);crypto.getRandomValues(a);
+  const k=[...a].map(x=>x.toString(16).padStart(2,'0')).join('');
+  try{await fbSet('appSettings','telegramSettings',{bcKey:k});S.settings.bcKey=k;saveLS();renderBcSignState();showToast('🔑 מעכשיו המדבקות מסומנות','var(--green-txt)',5000);}
+  catch(e){showToast('❌ '+e.message,'var(--red-txt)');}
+}
+async function setBcSign(on){
+  if(S.user?.role!=='manager'){renderBcSignState();return;}
+  if(on&&!await showConfirm('🔐 אכיפת ברקוד מסומן',esc('להפעיל עכשיו?\n\nעובד ואחראי לא יוכלו להתחיל משימה ממדבקה שהודפסה לפני הסימון או מהקלדה ידנית. ודא שהמדבקות של ההזמנות שבייצור הודפסו מחדש.'),'🔐 הפעל','ביטול')){renderBcSignState();return;}
+  const prev=!!S.settings.bcSignOn;S.settings.bcSignOn=!!on;
+  try{await fbSet('appSettings','telegramSettings',{bcSignOn:!!on});saveLS();showToast(on?'🔒 אכיפת ברקוד מסומן הופעלה':'🔓 האכיפה כובתה',on?'var(--amber-txt)':'var(--green-txt)',5000);}
+  catch(e){S.settings.bcSignOn=prev;showToast('❌ '+e.message,'var(--red-txt)');}
+  renderBcSignState();
 }
 function renderStationLockState(){
   const cb=document.getElementById('stn-lock');if(cb)cb.checked=!!S.settings?.stationLock;
@@ -10951,7 +11013,7 @@ async function tsStartCam(){
         // משימה (13 או 16 ספרות) — ממלא את השדה וסוגר לבחירת שלבים/כמות
         const digits=text.replace(/\D/g,'');
         if(isBcLen(digits.length)){
-          document.getElementById('ts-bc-inp').value=digits;tsParseBc(digits);
+          bcScanMark('ts',text,digits);document.getElementById('ts-bc-inp').value=digits;tsParseBc(digits);
           status.textContent=(T.sc_scanned||'✅ נסרק: ')+digits;
           clearInterval(tsCamInterval);setTimeout(()=>tsStopCam(),600);
         }
@@ -10972,6 +11034,7 @@ function tsAddToBatch(){
   const T=LANGS[currentLang];
   if(!empId){showToast(T.err_sel_worker||'⚠ בחר עובד','var(--red-txt)');return;}
   if(!isBcLen(raw.length)){showToast(T.err_barcode_13||'⚠ ברקוד חייב להיות 13 או 16 ספרות','var(--red-txt)');return;}
+  if(!bcSignGate('ts',raw))return;
   if(isShipBc(raw)){openShipModal(raw.slice(0,2),raw.slice(2,7),orderNoOf(raw));document.getElementById('ts-bc-inp').value='';return;} // ברקוד "יצא ללקוח"
   if(isSampleScan(raw)){
     // 👕 דגם ראשון — נכנס לסל כמשימת דגם (בלי שלבים ובלי שערים). כמה דגמים בסל = טיימר משותף.
@@ -11011,6 +11074,7 @@ async function tsStartTask(){
   const w=S.workers.find(x=>x.id===empId);
   if(!w||w.status!=='in'){showToast(T.cfm_worker_not_in||'⚠ העובד לא נמצא בעבודה — וודא שחתם כניסה','var(--red-txt)',5000);return;}
   // אם יש ברקוד בשדה — הוסף לסל
+  if(isBcLen(raw.length)&&!bcSignGate('ts',raw))return; // 🔐
   if(isBcLen(raw.length)&&isSampleScan(raw)){
     // 👕 דגם ראשון — בלי שלבים, בלי שערי תחנה/סדר ובלי מגבלות הסל
     const dup=sampleDupFor(w.id,raw,_tsBatch);
@@ -11325,6 +11389,7 @@ function mgrAddToBatch(){
   const T=LANGS[currentLang];
   if(!empId){showToast(T.err_sel_worker||'⚠ בחר עובד','var(--red-txt)');return;}
   if(!isBcLen(raw.length)){showToast(T.err_barcode_13||'⚠ ברקוד חייב להיות 13 או 16 ספרות','var(--red-txt)');return;}
+  if(!bcSignGate('mgr',raw))return;
   if(isShipBc(raw)){openShipModal(raw.slice(0,2),raw.slice(2,7),orderNoOf(raw));document.getElementById('mgr-bc-inp').value='';parseMgrBc('');return;} // ברקוד "יצא ללקוח"
   if(isSampleScan(raw)){ // 👕 דגם ראשון — לסל כמשימת דגם, כמו ב-tsAddToBatch
     const dup=sampleDupFor(empId,raw,_mgrBatch);
@@ -11357,6 +11422,7 @@ async function mgrStartTask(){
   if(!empId){showToast(T.err_sel_worker||'⚠ בחר עובד','var(--red-txt)');return;}
   const w=S.workers.find(x=>x.id===empId);
   if(!w||w.status!=='in'){showToast(T.cfm_worker_not_in||'⚠ העובד לא נמצא בעבודה','var(--red-txt)',5000);return;}
+  if(isBcLen(raw.length)&&!bcSignGate('mgr',raw))return; // 🔐
   if(isBcLen(raw.length)&&isSampleScan(raw)){
     // 👕 דגם ראשון — בלי שלבים ובלי שערי תחנה/סדר
     const dup=sampleDupFor(empId,raw,_mgrBatch);
@@ -13835,6 +13901,7 @@ function startDecoding(video,status){
         const text=code.data.replace(/\D/g,'');
         const bc=bcFromScan(text);
         if(bc){
+          bcScanMark('bc',code.data,bc);
           document.getElementById('bc-inp').value=bc;
           parseBc(bc);
           status.textContent=(T.sc_scanned||'✅ נסרק: ')+bc;
@@ -16369,7 +16436,7 @@ function bcGenerateOpenQty(){
         ${_bcProdMetaLine(pname,pdate)}
       </div>
     </div>`;
-  new QRCode(document.getElementById('bc-openqty-qr'),{text:code,width:150,height:150,colorDark:'#000000',colorLight:'#ffffff',correctLevel:QRCode.CorrectLevel.M});
+  new QRCode(document.getElementById('bc-openqty-qr'),{text:bcQr(code),width:150,height:150,colorDark:'#000000',colorLight:'#ffffff',correctLevel:QRCode.CorrectLevel.M});
   setTimeout(()=>{const im=document.getElementById('bc-openqty-qr')?.querySelector('img');if(im)im.style.display='none';},50);
 }
 function bcPrintOpenQty(cust,prod,code,pname,pdate){
@@ -16419,7 +16486,7 @@ function bcGenerateShip(){
         ${_bcProdMetaLine(pname,pdate)}
       </div>
     </div>`;
-  new QRCode(document.getElementById('bc-ship-qr'),{text:code,width:150,height:150,colorDark:'#000000',colorLight:'#ffffff',correctLevel:QRCode.CorrectLevel.M});
+  new QRCode(document.getElementById('bc-ship-qr'),{text:bcQr(code),width:150,height:150,colorDark:'#000000',colorLight:'#ffffff',correctLevel:QRCode.CorrectLevel.M});
   setTimeout(()=>{const im=document.getElementById('bc-ship-qr')?.querySelector('img');if(im)im.style.display='none';},50);
 }
 function bcPrintShip(cust,prod,code,pname,pdate){
@@ -16509,7 +16576,7 @@ function bcGenerate(){
     div.appendChild(_bcSelCheckbox());
     _bcNfcBtn(div,totalCode,'📦 כל הכמות · '+totalQtyAll+' יח׳');
     printArea.appendChild(div);
-    new QRCode(qrWrap,{text:totalCode,width:150,height:150,colorDark:'#000000',colorLight:'#ffffff',correctLevel:QRCode.CorrectLevel.M});
+    new QRCode(qrWrap,{text:bcQr(totalCode),width:150,height:150,colorDark:'#000000',colorLight:'#ffffff',correctLevel:QRCode.CorrectLevel.M});
     setTimeout(()=>{const im=qrWrap.querySelector('img');if(im)im.style.display='none';},50);
   })();
   items.forEach((it,idx)=>{
@@ -16537,7 +16604,7 @@ function bcGenerate(){
     div.appendChild(_bcSelCheckbox());
     _bcNfcBtn(div,code,'מידה '+it.size+' · '+parseInt(it.qty)+' יח׳ · '+colName);
     printArea.appendChild(div);
-    new QRCode(qrWrap,{text:code,width:150,height:150,colorDark:'#000000',colorLight:'#ffffff',correctLevel:QRCode.CorrectLevel.M});
+    new QRCode(qrWrap,{text:bcQr(code),width:150,height:150,colorDark:'#000000',colorLight:'#ffffff',correctLevel:QRCode.CorrectLevel.M});
     setTimeout(()=>{const im=qrWrap.querySelector('img');if(im)im.style.display='none';},50);
   });
 }
@@ -16579,7 +16646,7 @@ function bcGenerateSample(cust,prod,t){
   div.appendChild(qrWrap);div.appendChild(info);div.appendChild(_bcSelCheckbox());
   _bcNfcBtn(div,code,SAMPLE_STEP+' · '+qty+' יח׳');
   document.getElementById('bc-print-area').appendChild(div);
-  new QRCode(qrWrap,{text:code,width:150,height:150,colorDark:'#000000',colorLight:'#ffffff',correctLevel:QRCode.CorrectLevel.M});
+  new QRCode(qrWrap,{text:bcQr(code),width:150,height:150,colorDark:'#000000',colorLight:'#ffffff',correctLevel:QRCode.CorrectLevel.M});
   setTimeout(()=>{const im=qrWrap.querySelector('img');if(im)im.style.display='none';},50);
 }
 // הדפסה דרך iframe נסתר במקום window.open — ב-PWA במסך הבית (standalone) window.open נתקע על דף ההדפסה ואי אפשר לסגור אותו אלא בסגירת האפליקציה כולה
@@ -18340,7 +18407,7 @@ function bcPrint(mode){
   if(g){
     const shipCode=g.cust+g.prod+'900099'+(g.sfx||'');
     const tmp=document.createElement('div');
-    new QRCode(tmp,{text:shipCode,width:150,height:150,colorDark:'#000000',colorLight:'#ffffff',correctLevel:QRCode.CorrectLevel.M});
+    new QRCode(tmp,{text:bcQr(shipCode),width:150,height:150,colorDark:'#000000',colorLight:'#ffffff',correctLevel:QRCode.CorrectLevel.M});
     const cv=tmp.querySelector('canvas');
     if(cv)shipCard=`<div class="bc-card" style="border-width:3px;grid-column:1/-1">
         <img src="${cv.toDataURL('image/png')}" style="width:150px;height:150px;flex-shrink:0"/>
@@ -18424,7 +18491,7 @@ function bcPrint(mode){
 // מייצר PDF בגודל אמיתי כדי שאפשר להדפיס גם מהנייד (AirPrint מכווץ HTML, אבל PDF מודפס בגודל מקורי).
 function _bcQRCanvas(text,px){
   try{const tmp=document.createElement('div');
-    new QRCode(tmp,{text,width:px,height:px,colorDark:'#000000',colorLight:'#ffffff',correctLevel:QRCode.CorrectLevel.M});
+    new QRCode(tmp,{text:bcQr(text),width:px,height:px,colorDark:'#000000',colorLight:'#ffffff',correctLevel:QRCode.CorrectLevel.M});
     return tmp.querySelector('canvas');
   }catch(e){return null;}
 }
