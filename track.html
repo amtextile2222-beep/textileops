@@ -64,8 +64,8 @@ h2{font-size:14px;color:var(--txt2);margin:20px 0 8px}
 .pbar .pbtn:disabled{opacity:.6}
 .pbar #poff{background:none;border:0;color:inherit;text-decoration:underline;font:inherit;cursor:pointer;padding:0}
 .lay.has-stk{display:grid;grid-template-columns:minmax(0,1fr) 250px;gap:16px;align-items:start}
-.lay.has-stk aside{position:sticky;top:12px}
-@media (max-width:760px){.lay.has-stk{display:flex;flex-direction:column;gap:0}.lay.has-stk aside{order:-1;position:static}}
+.lay.has-stk aside{position:sticky;top:12px;max-height:calc(100vh - 24px);overflow-y:auto;overscroll-behavior:contain}
+@media (max-width:760px){.lay.has-stk{display:flex;flex-direction:column;gap:0}.lay.has-stk aside{order:-1;position:static;max-height:none;overflow:visible}}
 footer{font-size:11px;color:var(--txt3);text-align:center;margin:20px 0 8px}
 footer button{background:none;border:0;color:var(--blue);font:inherit;cursor:pointer;text-decoration:underline;padding:0}
 .login{max-width:380px;margin:30px auto;text-align:center}
