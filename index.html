@@ -18703,11 +18703,12 @@ function bcExportNiimbot(){
   const filtered=items.filter((_,i)=>sel.items.has(i));
   if(!filtered.length){alert('בחר לפחות ברקוד אחד לייצוא');return;}
   const BOM='﻿';
-  const header='ברקוד,לקוח,מוצר,מידה,כמות,קוד_צבע,שם_צבע\r\n';
+  // 🔐 עמודת "ברקוד" = מה שנכנס ל-QR — כולל הסימון (bcQr), אחרת המדבקה מ-NIIMBOT נחסמת באכיפה; "מספר" = הספרות לתצוגה
+  const header='ברקוד,לקוח,מוצר,מידה,כמות,קוד_צבע,שם_צבע,מספר\r\n';
   const rows=filtered.map(it=>{
     const code=cust+prod+it.size+it.qty+it.col+sfx;
     const colName=(COLORS[it.col]||it.col).replace(/,/g,' ');
-    return `${code},${cust},${prod},${it.size},${parseInt(it.qty)},${it.col},${colName}`;
+    return `${bcQr(code)},${cust},${prod},${it.size},${parseInt(it.qty)},${it.col},${colName},${code}`;
   }).join('\r\n');
   const csv=BOM+header+rows;
   const blob=new Blob([csv],{type:'text/csv;charset=utf-8;'});
