@@ -1642,7 +1642,8 @@ function trackStates(prods, tasks) {
     else if (scans.pack > 0) id = 'packing';
     else if (sew && sew.of > 0 && sew.full === sew.of) id = 'ready_pack';
     else if (scans.sew > 0) id = 'sewing';
-    else if (qty > 0 && scans.recv > 0) id = 'ready_sew';
+    // 🔢 (02/11/2026) כמות שהוזנה בזמן שהספירה עוד רצה — "ספירה וגזירה" עד שמשימת קבלה אחת הסתיימה. כמו pipeStateOf
+    else if (qty > 0 && ts.some(t => trackFamOfDept(t.dept) === 'recv' && t.duration > 0)) id = 'ready_sew';
     else if (scans.recv > 0) id = 'countcut';
     else id = 'intake';
     // דחיפה ידנית של מנהל — קדימה בלבד, כמו בלוח
