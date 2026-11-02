@@ -63,7 +63,23 @@ h2{font-size:14px;color:var(--txt2);margin:20px 0 8px}
 .pbar .pbtn{font-size:14px;font-weight:700;padding:8px 14px;border-radius:10px;border:0;background:var(--blue);color:#fff;cursor:pointer}
 .pbar .pbtn:disabled{opacity:.6}
 .pbar #poff{background:none;border:0;color:inherit;text-decoration:underline;font:inherit;cursor:pointer;padding:0}
-.lay.has-stk{display:grid;grid-template-columns:minmax(0,1fr) 250px;gap:16px;align-items:start}
+/* 📦 (02/11/2026) שורת חומר: שם בשורה מלאה, מתחת — במפעל / נדרש / חסר; פריט לפי מידה = טבלה אחת */
+.stk{padding:7px 0;border-top:1px solid var(--brd)}
+.stk-d+.stk{border-top:0}
+.stk-d{font-size:12px;font-weight:700;color:var(--txt2);margin:10px 0 2px}
+.stk-n{font-size:13px;font-weight:600}
+.stk-q{display:flex;flex-wrap:wrap;gap:4px 10px;font-size:12px;color:var(--txt3);margin-top:2px}
+.stk-q b{color:var(--txt);font-size:14px}
+.stk.bad .stk-n{color:var(--red)}
+.stk-miss{color:var(--red);font-weight:700}
+.stk-ok{color:var(--green)}
+.stk-t{width:100%;border-collapse:collapse;font-size:12px;margin-top:4px}
+.stk-t th{font-weight:400;color:var(--txt3);text-align:right;padding:2px 4px}
+.stk-t td{padding:3px 4px;border-top:1px solid var(--brd)}
+.stk-t tr.bad td{color:var(--red);font-weight:700}
+.stk-sum{font-size:12px;font-weight:700;padding:6px 8px;border-radius:8px;margin-bottom:4px;background:var(--red-bg);color:var(--red)}
+.stk-sum.ok{background:var(--green-bg);color:var(--green)}
+.lay.has-stk{display:grid;grid-template-columns:minmax(0,1fr) 300px;gap:16px;align-items:start}
 .lay.has-stk aside{position:sticky;top:12px;max-height:calc(100vh - 24px);overflow-y:auto;overscroll-behavior:contain}
 @media (max-width:760px){.lay.has-stk{display:flex;flex-direction:column;gap:0}.lay.has-stk aside{order:-1;position:static;max-height:none;overflow:visible}}
 footer{font-size:11px;color:var(--txt3);text-align:center;margin:20px 0 8px}
@@ -274,14 +290,24 @@ async function load(){
     // 🧵 (23/10/2026) גם פריטי גזירה/תפירה (תוויות, פלזלין…) — מקובצים לפי מחלקה, עם יחידה (מטר/גליל…)
     const DEPT={cut:'✂️ גזירה',sew:'🧵 תפירה',pack:'📦 אריזה'},multi=new Set(stk.map(s=>s.dept||'pack')).size>1;
     // 📋 (25/10/2026) נדרש להזמנות שלכם שבמפעל וכמה חסר — מהשרת (need); בלי need — כמו קודם
-    const stkRow=s=>{const nd=Number(s.need)||0,n=Number(s.n)||0,miss=nd>0&&n<nd,u=s.unit&&s.unit!=="יח'"?' '+esc(s.unit):'';
-      return `<div style="padding:3px 0"><div class="top">
-        <span>${esc(s.name)}</span><span><b style="${n<0||s.low||miss?'color:#dc2626':''}">${n}</b>${u?' <span class="meta" style="display:inline">'+u.trim()+'</span>':''}${s.low||miss?' <span class="badge" style="background:#fee2e2;color:#dc2626">⚠ כדאי לשלוח עוד</span>':''}</span></div>
-        ${nd>0?`<div class="meta" style="${miss?'color:#dc2626;font-weight:600':''}">נדרש להזמנות שלכם ${Math.round(nd*100)/100}${u}${miss?' · חסר '+(Math.round((nd-n)*100)/100)+u:' · יש מספיק'}</div>`:''}
-      </div>`;};
-    const stkHtml=stk.length?`<h2>📦 החומרים שלכם במפעל</h2><div class="card">${multi
-        ?Object.keys(DEPT).map(d=>{const l=stk.filter(s=>(s.dept||'pack')===d);return l.length?`<div class="meta" style="font-weight:700;margin-top:6px">${DEPT[d]}</div>`+l.map(stkRow).join(''):'';}).join('')
-        :stk.map(stkRow).join('')}<div class="meta">מתעדכן אוטומטית עם כל משלוח שיוצא אליכם.</div></div>`:'';
+    // 📋 (02/11/2026) נוסח ברור יותר: כל חומר — שם בשורה משלו ומתחתיו "במפעל / נדרש / חסר";
+    // פריט לפי מידה (מפתח פריט|מידה) — טבלה אחת במקום שורה לכל מידה; למעלה — סיכום כמה חומרים כדאי לשלוח
+    const r2=x=>Math.round(x*100)/100,unitOf=s=>s.unit&&s.unit!=="יח'"?' '+esc(s.unit):'';
+    const stOf=s=>{const nd=Number(s.need)||0,n=Number(s.n)||0,miss=nd>0&&n<nd;return{nd,n,miss,bad:n<0||!!s.low||miss};};
+    const stkRow=s=>{const{nd,n,miss,bad}=stOf(s),u=unitOf(s);
+      return `<div class="stk${bad?' bad':''}"><div class="stk-n">${esc(s.name)}</div><div class="stk-q">
+        <span>במפעל <b style="${bad?'color:var(--red)':''}">${n}</b>${u}</span>${nd>0?`<span>נדרש ${r2(nd)}${u}</span>`:''}
+        ${miss?`<span class="stk-miss">⚠ חסר ${r2(nd-n)}${u} — כדאי לשלוח עוד</span>`:bad?'<span class="stk-miss">⚠ כדאי לשלוח עוד</span>':nd>0?'<span class="stk-ok">✓ יש מספיק</span>':''}</div></div>`;};
+    const stkSz=(name,l)=>{const u=unitOf(l[0]),hasNd=l.some(s=>Number(s.need)>0),bad=l.some(s=>stOf(s).bad);
+      return `<div class="stk${bad?' bad':''}"><div class="stk-n">${esc(name)}</div><table class="stk-t"><tr><th>מידה</th><th>במפעל</th>${hasNd?'<th>נדרש</th><th></th>':''}</tr>${l.map(s=>{const o=stOf(s);
+        return `<tr${o.bad?' class="bad"':''}><td>${esc(s.sz)}</td><td>${o.n}${u}</td>${hasNd?`<td>${o.nd>0?r2(o.nd)+u:'—'}</td><td>${o.miss?'חסר '+r2(o.nd-o.n):o.bad?'⚠':o.nd>0?'<span class="stk-ok">✓</span>':''}</td>`:''}</tr>`;}).join('')}</table></div>`;};
+    const stkList=l=>{const out=[],grp={};l.forEach(s=>{const m=String(s.k||'').includes('|')&&/^(.*) · מידה (.*)$/.exec(s.name||'');
+        if(!m){out.push(s);return;}const b=String(s.k).split('|')[0];if(!grp[b]){grp[b]={name:m[1],l:[]};out.push(grp[b]);}grp[b].l.push({...s,sz:m[2]});});
+      return out.map(x=>x.l?stkSz(x.name,x.l):stkRow(x)).join('');};
+    const nBad=new Set(stk.filter(s=>stOf(s).bad).map(s=>String(s.k||'').split('|')[0])).size; // מידות של אותו פריט = חומר אחד
+    const stkHtml=stk.length?`<h2>📦 החומרים שלכם במפעל</h2><div class="card">${nBad?`<div class="stk-sum">⚠ ${nBad===1?'חומר אחד':nBad+' חומרים'} — כדאי לשלוח עוד</div>`:'<div class="stk-sum ok">✓ יש מספיק מכל החומרים</div>'}${multi
+        ?Object.keys(DEPT).map(d=>{const l=stk.filter(s=>(s.dept||'pack')===d);return l.length?`<div class="stk-d">${DEPT[d]}</div>`+stkList(l):'';}).join('')
+        :stkList(stk)}<div class="meta" style="margin-top:8px">מתעדכן אוטומטית עם כל משלוח שיוצא אליכם.</div></div>`:'';
     appEl.closest('.wrap')?.classList.toggle('wide',!!stk.length);
     appEl.innerHTML=`<div class="lay${stk.length?' has-stk':''}"><main>`+(!d.orders.length?'<div class="msg">אין כרגע הזמנות פעילות.</div>':
       (act.length?`<h2>🏭 בייצור (${act.length})</h2>`+act.map(card).join(''):'')+
