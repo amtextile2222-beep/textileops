@@ -146,7 +146,7 @@ const outBtn=()=>'<button id="out">התנתקות</button>';
 // התנתקות ⇒ גם ביטול ההתראות במכשיר (אחרת מכשיר שהתנתק היה ממשיך לקבל עדכונים)
 const bindOut=()=>{const b=$('out');if(b)b.onclick=async()=>{if(pushSt?.on)try{await pushCall('POST',{off:true});}catch(e){}pushSt=null;$('pushbar').innerHTML='';signOut(auth);};};
 
-// ── 🔔 התראות Push (23/10/2026) — שרת: customerPush (רישום) + customerNotify (שליחה כל 15 דק' בשעות
+// ── 🔔 התראות Push (23/10/2026) — שרת: customerPush (רישום) + customerNotify (שליחה כל 30 דק' בשעות
 // העבודה). SW נפרד (track-sw.js, scope './track') — לא נוגע ברישום של האפליקציה באותו דפדפן.
 // באייפון עובד רק מהאייקון במסך הבית (iOS 16.4+). תצוגת מנהל — בלי (הטוקן היה של המנהל)
 const URL_PUSH='https://us-central1-textileops-aef4a.cloudfunctions.net/customerPush';
@@ -335,7 +335,7 @@ async function checkVer(){
 }
 const tick=()=>{if(!document.hidden){load();checkVer();}};
 start();checkVer();
-// כל דקה (23/10/2026, היה 5) — רק כשהדף על המסך; ההזמנות עצמן שמורות בשרת 3 דק', המלאי מחושב בכל פעם
+// כל דקה (23/10/2026, היה 5) — רק כשהדף על המסך; ההזמנות עצמן שמורות בשרת 15 דק', המלאי מחושב בכל פעם
 setInterval(tick,60000);
 document.addEventListener('visibilitychange',tick);
 </script>

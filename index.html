@@ -14265,7 +14265,7 @@ function _custLinkHtml(code){
 function _custLinkRefresh(){const el=document.getElementById('cinfo-link');if(el)el.innerHTML=_custLinkHtml(el.dataset.code);}
 // ─── 🔔 שעות שליחת התראות ללקוחות (23/10/2026) — מנהל בלבד ────────────────
 // adminSettings/custNotifyCfg = {def:{יום:[מ,עד]}, cust:{קוד:{יום:[מ,עד]}}} — יום = 0 (א') … 6 (ש'),
-// יום שחסר = בלי התראות. customerNotify בשרת רץ כל 15 דק' ושולח ללקוח רק בתוך החלון שלו; עדכון
+// יום שחסר = בלי התראות. customerNotify בשרת רץ כל 30 דק' ושולח ללקוח רק בתוך החלון שלו; עדכון
 // שקרה מחוץ לשעות לא הולך לאיבוד — נשלח מאוחד בתחילת החלון הבא. ⚠️ NOTIFY_DEF_WIN זהה לשרת.
 let _custNotifyCfg={},_custPushToks={};
 const NOTIFY_DEF_WIN={0:['07:00','18:00'],1:['07:00','18:00'],2:['07:00','18:00'],3:['07:00','18:00'],4:['07:00','18:00'],5:['07:00','13:00']};

@@ -1458,8 +1458,8 @@ exports.attendanceCloserNow = functions.https.onRequest(async (req, res) => {
 // הלקוח צריך לראות בדיוק את מה שהמנהל רואה ב"לוח מצב הזמנות". שינוי שם ⇒ שינוי כאן.
 const TRACK_LISTS = ['intake', 'countcut', 'ready_sew', 'sewing', 'ready_pack', 'packing', 'ready_ship', 'shipped'];
 const TRACK_SHIP_DAYS = 30;
-const _trackCache = new Map(); // קוד לקוח → {at, body, prods}, 3 דק' — מגן מפני רענון חוזר שקורא שוב את כל ההיסטוריה
-const TRACK_CACHE_MS = 180000;
+const _trackCache = new Map(); // קוד לקוח → {at, body, prods}, 15 דק' — מגן מפני רענון חוזר שקורא שוב את כל ההיסטוריה
+const TRACK_CACHE_MS = 900000; // 💰 (02/11/2026) היה 3 דק': כל בנייה של לקוח 02 קוראת ~6,100 משימות
 function trackFamOfDept(d) {
   const s = String(d || '').toLowerCase();
   if (/استقبال|قص|קבל|חית|גזיר/.test(s)) return 'recv';
@@ -1874,10 +1874,10 @@ exports.customerTrack = functions.runWith({ memory: '1GB' }).https.onRequest(asy
   try {
     const a = await trackAuth(req, res);
     if (!a) return;
-    const { cust, asCust } = a;
-    // ⏱ מטמון 3 דק' (trackBody): הדף מרענן כל דקה; תנועת מלאי (מסמך packStock) מגיעה ללקוח תוך דקה.
-    // תצוגת המנהל (asCust) לא משתמשת במטמון בכלל — רואה תמיד את המצב העדכני.
-    res.json(asCust ? await trackBuild(cust) : await trackBody(cust));
+    const { cust } = a;
+    // ⏱ מטמון 15 דק' (trackBody): הדף מרענן כל דקה; תנועת מלאי (מסמך packStock) מגיעה ללקוח תוך דקה.
+    // גם תצוגת המנהל (asCust) דרך המטמון — בלעדיו דף פתוח קרא את כל ההיסטוריה בכל דקה.
+    res.json(await trackBody(cust));
   } catch (e) {
     console.error('customerTrack error:', e);
     res.status(500).json({ error: 'server' });
@@ -1949,7 +1949,7 @@ function notifyInWin(win, il) {
   return hm >= w[0] && hm < w[1];
 }
 exports.customerNotify = functions.runWith({ memory: '1GB', timeoutSeconds: 300 }).pubsub
-  .schedule('*/15 * * * *').timeZone('Asia/Jerusalem').onRun(async () => {
+  .schedule('*/30 * * * *').timeZone('Asia/Jerusalem').onRun(async () => {
   const il = new Date(new Date().toLocaleString('en-US', { timeZone: 'Asia/Jerusalem' }));
   const pushRef = db.doc('adminSettings/custPush'), stRef = db.doc('adminSettings/custNotifyState');
   // שתי קריאות קלות קודם — רוב הריצות (לילה/שבת) נעצרות כאן
