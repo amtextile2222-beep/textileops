@@ -1822,31 +1822,66 @@ async function trackAuth(req, res) {
 }
 
 // מצב ההזמנות + המלאי של לקוח — מה שדף הלקוח מציג. משותף ל-customerTrack ול-customerNotify
+// 💰 (02/11/2026) כל בנייה קראה את כל ההיסטוריה של כל דגם מוצג (לקוח 02: ~6,100 משימות, 27 דגמים, 3 בייצור):
+// 1. הזמנה שיצאה — המשימות משפיעות בה רק על התאריכים (שלב/אחוזים נקבעים מהמוצר), לכן התאריכים נשמרים פעם אחת
+//    ב-adminSettings/custDone_<לקוח> = {dates: {מזהה מוצר: {s: תאריך יציאה, d: dates[8]}}}. ביטול/שינוי יציאה (s שונה) ⇒ חישוב מחדש.
+// 2. הזמנה פתוחה — רק משימות מתאריך ההזמנה פחות מרווח. חריג: ההזמנה הישנה של הדגם קוראת הכל,
+//    כי משימה בלי מספר הזמנה ובלי prodStamp משויכת אליה (oldest ב-trackStates).
+const TRACK_CUT_MARGIN_MS = 14 * 86400000;
 async function trackBuild(cust) {
   const t0 = Date.now();
-  const [pS, aS, nS, kS] = await Promise.all([
+  const doneRef = db.doc('adminSettings/custDone_' + cust);
+  const [pS, aS, nS, kS, fS] = await Promise.all([
     db.collection('products').where('cust', '==', cust).get(),
     db.collection('activeTasks').where('cust', '==', cust).get(),
     db.doc('appSettings/customerNames').get(),
-    db.doc('appSettings/packStock').get()
+    db.doc('appSettings/packStock').get(),
+    doneRef.get()
   ]);
   const prods = pS.docs.map(d => ({ id: d.id, ...d.data() }));
+  const saved = (fS.data() || {}).dates || {};
   const from = new Date(Date.now() - TRACK_SHIP_DAYS * 86400000).toISOString().slice(0, 10);
-  // ⚡ היסטוריה רק של הדגמים שמוצגים (פתוחים / נשלחו ב-30 יום) — "נשלח" נקבע מהמוצר בלבד, ולכן
-  // הסינון לא משנה אף מצב שמוצג. כל ההיסטוריה של הלקוח לקחה 17-25 שנ' (נמדד 10/10/2026).
-  // where('prod','in') בלבד (בלי cust) — לא דורש אינדקס מורכב; הלקוח מסונן בזיכרון
+  // "נשלח" נקבע מהמוצר בלבד, ולכן הסינון לא משנה אף מצב שמוצג
   const shipOf = p => trackShipInfo(p, trackQty(p)).departed ? (trackShipDate(p) || '0') : '';
-  const codes = [...new Set(prods.filter(p => { const s = shipOf(p); return !s || s >= from; }).map(p => p.prod))];
-  const chunks = [];
-  for (let i = 0; i < codes.length; i += 30) chunks.push(codes.slice(i, i + 30));
-  const hSs = await Promise.all(chunks.map(c => db.collection('histTasks').where('prod', 'in', c).get()));
-  const tasks = [...hSs.flatMap(s => s.docs), ...aS.docs].map(d => d.data()).filter(t => t.cust === cust);
+  const frozen = p => { const v = saved[p.id], sh = shipOf(p); return !!v && !!sh && sh >= from && v.s === sh && Array.isArray(v.d); };
+  const need = prods.filter(p => { const sh = shipOf(p); return (!sh || sh >= from) && !frozen(p); });
+  const codes = [...new Set(need.map(p => p.prod))];
+  const cutOf = prod => {
+    const st = need.filter(p => p.prod === prod).map(trackStamp), first = Math.min(...st);
+    const oldest = Math.min(...prods.filter(p => p.prod === prod).map(trackStamp));
+    return first === oldest || !(first > 1.6e12 && first <= Date.now()) ? '' : new Date(first - TRACK_CUT_MARGIN_MS).toISOString();
+  };
+  // cust+prod — בלי אינדקס מורכב; עם startTime — אינדקס ב-firestore.indexes.json. אינדקס שעוד לא נבנה ⇒ קריאה מלאה
+  const readModel = async prod => {
+    const base = db.collection('histTasks').where('cust', '==', cust).where('prod', '==', prod), cut = cutOf(prod);
+    if (!cut) return base.get();
+    try { return await base.where('startTime', '>=', cut).get(); } catch (e) {
+      if (e.code !== 9) throw e;
+      console.warn('trackBuild: index not ready, full read of model ' + prod);
+      return base.get();
+    }
+  };
+  const hSs = await Promise.all(codes.map(readModel));
+  const hRead = hSs.reduce((n, x) => n + x.size, 0);
+  const tasks = [...hSs.flatMap(x => x.docs), ...aS.docs].map(d => d.data()).filter(t => t.cust === cust);
+  const all = trackStates(prods, tasks), nextDone = {};
+  all.forEach((o, i) => {
+    const p = prods[i];
+    if (frozen(p)) {
+      const v = saved[p.id];
+      nextDone[p.id] = v;
+      o.dates = o.dates.map((d, j) => (j >= 1 && j <= 6 && v.d[j]) || d);
+    } else if (o.stage === 7 && o.ship && o.ship >= from) nextDone[p.id] = { s: o.ship, d: o.dates };
+  });
+  // נשמר רק כשמשהו השתנה; כשל בשמירה לא מפיל את הדף — פשוט יחושב שוב בבנייה הבאה
+  const ids = Object.keys(nextDone);
+  if (ids.length !== Object.keys(saved).length || ids.some(k => nextDone[k] !== saved[k])) await doneRef.set({ dates: nextDone }).catch(e => console.error('custDone ' + cust + ':', e));
   // פעילות לפי סדר כניסה (הוותיקה ראשונה), ואחריהן שנשלחו — החדשה ראשונה
-  const orders = trackStates(prods, tasks)
+  const orders = all
     .filter(o => o.stage < 7 || (o.ship && o.ship >= from))
     .sort((a, b) => ((a.stage === 7) - (b.stage === 7)) ||
       (a.stage === 7 ? String(b.ship).localeCompare(String(a.ship)) : String(a.entry || '9999').localeCompare(String(b.entry || '9999'))));
-  console.log(`trackBuild ${cust}: ${tasks.length} tasks, ${codes.length} models, ${Date.now() - t0} ms`);
+  console.log(`trackBuild ${cust}: ${hRead} hist read, ${tasks.length} tasks, ${codes.length} models, ${ids.length} saved, ${Date.now() - t0} ms`);
   const body = { name: (nS.data() || {})[cust] || '', at: new Date().toISOString(), orders,
     stock: trackPackStock(cust, prods, kS.data() || {}) };
   _trackCache.set(cust, { at: Date.now(), body, prods });

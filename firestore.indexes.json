@@ -1,0 +1,37 @@
+{
+  "indexes": [
+    {
+      "collectionGroup": "histTasks",
+      "queryScope": "COLLECTION",
+      "fields": [
+        {
+          "fieldPath": "workerName",
+          "order": "ASCENDING"
+        },
+        {
+          "fieldPath": "endTime",
+          "order": "ASCENDING"
+        }
+      ]
+    },
+    {
+      "collectionGroup": "histTasks",
+      "queryScope": "COLLECTION",
+      "fields": [
+        {
+          "fieldPath": "cust",
+          "order": "ASCENDING"
+        },
+        {
+          "fieldPath": "prod",
+          "order": "ASCENDING"
+        },
+        {
+          "fieldPath": "startTime",
+          "order": "ASCENDING"
+        }
+      ]
+    }
+  ],
+  "fieldOverrides": []
+}
