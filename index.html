@@ -3651,9 +3651,7 @@ function pipeStateOf(p,tasks){
   else if(scans.pack>0)                          id='packing';
   else if(sew&&sew.of>0&&sew.full===sew.of)      id='ready_pack';
   else if(scans.sew>0)                           id='sewing';
-  // 🔢 (02/11/2026) כמות שהוזנה בזמן שמשימת הספירה עוד רצה (00205 #003) — נשאר ב"ספירה וגזירה" עד שמשימת
-  // קבלה/ספירה/גזירה אחת לפחות **הסתיימה**. ⚠️ זהה ב-trackStates בשרת
-  else if(qty>0&&tasks.some(t=>pipeFamOfDept(t.dept)==='recv'&&t.duration>0)) id='ready_sew';
+  else if(qty>0&&scans.recv>0)                   id='ready_sew';
   else if(scans.recv>0)                          id='countcut';
   else                                           id='intake';
   // 📌 דחיפה ידנית של מנהל. **קדימה בלבד** — אם המצב האמיתי כבר עקף אותה היא נבלעת
