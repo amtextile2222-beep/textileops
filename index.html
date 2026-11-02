@@ -2876,7 +2876,7 @@ async function saveCountEntry(){
     if(!S.fbConnected){alert('אין חיבור — התמונות לא נשמרו · لا يوجد اتصال');return;}
     try{
       delete _prodImgCache[p.id];
-      const imgs=(await fetchProdImgs(p.id)).concat(_ceImgs);
+      const imgs=(await fetchProdImgs(p.id,true)).concat(_ceImgs);
       await saveProdImgs(p.id,imgs,{srcCust:p.cust,srcProd:p.prod});
       _prodImgCache[p.id]=imgs;upd.imgCount=imgs.length;
     }catch(e){alert('שמירת התמונות נכשלה · فشل حفظ الصور: '+(e.message||e));return;}
@@ -18905,7 +18905,9 @@ function openProductModal(id){
     _prodImgsLoading=true;
     const _pv=document.getElementById('prod-img-preview');
     if(_pv)_pv.innerHTML='<span style="font-size:11px;color:var(--txt3)">טוען תמונות…</span>';
-    fetchProdImgs(p.id).then(a=>{_prodImgs=[...a];_prodImgsLoading=false;refreshImgPreview();});
+    // כשל בטעינה ⇒ החלון נשאר חסום לשמירה (_prodImgsLoading='fail'), אחרת השמירה הייתה מוחקת את התמונות
+    fetchProdImgs(p.id,true).then(a=>{_prodImgs=[...a];_prodImgsLoading=false;refreshImgPreview();})
+      .catch(()=>{_prodImgsLoading='fail';if(_pv)_pv.innerHTML='<span style="font-size:11px;color:var(--red-txt)">⚠ התמונות לא נטענו — סגור ופתח שוב את החלון לפני שמירה</span>';});
   }
   renumberStepRows();
   renderProductPricing();
@@ -19472,16 +19474,17 @@ function _imgChunks(imgs){
     out[out.length-1].push(im);sz+=n;}
   return out;
 }
-async function fetchProdImgs(id){
+// strict = לפני שמירה: כשל בקריאה (רשת/חלק חסר) זורק במקום להחזיר [] — אחרת השמירה דורסת את התמונות הקיימות (02/11/2026)
+async function fetchProdImgs(id,strict){
   if(_prodImgCache[id])return _prodImgCache[id];
-  if(!S.fbConnected)return [];
+  if(!S.fbConnected){if(strict)throw new Error('אין חיבור');return [];}
   try{const d=await fbGet('productImages',String(id));
     let arr=(d&&Array.isArray(d.images))?d.images:[];
     const parts=+(d&&d.parts)||1;
     if(parts>1){const more=await Promise.all(Array.from({length:parts-1},(_,i)=>fbGet('productImages',String(id)+'__'+(i+1))));
-      more.forEach(m=>{if(m&&Array.isArray(m.images))arr=arr.concat(m.images);});}
+      more.forEach(m=>{if(m&&Array.isArray(m.images))arr=arr.concat(m.images);else if(strict)throw new Error('חלק תמונות חסר');});}
     _prodImgCache[id]=arr;return arr;
-  }catch(e){return [];}
+  }catch(e){if(strict)throw e;return [];}
 }
 // שמירת כל התמונות של מוצר (מחליפה את הקיימות). החלקים הנוספים נכתבים לפני הראשי (שקובע כמה לקרוא),
 // ואחרי — מחיקת חלקים עודפים מהשמירה הקודמת. extra = שדות נוספים למסמך הראשי.
@@ -19660,6 +19663,7 @@ function pmSampleToggle(cb){
   if(el){el.value=SAMPLE_UNIT_PRICE;syncProfitFields('price');}
 }
 async function saveProduct(){
+  if(_prodImgsLoading==='fail'){alert('התמונות של המוצר לא נטענו — סגור ופתח שוב את החלון. השמירה עכשיו הייתה מוחקת אותן.');return;}
   if(_prodImgsLoading){showToast('⏳ התמונות עדיין נטענות — נסה שוב בעוד רגע','var(--amber-txt)');return;}
   const prod=(document.getElementById('pm-prod')?.value||'').trim().padStart(5,'0').slice(0,5);
   const cust=(document.getElementById('pm-cust')?.value||'').trim().padStart(2,'0').slice(0,2);
