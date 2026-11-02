@@ -2415,6 +2415,13 @@ const PROD_STAGES=[
 // (createdAt המקסימלי) ולא את ההתאמה הראשונה — אחרת התמחור/שלבים/צפי נלקחים מרשומה ישנה שנגמרה
 // (בלי unitPrice/workSteps) והשלבים+הצפי לא מופיעים בסורקים. אותו קריטריון כמו prodStampFor
 // (חסימת סריקה כפולה) כדי שכל המערכת תסכים על אותה רשומה "נוכחית".
+// 👕 (02/11/2026) מידות באותיות — בברקוד יש ספרה אחת למידה; הסדר שקבע המנהל: XS=0 S=1 M=2 L=3 XL=4 XXL=5 3XL=6 4XL=7.
+// products.szLetters = הזמנה שהמידות שלה באותיות. הנתונים (כמויות, ברקודים, משימות) נשארים ספרות — רק התצוגה מתורגמת.
+const SZ_LET=['XS','S','M','L','XL','XXL','3XL','4XL'];
+function szLbl(s,p){const z=String(s??'');return p?.szLetters&&/^[0-7]$/.test(z)?SZ_LET[+z]:z;}
+const szLblT=(cust,prod,s)=>szLbl(s,findProd(cust,prod));
+// קלט: אות מוכרת ⇒ הספרה שלה (2XL=XXL, XXXL=3XL); כל דבר אחר נשאר כמו שהוקלד
+function szDigit(v){const r=String(v??'').trim(),u=r.toUpperCase().replace(/\s/g,'').replace(/^2XL$/,'XXL').replace(/^XXXL$/,'3XL').replace(/^XXXXL$/,'4XL'),i=SZ_LET.indexOf(u);return i>=0?String(i):r;}
 function findProd(cust,prod){
   let best=null,mx=-1;
   for(const p of (S.products||[])){
@@ -7214,7 +7221,7 @@ function parseBc(v){
     :`<div style="display:flex;gap:5px;flex-wrap:wrap;align-items:center;padding:8px;background:var(--bg2);border-radius:var(--r)">
         <span class="bc-seg bc-c">לקוח: ${c||'__'}</span>
         <span class="bc-seg bc-p">מוצר: ${p.padEnd(5,'_')}</span>${bcOrderChip(v)}
-        <span class="bc-seg" style="background:var(--amber-bg);color:var(--amber-txt)">מידה: ${sz||'_'}</span>
+        <span class="bc-seg" style="background:var(--amber-bg);color:var(--amber-txt)">מידה: ${sz?esc(szLblT(c,p,sz)):'_'}</span>
         <span class="bc-seg bc-q">כמות: ${q.padEnd(3,'_')}</span>
         <span class="bc-seg bc-col">צבע: ${COLORS[col]||col||'__'}</span>
       </div>`;
@@ -7397,7 +7404,7 @@ function renderScanActive(){
         <span class="badge green"><span class="pulse"></span> ${T.active}</span>
       </div>
       <div style="display:flex;gap:4px;flex-wrap:wrap">
-        <span class="bc-seg bc-c">${t.cust}</span><span class="bc-seg bc-p">${t.prod}</span>${t.size?`<span class="bc-seg bc-s">מידה ${t.size}</span>`:''}<span class="bc-seg bc-q">${t.qty}</span><span class="bc-seg bc-col">${COLORS[t.col]||t.col}</span>
+        <span class="bc-seg bc-c">${t.cust}</span><span class="bc-seg bc-p">${t.prod}</span>${t.size?`<span class="bc-seg bc-s">מידה ${esc(szLblT(t.cust,t.prod,t.size))}</span>`:''}<span class="bc-seg bc-q">${t.qty}</span><span class="bc-seg bc-col">${COLORS[t.col]||t.col}</span>
         ${t.taskType?`<span class="badge gray">📋 ${esc(t.taskType)}</span>`:''}
       </div>
     </div>`).join('');
@@ -7481,7 +7488,7 @@ function renderTasks(){
           <div class="task-tmr ${cls}" id="tmr-${lead.id}" data-ids="${ids}" data-exp="${expSec}">${fmtS(elapsedSec)}</div>
           ${hasExp?`<div class="task-cd ${cls}" id="cd-${lead.id}">${fmtCountdown(expSec-elapsedSec)}</div>`:''}
         </div>`;
-    const prodChips=`<span class="bc-seg bc-c">לקוח ${lead.cust}</span><span class="bc-seg bc-p">${lead.prod}</span>${taskOrderLbl(lead)?`<span class="bc-seg" style="background:var(--green-bg,#dcfce7);color:var(--green-txt,#16a34a);font-weight:700">הזמנה ${taskOrderLbl(lead)}</span>`:''}${lead.size?`<span class="bc-seg bc-s">מידה ${lead.size}</span>`:''}<span class="bc-seg bc-q">${lead.qty} יח'</span><span class="bc-seg bc-col">${COLORS[lead.col]||lead.col}</span>`;
+    const prodChips=`<span class="bc-seg bc-c">לקוח ${lead.cust}</span><span class="bc-seg bc-p">${lead.prod}</span>${taskOrderLbl(lead)?`<span class="bc-seg" style="background:var(--green-bg,#dcfce7);color:var(--green-txt,#16a34a);font-weight:700">הזמנה ${taskOrderLbl(lead)}</span>`:''}${lead.size?`<span class="bc-seg bc-s">מידה ${esc(szLblT(lead.cust,lead.prod,lead.size))}</span>`:''}<span class="bc-seg bc-q">${lead.qty} יח'</span><span class="bc-seg bc-col">${COLORS[lead.col]||lead.col}</span>`;
     const pausedBadge=allPaused?`<span class="badge" style="background:#e0e7ff;color:#4338ca">⏸ ${T.task_paused}${pausedStr?' '+pausedStr:''}</span>`:'';
     const header=`<div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:6px">
         <div><div style="font-size:13px;font-weight:500;color:var(--txt)">${esc(lead.workerName)}${multi?` <span class="badge gray" style="font-size:10px">${tasks.length} שלבים</span>`:''}</div><div style="font-size:11px;color:var(--txt3)">${esc(lead.dept)}${lead.station?` · <span style="color:var(--green-txt)">📍 ${esc(lead.station)}</span>`:''}</div></div>
@@ -7505,7 +7512,7 @@ function renderTasks(){
         ${tasks.map(t=>`<div class="task-stage-row">
           <span class="badge gray">📋 ${esc(t.taskType||'—')}</span>
           <span style="font-size:11px;color:var(--txt3)">${t.qty} יח'${t.prod!==lead.prod?' · '+esc(t.prod):''}${taskOrderLbl(t)&&taskOrderLbl(t)!==taskOrderLbl(lead)?' · <b style="color:var(--green-txt,#16a34a)">הזמנה '+taskOrderLbl(t)+'</b>':''}</span>
-          ${t.size&&t.size!==lead.size?`<span class="bc-seg bc-s">מידה ${esc(t.size)}</span>`:''}${t.col!==lead.col?`<span class="bc-seg bc-col">${COLORS[t.col]||esc(t.col)}</span>`:''}${t.station&&t.station!==lead.station?`<span style="font-size:11px;color:var(--green-txt)">📍 ${esc(t.station)}</span>`:''}
+          ${t.size&&t.size!==lead.size?`<span class="bc-seg bc-s">מידה ${esc(szLblT(t.cust,t.prod,t.size))}</span>`:''}${t.col!==lead.col?`<span class="bc-seg bc-col">${COLORS[t.col]||esc(t.col)}</span>`:''}${t.station&&t.station!==lead.station?`<span style="font-size:11px;color:var(--green-txt)">📍 ${esc(t.station)}</span>`:''}
           <div style="margin-inline-start:auto;display:flex;gap:6px">${_taskActions(t)}</div>
         </div>`).join('')}
       </div>
@@ -7757,7 +7764,7 @@ function _histCardHtml(tasks){
         return`<div class="task-stage-row">
         <span class="badge gray">📋 ${esc(t.taskType||'—')}</span>
         <span style="font-size:11px;color:var(--txt3)">${qtyHtml(t.qty)}${t.prod!==lead.prod?' · '+esc(t.prod):''}</span>
-        ${t.size&&t.size!==lead.size?`<span class="bc-seg bc-s">מידה ${esc(t.size)}</span>`:''}${t.col!==lead.col?`<span class="bc-seg bc-col">${esc(COLORS[t.col]||t.col)}</span>`:''}${t.station&&t.station!==lead.station?`<span style="font-size:11px;color:var(--green-txt)">📍 ${esc(t.station)}</span>`:''}
+        ${t.size&&t.size!==lead.size?`<span class="bc-seg bc-s">מידה ${esc(szLblT(t.cust,t.prod,t.size))}</span>`:''}${t.col!==lead.col?`<span class="bc-seg bc-col">${esc(COLORS[t.col]||t.col)}</span>`:''}${t.station&&t.station!==lead.station?`<span style="font-size:11px;color:var(--green-txt)">📍 ${esc(t.station)}</span>`:''}
         <span class="badge ${tOver?'red':'blue'}" style="font-size:10px">${tOver?'⚠ ':''}${fmtM(t.duration||0)}</span>${_expDeltaBadge(t.duration||0,tExp,true,tDed)}
         <div style="margin-inline-start:auto;display:flex;gap:6px">${acts(t)}</div>
       </div>`;}).join('')}
@@ -7823,7 +7830,7 @@ function renderKiosk(){
     const cls=allPaused?'':_tmrClass(elapsedSec,expSec,thresh);
     const kcls=allPaused?'k-paused':_kioskCls(cls);
     const ids=tasks.map(t=>t.id).join(',');
-    const chips=`<span class="k-chip">לקוח ${lead.cust}</span><span class="k-chip k-p">${esc(lead.prod)}</span>${taskOrderLbl(lead)?`<span class="k-chip">${taskOrderLbl(lead)}</span>`:''}${lead.size?`<span class="k-chip k-s">מידה ${esc(lead.size)}</span>`:''}<span class="k-chip k-q">${lead.qty} יח'</span><span class="k-chip k-col">${COLORS[lead.col]||esc(lead.col)}</span>`;
+    const chips=`<span class="k-chip">לקוח ${lead.cust}</span><span class="k-chip k-p">${esc(lead.prod)}</span>${taskOrderLbl(lead)?`<span class="k-chip">${taskOrderLbl(lead)}</span>`:''}${lead.size?`<span class="k-chip k-s">מידה ${esc(szLblT(lead.cust,lead.prod,lead.size))}</span>`:''}<span class="k-chip k-q">${lead.qty} יח'</span><span class="k-chip k-col">${COLORS[lead.col]||esc(lead.col)}</span>`;
     const stepTasks=multi?tasks:(lead.taskType?[lead]:[]);
     const steps=stepTasks.length?`<div class="k-steps">${stepTasks.map(t=>_kStepRow(t,dm)).join('')}</div>`:'';
     const exp=hasExp?`<div class="k-exp">🎯 צפי ${fmtExpMin(expSec/60)}</div>`:'';
@@ -8173,7 +8180,7 @@ async function buildPersonalReport(){
         <th style="text-align:right;padding:6px 8px">${T.rep_time||'שעות'}</th>
       </tr></thead>
       <tbody>${prodRows.map(r=>`<tr style="border-bottom:0.5px solid var(--b)">
-        <td style="padding:7px 8px"><span class="bc-seg bc-p">${r.prod}</span>${r.size?` <span class="bc-seg bc-s">מידה ${r.size}</span>`:''} <span style="font-size:11px;color:var(--txt3)">לקוח ${r.cust}</span></td>
+        <td style="padding:7px 8px"><span class="bc-seg bc-p">${r.prod}</span>${r.size?` <span class="bc-seg bc-s">מידה ${esc(szLblT(r.cust,r.prod,r.size))}</span>`:''} <span style="font-size:11px;color:var(--txt3)">לקוח ${r.cust}</span></td>
         <td style="padding:7px 8px;color:var(--txt2)">${esc(r.taskType||'—')}</td>
         <td style="padding:7px 8px">${r.units}</td>
         <td style="padding:7px 8px"><span class="badge blue">${(r.secs/3600).toFixed(1)} ${T.hours||"שע'"}</span></td>
@@ -10007,7 +10014,7 @@ function parseMgrBc(v){
         <span class="bc-seg" style="background:var(--green-bg,#d1fae5);color:var(--green-txt,#065f46);font-weight:700">📦 כל הכמות${totalQty?' — '+totalQty+' יח׳':''}</span></div>`
     :`<div style="display:flex;gap:5px;flex-wrap:wrap;padding:6px;background:var(--bg2);border-radius:var(--r)">
         <span class="bc-seg bc-c">לקוח: ${c||'__'}</span><span class="bc-seg bc-p">מוצר: ${p.padEnd(5,'_')}</span>${bcOrderChip(v)}
-        <span class="bc-seg" style="background:var(--amber-bg);color:var(--amber-txt)">מידה: ${sz||'_'}</span>
+        <span class="bc-seg" style="background:var(--amber-bg);color:var(--amber-txt)">מידה: ${sz?esc(szLblT(c,p,sz)):'_'}</span>
         <span class="bc-seg bc-q">כמות: ${q.padEnd(3,'_')}</span><span class="bc-seg bc-col">צבע: ${COLORS[col]||col||'__'}</span></div>`;
   if(isBcLen(v.length))el.innerHTML+=bcRetiredHtml(v); // 🔒 ברקוד שסיים את תפקידו
   if(isBcLen(v.length)&&isTotalBc(v))el.innerHTML+=countEntryBtnHtml(v)+cutReportBtnHtml(v); // 📝 כמויות ושלבים + ✂️ דוח גזירה מהסורק
@@ -10912,7 +10919,7 @@ function tsParseBc(v){
         <span class="bc-seg" style="background:var(--green-bg,#d1fae5);color:var(--green-txt,#065f46);font-weight:700">📦 כל הכמות${totalQty?' — '+totalQty+' יח׳':''}</span></div>`
     :`<div style="display:flex;gap:5px;flex-wrap:wrap;padding:6px;background:var(--bg2);border-radius:var(--r)">
         <span class="bc-seg bc-c">לקוח: ${c||'__'}</span><span class="bc-seg bc-p">מוצר: ${p.padEnd(5,'_')}</span>${bcOrderChip(v)}
-        <span class="bc-seg" style="background:var(--amber-bg);color:var(--amber-txt)">מידה: ${sz||'_'}</span>
+        <span class="bc-seg" style="background:var(--amber-bg);color:var(--amber-txt)">מידה: ${sz?esc(szLblT(c,p,sz)):'_'}</span>
         <span class="bc-seg bc-q">כמות: ${q.padEnd(3,'_')}</span><span class="bc-seg bc-col">צבע: ${COLORS[col]||col||'__'}</span></div>`;
   if(isBcLen(v.length))el.innerHTML+=bcRetiredHtml(v); // 🔒 ברקוד שסיים את תפקידו
   if(isBcLen(v.length)&&isTotalBc(v))el.innerHTML+=countEntryBtnHtml(v)+cutReportBtnHtml(v); // 📝 כמויות ושלבים + ✂️ דוח גזירה מהסורק
@@ -12482,7 +12489,7 @@ function shipRowsHtml(p,editSh){
       <th style="text-align:center;padding:2px 4px;width:66px" title="יחידה שחוזרת בלי תפירה — לא נכנסת להתחשבנות">✂ לא תפור</th>
     </tr>
     ${rows.map(q=>`<tr data-rowtotal="${val(q,GRADE_A)+val(q,GRADE_B)+val(q,GRADE_U)}">
-        <td style="padding:2px 4px">${esc(q.size)}</td>
+        <td style="padding:2px 4px">${esc(szLbl(q.size,p))}</td>
         <td style="padding:2px 4px">${esc(COLORS[q.color]||q.color)}</td>
         <td style="padding:2px 4px;text-align:left;color:var(--txt3)">${q._extra?'<span title="המידה/צבע כבר לא ברשימת הכמויות של המוצר">—</span>':(parseInt(q.qty)||0)}</td>
         ${anyPrev?`<td style="padding:2px 4px;text-align:left;color:var(--blue-txt,#1e40af);font-weight:600">${already(q)||''}</td>`:''}
@@ -16326,7 +16333,7 @@ function bcFromProduct(pid){
           const sizeEl=row.querySelector('.bc-size');
           const qtyEl=row.querySelector('.bc-qty');
           const colEl=row.querySelector('.bc-col');
-          if(sizeEl)sizeEl.value=q.size||'0';
+          if(sizeEl)sizeEl.value=szLbl(q.size,p)||'0';
           if(qtyEl)qtyEl.value=q.qty||1;
           if(colEl){colEl.value=q.color||'00';colEl.style.color=q.color==='00'?'var(--txt3)':'var(--txt)';}
         }
@@ -16371,7 +16378,7 @@ function bcLoadFromProduct(){
         const sizeEl=row.querySelector('.bc-size');
         const qtyEl=row.querySelector('.bc-qty');
         const colEl=row.querySelector('.bc-col');
-        if(sizeEl)sizeEl.value=q.size||'0';
+        if(sizeEl)sizeEl.value=szLbl(q.size,p)||'0';
         if(qtyEl)qtyEl.value=q.qty||1;
         // מצא קוד צבע לפי שם
         if(colEl){
@@ -16396,7 +16403,7 @@ function bcAddRow(){
   div.style.cssText='display:grid;grid-template-columns:80px 80px 1fr 36px;gap:8px;align-items:end;margin-bottom:8px;background:var(--bg2);padding:8px;border-radius:8px';
   div.innerHTML=`
     <div><label style="font-size:11px;color:var(--txt3)">מידה</label>
-      <input type="text" class="bc-size" maxlength="1" inputmode="numeric" placeholder="1" style="font-size:14px;font-weight:600;text-align:center"/></div>
+      <input type="text" class="bc-size" maxlength="4" placeholder="1" style="font-size:14px;font-weight:600;text-align:center"/></div>
     <div><label style="font-size:11px;color:var(--txt3)">כמות</label>
       <input type="number" class="bc-qty" min="1" max="999" value="1" style="font-size:14px;font-weight:600;text-align:center"/></div>
     <div><label style="font-size:11px;color:var(--txt3)">צבע</label>
@@ -16522,13 +16529,14 @@ function bcGenerate(){
   const rows=[...document.querySelectorAll('.bc-row')];
   if(!rows.length){alert('הוסף לפחות שורה אחת');return;}
   const items=rows.map(r=>({
-    size:(r.querySelector('.bc-size')?.value||'0').replace(/\D/g,'').slice(0,1)||'0',
+    size:szDigit(r.querySelector('.bc-size')?.value||'0').replace(/\D/g,'').slice(0,1)||'0',
     qty:String(Math.min(999,Math.max(1,parseInt(r.querySelector('.bc-qty')?.value)||1))).padStart(3,'0'),
     col:r.querySelector('.bc-col')?.value||'00'
   }));
   const out=document.getElementById('bc-gen-output');
   if(!out)return;
   const _t=bcGenTarget(),sfx=bcSuffixFor(_t);
+  items.forEach(it=>{it.lbl=szLbl(it.size,_t);}); // 👕 מידה באותיות — על המדבקה בלבד
   // sfx נשמר יחד עם הפריטים — bcPrint / bcDownloadPDF / bcExportNiimbot בונים את
   // המחרוזות מחדש מ-_bcLastGen, ובלעדיו הם היו מפיקים 13 ספרות בזמן שהמסך מציג 16.
   window._bcLastGen={cust,prod,items,sfx,pid:_t?.id||null};
@@ -16599,14 +16607,14 @@ function bcGenerate(){
       <div style="font-size:13px;font-weight:700;color:#000">לקוח: ${cust}</div>
       <div style="font-size:13px;font-weight:700;color:#000">מוצר: ${prod}</div>
       ${bcOrderLbl(code)}
-      <div style="font-size:13px;font-weight:700;color:#000">מידה: ${it.size}</div>
+      <div style="font-size:13px;font-weight:700;color:#000">מידה: ${esc(it.lbl||it.size)}</div>
       <div style="font-size:13px;font-weight:700;color:#000">כמות: ${parseInt(it.qty)}</div>
       <div style="font-size:13px;font-weight:700;color:#000">צבע: ${it.col} · ${colName}</div>
       <div style="font-size:11px;color:#555;margin-top:4px">${code}</div>`;
     div.appendChild(qrWrap);
     div.appendChild(infoDiv);
     div.appendChild(_bcSelCheckbox());
-    _bcNfcBtn(div,code,'מידה '+it.size+' · '+parseInt(it.qty)+' יח׳ · '+colName);
+    _bcNfcBtn(div,code,'מידה '+(it.lbl||it.size)+' · '+parseInt(it.qty)+' יח׳ · '+colName);
     printArea.appendChild(div);
     new QRCode(qrWrap,{text:bcQr(code),width:150,height:150,colorDark:'#000000',colorLight:'#ffffff',correctLevel:QRCode.CorrectLevel.M});
     _qrOne(qrWrap);
@@ -18318,7 +18326,7 @@ ${mtx.colorRows.length?`<table>
       <th colspan="${mtx.sizes.length}" class="c">מידות</th>
       <th rowspan="2" class="n">כמות</th>
     </tr>
-    <tr>${mtx.sizes.map(s=>`<th class="c sz">${esc(s)||'—'}</th>`).join('')}</tr>
+    <tr>${mtx.sizes.map(s=>`<th class="c sz">${esc(szLbl(s,p))||'—'}</th>`).join('')}</tr>
   </thead>
   <tbody>${mtx.colorRows.map(r=>`<tr${r.u?' style="font-style:italic;color:#92400e"':''}>
       <td class="hd">${esc(r.label)}</td>
@@ -18557,7 +18565,7 @@ async function bcDownloadPDF(share){
       {t:'לקוח: '+cust,mm:3.6,bold:true,color:'#000'},
       {t:'מוצר: '+prod,mm:3.6,bold:true,color:'#000'},
       ...(sfx?[{t:'🔢 הזמנה #'+sfx,mm:3.6,bold:true,color:'#059669'}]:[]),
-      {t:'מידה: '+it.size,mm:3.6,bold:true,color:'#000'},
+      {t:'מידה: '+(it.lbl||it.size),mm:3.6,bold:true,color:'#000'},
       {t:'כמות: '+parseInt(it.qty),mm:3.6,bold:true,color:'#000'},
       {t:'צבע: '+it.col+' · '+colName,mm:3.6,bold:true,color:'#000'},
       {t:code,mm:2.8,bold:false,color:'#555'}]});
@@ -18708,7 +18716,7 @@ function bcExportNiimbot(){
   const rows=filtered.map(it=>{
     const code=cust+prod+it.size+it.qty+it.col+sfx;
     const colName=(COLORS[it.col]||it.col).replace(/,/g,' ');
-    return `${bcQr(code)},${cust},${prod},${it.size},${parseInt(it.qty)},${it.col},${colName},${code}`;
+    return `${bcQr(code)},${cust},${prod},${it.lbl||it.size},${parseInt(it.qty)},${it.col},${colName},${code}`;
   }).join('\r\n');
   const csv=BOM+header+rows;
   const blob=new Blob([csv],{type:'text/csv;charset=utf-8;'});
@@ -18732,7 +18740,7 @@ function renderProducts(){
     const imgHtml=_ic
       ?`<div style="margin-top:8px"><button type="button" class="btn" style="font-size:11px;padding:4px 10px" onclick="loadProdImgs('${p.id}')">📷 ${_ic} ${_ic===1?'תמונה':'תמונות'}</button><div id="pimg-${p.id}"></div></div>`:'';
     const qtyRows=p.quantities&&p.quantities.length
-      ?`<div style="margin-top:8px;font-size:11px;color:var(--txt3)">${p.quantities.map(q=>`מידה ${q.size} | ${COLORS[q.color]||q.color}: <b style="color:var(--txt)">${q.qty}</b>`).join(' &nbsp;·&nbsp; ')}</div>`:'';
+      ?`<div style="margin-top:8px;font-size:11px;color:var(--txt3)">${p.quantities.map(q=>`מידה ${esc(szLbl(q.size,p))} | ${COLORS[q.color]||q.color}: <b style="color:var(--txt)">${q.qty}</b>`).join(' &nbsp;·&nbsp; ')}</div>`:'';
     const docHtml=p.docs&&p.docs.length
       ?`<div style="margin-top:6px;display:flex;gap:6px;flex-wrap:wrap">${p.docs.map((d,i)=>`<a href="${d.data}" download="${d.name}" style="font-size:11px;padding:3px 8px;border-radius:5px;background:var(--bg2);color:var(--blue-txt);text-decoration:none">📄 ${esc(d.name)}</a>`).join('')}</div>`:'';
     // שלב נוכחי — Array.isArray מגן מנתונים ישנים שנשמרו כאובייקט
@@ -18787,7 +18795,7 @@ function openProductModal(id){
   const colorOpts=Object.entries(COLORS).map(([k,v])=>`<option value="${k}">${v}</option>`).join('');
   const qRows=p&&p.quantities&&p.quantities.length
     ?p.quantities.map((q,i)=>`<tr>
-      <td><input type="text" value="${esc(q.size)}" maxlength="2" style="width:50px;font-size:12px" data-qi="${i}" data-qf="size"></td>
+      <td><input type="text" value="${esc(szLbl(q.size,p))}" maxlength="4" style="width:50px;font-size:12px" data-qi="${i}" data-qf="size"></td>
       <td><select data-qi="${i}" data-qf="color" style="font-size:12px"><option value="">--</option>${Object.entries(COLORS).map(([k,v])=>`<option value="${k}" ${q.color===k?'selected':''}>${v}</option>`).join('')}</select></td>
       <td><input type="number" value="${q.qty}" min="0" style="width:70px;font-size:12px" data-qi="${i}" data-qf="qty"></td>
       <td><button type="button" onclick="this.closest('tr').remove();renderProductPricing()" style="background:none;border:none;color:var(--red);cursor:pointer;font-size:14px">✕</button></td>
@@ -18843,6 +18851,7 @@ function openProductModal(id){
       <tbody id="pm-qty-body">${qRows}</tbody>
     </table>
     <button type="button" class="btn" onclick="addQtyRow()" style="font-size:12px">+ הוסף שורה</button>
+    <label style="display:inline-flex;align-items:center;gap:6px;font-size:12px;margin-right:10px;flex-wrap:wrap"><input type="checkbox" id="pm-szlet" ${p?.szLetters?'checked':''}> 👕 מידות באותיות <span style="color:var(--txt3)">XS=0 · S=1 · M=2 · L=3 · XL=4 · XXL=5 · 3XL=6 — אפשר להקליד את האות בטבלה</span></label>
     <div style="display:flex;align-items:center;gap:8px;flex-wrap:wrap;margin-top:8px">
       <label for="pm-estqty" style="font-size:12px;font-weight:600">📏 כמות משוערת</label>
       <input id="pm-estqty" type="number" min="0" step="1" value="${p?.estQty||''}" placeholder="למשל 200" oninput="renderProductPricing()" style="width:90px;font-size:13px;padding:4px 8px;border-radius:6px;border:1px solid var(--brd);background:var(--card);color:var(--txt)"/>
@@ -18926,7 +18935,7 @@ function addQtyBulk(){
   for(let s=from;s<=to;s++){
     const i=Date.now()+s;
     const tr=document.createElement('tr');
-    tr.innerHTML=`<td><input type="text" maxlength="2" style="width:50px;font-size:12px" data-qi="${i}" data-qf="size" value="${s}"></td>
+    tr.innerHTML=`<td><input type="text" maxlength="4" style="width:50px;font-size:12px" data-qi="${i}" data-qf="size" value="${s}"></td>
       <td><select data-qi="${i}" data-qf="color" style="font-size:12px"><option value="">--</option>${colorOpts}</select></td>
       <td><input type="number" value="${qty}" min="0" style="width:70px;font-size:12px" data-qi="${i}" data-qf="qty"></td>
       <td><button type="button" onclick="this.closest('tr').remove();renderProductPricing()" style="background:none;border:none;color:var(--red);cursor:pointer;font-size:14px">✕</button></td>`;
@@ -19327,7 +19336,7 @@ function addQtyRow(){
   const colorOpts=Object.entries(COLORS).map(([k,v])=>`<option value="${k}">${v}</option>`).join('');
   const i=Date.now();
   const tr=document.createElement('tr');
-  tr.innerHTML=`<td><input type="text" maxlength="2" style="width:50px;font-size:12px" data-qi="${i}" data-qf="size" placeholder="1"></td>
+  tr.innerHTML=`<td><input type="text" maxlength="4" style="width:50px;font-size:12px" data-qi="${i}" data-qf="size" placeholder="1"></td>
     <td><select data-qi="${i}" data-qf="color" style="font-size:12px"><option value="">--</option>${colorOpts}</select></td>
     <td><input type="number" value="0" min="0" style="width:70px;font-size:12px" data-qi="${i}" data-qf="qty"></td>
     <td><button type="button" onclick="this.closest('tr').remove();renderProductPricing()" style="background:none;border:none;color:var(--red);cursor:pointer;font-size:14px">✕</button></td>`;
@@ -19660,8 +19669,10 @@ async function saveProduct(){
   if(!(document.getElementById('pm-cust')?.value||'').trim()){alert('יש להזין מספר לקוח');return;}
   // קמויות
   const quantities=[];
+  let szLetters=!!document.getElementById('pm-szlet')?.checked; // 👕 אות שהוקלדה בטבלה מסמנת את ההזמנה כמידות באותיות
   document.querySelectorAll('#pm-qty-body tr').forEach(tr=>{
-    const size=tr.querySelector('[data-qf="size"]')?.value||'';
+    const _sz=tr.querySelector('[data-qf="size"]')?.value||'',size=szDigit(_sz);
+    if(size!==_sz.trim())szLetters=true;
     const color=tr.querySelector('[data-qf="color"]')?.value||'';
     const qty=parseInt(tr.querySelector('[data-qf="qty"]')?.value)||0;
     if(size||color)quantities.push({size,color,qty});
@@ -19726,7 +19737,7 @@ async function saveProduct(){
         const{orderNo}=await newProdOrderFields(cust,prod);
         if(orderNo!==_oNo){p.orderNo=orderNo;showToast('🔢 מספר ההזמנה עודכן ל-#'+String(orderNo).padStart(3,'0')+' — אם כבר הודפסו ברקודים, יש להדפיס מחדש','var(--amber-txt)',8000);}
       }
-      Object.assign(p,{prod,cust,name,images:_prodImgs,imgCount:_prodImgs.length,docs:_prodDocs,quantities,stageLog,stageSkipped,workSteps,unitPrice,targetProfitPct,directMaterialsCost,cutPrice,cutProfitPct,extraMatPrice,isSample,estQty,cons});
+      Object.assign(p,{prod,cust,name,images:_prodImgs,imgCount:_prodImgs.length,docs:_prodDocs,quantities,stageLog,stageSkipped,workSteps,unitPrice,targetProfitPct,directMaterialsCost,cutPrice,cutProfitPct,extraMatPrice,isSample,estQty,cons,szLetters});
     }
   }else{
     const id='p'+Date.now();
@@ -19737,7 +19748,7 @@ async function saveProduct(){
       stageLog.sort((a,b)=>PROD_STAGES.findIndex(x=>x.id===a.id)-PROD_STAGES.findIndex(x=>x.id===b.id));
     }
     const _ordF=await newProdOrderFields(cust,prod);
-    S.products.push({id,createdAt:Date.now(),..._ordF,prod,cust,name,images:_prodImgs,imgCount:_prodImgs.length,docs:_prodDocs,quantities,stageLog,stageSkipped,workSteps,unitPrice,targetProfitPct,directMaterialsCost,cutPrice,cutProfitPct,extraMatPrice,isSample,estQty,cons});
+    S.products.push({id,createdAt:Date.now(),..._ordF,prod,cust,name,images:_prodImgs,imgCount:_prodImgs.length,docs:_prodDocs,quantities,stageLog,stageSkipped,workSteps,unitPrice,targetProfitPct,directMaterialsCost,cutPrice,cutProfitPct,extraMatPrice,isSample,estQty,cons,szLetters});
   }
   saveLS();
   if(S.fbConnected){
