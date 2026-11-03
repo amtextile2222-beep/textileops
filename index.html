@@ -7,7 +7,7 @@
 <meta http-equiv="Pragma" content="no-cache"/>
 <meta http-equiv="Expires" content="0"/>
 <title>TextileOps — ניהול מפעל בגדים</title>
-<meta name="theme-color" content="#185FA5"/>
+<meta name="theme-color" content="#2D6470"/>
 <meta name="google" content="notranslate"/>
 <link rel="manifest" href="manifest.json"/>
 <link rel="icon" type="image/png" href="icon-192.png"/>
@@ -19,10 +19,12 @@
 <style>
 *{box-sizing:border-box;margin:0;padding:0}
 :root{
-  --bg:#fff;--bg2:#f5f5f3;--bg3:#efede8;
+  /* 🎨 (03/11/2026) ערכת צבעים: תכלת אבקה #A8C9C8 (ראשי — טקסט/מסגרות בגוון הכהה שלו) + כתום #F45B0B לכפתורים הראשיים */
+  --bg:#fff;--bg2:#f2f6f6;--bg3:#e8f0f0;
   --txt:#1a1a18;--txt2:#6b6b67;--txt3:#a0a09c;
   --b:rgba(0,0,0,.10);--b2:rgba(0,0,0,.18);
-  --blue:#185FA5;--blue-bg:#e6f1fb;--blue-txt:#185FA5;
+  --blue:#2D6470;--blue-bg:#dae8eb;--blue-txt:#2D6470;
+  --acc:#F45B0B;--acc-h:#d94c06;--acc-txt:#fff;
   --green:#0F6E56;--green-bg:#e1f5ee;--green-txt:#0F6E56;
   --red:#A32D2D;--red-bg:#fcebeb;--red-txt:#A32D2D;
   --amber:#854F0B;--amber-bg:#faeeda;--amber-txt:#854F0B;
@@ -35,7 +37,7 @@
   --bg:#1c1c1a;--bg2:#252523;--bg3:#2e2e2b;
   --txt:#f0ede8;--txt2:#a0a09c;--txt3:#6b6b67;
   --b:rgba(255,255,255,.10);--b2:rgba(255,255,255,.18);
-  --blue-bg:#0c3a63;--blue-txt:#85b7eb;
+  --blue-bg:#1f3a39;--blue-txt:#A8C9C8;
   --green-bg:#063328;--green-txt:#5dcaa5;
   --red-bg:#3d1010;--red-txt:#f09595;
   --amber-bg:#3d2505;--amber-txt:#ef9f27;
@@ -81,7 +83,8 @@ body{font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',sans-serif;backgrou
 /* BUTTONS */
 .btn{padding:8px 14px;border-radius:var(--r);border:0.5px solid var(--b2);background:var(--bg);color:var(--txt);font-size:13px;cursor:pointer;display:inline-flex;align-items:center;gap:6px;transition:all .15s;font-family:inherit}
 .btn:hover{background:var(--bg2)}
-.btn.primary{background:var(--blue-bg);color:var(--blue-txt);border-color:var(--blue-txt)}
+.btn.primary{background:var(--acc);color:var(--acc-txt);border-color:var(--acc);font-weight:600}
+.btn.primary:hover{background:var(--acc-h);border-color:var(--acc-h)}
 .btn.success{background:var(--green-bg);color:var(--green-txt);border-color:var(--green-txt)}
 .btn.danger{background:var(--red-bg);color:var(--red-txt);border-color:var(--red-txt)}
 .btn.warn{background:var(--amber-bg);color:var(--amber-txt);border-color:var(--amber-txt)}
@@ -18025,7 +18028,7 @@ function renderDNotes(){
     +(f.pack?` <span style="color:var(--txt3)">(📦 ${dnMoney(f.pack)})</span>`:'')
     +(f.missing?` · <b style="color:var(--red-txt)">⚠ ${f.missing} בלי מחיר</b>`:'')
     +(voids.length?` · <span style="color:var(--txt3)">🕳 ${voids.length===1?'תעודה אחת בוטלה':voids.length+' תעודות בוטלו'}</span>`:'')
-    +(selVis?` · <b style="color:#185FA5">☑ ${selVis} מסומנות</b> <a href="#" onclick="dnSelClear();return false" style="font-size:11px">נקה סימון</a>`:'');
+    +(selVis?` · <b style="color:var(--blue-txt)">☑ ${selVis} מסומנות</b> <a href="#" onclick="dnSelClear();return false" style="font-size:11px">נקה סימון</a>`:'');
   const heDate=d=>d?String(d).slice(8,10)+'/'+String(d).slice(5,7)+'/'+String(d).slice(0,4):'—';
   if(!rows.length&&!voids.length){
     box.innerHTML=`<div class="card" style="text-align:center;color:var(--txt3);font-size:13px;padding:18px">אין תעודות תואמות</div>`;
