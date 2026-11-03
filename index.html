@@ -3600,6 +3600,12 @@ function pipeFamOfDept(d){
   return '';
 }
 function pipeFamOfStep(s){return pipeFamOfDept(String(stepStation(s)||'').split('::')[0]);}
+// 🔢 (03/11/2026) סדר שלבי העבודה לפי מחלקה: קבלת סחורה ← תפירה (1 ו-2 = אחת) ← אריזה; בתוך מחלקה — הסדר שהוזן.
+// שלב בלי תחנה/מחלקה לא מזוהה נשאר צמוד לשלב שלפניו. מיון יציב — שלב שנשכח ונוסף בסוף עולה למקומו
+function sortStepsByDept(steps){
+  const R={recv:0,sew:1,pack:2};let prev=0;
+  return steps.map((s,i)=>{const f=pipeFamOfStep(s);if(f in R)prev=R[f];return{s,i,r:prev};}).sort((a,b)=>a.r-b.r||a.i-b.i).map(x=>x.s);
+}
 // מצב הצנרת של רשומת מוצר אחת. `tasks` = כל המשימות **של ההזמנה הזו בלבד** (שויכו ב-taskOrderStamp).
 function pipeStateOf(p,tasks){
   const qty=_prodQty(p);
@@ -19707,6 +19713,7 @@ async function saveProduct(){
     merge:!!r.querySelector('[data-f="merge"]')?.checked,
     cut:!!r.querySelector('[data-f="cut"]')?.checked
   })).filter(s=>s.name);
+  workSteps.splice(0,workSteps.length,...sortStepsByDept(workSteps));
   const unitPrice=parseFloat(document.getElementById('pm-price')?.value)||0;
   const targetProfitPct=parseFloat(document.getElementById('pm-profit')?.value)||0;
   const directMaterialsCost=parseFloat(document.getElementById('pm-materials')?.value)||0;
