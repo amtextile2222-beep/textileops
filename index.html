@@ -16436,6 +16436,7 @@ function bcGenerateOpenQty(){
   out.innerHTML=`
     <div style="display:flex;gap:8px;margin-bottom:10px">
       <button class="btn" onclick="bcPrintOpenQty('${cust}','${prod}','${code}','${escj(pname)}','${escj(pdate)}')" style="font-size:13px">🖨️ הדפס</button>
+      <button class="btn" onclick="bcPrintOpenQty('${cust}','${prod}','${code}','${escj(pname)}','${escj(pdate)}',true)" style="font-size:13px">💬 שלח בוואטסאפ</button>
     </div>
     <div id="bc-openqty-card" style="background:#fff;border:3px solid var(--amber-txt);border-radius:8px;padding:14px;display:flex;align-items:center;gap:14px;max-width:400px">
       <div id="bc-openqty-qr" style="flex-shrink:0;width:150px;height:150px"></div>
@@ -16452,10 +16453,10 @@ function bcGenerateOpenQty(){
   new QRCode(document.getElementById('bc-openqty-qr'),{text:bcQr(code),width:150,height:150,colorDark:'#000000',colorLight:'#ffffff',correctLevel:QRCode.CorrectLevel.M});
   _qrOne(document.getElementById('bc-openqty-qr'));
 }
-function bcPrintOpenQty(cust,prod,code,pname,pdate){
+function bcPrintOpenQty(cust,prod,code,pname,pdate,share){
   const canvas=document.querySelector('#bc-openqty-qr canvas');
   const img=canvas?`<img src="${canvas.toDataURL('image/png')}" style="width:150px;height:150px"/>`:'';
-  printViaIframe(`<html dir="rtl"><head><title>ברקוד ספירה/גזירה</title>
+  _bcCardOut(share,'count-barcode',cust,prod,code,'ברקוד ספירה/גזירה',`<html dir="rtl"><head><title>ברקוד ספירה/גזירה</title>
     <style>body{margin:20px;font-family:Arial,sans-serif;background:#fff}
     .card{border:3px solid #d97706;border-radius:8px;padding:16px;display:inline-flex;align-items:center;gap:16px}
     @media print{@page{size:A4 portrait;margin:10mm}}</style></head><body>
@@ -16472,6 +16473,14 @@ function bcPrintOpenQty(cust,prod,code,pname,pdate){
       </div>
     </div></body></html>`);
 }
+// 💬 (03/11/2026) ברקוד ספירה/יציאה ודף שלבים בוואטסאפ — אותו HTML של ההדפסה ⇒ PDF (_dnPdfBlob) ⇒ _waSharePdf
+async function _bcCardOut(share,kind,cust,prod,code,label,html){
+  if(!share){printViaIframe(html);return;}
+  showToast('⏳ מכין PDF…','var(--txt3)',4000);
+  let blob;try{blob=await _dnPdfBlob(html);}catch(e){alert('הכנת ה-PDF נכשלה: '+(e?.message||e));return;}
+  const no=String(code).slice(13);
+  await _waSharePdf(blob,kind+'-'+cust+'-'+prod+(no?'-'+no:'')+'.pdf',label+' · לקוח '+cust+' · מוצר '+prod+(no?' · הזמנה #'+no:''),'');
+}
 // ברקוד "יצא ללקוח": לקוח+מוצר+9+000+99 (col='99' שמור). סריקתו מסמנת shipped + פותחת עדכון כמות
 function bcGenerateShip(){
   const cust=(document.getElementById('bc-gen-cust')?.value||'').replace(/\D/g,'').padStart(2,'0').slice(0,2);
@@ -16486,6 +16495,7 @@ function bcGenerateShip(){
   out.innerHTML=`
     <div style="display:flex;gap:8px;margin-bottom:10px">
       <button class="btn" onclick="bcPrintShip('${cust}','${prod}','${code}','${escj(pname)}','${escj(pdate)}')" style="font-size:13px">🖨️ הדפס</button>
+      <button class="btn" onclick="bcPrintShip('${cust}','${prod}','${code}','${escj(pname)}','${escj(pdate)}',true)" style="font-size:13px">💬 שלח בוואטסאפ</button>
     </div>
     <div id="bc-ship-card" style="background:#fff;border:3px solid var(--green-txt,#16a34a);border-radius:8px;padding:14px;display:flex;align-items:center;gap:14px;max-width:400px">
       <div id="bc-ship-qr" style="flex-shrink:0;width:150px;height:150px"></div>
@@ -16506,10 +16516,10 @@ function bcGenerateShip(){
 // ה-img אחרי 50ms נפלה לפעמים **אחרי** ההחלפה ⇒ שניהם מוסתרים, כרטיס בלי QR (נצפה 01/11). משאירים תמיד את ה-canvas
 // (ההדפסה וה-PDF לוקחים ממנו) — כמה פעמים, כדי לנצח את ההחלפה גם כשהיא מאחרת.
 function _qrOne(el){const f=()=>{const c=el?.querySelector('canvas'),im=el?.querySelector('img');if(c){c.style.display='block';if(im)im.style.display='none';}};f();[50,300,1500].forEach(t=>setTimeout(f,t));}
-function bcPrintShip(cust,prod,code,pname,pdate){
+function bcPrintShip(cust,prod,code,pname,pdate,share){
   const canvas=document.querySelector('#bc-ship-qr canvas');
   const img=canvas?`<img src="${canvas.toDataURL('image/png')}" style="width:150px;height:150px"/>`:'';
-  printViaIframe(`<html dir="rtl"><head><title>ברקוד יצא ללקוח</title>
+  _bcCardOut(share,'ship-barcode',cust,prod,code,'ברקוד יצא ללקוח',`<html dir="rtl"><head><title>ברקוד יצא ללקוח</title>
     <style>body{margin:20px;font-family:Arial,sans-serif;background:#fff}
     .card{border:3px solid #16a34a;border-radius:8px;padding:16px;display:inline-flex;align-items:center;gap:16px}
     @media print{@page{size:A4 portrait;margin:10mm}}</style></head><body>
@@ -18888,6 +18898,7 @@ function openProductModal(id){
     <div id="pm-tasksteps-list" style="margin-bottom:8px" onchange="renderProductPricing()">${(p?.workSteps||[]).map(s=>_stepRowHtml(s)).join('')}</div>
     <button type="button" class="btn" onclick="addTaskStepRow()" style="font-size:12px">+ הוסף שלב עבודה</button>
     <button type="button" class="btn" onclick="printWorkSteps()" style="font-size:12px" title="דף שלבים ותחנות לרצפה — בלי זמן לשלב; למטה הזמן להזמנה לפי מחלקה">🖨 הדפס שלבים</button>
+    <button type="button" class="btn" onclick="printWorkSteps(true)" style="font-size:12px" title="אותו דף שלבים כ-PDF — נשלח בוואטסאפ">💬 וואטסאפ</button>
 
     <div class="sec" style="margin-top:14px;margin-bottom:6px">💰 תמחור ליחידה</div>
     <label style="display:flex;align-items:center;gap:6px;font-size:13px;margin-bottom:8px;cursor:pointer;flex-wrap:wrap"><input id="pm-sample" type="checkbox" style="width:auto" ${p?.isSample?'checked':''} onchange="pmSampleToggle(this)"/> <b>👕 דגם ראשון</b> <span style="font-size:11px;color:var(--txt3)">₪${SAMPLE_UNIT_PRICE} ליחידה · ברקוד דגם אחד · בלי שלבים, פתוח לכל התחנות · העלות לפי זמן העבודה</span></label>
@@ -19297,7 +19308,7 @@ function _orderDeptTimeHtml(list){
 // 🖨 דף שלבי עבודה לרצפה (19/10/2026 — בקשת המשתמש): שלב + תחנה (ראשית, ונוספות בקטן),
 // **בלי זמן לשלב**. למטה — הזמן להזמנה כולה לפי מחלקה, אותו חישוב בדיוק כמו בבלוק שבחלון
 // (_pmOrdMin מהרינדור האחרון × היחידות בטבלת הכמויות). נקרא מהחלון הפתוח — כולל שינויים שלא נשמרו.
-async function printWorkSteps(){
+async function printWorkSteps(share){
   try{renderProductPricing();}catch(_){}
   const v=id=>(document.getElementById(id)?.value||'').trim();
   const steps=[...document.querySelectorAll('#pm-tasksteps-list .ts-row')].map(r=>({
@@ -19333,6 +19344,11 @@ async function printWorkSteps(){
     <h2>${esc(title)}</h2><div class="sub">${name?esc(name)+' · ':''}${steps.length} שלבים · הודפס ${new Date().toLocaleDateString('he-IL')}</div>
     <table><thead><tr><th>#</th><th>שלב</th><th>תחנה</th><th>מחלקה</th></tr></thead><tbody>${rows}</tbody></table>
     ${dept}</body></html>`;
+  if(share){ // 💬 (03/11/2026) וואטסאפ — אותו דף כ-PDF
+    showToast('⏳ מכין PDF…','var(--txt3)',4000);
+    let b;try{b=await _dnPdfBlob(html);}catch(e){alert('הכנת ה-PDF נכשלה: '+(e?.message||e));return;}
+    await _waSharePdf(b,'work-steps-'+(prod||'0')+'.pdf',title+(name?' · '+name:''),'');return;
+  }
   if(!_isIOS()){printViaIframe(html);return;}
   // 🍎 אייפון: כמו תעודת המשלוח — PDF (עד 15% מעל עמוד מתכווץ לעמוד אחד) ⇒ שיתוף ⇒ הדפסה
   showToast('⏳ מכין PDF…','var(--txt3)',4000);
