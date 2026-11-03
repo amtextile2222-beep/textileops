@@ -5,7 +5,7 @@
 <meta name="viewport" content="width=device-width,initial-scale=1"/>
 <meta name="robots" content="noindex,nofollow"/>
 <meta name="referrer" content="no-referrer"/>
-<meta name="theme-color" content="#185FA5"/>
+<meta name="theme-color" content="#2D6470"/>
 <title>מעקב הזמנות</title>
 <link rel="icon" href="icon-192.png"/>
 <link rel="apple-touch-icon" href="icon-180.png"/>
@@ -13,10 +13,11 @@
 <style>
 /* 📦 דף מעקב הזמנות ללקוח (10/10/2026). כניסה עם קישור במייל (Firebase Email Link), פעם אחת למכשיר.
    הנתונים מ-Cloud Function customerTrack, שבודקת שהמייל המאומת מורשה ללקוח — ראה functions/index.js */
-:root{--bg:#f5f5f3;--card:#fff;--txt:#1c1c1a;--txt2:#555;--txt3:#888;--brd:rgba(0,0,0,.1);
-  --blue:#185FA5;--blue-bg:#e6f0fa;--green:#16a34a;--green-bg:#dcfce7;--track:#e5e5e2;--red:#dc2626;--red-bg:#fee2e2}
+/* 🎨 (03/11/2026) אותה ערכה כמו באפליקציה: תכלת (טקסט/פסים בגוון הכהה) + כתום לכפתורים */
+:root{--bg:#e8f0f0;--card:#fff;--acc:#F45B0B;--acc-h:#d94c06;--sh:0 1px 2px rgba(20,50,58,.06),0 4px 16px rgba(20,50,58,.06);--txt:#1c1c1a;--txt2:#555;--txt3:#888;--brd:rgba(0,0,0,.1);
+  --blue:#2D6470;--blue-bg:#dae8eb;--green:#16a34a;--green-bg:#dcfce7;--track:#e5e5e2;--red:#dc2626;--red-bg:#fee2e2}
 @media (prefers-color-scheme:dark){:root{--bg:#1c1c1a;--card:#252523;--txt:#f0f0ee;--txt2:#bbb;--txt3:#888;
-  --brd:rgba(255,255,255,.12);--blue:#6aa8e8;--blue-bg:#1d3047;--green:#4ade80;--green-bg:#173a24;--track:#3a3a37;--red:#f87171;--red-bg:#3f1d1d}}
+  --brd:rgba(255,255,255,.12);--blue:#A8C9C8;--blue-bg:#1f3a39;--sh:0 1px 2px rgba(0,0,0,.3),0 4px 16px rgba(0,0,0,.25);--green:#4ade80;--green-bg:#173a24;--track:#3a3a37;--red:#f87171;--red-bg:#3f1d1d}}
 *{box-sizing:border-box}
 body{margin:0;background:var(--bg);color:var(--txt);font-family:system-ui,-apple-system,"Segoe UI",Arial,sans-serif;line-height:1.45}
 .wrap{max-width:720px;margin:0 auto;padding:16px}
@@ -25,11 +26,11 @@ header .logo{font-size:28px}
 h1{font-size:20px;margin:0}
 .sub{font-size:13px;color:var(--txt3)}
 h2{font-size:14px;color:var(--txt2);margin:20px 0 8px}
-.card{background:var(--card);border:1px solid var(--brd);border-radius:12px;padding:12px 14px;margin-bottom:10px}
+.card{background:var(--card);border:1px solid var(--brd);border-radius:16px;padding:12px 14px;margin-bottom:10px;box-shadow:var(--sh)}
 .top{display:flex;justify-content:space-between;align-items:flex-start;gap:8px}
 .nm{font-weight:700;font-size:15px}
 .meta{font-size:12px;color:var(--txt3);margin-top:2px}
-.badge{flex:0 0 auto;font-size:12px;font-weight:700;padding:3px 10px;border-radius:999px;background:var(--blue-bg);color:var(--blue);white-space:nowrap}
+.badge{flex:0 0 auto;font-size:12px;font-weight:700;padding:3px 10px;border-radius:999px;background:var(--blue-bg);color:var(--blue);white-space:nowrap;border:1px solid color-mix(in srgb,currentColor 22%,transparent)}
 .badge.done{background:var(--green-bg);color:var(--green)}
 .bar{display:flex;gap:3px;margin:10px 0 4px}
 .bar span{flex:1;min-width:0;text-align:center}
@@ -60,7 +61,7 @@ h2{font-size:14px;color:var(--txt2);margin:20px 0 8px}
 .pbar{display:flex;align-items:center;gap:10px;flex-wrap:wrap;font-size:13px;color:var(--txt2);background:var(--card);border:1px solid var(--brd);border-radius:12px;padding:9px 12px;margin-bottom:12px}
 .pbar.on{background:var(--green-bg);color:var(--green);border-color:transparent}
 .pbar span{font-size:12px;color:var(--txt3)}
-.pbar .pbtn{font-size:14px;font-weight:700;padding:8px 14px;border-radius:10px;border:0;background:var(--blue);color:#fff;cursor:pointer}
+.pbar .pbtn{font-size:14px;font-weight:700;padding:8px 14px;border-radius:10px;border:0;background:var(--acc);color:#fff;cursor:pointer}
 .pbar .pbtn:disabled{opacity:.6}
 .pbar #poff{background:none;border:0;color:inherit;text-decoration:underline;font:inherit;cursor:pointer;padding:0}
 /* 📦 (02/11/2026) שורת חומר: שם בשורה מלאה, מתחת — במפעל / נדרש / חסר; פריט לפי מידה = טבלה אחת */
@@ -87,7 +88,11 @@ footer button{background:none;border:0;color:var(--blue);font:inherit;cursor:poi
 .login{max-width:380px;margin:30px auto;text-align:center}
 .login p{font-size:14px;color:var(--txt2);margin:0 0 14px}
 .login input{width:100%;font-size:16px;padding:12px;border-radius:10px;border:1px solid var(--brd);background:var(--card);color:var(--txt);text-align:left}
-.login button{width:100%;margin-top:10px;font-size:16px;font-weight:700;padding:12px;border-radius:10px;border:0;background:var(--blue);color:#fff;cursor:pointer}
+.login button{width:100%;margin-top:10px;font-size:16px;font-weight:700;padding:12px;border-radius:10px;border:0;background:var(--acc);color:#fff;cursor:pointer}
+.login button:hover:not(:disabled),.pbar .pbtn:hover:not(:disabled){background:var(--acc-h)}
+.login input:focus{outline:none;border-color:var(--blue);box-shadow:0 0 0 3px var(--blue-bg)}
+h1{color:var(--blue)}
+.pbar{box-shadow:var(--sh)}
 .login button:disabled{opacity:.6}
 .login .err{color:#dc2626;font-size:13px;margin-top:8px;min-height:1em}
 </style>
@@ -273,7 +278,7 @@ async function load(){
     if(r.status===403){
       const j=await r.json().catch(()=>({}));
       $('sub').textContent='';
-      appEl.innerHTML=j.error==='pending'?`<div class="msg">⏳ המכשיר הזה עדיין לא אושר לצפייה בהזמנות.<br>שלחנו בקשת אישור למפעל — הדף יתעדכן לבד אחרי האישור.<br><br><button id="rt" style="font-size:14px;padding:8px 16px;border-radius:10px;border:0;background:var(--blue);color:#fff;cursor:pointer">🔄 בדיקה שוב</button></div>`
+      appEl.innerHTML=j.error==='pending'?`<div class="msg">⏳ המכשיר הזה עדיין לא אושר לצפייה בהזמנות.<br>שלחנו בקשת אישור למפעל — הדף יתעדכן לבד אחרי האישור.<br><br><button id="rt" style="font-size:14px;padding:8px 16px;border-radius:10px;border:0;background:var(--acc);color:#fff;cursor:pointer">🔄 בדיקה שוב</button></div>`
         :j.error==='blocked'?`<div class="msg">⛔ הגישה מהמכשיר הזה נחסמה.<br>פנו אלינו לפרטים.</div>`
         :`<div class="msg">🔒 המייל <b dir="ltr">${esc(u.email)}</b> אינו מורשה לצפות בהזמנות.<br>פנו אלינו כדי להוסיף אותו.</div>`;
       const rt=$('rt');if(rt)rt.onclick=()=>{appEl.innerHTML='<div class="msg">⏳ בודק…</div>';load();};
