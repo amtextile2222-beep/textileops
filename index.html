@@ -19273,7 +19273,8 @@ function _pmUnitsForTime(){
 function _orderDeptAgg(list){
   const by={},order=[];
   for(const x of list){
-    const k=x.station?String(x.station).split("::")[0]:"";
+    // 🧵 (03/11/2026) מחלקות התפירה (1, 2…) — שורה אחת, בלי המספר
+    let k=x.station?String(x.station).split("::")[0]:"";if(pipeFamOfDept(k)==='sew')k=k.replace(/\s*\d+\s*$/,'');
     const key=(x.cut?"✂ ":"")+(k||"ללא מחלקה");
     if(!(key in by)){by[key]=0;order.push(key);}
     by[key]+=x.min;
