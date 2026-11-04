@@ -3474,12 +3474,12 @@ async function mmSave(){
 function mmClose(){if(_mm?.dirty&&!confirm('לסגור בלי לשמור? · إغلاق بدون حفظ؟'))return;document.getElementById('mm-wrap')?.remove();_mm=null;}
 function mmPrint(){
   const p=(S.products||[]).find(x=>String(x.id)===String(_mm?.pid));if(!p||!_mm.map)return;
-  const ck=_mmChecks(),m=_mm.map,win=window.open('','_blank');if(!win){alert('הדפדפן חסם חלון חדש');return;}
-  win.document.write('<!doctype html><html dir="rtl"><head><meta charset="utf-8"><title>מפת פריסה '+esc(p.cust+'/'+p.prod)+'</title><style>body{font-family:Arial,sans-serif;margin:8mm}@page{size:A4 landscape}</style></head><body>'
+  const ck=_mmChecks(),m=_mm.map;
+  // דרך iframe — window.open נתקע ב-PWA במסך הבית (אין איך לסגור את דף ההדפסה)
+  printViaIframe('<!doctype html><html dir="rtl"><head><meta charset="utf-8"><title>מפת פריסה '+esc(p.cust+'/'+p.prod)+'</title><style>body{font-family:Arial,sans-serif;margin:8mm}@page{size:A4 landscape}</style></head><body>'
     +'<h3 style="margin:0 0 4px">🧵 מפת פריסה · '+esc(p.cust)+'/'+esc(p.prod)+' '+esc(p.name||'')+'</h3>'
     +'<div style="font-size:12px;margin-bottom:6px">'+esc(m.name||'')+' · אורך '+_crM(m.len/100)+' מ\' · רוחב '+m.wid+' ס"מ'+(+_mm.rep?' · חזרת פס '+_mm.rep+' ס"מ':'')+'</div>'
     +'<div dir="ltr">'+_mmSvg(p,ck,true)+'</div>'+_mmTable(p,ck)+'</body></html>');
-  win.document.close();setTimeout(()=>{try{win.print();}catch(e){}},400);
 }
 const bcRetiredMsg=why=>{const T=LANGS[currentLang];return why==='cut'?T.bc_ret_cut:T.bc_ret_ship;};
 // שורה אדומה בתצוגה המקדימה של שלושת הסורקים — העובד רואה מיד, לא רק בלחיצה על "התחל"
