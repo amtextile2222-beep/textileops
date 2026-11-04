@@ -15,7 +15,6 @@
 <meta name="apple-mobile-web-app-capable" content="yes"/>
 <meta name="apple-mobile-web-app-status-bar-style" content="default"/>
 <meta name="apple-mobile-web-app-title" content="TextileOps"/>
-<script src="https://cdn.jsdelivr.net/npm/face-api.js@0.22.2/dist/face-api.min.js?v=20260617"></script>
 <style>
 *{box-sizing:border-box;margin:0;padding:0}
 :root{
@@ -1619,15 +1618,11 @@ thead th{font-weight:600}
   </div>
 </div>
 
-<!-- PDF.JS -->
-<script src="https://cdn.jsdelivr.net/npm/pdfjs-dist@3.11.174/build/pdf.min.js"></script>
 <!-- ZXING BARCODE READER -->
 <script src="https://cdn.jsdelivr.net/npm/jsqr@1.4.0/dist/jsQR.js"></script>
 <!-- QR CODE GENERATOR -->
 <script src="https://cdn.jsdelivr.net/npm/qrcodejs@1.0.0/qrcode.min.js"></script>
 <script src="https://cdn.jsdelivr.net/npm/jsbarcode@3.11.6/dist/JsBarcode.all.min.js"></script>
-<!-- PDF GENERATOR (מדבקות A4 בגודל מדויק) -->
-<script src="https://cdn.jsdelivr.net/npm/jspdf@2.5.1/dist/jspdf.umd.min.js"></script>
 
 <!-- FIREBASE SDK -->
 <script type="module">
@@ -10311,11 +10306,11 @@ function printWorkerBarcodes(mode){
 }
 // ─── PDF מדבקות עובדים (A4 מדויק, 105×56 מ"מ) ───
 // אותו מנוע של מדבקות המשימות (_bcPdfCell) — להדפסה מהנייד, שם AirPrint מכווץ HTML
-function workerBcDownloadPDF(){
+async function workerBcDownloadPDF(){
   const selIds=_wbcSelectedIds();
   const workers=S.workers.filter(w=>w.role!=='manager'&&(!selIds||selIds.has(String(w.id))));
   if(!workers.length){alert(selIds?'בחר לפחות עובד אחד להדפסה':'אין עובדים');return;}
-  const J=window.jspdf&&window.jspdf.jsPDF;
+  await _lib('jspdf').catch(()=>{});const J=window.jspdf&&window.jspdf.jsPDF;
   if(!J){alert('ספריית PDF עדיין נטענת — נסה שוב עוד רגע');return;}
   if(!window.QRCode){alert('ספריית QR לא נטענה');return;}
   const cards=workers.map(w=>({qr:'EMP:'+w.id,lines:[
@@ -10918,11 +10913,11 @@ function printStationBarcodes(mode){
 }
 // ─── PDF מדבקות תחנות (A4 מדויק, 105×56 מ"מ) ───
 // אותו מנוע של מדבקות המשימות (_bcPdfCell) — להדפסה מהנייד, שם AirPrint מכווץ HTML
-function stationBcDownloadPDF(){
+async function stationBcDownloadPDF(){
   const selIds=_stnbcSelectedIds();
   const sts=(S.workStations||[]).filter(s=>!selIds||selIds.has(String(s.id)));
   if(!sts.length){alert(selIds?'בחר לפחות תחנה אחת להדפסה':'אין תחנות מוגדרות');return;}
-  const J=window.jspdf&&window.jspdf.jsPDF;
+  await _lib('jspdf').catch(()=>{});const J=window.jspdf&&window.jspdf.jsPDF;
   if(!J){alert('ספריית PDF עדיין נטענת — נסה שוב עוד רגע');return;}
   if(!window.QRCode){alert('ספריית QR לא נטענה');return;}
   const cards=sts.map(s=>{
@@ -16818,7 +16813,7 @@ const _waPhone=ph=>{let d=String(ph||'').replace(/\D/g,'');if(d.startsWith('0'))
 // html = מסמך אחד או מערך מסמכים (💬 כמה תעודות — 31/10/2026): כל מסמך מתחיל בעמוד חדש באותו PDF
 async function _dnPdfBlob(html){
   await _loadH2C();
-  const J=window.jspdf&&window.jspdf.jsPDF;if(!J)throw new Error('ספריית PDF עדיין נטענת — נסה שוב עוד רגע');
+  await _lib('jspdf').catch(()=>{});const J=window.jspdf&&window.jspdf.jsPDF;if(!J)throw new Error('ספריית PDF עדיין נטענת — נסה שוב עוד רגע');
   const doc=new J({unit:'mm',format:'a4',orientation:'portrait'});
   let pages=0;const add=(...a)=>{if(pages++)doc.addPage();doc.addImage(...a);};
   for(const one of [].concat(html)){
@@ -18588,7 +18583,7 @@ function _bcPdfCell(card){
 async function bcDownloadPDF(share){
   const g=window._bcLastGen;
   if(!g){alert('צור ברקודים תחילה');return;}
-  const J=window.jspdf&&window.jspdf.jsPDF;
+  await _lib('jspdf').catch(()=>{});const J=window.jspdf&&window.jspdf.jsPDF;
   if(!J){alert('ספריית PDF עדיין נטענת — נסה שוב עוד רגע');return;}
   if(!window.QRCode){alert('ספריית QR לא נטענה');return;}
   const {cust,prod,items}=g,sfx=g.sfx||'';
@@ -18670,6 +18665,7 @@ async function bcHandlePDF(input){
   const setMsg=(t,ok)=>{if(msg){msg.textContent=t;msg.style.color=ok?'var(--green-txt)':ok===false?'var(--red-txt)':'var(--txt3)';}};
   setMsg('⏳ מעבד קובץ...',null);
   try{
+    await _lib('pdfjs').catch(()=>{});
     if(!window.pdfjsLib){setMsg('⚠ PDF.js לא נטען, נסה שוב',false);return;}
     window.pdfjsLib.GlobalWorkerOptions.workerSrc='https://cdn.jsdelivr.net/npm/pdfjs-dist@3.11.174/build/pdf.worker.min.js';
     const ab=await file.arrayBuffer();
@@ -20060,10 +20056,17 @@ async function sendFaceRegPhotos(workerName,snaps){
   }
 }
 
+// ⚡ (04/11/2026) ספריות כבדות (זיהוי פנים 650KB, יצירת/קריאת PDF ~670KB) נטענות רק כשצריך —
+// קודם הן נטענו בכל פתיחה, וזיהוי הפנים בראש הדף חסם את ציור המסך כולו עד שירד
+const _LIBS={faceapi:['https://cdn.jsdelivr.net/npm/face-api.js@0.22.2/dist/face-api.min.js?v=20260617',()=>window.faceapi],jspdf:['https://cdn.jsdelivr.net/npm/jspdf@2.5.1/dist/jspdf.umd.min.js',()=>window.jspdf],pdfjs:['https://cdn.jsdelivr.net/npm/pdfjs-dist@3.11.174/build/pdf.min.js',()=>window.pdfjsLib]},_libP={};
+function _lib(k){const[u,ok]=_LIBS[k];if(ok())return Promise.resolve();
+  return _libP[k]||(_libP[k]=new Promise((res,rej)=>{const sc=document.createElement('script');sc.src=u;
+    sc.onload=()=>ok()?res():(_libP[k]=null,rej(new Error(k+' לא נטען')));sc.onerror=()=>{_libP[k]=null;sc.remove();rej(new Error(k+' לא נטען — בדוק חיבור ונסה שוב'));};document.head.appendChild(sc);}));}
 async function loadFaceModels(){
   if(_faceModelsLoaded)return true;
   const base='https://cdn.jsdelivr.net/gh/justadudewhohacks/face-api.js@master/weights';
   try{
+    await _lib('faceapi');
     await Promise.all([
       faceapi.nets.tinyFaceDetector.loadFromUri(base),
       faceapi.nets.faceLandmark68TinyNet.loadFromUri(base),
