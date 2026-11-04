@@ -3324,7 +3324,7 @@ function _mmSvg(p,ck,prn){
     g+='<rect x="'+q.x+'" y="'+q.y+'" width="'+w+'" height="'+h+'" fill="'+c+'" fill-opacity=".35" stroke="'+(b?'#d00':c)+'" stroke-width="'+(b?1.2:0.4)+'"/>'
       +(inG.has(q)?'<line x1="'+st+'" y1="'+q.y+'" x2="'+st+'" y2="'+q.Y+'" stroke="'+(b?'#d00':'#222')+'" stroke-width="0.9"/>':'')
       +'<text x="'+(q.x+w/2)+'" y="'+(q.y+h/2+fs/3)+'" font-size="'+fs+'" text-anchor="middle" fill="#222">'+esc(q.n)+' '+esc(szLbl(q.s,p))+'</text>';});
-  return '<svg viewBox="-2 -2 '+(L+4)+' '+(W+16)+'" xmlns="http://www.w3.org/2000/svg" style="width:100%;'+(prn?'':'min-width:'+Math.round(L*1.4)+'px;')+'height:auto;display:block;background:#fff">'
+  return '<svg viewBox="-2 -2 '+(L+4)+' '+(W+16)+'" xmlns="http://www.w3.org/2000/svg" style="'+(prn?'width:100%;':'width:'+100*(_mm.z||1)+'%;min-width:'+Math.round(L*1.4*(_mm.z||1))+'px;')+'height:auto;display:block;background:#fff">'
     +'<rect x="0" y="0" width="'+L+'" height="'+W+'" fill="#fafafa" stroke="#333" stroke-width="0.5"/>'+g+'</svg>';
 }
 const _mmCm=v=>(Math.round(v*10)/10).toFixed(1);
@@ -3345,6 +3345,7 @@ function renderMrkMap(){
   const m=_mm.map,inp='font-size:14px;padding:6px;border-radius:8px;border:1px solid var(--brd);background:var(--bg);color:var(--txt)';
   const lbl='font-size:11px;color:var(--txt3);display:flex;flex-direction:column;gap:2px';
   const ck=_mmChecks(),nb=ck.filter(c=>c.bad).length,sizes=m?[...new Set(m.pcs.map(q=>q.s))]:[];
+  const ob=document.getElementById('mm-box'),sc=ob?[ob.scrollLeft,ob.scrollTop]:null;
   w.innerHTML='<div style="background:var(--card);border-radius:14px;padding:16px;max-width:1100px;width:100%;box-shadow:0 10px 40px rgba(0,0,0,.3);margin:auto">'
     +'<div style="display:flex;gap:6px;align-items:center;flex-wrap:wrap;margin-bottom:8px">'
     +'<div style="font-size:16px;font-weight:800;flex:1;min-width:180px">🧵 מפת פריסה · خريطة الفرش · '+esc(p.cust)+'/'+esc(p.prod)+'</div>'
@@ -3360,7 +3361,9 @@ function renderMrkMap(){
       +'<label style="'+lbl+'">סובלנות (ס"מ) · السماح<input type="number" step="0.1" min="0" inputmode="decimal" value="'+esc(String(_mm.tol))+'" onchange="mmSet(\'tol\',this.value)" style="'+inp+';width:80px"></label>'
       +'<label style="'+lbl+'">הזזת קווי הפס (ס"מ)<input type="number" step="0.1" inputmode="decimal" value="'+esc(String(_mm.off))+'" onchange="mmSet(\'off\',this.value)" style="'+inp+';width:90px"></label>'
       +'<label style="'+lbl+';flex:1;min-width:160px">קבוצות התאמה · مجموعات (FR+BK, SL)<input value="'+esc(_mm.grp)+'" onchange="mmSet(\'grp\',this.value)" dir="ltr" style="'+inp+'"></label></div>'
-    +'<div dir="ltr" style="overflow-x:auto;border:1px solid var(--brd);border-radius:8px">'+_mmSvg(p,ck)+'</div>'
+    +'<div style="display:flex;gap:6px;align-items:center;margin-bottom:4px"><button class="btn" style="font-size:14px;padding:2px 10px" onclick="mmZoom(1.4)">＋</button><button class="btn" style="font-size:14px;padding:2px 10px" onclick="mmZoom(1/1.4)">－</button><button class="btn" style="font-size:12px;padding:3px 8px" onclick="mmZoom(0)">מלא</button>'
+      +'<span style="font-size:11px;color:var(--txt3)">גלגלת העכבר = זום · גרירה = הזזה · عجلة الفأرة = تكبير</span></div>'
+    +'<div id="mm-box" dir="ltr" style="overflow:auto;max-height:70vh;border:1px solid var(--brd);border-radius:8px;cursor:grab;touch-action:pan-x pan-y">'+_mmSvg(p,ck)+'</div>'
     +'<div style="display:flex;gap:10px;flex-wrap:wrap;font-size:12px;margin:6px 0">'+sizes.map((s,i)=>'<span><span style="display:inline-block;width:12px;height:12px;border-radius:3px;vertical-align:middle;background:'+_MM_COL[i%_MM_COL.length]+'"></span> מידה '+esc(szLbl(s,p))+'</span>').join('')
       +'<span style="color:var(--txt3)">· קו שחור = תחילת החלק לבדיקה · אדום = לא מתאים</span></div>'
     +'<div style="font-size:14px;font-weight:700;margin-top:8px">'+(!+_mm.rep?'הזן את חזרת הפס כדי לבדוק התאמה · أدخل تكرار الخط':nb?'⚠ '+nb+' בדיקות לא מתאימות':'✓ כל החלקים בקבוצות על אותו פס')
@@ -3368,6 +3371,23 @@ function renderMrkMap(){
     +_mmTable(p,ck)
     +'<div style="font-size:11px;color:var(--txt3);margin-top:8px">החלקים מצוירים כמלבן (הצורה המדויקת שמורה בקובץ בפורמט סגור). ההשוואה לפי קצה המלבן של כל חלק.</div>')
     +'</div>';
+  const box=document.getElementById('mm-box');if(!box)return;
+  if(sc){box.scrollLeft=sc[0];box.scrollTop=sc[1];}
+  box.addEventListener('wheel',e=>{e.preventDefault();mmZoom(e.deltaY<0?1.25:1/1.25,e);},{passive:false});
+  // גרירה בעכבר = הזזה (במגע — הגלילה הרגילה של הדפדפן)
+  box.addEventListener('mousedown',e=>{if(e.button)return;const x0=e.clientX,y0=e.clientY,l0=box.scrollLeft,t0=box.scrollTop;box.style.cursor='grabbing';
+    const mv=ev=>{box.scrollLeft=l0-(ev.clientX-x0);box.scrollTop=t0-(ev.clientY-y0);};
+    const up=()=>{box.style.cursor='grab';removeEventListener('mousemove',mv);removeEventListener('mouseup',up);};
+    addEventListener('mousemove',mv);addEventListener('mouseup',up);e.preventDefault();});
+}
+// 🔍 זום סביב נקודת העכבר (בלי ev — סביב המרכז; f=0 — חזרה לגודל מלא). משנה רק את רוחב ה-SVG, בלי לצייר מחדש
+function mmZoom(f,ev){
+  const box=document.getElementById('mm-box'),sv=box?.querySelector('svg');if(!sv||!_mm?.map)return;
+  const z=f?Math.min(12,Math.max(1,(_mm.z||1)*f)):1;if(z===(_mm.z||1)&&f)return;
+  const r=box.getBoundingClientRect(),px=ev?ev.clientX-r.left:box.clientWidth/2,py=ev?ev.clientY-r.top:box.clientHeight/2;
+  const fx=(box.scrollLeft+px)/sv.clientWidth,fy=(box.scrollTop+py)/sv.clientHeight;
+  _mm.z=z;sv.style.width=100*z+'%';sv.style.minWidth=Math.round(_mm.map.len*1.4*z)+'px';
+  box.scrollLeft=fx*sv.clientWidth-px;box.scrollTop=fy*sv.clientHeight-py;
 }
 async function mmSave(){
   const p=(S.products||[]).find(x=>String(x.id)===String(_mm?.pid));if(!p||!_mm.map)return;
