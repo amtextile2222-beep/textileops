@@ -3364,8 +3364,8 @@ function _mmSvg(p,ck,prn){
   for(let x=0;x<=L;x+=50)g+='<line x1="'+x+'" y1="'+W+'" x2="'+x+'" y2="'+(W+(x%100?3:5))+'" stroke="#555" stroke-width="0.3"/>'+(x%100?'':'<text x="'+x+'" y="'+(W+11)+'" font-size="6" text-anchor="middle" fill="#555">'+(x/100)+'m</text>');
   m.pcs.forEach(q=>{const c=_MM_COL[sizes.indexOf(q.s)%_MM_COL.length],b=bad.has(q),w=q.X-q.x,h=q.Y-q.y,fs=Math.max(2.5,Math.min(7,w/4,h/3)),ol=_mmOl(q),st=ol.length?_mmHem(q):_mmStart(q);
     const P=l=>l.map(v=>v[0]+','+v[1]).join(' '),main=ol.reduce((a,l)=>l.length>a.length?l:a,[]);
-    g+=ol.length?'<polygon points="'+P(main)+'" fill="'+c+'" fill-opacity=".35" stroke="none"/>'+ol.map(l=>'<polyline points="'+P(l)+'" fill="none" stroke="'+(b?'#d00':'#333')+'" stroke-width="'+(b?0.8:0.3)+'"/>').join('')
-      :'<rect x="'+q.x+'" y="'+q.y+'" width="'+w+'" height="'+h+'" fill="'+c+'" fill-opacity=".35" stroke="'+(b?'#d00':c)+'" stroke-width="'+(b?1.2:0.4)+'"/>'
+    g+=(ol.length?'<polygon points="'+P(main)+'" fill="'+c+'" fill-opacity=".35" stroke="none"/>'+ol.map(l=>'<polyline points="'+P(l)+'" fill="none" stroke="'+(b?'#d00':'#333')+'" stroke-width="'+(b?0.8:0.3)+'"/>').join('')
+      :'<rect x="'+q.x+'" y="'+q.y+'" width="'+w+'" height="'+h+'" fill="'+c+'" fill-opacity=".35" stroke="'+(b?'#d00':c)+'" stroke-width="'+(b?1.2:0.4)+'"/>')
       +(inG.has(q)?'<line x1="'+st+'" y1="'+q.y+'" x2="'+st+'" y2="'+q.Y+'" stroke="'+(b?'#d00':'#222')+'" stroke-width="0.9"/>':'')
       +'<text x="'+(q.x+w/2)+'" y="'+(q.y+h/2+fs/3)+'" font-size="'+fs+'" text-anchor="middle" fill="#222">'+esc(q.n)+' '+esc(szLbl(q.s,p))+'</text>';});
   return '<svg viewBox="-2 -2 '+(L+4)+' '+(W+16)+'" xmlns="http://www.w3.org/2000/svg" style="'+(prn?'width:100%;':'width:'+100*(_mm.z||1)+'%;min-width:'+Math.round(L*1.4*(_mm.z||1))+'px;')+'height:auto;display:block;background:#fff">'
