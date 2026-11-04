@@ -3264,7 +3264,7 @@ async function saveCutReport(){
 // קווי המתאר נמצאים בחלק הבינארי (פורמט סגור) — לכן החלקים מצוירים כמלבנים. ציר X = אורך הציור; פס לרוחב הבד = קו ב-X קבוע.
 // התאמה: חלקים מאותה קבוצה (ברירת מחדל קדמי+גב, שרוולים) באותה מידה חייבים להתחיל באותו מקום של הפס —
 // ההפרש בין "תחילת החלק" (הקצה שהיה בצד אחד לפני סיבוב 180°) מודולו חזרת הפס ≤ סובלנות. בלי חזרת פס — ההפרש עצמו.
-// products.mrkMap = {name,date,len,wid,rep,off,tol,grp,pcs:[{s,n,x,X,y,Y,a,f}],by,at} — אובייקטים (Firestore לא שומר מערך בתוך מערך)
+// products.mrkMap = {name,date,len,wid,rep,off,tol,grp,plt,pcs:[{s,n,x,X,y,Y,a,f,o}],by,at} (o = צורה מקובץ הפלוטר) — אובייקטים (Firestore לא שומר מערך בתוך מערך)
 let _mm=null;
 function _mrkParse(buf){
   const u=new Uint8Array(buf);let t='';for(let i=0;i<u.length&&i<600000;i++)t+=String.fromCharCode(u[i]);
@@ -3299,6 +3299,48 @@ function openMrkMap(pid){
 function mmLoad(inp){const f=inp.files?.[0];inp.value='';if(!f)return;
   f.arrayBuffer().then(b=>{try{const r=_mrkParse(b);_mm.map=r;_mm.dirty=true;renderMrkMap();showToast('✅ '+r.pcs.length+' חלקים נקראו');}catch(e){alert('⚠ '+e.message);}});}
 function mmSet(k,v){_mm[k]=v;_mm.dirty=!!_mm.map;renderMrkMap();}
+// 📐 קובץ פלוטר HP-GL (HPG/PLT) של אותו ציור — הצורות האמיתיות. 40 יח' = 1 מ"מ (אחרת — קנה מידה לפי אורך הציור).
+// עט החיתוך = העט עם הכי הרבה קווים ארוכים (שאר העטים = טקסט). כל קו משויך לחלק הקטן ביותר שהמלבן שלו מכיל את מרכז הקו.
+// נשמר בחלק: o = "x,y x,y|..." יחסית לפינת המלבן, 0.01 ס"מ, אחרי פישוט (Douglas-Peucker 0.05 ס"מ)
+function _hpglParse(t){
+  let pen=0,cur=null;const out=[],flush=()=>{if(cur&&cur.p.length>1)out.push(cur);cur=null;};
+  t.split(/[;\r\n]+/).forEach(c=>{c=c.trim();if(!c)return;const op=c.slice(0,2).toUpperCase(),v=c.slice(2).split(/[ ,]+/).filter(Boolean).map(Number);
+    if(op==='SP'){flush();pen=v[0]||0;}
+    else if(op==='PU'){flush();if(v.length>=2)cur={pen,p:[[v[v.length-2],v[v.length-1]]]};}
+    else if(op==='PD'){if(!cur)cur={pen,p:[]};for(let i=0;i+1<v.length;i+=2)cur.p.push([v[i],v[i+1]]);}});
+  flush();return out;
+}
+function _dp(p,e){
+  if(p.length<3)return p;const a=p[0],b=p[p.length-1],dx=b[0]-a[0],dy=b[1]-a[1],L=Math.hypot(dx,dy);let mi=0,md=0;
+  for(let i=1;i<p.length-1;i++){const d=L<1e-9?Math.hypot(p[i][0]-a[0],p[i][1]-a[1]):Math.abs(dy*p[i][0]-dx*p[i][1]+b[0]*a[1]-b[1]*a[0])/L;if(d>md){md=d;mi=i;}}
+  return md>e?_dp(p.slice(0,mi+1),e).slice(0,-1).concat(_dp(p.slice(mi),e)):[a,b];
+}
+const _bb=pts=>{let a=1e12,b=-1e12,c=1e12,d=-1e12;pts.forEach(([x,y])=>{if(x<a)a=x;if(x>b)b=x;if(y<c)c=y;if(y>d)d=y;});return[a,b,c,d];};
+function _mmAttachPlt(m,t){
+  const ls=_hpglParse(t);if(!ls.length)throw new Error('לא נמצאו קווים בקובץ · لا توجد خطوط');
+  const big={};ls.forEach(q=>{const b=_bb(q.p);if(b[1]-b[0]>8000||b[3]-b[2]>8000)big[q.pen]=(big[q.pen]||0)+1;});
+  const cut=+(Object.entries(big).sort((a,b)=>b[1]-a[1])[0]||[])[0];
+  let mx=0;ls.forEach(q=>{if(q.pen===cut)q.p.forEach(p=>{if(p[0]>mx)mx=p[0];});});
+  const k=Math.abs(mx/400-m.len)<3?400:mx/m.len,acc=m.pcs.map(()=>[]);
+  ls.filter(q=>q.pen===cut).forEach(q=>{const pts=q.p.map(p=>[p[0]/k,p[1]/k]),b=_bb(pts),cx=(b[0]+b[1])/2,cy=(b[2]+b[3])/2;
+    let bi=-1,ba=1e12;m.pcs.forEach((p,i)=>{if(cx>=p.x-0.5&&cx<=p.X+0.5&&cy>=p.y-0.5&&cy<=p.Y+0.5){const a=(p.X-p.x)*(p.Y-p.y);if(a<ba){ba=a;bi=i;}}});
+    if(bi>=0)acc[bi].push(_dp(pts,0.05));});
+  const n=acc.filter(a=>a.length).length;
+  if(n<m.pcs.length/2)throw new Error('הקווים לא מתאימים לחלקים ('+n+'/'+m.pcs.length+') — האם זה אותו ציור? · الملف لا يطابق الرسم');
+  const r1=v=>Math.round(v*100)/100;
+  m.pcs.forEach((p,i)=>{if(acc[i].length)p.o=acc[i].map(l=>l.map(([x,y])=>r1(x-p.x)+','+r1(y-p.y)).join(' ')).join('|');else delete p.o;});
+  m.plt=1;return n;
+}
+const _mmOl=p=>String(p.o||'').split('|').filter(Boolean).map(l=>l.split(' ').map(v=>{const[a,b]=v.split(',');return[p.x+(+a),p.y+(+b)];}));
+// קו המכפלת/החפת: הקצה (שמאל/ימין) שבו הקו הישר האנכי הארוך יותר — בכתף/בראש השרוול הקצה מעוגל וקצר
+function _mmHem(p){
+  const pts=_mmOl(p).flat();if(pts.length<4)return null;const[mn,mx]=_bb(pts);
+  const sp=v=>{let a=1e9,b=-1e9;pts.forEach(q=>{if(Math.abs(q[0]-v)<0.6){if(q[1]<a)a=q[1];if(q[1]>b)b=q[1];}});return b>a?b-a:0;};
+  return sp(mn)>=sp(mx)?mn:mx;
+}
+function mmLoadPlt(inp){const f=inp.files?.[0];inp.value='';if(!f||!_mm)return;
+  if(!_mm.map){alert('טען קודם את קובץ ה-MRK · حمّل ملف MRK أولاً');return;}
+  f.text().then(t=>{try{const n=_mmAttachPlt(_mm.map,t);_mm.dirty=true;renderMrkMap();showToast('✅ צורות נטענו ל-'+n+' חלקים');}catch(e){alert('⚠ '+e.message);}});}
 const _MM_COL=['#e5484d','#3e8ef7','#30a46c','#f5a524','#8e4ec6','#12a594','#d6409f','#7c6f5a'];
 // הקצה שהיה בצד ההתחלה של החלק לפני הסיבוב — סיבוב 180° או היפוך ימין/שמאל מעבירים אותו לצד השני
 const _mmStart=q=>(q.a===180)!==/left|right|hor/i.test(q.f||'')?q.X:q.x;
@@ -3308,8 +3350,8 @@ function _mmChecks(){
   const out=[];
   [...new Set(m.pcs.map(q=>q.s))].forEach(s=>grps.forEach(g=>{
     const it=m.pcs.filter(q=>q.s===s&&g.includes(String(q.n).toUpperCase()));if(it.length<2)return;
-    const rot=it.some(q=>q.a%180),r0=_mmStart(it[0]);let mx=0;
-    const rows=it.map(q=>{const d=_mmStart(q)-r0,ph=rp>0?((d%rp)+rp)%rp:Math.abs(d),dev=rp>0?Math.min(ph,rp-ph):ph;mx=Math.max(mx,dev);return{q,d,dev};});
+    const st=q=>_mmHem(q)??_mmStart(q),rot=it.some(q=>q.a%180&&!q.o),r0=st(it[0]);let mx=0;
+    const rows=it.map(q=>{const d=st(q)-r0,ph=rp>0?((d%rp)+rp)%rp:Math.abs(d),dev=rp>0?Math.min(ph,rp-ph):ph;mx=Math.max(mx,dev);return{q,d,dev};});
     out.push({s,g:g.join('+'),rows,x0:Math.min(...it.map(q=>q.x)),x1:Math.max(...it.map(q=>q.X)),dev:mx,rot,bad:rot||(rp>0&&mx>tol+1e-9)});}));
   return out.sort((a,b)=>a.x0-b.x0);
 }
@@ -3320,8 +3362,10 @@ function _mmSvg(p,ck,prn){
   let g='';
   if(rp>=0.3&&L/rp<=4000)for(let x=((off%rp)+rp)%rp;x<=L;x+=rp)g+='<line x1="'+x+'" y1="0" x2="'+x+'" y2="'+W+'" stroke="#9fb7bd" stroke-width="0.15"/>';
   for(let x=0;x<=L;x+=50)g+='<line x1="'+x+'" y1="'+W+'" x2="'+x+'" y2="'+(W+(x%100?3:5))+'" stroke="#555" stroke-width="0.3"/>'+(x%100?'':'<text x="'+x+'" y="'+(W+11)+'" font-size="6" text-anchor="middle" fill="#555">'+(x/100)+'m</text>');
-  m.pcs.forEach(q=>{const c=_MM_COL[sizes.indexOf(q.s)%_MM_COL.length],b=bad.has(q),w=q.X-q.x,h=q.Y-q.y,fs=Math.max(2.5,Math.min(7,w/4,h/3)),st=_mmStart(q);
-    g+='<rect x="'+q.x+'" y="'+q.y+'" width="'+w+'" height="'+h+'" fill="'+c+'" fill-opacity=".35" stroke="'+(b?'#d00':c)+'" stroke-width="'+(b?1.2:0.4)+'"/>'
+  m.pcs.forEach(q=>{const c=_MM_COL[sizes.indexOf(q.s)%_MM_COL.length],b=bad.has(q),w=q.X-q.x,h=q.Y-q.y,fs=Math.max(2.5,Math.min(7,w/4,h/3)),ol=_mmOl(q),st=ol.length?_mmHem(q):_mmStart(q);
+    const P=l=>l.map(v=>v[0]+','+v[1]).join(' '),main=ol.reduce((a,l)=>l.length>a.length?l:a,[]);
+    g+=ol.length?'<polygon points="'+P(main)+'" fill="'+c+'" fill-opacity=".35" stroke="none"/>'+ol.map(l=>'<polyline points="'+P(l)+'" fill="none" stroke="'+(b?'#d00':'#333')+'" stroke-width="'+(b?0.8:0.3)+'"/>').join('')
+      :'<rect x="'+q.x+'" y="'+q.y+'" width="'+w+'" height="'+h+'" fill="'+c+'" fill-opacity=".35" stroke="'+(b?'#d00':c)+'" stroke-width="'+(b?1.2:0.4)+'"/>'
       +(inG.has(q)?'<line x1="'+st+'" y1="'+q.y+'" x2="'+st+'" y2="'+q.Y+'" stroke="'+(b?'#d00':'#222')+'" stroke-width="0.9"/>':'')
       +'<text x="'+(q.x+w/2)+'" y="'+(q.y+h/2+fs/3)+'" font-size="'+fs+'" text-anchor="middle" fill="#222">'+esc(q.n)+' '+esc(szLbl(q.s,p))+'</text>';});
   return '<svg viewBox="-2 -2 '+(L+4)+' '+(W+16)+'" xmlns="http://www.w3.org/2000/svg" style="'+(prn?'width:100%;':'width:'+100*(_mm.z||1)+'%;min-width:'+Math.round(L*1.4*(_mm.z||1))+'px;')+'height:auto;display:block;background:#fff">'
@@ -3350,11 +3394,12 @@ function renderMrkMap(){
     +'<div style="display:flex;gap:6px;align-items:center;flex-wrap:wrap;margin-bottom:8px">'
     +'<div style="font-size:16px;font-weight:800;flex:1;min-width:180px">🧵 מפת פריסה · خريطة الفرش · '+esc(p.cust)+'/'+esc(p.prod)+'</div>'
     +'<label class="btn" style="font-size:12px;cursor:pointer">📂 '+(m?'קובץ אחר':'טען קובץ MRK')+'<input type="file" accept=".mrk,.MRK" style="display:none" onchange="mmLoad(this)"></label>'
+    +(m?'<label class="btn" style="font-size:12px;cursor:pointer">📐 '+(m.plt?'קובץ פלוטר אחר':'קובץ פלוטר (HPG/PLT)')+'<input type="file" accept=".hpg,.plt,.hpgl,.HPG,.PLT" style="display:none" onchange="mmLoadPlt(this)"></label>':'')
     +(m&&_mm.dirty?'<button class="btn primary" style="font-size:12px" onclick="mmSave()">💾 שמור · حفظ</button>':'')
     +(m?'<button class="btn" style="font-size:12px" onclick="mmPrint()">🖨 הדפס</button>':'')
     +'<button class="btn" style="font-size:12px;padding:4px 10px" onclick="mmClose()">✕</button></div>'
     +(!m?'<div style="padding:24px;text-align:center;color:var(--txt3);font-size:14px">טען את קובץ הציור (MRK של Optitex) — יוצגו כל החלקים לפי מידה, ובדיקה שהקדמי והגב (והשרוולים) נופלים על אותו פס.<br>حمّل ملف الرسم (MRK) لعرض القطع وفحص تطابق الخطوط.</div>'
-    :'<div style="font-size:12px;color:var(--txt3);margin-bottom:8px">'+esc(m.name||'')+(m.date?' · '+esc(m.date):'')+' · אורך <b style="color:var(--txt)">'+_crM(m.len/100)+' מ\'</b> · רוחב <b style="color:var(--txt)">'+m.wid+' ס"מ</b> · '+m.pcs.length+' חלקים'
+    :'<div style="font-size:12px;color:var(--txt3);margin-bottom:8px">'+esc(m.name||'')+(m.date?' · '+esc(m.date):'')+' · אורך <b style="color:var(--txt)">'+_crM(m.len/100)+' מ\'</b> · רוחב <b style="color:var(--txt)">'+m.wid+' ס"מ</b> · '+m.pcs.length+' חלקים'+(m.plt?' · 📐 צורות מקובץ הפלוטר':'')
       +(p.mrkMap?.at&&!_mm.dirty?' · נשמר '+new Date(p.mrkMap.at).toLocaleDateString('he-IL')+(p.mrkMap.by?' — '+esc(p.mrkMap.by):''):'')+'</div>'
     +'<div style="display:flex;gap:8px;flex-wrap:wrap;margin-bottom:8px;align-items:flex-end">'
       +'<label style="'+lbl+'">חזרת הפס (ס"מ) · تكرار الخط<input type="number" step="0.1" min="0" inputmode="decimal" value="'+esc(String(_mm.rep))+'" placeholder="למשל 2.5" onchange="mmSet(\'rep\',this.value)" style="'+inp+';width:110px"></label>'
@@ -3365,11 +3410,11 @@ function renderMrkMap(){
       +'<span style="font-size:11px;color:var(--txt3)">גלגלת העכבר = זום · גרירה = הזזה · عجلة الفأرة = تكبير</span></div>'
     +'<div id="mm-box" dir="ltr" style="overflow:auto;max-height:70vh;border:1px solid var(--brd);border-radius:8px;cursor:grab;touch-action:pan-x pan-y">'+_mmSvg(p,ck)+'</div>'
     +'<div style="display:flex;gap:10px;flex-wrap:wrap;font-size:12px;margin:6px 0">'+sizes.map((s,i)=>'<span><span style="display:inline-block;width:12px;height:12px;border-radius:3px;vertical-align:middle;background:'+_MM_COL[i%_MM_COL.length]+'"></span> מידה '+esc(szLbl(s,p))+'</span>').join('')
-      +'<span style="color:var(--txt3)">· קו שחור = תחילת החלק לבדיקה · אדום = לא מתאים</span></div>'
+      +'<span style="color:var(--txt3)">· קו שחור = '+(m.plt?'קו המכפלת/החפת':'תחילת החלק')+' לבדיקה · אדום = לא מתאים</span></div>'
     +'<div style="font-size:14px;font-weight:700;margin-top:8px">'+(!+_mm.rep?'הזן את חזרת הפס כדי לבדוק התאמה · أدخل تكرار الخط':nb?'⚠ '+nb+' בדיקות לא מתאימות':'✓ כל החלקים בקבוצות על אותו פס')
       +(+_mm.rep?'':' <span style="font-size:12px;font-weight:400;color:var(--txt3)">— בינתיים מוצג ההפרש בין החלקים</span>')+'</div>'
     +_mmTable(p,ck)
-    +'<div style="font-size:11px;color:var(--txt3);margin-top:8px">החלקים מצוירים כמלבן (הצורה המדויקת שמורה בקובץ בפורמט סגור). ההשוואה לפי קצה המלבן של כל חלק.</div>')
+    +'<div style="font-size:11px;color:var(--txt3);margin-top:8px">'+(m.plt?'הצורות מקובץ הפלוטר. ההשוואה לפי קו המכפלת/החפת של כל חלק (הקצה הישר).':'החלקים מצוירים כמלבן — טען את קובץ הפלוטר (HPG/PLT) של אותו ציור לצורות המדויקות. ההשוואה לפי קצה המלבן.')+'</div>')
     +'</div>';
   const box=document.getElementById('mm-box');if(!box)return;
   if(sc){box.scrollLeft=sc[0];box.scrollTop=sc[1];}
