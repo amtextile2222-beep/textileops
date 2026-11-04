@@ -3042,7 +3042,8 @@ function renderCutReport(){
   wrap.innerHTML=`<div style="background:var(--card);border-radius:14px;padding:16px;max-width:520px;width:100%;box-shadow:0 10px 40px rgba(0,0,0,.3);margin:auto">
     <div style="display:flex;justify-content:space-between;align-items:center">
       <div style="font-size:16px;font-weight:800">✂️ דוח גזירה · ${esc(p.cust)}/${esc(p.prod)}${(parseInt(p.orderNo,10)||0)?' #'+String(p.orderNo).padStart(3,'0'):''}</div>
-      <button class="btn" style="font-size:12px;padding:4px 10px" onclick="crClose()">✕</button>
+      <span style="display:flex;gap:6px"><button class="btn" style="font-size:12px;padding:4px 10px" onclick="openMrkMap('${escj(String(p.id))}')">🧵 מפת פריסה${p.mrkMap?' ✓':''}</button>
+      <button class="btn" style="font-size:12px;padding:4px 10px" onclick="crClose()">✕</button></span>
     </div>
     <div style="font-size:12px;color:var(--txt3);margin-bottom:10px">${esc(p.name||'')}${at}</div>
     <div style="font-size:14px;font-weight:700">🎯 כמה צריך לגזור · المطلوب</div>
@@ -3257,6 +3258,133 @@ async function saveCutReport(){
   sendTelegram('✂️ דוח גזירה — '+(S.user?.name||'')+'\n🏷 '+p.cust+'/'+p.prod+((parseInt(p.orderNo,10)||0)?' #'+String(p.orderNo).padStart(3,'0'):'')+' '+(p.name||'')
     +'\n🧵 '+rolls.length+' גלילים · '+_crM(used)+" מ' נוצלו"+(cutN?' · '+cutN+" יח' · "+_crM(used/cutN)+" מ' ליח'":'')
     +'\n📦 כמות: '+before+' ← '+after+" יח'").catch(()=>{});
+}
+// ─── 🧵 מפת פריסה לפסים (04/11/2026) ──────────────────────────────────────────
+// קובץ MRK של Optitex: בתחילתו XML קריא — אורך/רוחב הציור, ולכל חלק: מידה, מידות המלבן שלו, מרכז, זווית והיפוך.
+// קווי המתאר נמצאים בחלק הבינארי (פורמט סגור) — לכן החלקים מצוירים כמלבנים. ציר X = אורך הציור; פס לרוחב הבד = קו ב-X קבוע.
+// התאמה: חלקים מאותה קבוצה (ברירת מחדל קדמי+גב, שרוולים) באותה מידה חייבים להתחיל באותו מקום של הפס —
+// ההפרש בין "תחילת החלק" (הקצה שהיה בצד אחד לפני סיבוב 180°) מודולו חזרת הפס ≤ סובלנות. בלי חזרת פס — ההפרש עצמו.
+// products.mrkMap = {name,date,len,wid,rep,off,tol,grp,pcs:[{s,n,x,X,y,Y,a,f}],by,at} — אובייקטים (Firestore לא שומר מערך בתוך מערך)
+let _mm=null;
+function _mrkParse(buf){
+  const u=new Uint8Array(buf);let t='';for(let i=0;i<u.length&&i<600000;i++)t+=String.fromCharCode(u[i]);
+  const a=t.indexOf('<MARKER>'),b=t.indexOf('</MARKER>');
+  if(a<0||b<0)throw new Error('זה לא קובץ MRK של Optitex · ليس ملف MRK');
+  const x=new DOMParser().parseFromString(t.slice(a,b+9),'text/xml');
+  if(x.querySelector('parsererror'))throw new Error('הקובץ פגום · الملف تالف');
+  // שמות בעברית שמורים בקידוד Windows-1255 (à..ú) ⇒ א..ת
+  const heb=v=>String(v||'').replace(/[à-ú]/g,c=>String.fromCharCode(0x5d0+c.charCodeAt(0)-0xe0)).trim();
+  const kid=(el,n)=>{for(const c of el.children)if(c.tagName===n)return c;return null;};
+  const txt=(el,n)=>kid(el,n)?.textContent||'';
+  const root=x.documentElement,k=/inch/i.test(kid(root,'UNITS')?.getAttribute('LINEAR')||'')?2.54:1,r2=v=>Math.round(v*k*100)/100,pcs=[];
+  root.querySelectorAll('SIZE').forEach(sz=>{const sn=heb(txt(sz,'NAME'));
+    sz.querySelectorAll('PIECE').forEach(pc=>{const n=heb(txt(pc,'NAME')),g=kid(pc,'GEOM_INFO');if(!g)return;
+      const w=+g.getAttribute('SIZE_X')||0,h=+g.getAttribute('SIZE_Y')||0;
+      pc.querySelectorAll('PLACED > POSITION').forEach(ps=>{const cx=+ps.getAttribute('X-CENTER'),cy=+ps.getAttribute('Y-CENTER');
+        const q=((Math.round((+ps.getAttribute('ANGLE')||0)/90)%4)+4)%4,ww=q%2?h:w,hh=q%2?w:h,fl=ps.getAttribute('FLIP')||'no';
+        pcs.push({s:sn,n,x:r2(cx-ww/2),X:r2(cx+ww/2),y:r2(cy-hh/2),Y:r2(cy+hh/2),a:q*90,f:fl==='no'?'':fl});});});});
+  const len=r2(+txt(root,'LENGTH')||0),wid=r2(+txt(root,'WIDTH')||0);
+  if(!len||!pcs.length)throw new Error('לא נמצאו חלקים בקובץ · لا توجد قطع');
+  return{name:heb(txt(root,'NAME')),date:txt(root,'DATE'),len,wid,pcs};
+}
+function openMrkMap(pid){
+  const p=(S.products||[]).find(x=>String(x.id)===String(pid));if(!p)return;
+  const m=p.mrkMap;
+  _mm={pid:p.id,map:m?JSON.parse(JSON.stringify(m)):null,rep:m?.rep||'',off:m?.off||'',tol:m?.tol??0.3,grp:m?.grp||'FR+BK, SL',dirty:false};
+  document.getElementById('mm-wrap')?.remove();
+  const w=document.createElement('div');w.id='mm-wrap';
+  w.style.cssText='position:fixed;inset:0;background:rgba(0,0,0,.5);display:flex;align-items:flex-start;justify-content:center;z-index:10000;padding:12px;overflow-y:auto';
+  document.body.appendChild(w);renderMrkMap();
+}
+function mmLoad(inp){const f=inp.files?.[0];inp.value='';if(!f)return;
+  f.arrayBuffer().then(b=>{try{const r=_mrkParse(b);_mm.map=r;_mm.dirty=true;renderMrkMap();showToast('✅ '+r.pcs.length+' חלקים נקראו');}catch(e){alert('⚠ '+e.message);}});}
+function mmSet(k,v){_mm[k]=v;_mm.dirty=!!_mm.map;renderMrkMap();}
+const _MM_COL=['#e5484d','#3e8ef7','#30a46c','#f5a524','#8e4ec6','#12a594','#d6409f','#7c6f5a'];
+// הקצה שהיה בצד ההתחלה של החלק לפני הסיבוב — סיבוב 180° או היפוך ימין/שמאל מעבירים אותו לצד השני
+const _mmStart=q=>(q.a===180)!==/left|right|hor/i.test(q.f||'')?q.X:q.x;
+function _mmChecks(){
+  const m=_mm.map;if(!m)return[];const rp=+_mm.rep||0,tol=+_mm.tol||0;
+  const grps=String(_mm.grp||'').split(',').map(g=>g.split('+').map(t=>t.trim().toUpperCase()).filter(Boolean)).filter(g=>g.length);
+  const out=[];
+  [...new Set(m.pcs.map(q=>q.s))].forEach(s=>grps.forEach(g=>{
+    const it=m.pcs.filter(q=>q.s===s&&g.includes(String(q.n).toUpperCase()));if(it.length<2)return;
+    const rot=it.some(q=>q.a%180),r0=_mmStart(it[0]);let mx=0;
+    const rows=it.map(q=>{const d=_mmStart(q)-r0,ph=rp>0?((d%rp)+rp)%rp:Math.abs(d),dev=rp>0?Math.min(ph,rp-ph):ph;mx=Math.max(mx,dev);return{q,d,dev};});
+    out.push({s,g:g.join('+'),rows,x0:Math.min(...it.map(q=>q.x)),x1:Math.max(...it.map(q=>q.X)),dev:mx,rot,bad:rot||(rp>0&&mx>tol+1e-9)});}));
+  return out.sort((a,b)=>a.x0-b.x0);
+}
+// prn=true — בלי min-width (לחלון ההדפסה)
+function _mmSvg(p,ck,prn){
+  const m=_mm.map,L=m.len,W=m.wid,rp=+_mm.rep||0,off=+_mm.off||0,sizes=[...new Set(m.pcs.map(q=>q.s))];
+  const bad=new Set(),inG=new Set();ck.forEach(c=>c.rows.forEach(r=>{inG.add(r.q);if(c.bad)bad.add(r.q);}));
+  let g='';
+  if(rp>=0.3&&L/rp<=4000)for(let x=((off%rp)+rp)%rp;x<=L;x+=rp)g+='<line x1="'+x+'" y1="0" x2="'+x+'" y2="'+W+'" stroke="#9fb7bd" stroke-width="0.15"/>';
+  for(let x=0;x<=L;x+=50)g+='<line x1="'+x+'" y1="'+W+'" x2="'+x+'" y2="'+(W+(x%100?3:5))+'" stroke="#555" stroke-width="0.3"/>'+(x%100?'':'<text x="'+x+'" y="'+(W+11)+'" font-size="6" text-anchor="middle" fill="#555">'+(x/100)+'m</text>');
+  m.pcs.forEach(q=>{const c=_MM_COL[sizes.indexOf(q.s)%_MM_COL.length],b=bad.has(q),w=q.X-q.x,h=q.Y-q.y,fs=Math.max(2.5,Math.min(7,w/4,h/3)),st=_mmStart(q);
+    g+='<rect x="'+q.x+'" y="'+q.y+'" width="'+w+'" height="'+h+'" fill="'+c+'" fill-opacity=".35" stroke="'+(b?'#d00':c)+'" stroke-width="'+(b?1.2:0.4)+'"/>'
+      +(inG.has(q)?'<line x1="'+st+'" y1="'+q.y+'" x2="'+st+'" y2="'+q.Y+'" stroke="'+(b?'#d00':'#222')+'" stroke-width="0.9"/>':'')
+      +'<text x="'+(q.x+w/2)+'" y="'+(q.y+h/2+fs/3)+'" font-size="'+fs+'" text-anchor="middle" fill="#222">'+esc(q.n)+' '+esc(szLbl(q.s,p))+'</text>';});
+  return '<svg viewBox="-2 -2 '+(L+4)+' '+(W+16)+'" xmlns="http://www.w3.org/2000/svg" style="width:100%;'+(prn?'':'min-width:'+Math.round(L*1.4)+'px;')+'height:auto;display:block;background:#fff">'
+    +'<rect x="0" y="0" width="'+L+'" height="'+W+'" fill="#fafafa" stroke="#333" stroke-width="0.5"/>'+g+'</svg>';
+}
+const _mmCm=v=>(Math.round(v*10)/10).toFixed(1);
+function _mmTable(p,ck){
+  const rp=+_mm.rep||0;if(!ck.length)return '<div style="font-size:12px;color:#888">אין חלקים שמתאימים לקבוצות ההתאמה</div>';
+  const td='border:1px solid #ccc;padding:4px 6px';
+  return '<table style="border-collapse:collapse;width:100%;font-size:13px;margin-top:6px;color:#222"><tr style="background:#eef3f4">'
+    +['איפה בציור · المكان','מידה · المقاس','חלקים · القطع',rp?'סטייה מהפס · الانحراف':'הפרש · الفرق',''].map(h=>'<th style="'+td+';text-align:right">'+h+'</th>').join('')+'</tr>'
+    +ck.map(c=>'<tr style="background:'+(c.bad?'#fdecec':'#fff')+'"><td style="'+td+'" dir="ltr">'+_crM(c.x0/100)+'–'+_crM(c.x1/100)+' m</td>'
+      +'<td style="'+td+';font-weight:700">'+esc(szLbl(c.s,p))+'</td>'
+      +'<td style="'+td+'" dir="ltr">'+c.rows.map(r=>esc(r.q.n)+(r.d?' <span style="color:#888">('+(r.d>0?'+':'')+_mmCm(r.d)+')</span>':'')).join(' · ')+'</td>'
+      +'<td style="'+td+'">'+_mmCm(c.dev)+' ס"מ</td>'
+      +'<td style="'+td+';font-weight:700;color:'+(c.bad?'#c00':'#0a7a4a')+'">'+(c.rot?'⚠ מסובב 90° — לבדוק ביד':!rp?'<span style="color:#888;font-weight:400">הזן חזרת פס</span>':c.bad?'⚠ לא על אותו פס':'✓')+'</td></tr>').join('')+'</table>';
+}
+function renderMrkMap(){
+  const w=document.getElementById('mm-wrap');if(!w||!_mm)return;
+  const p=(S.products||[]).find(x=>String(x.id)===String(_mm.pid));if(!p){w.remove();return;}
+  const m=_mm.map,inp='font-size:14px;padding:6px;border-radius:8px;border:1px solid var(--brd);background:var(--bg);color:var(--txt)';
+  const lbl='font-size:11px;color:var(--txt3);display:flex;flex-direction:column;gap:2px';
+  const ck=_mmChecks(),nb=ck.filter(c=>c.bad).length,sizes=m?[...new Set(m.pcs.map(q=>q.s))]:[];
+  w.innerHTML='<div style="background:var(--card);border-radius:14px;padding:16px;max-width:1100px;width:100%;box-shadow:0 10px 40px rgba(0,0,0,.3);margin:auto">'
+    +'<div style="display:flex;gap:6px;align-items:center;flex-wrap:wrap;margin-bottom:8px">'
+    +'<div style="font-size:16px;font-weight:800;flex:1;min-width:180px">🧵 מפת פריסה · خريطة الفرش · '+esc(p.cust)+'/'+esc(p.prod)+'</div>'
+    +'<label class="btn" style="font-size:12px;cursor:pointer">📂 '+(m?'קובץ אחר':'טען קובץ MRK')+'<input type="file" accept=".mrk,.MRK" style="display:none" onchange="mmLoad(this)"></label>'
+    +(m&&_mm.dirty?'<button class="btn primary" style="font-size:12px" onclick="mmSave()">💾 שמור · حفظ</button>':'')
+    +(m?'<button class="btn" style="font-size:12px" onclick="mmPrint()">🖨 הדפס</button>':'')
+    +'<button class="btn" style="font-size:12px;padding:4px 10px" onclick="mmClose()">✕</button></div>'
+    +(!m?'<div style="padding:24px;text-align:center;color:var(--txt3);font-size:14px">טען את קובץ הציור (MRK של Optitex) — יוצגו כל החלקים לפי מידה, ובדיקה שהקדמי והגב (והשרוולים) נופלים על אותו פס.<br>حمّل ملف الرسم (MRK) لعرض القطع وفحص تطابق الخطوط.</div>'
+    :'<div style="font-size:12px;color:var(--txt3);margin-bottom:8px">'+esc(m.name||'')+(m.date?' · '+esc(m.date):'')+' · אורך <b style="color:var(--txt)">'+_crM(m.len/100)+' מ\'</b> · רוחב <b style="color:var(--txt)">'+m.wid+' ס"מ</b> · '+m.pcs.length+' חלקים'
+      +(p.mrkMap?.at&&!_mm.dirty?' · נשמר '+new Date(p.mrkMap.at).toLocaleDateString('he-IL')+(p.mrkMap.by?' — '+esc(p.mrkMap.by):''):'')+'</div>'
+    +'<div style="display:flex;gap:8px;flex-wrap:wrap;margin-bottom:8px;align-items:flex-end">'
+      +'<label style="'+lbl+'">חזרת הפס (ס"מ) · تكرار الخط<input type="number" step="0.1" min="0" inputmode="decimal" value="'+esc(String(_mm.rep))+'" placeholder="למשל 2.5" onchange="mmSet(\'rep\',this.value)" style="'+inp+';width:110px"></label>'
+      +'<label style="'+lbl+'">סובלנות (ס"מ) · السماح<input type="number" step="0.1" min="0" inputmode="decimal" value="'+esc(String(_mm.tol))+'" onchange="mmSet(\'tol\',this.value)" style="'+inp+';width:80px"></label>'
+      +'<label style="'+lbl+'">הזזת קווי הפס (ס"מ)<input type="number" step="0.1" inputmode="decimal" value="'+esc(String(_mm.off))+'" onchange="mmSet(\'off\',this.value)" style="'+inp+';width:90px"></label>'
+      +'<label style="'+lbl+';flex:1;min-width:160px">קבוצות התאמה · مجموعات (FR+BK, SL)<input value="'+esc(_mm.grp)+'" onchange="mmSet(\'grp\',this.value)" dir="ltr" style="'+inp+'"></label></div>'
+    +'<div dir="ltr" style="overflow-x:auto;border:1px solid var(--brd);border-radius:8px">'+_mmSvg(p,ck)+'</div>'
+    +'<div style="display:flex;gap:10px;flex-wrap:wrap;font-size:12px;margin:6px 0">'+sizes.map((s,i)=>'<span><span style="display:inline-block;width:12px;height:12px;border-radius:3px;vertical-align:middle;background:'+_MM_COL[i%_MM_COL.length]+'"></span> מידה '+esc(szLbl(s,p))+'</span>').join('')
+      +'<span style="color:var(--txt3)">· קו שחור = תחילת החלק לבדיקה · אדום = לא מתאים</span></div>'
+    +'<div style="font-size:14px;font-weight:700;margin-top:8px">'+(!+_mm.rep?'הזן את חזרת הפס כדי לבדוק התאמה · أدخل تكرار الخط':nb?'⚠ '+nb+' בדיקות לא מתאימות':'✓ כל החלקים בקבוצות על אותו פס')
+      +(+_mm.rep?'':' <span style="font-size:12px;font-weight:400;color:var(--txt3)">— בינתיים מוצג ההפרש בין החלקים</span>')+'</div>'
+    +_mmTable(p,ck)
+    +'<div style="font-size:11px;color:var(--txt3);margin-top:8px">החלקים מצוירים כמלבן (הצורה המדויקת שמורה בקובץ בפורמט סגור). ההשוואה לפי קצה המלבן של כל חלק.</div>')
+    +'</div>';
+}
+async function mmSave(){
+  const p=(S.products||[]).find(x=>String(x.id)===String(_mm?.pid));if(!p||!_mm.map)return;
+  if(!S.fbConnected){alert('אין חיבור — לא נשמר · لا يوجد اتصال');return;}
+  const mrkMap={..._mm.map,rep:+_mm.rep||0,off:+_mm.off||0,tol:+_mm.tol||0,grp:String(_mm.grp||''),by:S.user?.name||'',at:Date.now()};
+  if(!await fbUpdateOnly('products',p.id,{mrkMap})){alert('השמירה נכשלה — בדוק חיבור · فشل الحفظ');return;}
+  p.mrkMap=mrkMap;saveLS();_mm.dirty=false;showToast('✅ מפת הפריסה נשמרה','var(--green-txt)');renderMrkMap();
+}
+function mmClose(){if(_mm?.dirty&&!confirm('לסגור בלי לשמור? · إغلاق بدون حفظ؟'))return;document.getElementById('mm-wrap')?.remove();_mm=null;}
+function mmPrint(){
+  const p=(S.products||[]).find(x=>String(x.id)===String(_mm?.pid));if(!p||!_mm.map)return;
+  const ck=_mmChecks(),m=_mm.map,win=window.open('','_blank');if(!win){alert('הדפדפן חסם חלון חדש');return;}
+  win.document.write('<!doctype html><html dir="rtl"><head><meta charset="utf-8"><title>מפת פריסה '+esc(p.cust+'/'+p.prod)+'</title><style>body{font-family:Arial,sans-serif;margin:8mm}@page{size:A4 landscape}</style></head><body>'
+    +'<h3 style="margin:0 0 4px">🧵 מפת פריסה · '+esc(p.cust)+'/'+esc(p.prod)+' '+esc(p.name||'')+'</h3>'
+    +'<div style="font-size:12px;margin-bottom:6px">'+esc(m.name||'')+' · אורך '+_crM(m.len/100)+' מ\' · רוחב '+m.wid+' ס"מ'+(+_mm.rep?' · חזרת פס '+_mm.rep+' ס"מ':'')+'</div>'
+    +'<div dir="ltr">'+_mmSvg(p,ck,true)+'</div>'+_mmTable(p,ck)+'</body></html>');
+  win.document.close();setTimeout(()=>{try{win.print();}catch(e){}},400);
 }
 const bcRetiredMsg=why=>{const T=LANGS[currentLang];return why==='cut'?T.bc_ret_cut:T.bc_ret_ship;};
 // שורה אדומה בתצוגה המקדימה של שלושת הסורקים — העובד רואה מיד, לא רק בלחיצה על "התחל"
