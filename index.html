@@ -3338,6 +3338,8 @@ const _mmOl=p=>String(p.o||'').split('|').filter(Boolean).map(l=>l.split(' ').ma
 // פינת המכפלת (איפה שהתפר מתחיל) ובית השחי (איפה שהוא נגמר ומתחיל קו הבית-יד). קצה המכפלת = הקצה שאין בו
 // שקע באמצע (הצוואר/ראש השרוול). לכל אחד משני הצדדים: הקצה החיצוני לפי מרחק מהמכפלת, קו ישר מותאם על
 // 1..35% מהאורך; פינה = הנקודה הראשונה על הקו (0.3 ס"מ), בית שחי = הראשונה אחרי 30% שנכנסת פנימה 0.5 ס"מ.
+// חלקים זהים (אותו שם, למשל שני שרוולים) — רק הפינה: בית השחי שלהם נגזר מאותו אורך, ובשרוול ראש השרוול נפתח בהדרגה
+// ולכן הזיהוי שלו לא יציב (1.7 ס"מ הפרש בין שרוולים זהים של 14775).
 const _mmFC=new Map();
 function _mmFeat(p){
   const key=p.x+'|'+p.y+'|'+(p.o||'');if(_mmFC.has(key))return _mmFC.get(key);
@@ -3376,10 +3378,10 @@ function _mmChecks(){
   const out=[];
   [...new Set(m.pcs.map(q=>q.s))].forEach(s=>grps.forEach(g=>{
     const it=m.pcs.filter(q=>q.s===s&&g.includes(String(q.n).toUpperCase()));if(it.length<2)return;
-    const ft=it.map(_mmFeat),sd=ft.every(Boolean),dv=d=>{const ph=rp>0?((d%rp)+rp)%rp:Math.abs(d);return rp>0?Math.min(ph,rp-ph):ph;};
+    const ft=it.map(_mmFeat),sd=ft.every(Boolean),one=new Set(it.map(q=>String(q.n).toUpperCase())).size===1,dv=d=>{const ph=rp>0?((d%rp)+rp)%rp:Math.abs(d);return rp>0?Math.min(ph,rp-ph):ph;};
     const st=q=>_mmHem(q)??_mmStart(q),rot=!sd&&it.some(q=>q.a%180&&!q.o),r0=sd?ft[0].hc:st(it[0]);let mx=0,mh=0,mu=0;
-    const rows=it.map((q,i)=>{const d=(sd?ft[i].hc:st(q))-r0,du=sd?ft[i].ua-ft[0].ua:0,eh=dv(d),eu=sd?dv(du):0;mh=Math.max(mh,eh);mu=Math.max(mu,eu);mx=Math.max(mx,eh,eu);return{q,d,du,dev:Math.max(eh,eu)};});
-    out.push({s,g:g.join('+'),rows,sd,dh:mh,du:mu,x0:Math.min(...it.map(q=>q.x)),x1:Math.max(...it.map(q=>q.X)),dev:mx,rot,bad:rot||(rp>0&&mx>tol+1e-9)});}));
+    const rows=it.map((q,i)=>{const d=(sd?ft[i].hc:st(q))-r0,du=sd?ft[i].ua-ft[0].ua:0,eh=dv(d),eu=sd&&!one?dv(du):0;mh=Math.max(mh,eh);mu=Math.max(mu,eu);mx=Math.max(mx,eh,eu);return{q,d,du,dev:Math.max(eh,eu)};});
+    out.push({s,g:g.join('+'),rows,sd,one,dh:mh,du:mu,x0:Math.min(...it.map(q=>q.x)),x1:Math.max(...it.map(q=>q.X)),dev:mx,rot,bad:rot||(rp>0&&mx>tol+1e-9)});}));
   return out.sort((a,b)=>a.x0-b.x0);
 }
 // prn=true — בלי min-width (לחלון ההדפסה)
@@ -3408,7 +3410,7 @@ function _mmTable(p,ck){
     +ck.map(c=>'<tr style="background:'+(c.bad?'#fdecec':'#fff')+'"><td style="'+td+'" dir="ltr">'+_crM(c.x0/100)+'–'+_crM(c.x1/100)+' m</td>'
       +'<td style="'+td+';font-weight:700">'+esc(szLbl(c.s,p))+'</td>'
       +'<td style="'+td+'" dir="ltr">'+c.rows.map(r=>esc(r.q.n)+(r.d?' <span style="color:#888">('+(r.d>0?'+':'')+_mmCm(r.d)+')</span>':'')).join(' · ')+'</td>'
-      +'<td style="'+td+'">'+(c.sd?'מכפלת '+_mmCm(c.dh)+' · בית שחי '+_mmCm(c.du):_mmCm(c.dev))+' ס"מ</td>'
+      +'<td style="'+td+'">'+(c.sd?(c.one?'חפת/מכפלת '+_mmCm(c.dh):'מכפלת '+_mmCm(c.dh)+' · בית שחי '+_mmCm(c.du)):_mmCm(c.dev))+' ס"מ</td>'
       +'<td style="'+td+';font-weight:700;color:'+(c.bad?'#c00':'#0a7a4a')+'">'+(c.rot?'⚠ מסובב 90° — לבדוק ביד':!rp?'<span style="color:#888;font-weight:400">הזן חזרת פס</span>':c.bad?'⚠ לא על אותו פס':'✓')+'</td></tr>').join('')+'</table>';
 }
 function renderMrkMap(){
