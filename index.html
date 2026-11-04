@@ -3404,7 +3404,7 @@ function _mmSvg(p,ck,prn){
 const _mmCm=v=>(Math.round(v*10)/10).toFixed(1);
 function _mmTable(p,ck){
   const rp=+_mm.rep||0;if(!ck.length)return '<div style="font-size:12px;color:#888">אין חלקים שמתאימים לקבוצות ההתאמה</div>';
-  const td='border:1px solid #ccc;padding:4px 6px';
+  const td='border:1px solid #ccc;padding:4px 6px;color:#222'; // צבע קבוע — הרקע לבן גם במצב כהה
   return '<table style="border-collapse:collapse;width:100%;font-size:13px;margin-top:6px;color:#222"><tr style="background:#eef3f4">'
     +['איפה בציור · المكان','מידה · المقاس','חלקים · القطع',rp?'סטייה מהפס · الانحراف':'הפרש · الفرق',''].map(h=>'<th style="'+td+';text-align:right">'+h+'</th>').join('')+'</tr>'
     +ck.map(c=>'<tr style="background:'+(c.bad?'#fdecec':'#fff')+'"><td style="'+td+'" dir="ltr">'+_crM(c.x0/100)+'–'+_crM(c.x1/100)+' m</td>'
