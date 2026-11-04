@@ -3333,6 +3333,32 @@ function _mmAttachPlt(m,t){
 }
 const _mmOl=p=>String(p.o||'').split('|').filter(Boolean).map(l=>l.split(' ').map(v=>{const[a,b]=v.split(',');return[p.x+(+a),p.y+(+b)];}));
 // קו המכפלת/החפת: הקצה (שמאל/ימין) שבו הקו הישר האנכי הארוך יותר — בכתף/בראש השרוול הקצה מעוגל וקצר
+// ✂ קו התפר הצדדי (04/11/2026 — הערת המשתמש: הבדיקה לפי קצה החלק תפסה את מרכז המכפלת המעוגלת/ראש הכתף,
+// והגב לפעמים ארוך יותר בכתף בכוונה). הפסים צריכים להיפגש בתפר הצד — לכן משווים שתי נקודות עליו:
+// פינת המכפלת (איפה שהתפר מתחיל) ובית השחי (איפה שהוא נגמר ומתחיל קו הבית-יד). קצה המכפלת = הקצה שאין בו
+// שקע באמצע (הצוואר/ראש השרוול). לכל אחד משני הצדדים: הקצה החיצוני לפי מרחק מהמכפלת, קו ישר מותאם על
+// 1..35% מהאורך; פינה = הנקודה הראשונה על הקו (0.3 ס"מ), בית שחי = הראשונה אחרי 30% שנכנסת פנימה 0.5 ס"מ.
+const _mmFC=new Map();
+function _mmFeat(p){
+  const key=p.x+'|'+p.y+'|'+(p.o||'');if(_mmFC.has(key))return _mmFC.get(key);
+  let r=null;const ol=_mmOl(p),pts=[];
+  ol.forEach(l=>{for(let i=0;i<l.length-1;i++){const a=l[i],b=l[i+1],n=Math.max(1,Math.ceil(Math.hypot(b[0]-a[0],b[1]-a[1])/0.1));for(let k=0;k<n;k++)pts.push([a[0]+(b[0]-a[0])*k/n,a[1]+(b[1]-a[1])*k/n]);}pts.push(l[l.length-1]);});
+  if(pts.length>20){
+    const[mnx,mxx,mny,mxy]=_bb(pts),H=mxy-mny,L=mxx-mnx,mid=pts.filter(q=>q[1]>mny+H*.4&&q[1]<mny+H*.6);
+    if(mid.length&&L>5){
+      const dLo=Math.min(...mid.map(q=>q[0]))-mnx,dHi=mxx-Math.max(...mid.map(q=>q[0])),lo=dLo<=dHi,hem=lo?mnx:mxx,dir=lo?1:-1;
+      const B=0.2,N=Math.ceil(L/B)+2,ylo=new Array(N).fill(Infinity),yhi=new Array(N).fill(-Infinity);
+      pts.forEach(([x,y])=>{const i=Math.round((x-hem)*dir/B);if(i<0||i>=N)return;if(y<ylo[i])ylo[i]=y;if(y>yhi[i])yhi[i]=y;});
+      const side=(arr,sg)=>{const P=[];arr.forEach((y,i)=>{if(isFinite(y))P.push([i*B,y]);});const F=P.filter(q=>q[0]>1&&q[0]<L*.35);if(F.length<5)return null;
+        const n=F.length,sx=F.reduce((a,q)=>a+q[0],0),sy=F.reduce((a,q)=>a+q[1],0),sxx=F.reduce((a,q)=>a+q[0]*q[0],0),sxy=F.reduce((a,q)=>a+q[0]*q[1],0);
+        const m=(n*sxy-sx*sy)/((n*sxx-sx*sx)||1),b=(sy-m*sx)/n,fy=d=>m*d+b;
+        const hc=P.find(q=>Math.abs(q[1]-fy(q[0]))<0.3),ua=P.find(q=>q[0]>L*.3&&(q[1]-fy(q[0]))*sg>0.5);return hc&&ua?[hc[0],ua[0]]:null;};
+      const S=[side(ylo,1),side(yhi,-1)].filter(Boolean);
+      if(S.length){const av=k=>S.reduce((t,v)=>t+v[k],0)/S.length;r={hc:hem+dir*av(0),ua:hem+dir*av(1)};}
+    }
+  }
+  _mmFC.set(key,r);return r;
+}
 function _mmHem(p){
   const pts=_mmOl(p).flat();if(pts.length<4)return null;const[mn,mx]=_bb(pts);
   const sp=v=>{let a=1e9,b=-1e9;pts.forEach(q=>{if(Math.abs(q[0]-v)<0.6){if(q[1]<a)a=q[1];if(q[1]>b)b=q[1];}});return b>a?b-a:0;};
@@ -3350,9 +3376,10 @@ function _mmChecks(){
   const out=[];
   [...new Set(m.pcs.map(q=>q.s))].forEach(s=>grps.forEach(g=>{
     const it=m.pcs.filter(q=>q.s===s&&g.includes(String(q.n).toUpperCase()));if(it.length<2)return;
-    const st=q=>_mmHem(q)??_mmStart(q),rot=it.some(q=>q.a%180&&!q.o),r0=st(it[0]);let mx=0;
-    const rows=it.map(q=>{const d=st(q)-r0,ph=rp>0?((d%rp)+rp)%rp:Math.abs(d),dev=rp>0?Math.min(ph,rp-ph):ph;mx=Math.max(mx,dev);return{q,d,dev};});
-    out.push({s,g:g.join('+'),rows,x0:Math.min(...it.map(q=>q.x)),x1:Math.max(...it.map(q=>q.X)),dev:mx,rot,bad:rot||(rp>0&&mx>tol+1e-9)});}));
+    const ft=it.map(_mmFeat),sd=ft.every(Boolean),dv=d=>{const ph=rp>0?((d%rp)+rp)%rp:Math.abs(d);return rp>0?Math.min(ph,rp-ph):ph;};
+    const st=q=>_mmHem(q)??_mmStart(q),rot=!sd&&it.some(q=>q.a%180&&!q.o),r0=sd?ft[0].hc:st(it[0]);let mx=0,mh=0,mu=0;
+    const rows=it.map((q,i)=>{const d=(sd?ft[i].hc:st(q))-r0,du=sd?ft[i].ua-ft[0].ua:0,eh=dv(d),eu=sd?dv(du):0;mh=Math.max(mh,eh);mu=Math.max(mu,eu);mx=Math.max(mx,eh,eu);return{q,d,du,dev:Math.max(eh,eu)};});
+    out.push({s,g:g.join('+'),rows,sd,dh:mh,du:mu,x0:Math.min(...it.map(q=>q.x)),x1:Math.max(...it.map(q=>q.X)),dev:mx,rot,bad:rot||(rp>0&&mx>tol+1e-9)});}));
   return out.sort((a,b)=>a.x0-b.x0);
 }
 // prn=true — בלי min-width (לחלון ההדפסה)
@@ -3366,7 +3393,8 @@ function _mmSvg(p,ck,prn){
     const P=l=>l.map(v=>v[0]+','+v[1]).join(' '),main=ol.reduce((a,l)=>l.length>a.length?l:a,[]);
     g+=(ol.length?'<polygon points="'+P(main)+'" fill="'+c+'" fill-opacity=".35" stroke="none"/>'+ol.map(l=>'<polyline points="'+P(l)+'" fill="none" stroke="'+(b?'#d00':'#333')+'" stroke-width="'+(b?0.8:0.3)+'"/>').join('')
       :'<rect x="'+q.x+'" y="'+q.y+'" width="'+w+'" height="'+h+'" fill="'+c+'" fill-opacity=".35" stroke="'+(b?'#d00':c)+'" stroke-width="'+(b?1.2:0.4)+'"/>')
-      +(inG.has(q)?'<line x1="'+st+'" y1="'+q.y+'" x2="'+st+'" y2="'+q.Y+'" stroke="'+(b?'#d00':'#222')+'" stroke-width="0.9"/>':'')
+      +(inG.has(q)?(()=>{const ft=ol.length&&_mmFeat(q),ln=(x,da)=>'<line x1="'+x+'" y1="'+q.y+'" x2="'+x+'" y2="'+q.Y+'" stroke="'+(b?'#d00':'#222')+'" stroke-width="0.7"'+(da?' stroke-dasharray="1.5 1"':'')+'/>';
+        return ft?ln(ft.hc)+ln(ft.ua,1):ln(st);})():'')
       +'<text x="'+(q.x+w/2)+'" y="'+(q.y+h/2+fs/3)+'" font-size="'+fs+'" text-anchor="middle" fill="#222">'+esc(q.n)+' '+esc(szLbl(q.s,p))+'</text>';});
   return '<svg viewBox="-2 -2 '+(L+4)+' '+(W+16)+'" xmlns="http://www.w3.org/2000/svg" style="'+(prn?'width:100%;':'width:'+100*(_mm.z||1)+'%;min-width:'+Math.round(L*1.4*(_mm.z||1))+'px;')+'height:auto;display:block;background:#fff">'
     +'<rect x="0" y="0" width="'+L+'" height="'+W+'" fill="#fafafa" stroke="#333" stroke-width="0.5"/>'+g+'</svg>';
@@ -3380,7 +3408,7 @@ function _mmTable(p,ck){
     +ck.map(c=>'<tr style="background:'+(c.bad?'#fdecec':'#fff')+'"><td style="'+td+'" dir="ltr">'+_crM(c.x0/100)+'–'+_crM(c.x1/100)+' m</td>'
       +'<td style="'+td+';font-weight:700">'+esc(szLbl(c.s,p))+'</td>'
       +'<td style="'+td+'" dir="ltr">'+c.rows.map(r=>esc(r.q.n)+(r.d?' <span style="color:#888">('+(r.d>0?'+':'')+_mmCm(r.d)+')</span>':'')).join(' · ')+'</td>'
-      +'<td style="'+td+'">'+_mmCm(c.dev)+' ס"מ</td>'
+      +'<td style="'+td+'">'+(c.sd?'מכפלת '+_mmCm(c.dh)+' · בית שחי '+_mmCm(c.du):_mmCm(c.dev))+' ס"מ</td>'
       +'<td style="'+td+';font-weight:700;color:'+(c.bad?'#c00':'#0a7a4a')+'">'+(c.rot?'⚠ מסובב 90° — לבדוק ביד':!rp?'<span style="color:#888;font-weight:400">הזן חזרת פס</span>':c.bad?'⚠ לא על אותו פס':'✓')+'</td></tr>').join('')+'</table>';
 }
 function renderMrkMap(){
@@ -3410,11 +3438,11 @@ function renderMrkMap(){
       +'<span style="font-size:11px;color:var(--txt3)">גלגלת העכבר = זום · גרירה = הזזה · عجلة الفأرة = تكبير</span></div>'
     +'<div id="mm-box" dir="ltr" style="overflow:auto;max-height:70vh;border:1px solid var(--brd);border-radius:8px;cursor:grab;touch-action:pan-x pan-y">'+_mmSvg(p,ck)+'</div>'
     +'<div style="display:flex;gap:10px;flex-wrap:wrap;font-size:12px;margin:6px 0">'+sizes.map((s,i)=>'<span><span style="display:inline-block;width:12px;height:12px;border-radius:3px;vertical-align:middle;background:'+_MM_COL[i%_MM_COL.length]+'"></span> מידה '+esc(szLbl(s,p))+'</span>').join('')
-      +'<span style="color:var(--txt3)">· קו שחור = '+(m.plt?'קו המכפלת/החפת':'תחילת החלק')+' לבדיקה · אדום = לא מתאים</span></div>'
+      +'<span style="color:var(--txt3)">· '+(m.plt?'קו שחור = פינת המכפלת בתפר הצד · מקווקו = בית השחי':'קו שחור = תחילת החלק לבדיקה')+' · אדום = לא מתאים</span></div>'
     +'<div style="font-size:14px;font-weight:700;margin-top:8px">'+(!+_mm.rep?'הזן את חזרת הפס כדי לבדוק התאמה · أدخل تكرار الخط':nb?'⚠ '+nb+' בדיקות לא מתאימות':'✓ כל החלקים בקבוצות על אותו פס')
       +(+_mm.rep?'':' <span style="font-size:12px;font-weight:400;color:var(--txt3)">— בינתיים מוצג ההפרש בין החלקים</span>')+'</div>'
     +_mmTable(p,ck)
-    +'<div style="font-size:11px;color:var(--txt3);margin-top:8px">'+(m.plt?'הצורות מקובץ הפלוטר. ההשוואה לפי קו המכפלת/החפת של כל חלק (הקצה הישר).':'החלקים מצוירים כמלבן — טען את קובץ הפלוטר (HPG/PLT) של אותו ציור לצורות המדויקות. ההשוואה לפי קצה המלבן.')+'</div>')
+    +'<div style="font-size:11px;color:var(--txt3);margin-top:8px">'+(m.plt?'הצורות מקובץ הפלוטר. ההשוואה בתפר הצד: פינת המכפלת ובית השחי של כל חלק (לא ראש הכתף — הגב יכול להיות ארוך יותר שם בכוונה).':'החלקים מצוירים כמלבן — טען את קובץ הפלוטר (HPG/PLT) של אותו ציור לצורות המדויקות. ההשוואה לפי קצה המלבן.')+'</div>')
     +'</div>';
   const box=document.getElementById('mm-box');if(!box)return;
   if(sc){box.scrollLeft=sc[0];box.scrollTop=sc[1];}
