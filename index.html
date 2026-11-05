@@ -3287,10 +3287,20 @@ function _mrkParse(buf){
   if(!len||!pcs.length)throw new Error('לא נמצאו חלקים בקובץ · لا توجد قطع');
   return{name:heb(txt(root,'NAME')),date:txt(root,'DATE'),len,wid,pcs};
 }
+// 🔒 מסמכי מוצר פתוחים לכתיבה לכל מחובר — שדות שמוצגים בלי esc (מספרים, נקודות הצורה) מנוקים כאן,
+// כדי שערך שנכתב ישירות ל-Firestore לא ירוץ כקוד אצל המנהל (05/11/2026)
+const _mmN=v=>{v=+v;return isFinite(v)?v:0;};
+function _mmClean(m){
+  if(!m||typeof m!=='object')return null;
+  const r={...m};['len','wid','rep','off'].forEach(k=>r[k]=_mmN(m[k]));if(m.tol!=null)r.tol=_mmN(m.tol);
+  r.plt=m.plt?1:0;r.pcs=(Array.isArray(m.pcs)?m.pcs:[]).map(q=>{const c={s:typeof q?.s==='number'?q.s:String(q?.s??''),n:String(q?.n??''),f:String(q?.f||'').replace(/[^a-z_]/gi,'')};
+    ['x','X','y','Y','a'].forEach(k=>c[k]=_mmN(q?.[k]));if(q?.o)c.o=String(q.o).replace(/[^0-9.,| -]/g,'');return c;});
+  return r;
+}
 function openMrkMap(pid){
   const p=(S.products||[]).find(x=>String(x.id)===String(pid));if(!p)return;
-  const m=p.mrkMap;
-  _mm={pid:p.id,map:m?JSON.parse(JSON.stringify(m)):null,rep:m?.rep||'',off:m?.off||'',tol:m?.tol??0.3,grp:m?.grp||'FR+BK, SL',dirty:false};
+  const m=_mmClean(p.mrkMap);
+  _mm={pid:p.id,map:m,rep:m?.rep||'',off:m?.off||'',tol:m?.tol??0.3,grp:m?.grp||'FR+BK, SL',dirty:false};
   document.getElementById('mm-wrap')?.remove();
   const w=document.createElement('div');w.id='mm-wrap';
   w.style.cssText='position:fixed;inset:0;background:rgba(0,0,0,.5);display:flex;align-items:flex-start;justify-content:center;z-index:10000;padding:12px;overflow-y:auto';
