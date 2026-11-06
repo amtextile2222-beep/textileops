@@ -2066,29 +2066,34 @@ exports.voicePush = functions.firestore.document('voiceMsgs/{id}').onCreate(asyn
   const name = (from.exists && from.data().name) || 'מנהל';
   const sec = Math.round((+d.dur || 0) / 1000);
   const title = '🎙 ' + name, body = 'הודעה קולית' + (sec ? ' · ' + sec + ' שנ\'' : '') + ' — לחצי לשמיעה · رسالة صوتية';
+  // tag לפי ההודעה — אם בכל זאת נשלחו שתיים לאותו מכשיר, הטלפון מציג אחת (השנייה מחליפה)
+  const tag = 'vc_' + snap.id;
   const msg = token => withTtl({
     token, notification: { title, body },
-    android: { priority: 'high', notification: { sound: 'default', channelId: 'textileops' } },
-    apns: { payload: { aps: { sound: 'default', contentAvailable: true } }, headers: { 'apns-priority': '10', 'apns-push-type': 'alert' } },
-    webpush: { notification: { icon: 'https://amtextile2222-beep.github.io/textileops/icon-192.png', requireInteraction: true, vibrate: [200, 100, 200] } }
+    android: { priority: 'high', notification: { sound: 'default', channelId: 'textileops', tag } },
+    apns: { payload: { aps: { sound: 'default', contentAvailable: true } }, headers: { 'apns-priority': '10', 'apns-push-type': 'alert', 'apns-collapse-id': tag } },
+    webpush: { notification: { icon: 'https://amtextile2222-beep.github.io/textileops/icon-192.png', requireInteraction: true, vibrate: [200, 100, 200], tag } }
   }, PUSH_TTL_ALERT);
   const want = new Set(to);
   const pushRef = db.collection('appSettings').doc('pushSettings');
   const pushSnap = await pushRef.get();
   const tokens = (pushSnap.exists && pushSnap.data().tokens) || {};
-  const jobs = [];
+  // רישום אחד לכל נמען (06/11/2026 — התראה כפולה): מי שרשום ברשימת המנהלים/אחראים (pushSettings)
+  // מקבל רק משם; fcmToken של כרטיס העובד — רק למי שאין לו שם רישום. וכל טוקן נשלח פעם אחת.
+  const sendTo = new Map(), viaMgr = new Set();
   Object.entries(tokens).forEach(([key, t]) => {
     if (!t || typeof t !== 'object' || !t.token || !want.has(t.workerId)) return;
-    jobs.push(admin.messaging().send(msg(t.token)).catch(err => {
-      if (DEAD_FCM_CODES.includes(err.code)) return pushRef.update(new admin.firestore.FieldPath('tokens', key), FieldValue.delete()).catch(() => {});
-    }));
+    viaMgr.add(t.workerId);if (!sendTo.has(t.token)) sendTo.set(t.token, key);
   });
   // נמענים שהם עובדים — fcmToken בכרטיס (קריאה במנות של 30 עם 'in')
-  for (let i = 0; i < to.length; i += 30) {
-    const ws = await db.collection('workers').where(admin.firestore.FieldPath.documentId(), 'in', to.slice(i, i + 30)).get();
-    ws.forEach(w => { const tk = w.data().fcmToken; if (tk && !w.data().disabled) jobs.push(admin.messaging().send(msg(tk)).catch(() => {})); });
+  const rest = to.filter(id => !viaMgr.has(id));
+  for (let i = 0; i < rest.length; i += 30) {
+    const ws = await db.collection('workers').where(admin.firestore.FieldPath.documentId(), 'in', rest.slice(i, i + 30)).get();
+    ws.forEach(w => { const tk = w.data().fcmToken; if (tk && !w.data().disabled && !sendTo.has(tk)) sendTo.set(tk, null); });
   }
-  await Promise.all(jobs);
+  await Promise.all([...sendTo].map(([tk, key]) => admin.messaging().send(msg(tk)).catch(err => {
+    if (key && DEAD_FCM_CODES.includes(err.code)) return pushRef.update(new admin.firestore.FieldPath('tokens', key), FieldValue.delete()).catch(() => {});
+  })));
   return null;
 });
 

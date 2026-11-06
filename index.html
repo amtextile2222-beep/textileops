@@ -11587,7 +11587,7 @@ function replyToWorker(workerName){
 // מנהל/אחראי שולחים לכל אחד. עובד לפי workers.voiceMode שהמנהל קובע: '' = רק תשובה למי ששלח לו,
 // 'open' = יכול גם להתחיל (לאחראי/מנהל אחד), 'off' = רק שומע. נאכף ב-Rules. הודעות נמחקות אחרי 3 ימים (voiceCleanup).
 // Push לנמענים — voicePush בשרת. מי שהאפליקציה פתוחה אצלו שומע מיד (אם הדפדפן חוסם ניגון אוטומטי — חלון עם ▶).
-let _vcIn=[],_vcOut=[],_vcSince=0,_vcRec=null,_vcStream=null,_vcQ=[],_vcPlaying=null,_vcTarget='';
+let _vcIn=[],_vcOut=[],_vcSince=0,_vcBoot=false,_vcRec=null,_vcStream=null,_vcQ=[],_vcPlaying=null,_vcTarget='';
 const _vcMax=45000;
 const _vcMgr=()=>S.user&&(S.user.role==='manager'||S.user.role==='supervisor');
 const _vcMode=()=>_vcMgr()?'all':((S.workers.find(w=>w.id===S.user?.id)||S.user||{}).voiceMode||'');
@@ -11596,11 +11596,15 @@ const _vcName=id=>(S.workers.find(w=>w.id===id)||{}).name||'?';
 function listenVoice(){
   if(!S.fbConnected||!db||!S.user)return;
   const{collection,query,where}=window._fb;
-  _vcSince=Date.now();_vcIn=[];_vcOut=[];
+  _vcSince=Date.now();_vcIn=[];_vcOut=[];_vcBoot=false;
   _live('voiceIn',()=>query(collection(db,'voiceMsgs'),where('to','array-contains',S.user.id)),snap=>{
     _vcIn=snap.docs.map(d=>({id:d.id,...d.data()})).filter(m=>m.at>Date.now()-3*864e5).sort((a,b)=>b.at-a.at);
     snap.docChanges().forEach(c=>{if(c.type!=='added')return;const m={id:c.doc.id,...c.doc.data()};
       if(m.at>_vcSince-5000&&m.from!==S.user.id&&!(m.heard||{})[S.user.id])_vcArrive(m);});
+    // פתיחה מהתראת Push: הודעות מ-15 הדקות האחרונות שלא נשמעו מוצעות מיד (מהישנה לחדשה) —
+    // אחרת הן רק חיכו עם נקודה כחולה. פעם אחת לכל כניסה, רק מהשרת (לא מה-cache)
+    if(!_vcBoot&&!snap.metadata.fromCache){_vcBoot=true;
+      _vcIn.filter(m=>m.at>Date.now()-15*60e3&&m.at<=_vcSince-5000&&m.from!==S.user.id&&!(m.heard||{})[S.user.id]).reverse().forEach(_vcArrive);}
     _vcFab();_vcRender();
   });
   if(_vcMgr())_live('voiceOut',()=>query(collection(db,'voiceMsgs'),where('from','==',S.user.id)),snap=>{
