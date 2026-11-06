@@ -50,12 +50,15 @@ service cloud.firestore {
         && request.resource.data.get('stepOrderGateMode', '') == resource.data.get('stepOrderGateMode', '')
         && request.resource.data.get('permissions', []) == resource.data.get('permissions', [])
         // 🎙 הרשאת קשר קולי (06/11/2026) — המנהל קובע; עובד לא פותח לעצמו ערוץ
-        && request.resource.data.get('voiceMode', '') == resource.data.get('voiceMode', ''));
+        && request.resource.data.get('voiceMode', '') == resource.data.get('voiceMode', '')
+        && request.resource.data.get('voiceTo', []) == resource.data.get('voiceTo', []));
     }
 
     // 🎙 הודעות קוליות (מכשיר קשר, 06/11/2026). to = רשימת נמענים, aud = הקלטה (data URL).
-    // מנהל/אחראי שולחים לכל אחד. עובד: voiceMode 'open' ⇒ לאחראי/מנהל אחד; ברירת מחדל ('') ⇒ רק תשובה
-    // לשולח של הודעה שקיבל (replyTo); 'off' ⇒ לא שולח בכלל. שינוי אחרי שליחה — רק "שמעתי" של הנמען עצמו.
+    // רק המנהל שולח לכל אחד וקורא את כל השיחות. כל השאר (גם אחראי) לפי מה שהמנהל קבע בכרטיס:
+    // voiceMode 'open' ⇒ רק לנמענים שברשימה voiceTo (בלי רשימה — כמו קודם: מנהל/אחראי אחד);
+    // ברירת מחדל ('') ⇒ רק תשובה לשולח של הודעה שקיבל (replyTo); 'off' ⇒ לא שולח בכלל.
+    // שינוי אחרי שליחה — רק "שמעתי" של הנמען עצמו.
     function voiceTarget(uid) {
       return get(/databases/$(database)/documents/workers/$(uid)).data.get('role', '') in ['manager', 'supervisor'];
     }
@@ -66,7 +69,7 @@ service cloud.firestore {
         && request.auth.uid in get(/databases/$(database)/documents/voiceMsgs/$(d.replyTo)).data.to;
     }
     match /voiceMsgs/{id} {
-      allow read: if hasRole() && (request.auth.uid in resource.data.to || resource.data.from == request.auth.uid);
+      allow read: if isMgr() || (hasRole() && (request.auth.uid in resource.data.to || resource.data.from == request.auth.uid));
       allow create: if hasRole()
         && request.resource.data.from == request.auth.uid
         && request.resource.data.to is list
@@ -74,9 +77,12 @@ service cloud.firestore {
         && request.resource.data.aud is string
         && request.resource.data.aud.size() < 900000
         && request.resource.data.heard == {}
-        && (isMgr() || isSup()
+        && (isMgr()
+          || (me().get('voiceMode', '') == 'open' && me().get('voiceTo', []).size() > 0
+            && me().get('voiceTo', []).hasAll(request.resource.data.to))
           || (request.resource.data.to.size() == 1 && me().get('voiceMode', '') != 'off'
-            && ((me().get('voiceMode', '') == 'open' && voiceTarget(request.resource.data.to[0]))
+            && ((me().get('voiceMode', '') == 'open' && me().get('voiceTo', []).size() == 0
+                && voiceTarget(request.resource.data.to[0]))
               || voiceReplyOk(request.resource.data))));
       allow update: if hasRole() && request.auth.uid in resource.data.to
         && request.resource.data.diff(resource.data).affectedKeys().hasOnly(['heard'])

@@ -11584,34 +11584,52 @@ function replyToWorker(workerName){
 }
 // ─── 🎙 מכשיר קשר — הודעות קוליות (06/11/2026) ───────────────────────
 // voiceMsgs/{id} = {from,fromName,to:[ids],toLbl,aud(data URL),mime,dur,at,heard:{uid:ms},replyTo?}
-// מנהל/אחראי שולחים לכל אחד. עובד לפי workers.voiceMode שהמנהל קובע: '' = רק תשובה למי ששלח לו,
-// 'open' = יכול גם להתחיל (לאחראי/מנהל אחד), 'off' = רק שומע. נאכף ב-Rules. הודעות נמחקות אחרי 3 ימים (voiceCleanup).
+// מנהל שולח לכל אחד ושומע את כל השיחות. כל השאר (גם אחראי) לפי workers.voiceMode שהמנהל קובע: '' = רק תשובה
+// למי ששלח לו, 'open' = יכול גם להתחיל — לנמענים ב-workers.voiceTo, 'off' = רק שומע. נאכף ב-Rules. נמחקות אחרי 3 ימים (voiceCleanup).
 // Push לנמענים — voicePush בשרת. מי שהאפליקציה פתוחה אצלו שומע מיד (אם הדפדפן חוסם ניגון אוטומטי — חלון עם ▶).
 let _vcIn=[],_vcOut=[],_vcSince=0,_vcBoot=false,_vcRec=null,_vcStream=null,_vcQ=[],_vcPlaying=null,_vcTarget='';
 const _vcMax=45000;
-const _vcMgr=()=>S.user&&(S.user.role==='manager'||S.user.role==='supervisor');
-const _vcMode=()=>_vcMgr()?'all':((S.workers.find(w=>w.id===S.user?.id)||S.user||{}).voiceMode||'');
+// (06/11/2026 — בקשת המנהל) רק המנהל פתוח לכולם ושומע את כל השיחות. אחראי — כמו עובד: לפי voiceMode,
+// ו-'open' = רק לנמענים ב-voiceTo שהמנהל בחר בכרטיס (רשימה ריקה = מנהלים/אחראים, ההתנהגות הקודמת).
+const _vcMgr=()=>S.user&&S.user.role==='manager';
+const _vcMeW=()=>S.workers.find(w=>w.id===S.user?.id)||S.user||{};
+const _vcMode=()=>_vcMgr()?'all':(_vcMeW().voiceMode||'');
 const _vcCanReply=()=>_vcMgr()||_vcMode()!=='off';
 const _vcName=id=>(S.workers.find(w=>w.id===id)||{}).name||'?';
+let _vcOther=[],_vcMon=false;try{_vcMon=localStorage.getItem('vc_mon')==='1';}catch(e){}
+const _vcSort=docs=>docs.map(d=>({id:d.id,...d.data()})).filter(m=>m.at>Date.now()-3*864e5).sort((a,b)=>b.at-a.at);
+// הודעות חדשות ששייכות לי (נמען) ⇒ ניגון; מנהל עם "האזנה לכל השיחות" ⇒ גם שיחות של אחרים
+function _vcOnSnap(snap){
+  const me=S.user.id,mine=m=>(m.to||[]).includes(me)&&m.from!==me&&!(m.heard||{})[me];
+  snap.docChanges().forEach(c=>{if(c.type!=='added')return;const m={id:c.doc.id,...c.doc.data()};
+    if(m.at<=_vcSince-5000)return;
+    if(mine(m))_vcArrive(m);else if(_vcMgr()&&_vcMon&&m.from!==me&&!(m.to||[]).includes(me))_vcArrive(m);});
+  // פתיחה מהתראת Push: הודעות מ-15 הדקות האחרונות שלא נשמעו מוצעות מיד (מהישנה לחדשה) —
+  // אחרת הן רק חיכו עם נקודה כחולה. פעם אחת לכל כניסה, רק מהשרת (לא מה-cache)
+  if(!_vcBoot&&!snap.metadata.fromCache){_vcBoot=true;
+    _vcIn.filter(m=>m.at>Date.now()-15*60e3&&m.at<=_vcSince-5000&&mine(m)).reverse().forEach(_vcArrive);}
+}
 function listenVoice(){
   if(!S.fbConnected||!db||!S.user)return;
   const{collection,query,where}=window._fb;
-  _vcSince=Date.now();_vcIn=[];_vcOut=[];_vcBoot=false;
-  _live('voiceIn',()=>query(collection(db,'voiceMsgs'),where('to','array-contains',S.user.id)),snap=>{
-    _vcIn=snap.docs.map(d=>({id:d.id,...d.data()})).filter(m=>m.at>Date.now()-3*864e5).sort((a,b)=>b.at-a.at);
-    snap.docChanges().forEach(c=>{if(c.type!=='added')return;const m={id:c.doc.id,...c.doc.data()};
-      if(m.at>_vcSince-5000&&m.from!==S.user.id&&!(m.heard||{})[S.user.id])_vcArrive(m);});
-    // פתיחה מהתראת Push: הודעות מ-15 הדקות האחרונות שלא נשמעו מוצעות מיד (מהישנה לחדשה) —
-    // אחרת הן רק חיכו עם נקודה כחולה. פעם אחת לכל כניסה, רק מהשרת (לא מה-cache)
-    if(!_vcBoot&&!snap.metadata.fromCache){_vcBoot=true;
-      _vcIn.filter(m=>m.at>Date.now()-15*60e3&&m.at<=_vcSince-5000&&m.from!==S.user.id&&!(m.heard||{})[S.user.id]).reverse().forEach(_vcArrive);}
-    _vcFab();_vcRender();
-  });
-  if(_vcMgr())_live('voiceOut',()=>query(collection(db,'voiceMsgs'),where('from','==',S.user.id)),snap=>{
-    _vcOut=snap.docs.map(d=>({id:d.id,...d.data()})).filter(m=>m.at>Date.now()-3*864e5).sort((a,b)=>b.at-a.at);_vcRender();
-  });
+  _vcSince=Date.now();_vcIn=[];_vcOut=[];_vcOther=[];_vcBoot=false;
+  if(_vcMgr()){
+    // מנהל: מאזין אחד לכל השיחות של 3 הימים האחרונים ⇒ מתחלק ל"התקבלו" / "נשלחו" / "בין אחרים"
+    _live('voiceAll',()=>query(collection(db,'voiceMsgs'),where('at','>=',Date.now()-3*864e5)),snap=>{
+      const all=_vcSort(snap.docs),me=S.user.id;
+      _vcIn=all.filter(m=>(m.to||[]).includes(me));_vcOut=all.filter(m=>m.from===me);
+      _vcOther=all.filter(m=>m.from!==me&&!(m.to||[]).includes(me));
+      _vcOnSnap(snap);_vcFab();_vcRender();
+    });
+  }else{
+    _live('voiceIn',()=>query(collection(db,'voiceMsgs'),where('to','array-contains',S.user.id)),snap=>{
+      _vcIn=_vcSort(snap.docs);_vcOnSnap(snap);_vcFab();_vcRender();
+    });
+    _live('voiceOut',()=>query(collection(db,'voiceMsgs'),where('from','==',S.user.id)),snap=>{_vcOut=_vcSort(snap.docs);_vcRender();});
+  }
   _vcFab();
 }
+function vcMonToggle(on){_vcMon=!!on;try{localStorage.setItem('vc_mon',on?'1':'0');}catch(e){}_vcRender();}
 function _vcFab(){
   let b=document.getElementById('vc-fab');
   const show=S.user&&(_vcMgr()||_vcMode()==='open'||_vcIn.length);
@@ -11653,20 +11671,25 @@ function _vcHeard(m){
   _vcFab();
 }
 function vcPlay(id){
-  const m=_vcIn.find(x=>x.id===id)||_vcOut.find(x=>x.id===id);if(!m)return;
+  const m=_vcIn.find(x=>x.id===id)||_vcOut.find(x=>x.id===id)||_vcOther.find(x=>x.id===id);if(!m)return;
   if(_vcPlaying){_vcPlaying.pause();_vcPlaying=null;}
   const a=new Audio(m.aud);_vcPlaying=a;a.onended=a.onerror=()=>{_vcPlaying=null;_vcRender();setTimeout(_vcNext,300);};
   a.play().then(()=>{_vcHeard(m);_vcRender();}).catch(e=>{_vcPlaying=null;showToast('⚠ לא ניתן לנגן: '+e.message,'var(--red-txt)');});
 }
-// נמענים לבחירה: מנהל/אחראי — נוכחים עכשיו / כולם / מחלקה / עובד; עובד "פתוח" — מנהלים ואחראים
+// נמענים לבחירה: מנהל — נוכחים עכשיו / כולם / מחלקה / עובד; אחר "פתוח" — רק מי שברשימה שלו (voiceTo),
+// בלי רשימה — מנהלים ואחראים (ההתנהגות הקודמת)
+const _vcList=()=>{const L=_vcMeW().voiceTo||[];return S.workers.filter(w=>L.includes(w.id)&&w.id!==S.user.id&&!w.disabled);};
 function _vcTargets(){
   const me=S.user.id,act=S.workers.filter(w=>w.id!==me&&!w.disabled);
-  if(!_vcMgr())return act.filter(w=>w.role==='manager'||w.role==='supervisor').map(w=>['w:'+w.id,(w.role==='manager'?'👑 ':'')+w.name]);
+  if(!_vcMgr()){const L=_vcList(),nm=w=>(w.role==='manager'?'👑 ':'')+w.name+(w.status==='in'?' 🟢':'');
+    if(!(_vcMeW().voiceTo||[]).length)return act.filter(w=>w.role==='manager'||w.role==='supervisor').map(w=>['w:'+w.id,nm(w)]);
+    return[...(L.length>1?[['list','👥 כל הרשימה שלי · كل قائمتي ('+L.length+')']]:[]),...L.map(w=>['w:'+w.id,nm(w)])];}
   const deps=[...new Set(act.map(w=>w.dept).filter(Boolean))];
   return[['in','🟢 כל הנוכחים עכשיו · الحاضرون'],['all','👥 כולם · الجميع'],...deps.map(d=>['d:'+d,'🏭 '+d]),...act.map(w=>['w:'+w.id,w.name+(w.status==='in'?' 🟢':'')])];
 }
 function _vcResolve(k){
   const me=S.user.id,act=S.workers.filter(w=>w.id!==me&&!w.disabled);
+  if(k==='list')return _vcList().map(w=>w.id);
   if(k==='in')return act.filter(w=>w.status==='in').map(w=>w.id);
   if(k==='all')return act.map(w=>w.id);
   if(k.startsWith('d:'))return act.filter(w=>w.dept===k.slice(2)).map(w=>w.id);
@@ -11708,7 +11731,16 @@ function _vcRender(){
     +rec
     +'<div style="font-size:13px;font-weight:700;margin:14px 0 4px">📥 התקבלו · الواردة</div>'
     +(_vcIn.length?_vcIn.map(m=>row(m,false)).join(''):'<div style="font-size:12px;color:var(--txt3)">אין הודעות ב-3 הימים האחרונים</div>')
-    +(_vcMgr()&&_vcOut.length?'<div style="font-size:13px;font-weight:700;margin:14px 0 4px">📤 נשלחו · المرسلة</div>'+_vcOut.slice(0,30).map(m=>row(m,true)).join(''):'')
+    +(_vcOut.length?'<div style="font-size:13px;font-weight:700;margin:14px 0 4px">📤 נשלחו · المرسلة</div>'+_vcOut.slice(0,30).map(m=>row(m,true)).join(''):'')
+    // 👂 מנהל: כל השיחות בין אחרים (שולח ⬅ נמענים), עם אפשרות האזנה חיה
+    +(_vcMgr()?'<div style="display:flex;align-items:center;gap:8px;margin:14px 0 4px"><div style="font-size:13px;font-weight:700;flex:1">👂 שיחות בין אחרים · محادثات الآخرين</div>'
+      +'<label style="font-size:12px;display:flex;align-items:center;gap:4px;cursor:pointer"><input type="checkbox" style="width:auto" '+(_vcMon?'checked':'')+' onchange="vcMonToggle(this.checked)"> 🔊 השמע אוטומטית</label></div>'
+      +(_vcOther.length?_vcOther.slice(0,40).map(m=>{const h=Object.keys(m.heard||{});
+        return'<div style="display:flex;gap:8px;align-items:center;padding:8px 4px;border-bottom:0.5px solid var(--b)">'
+          +'<button class="btn" style="font-size:16px;padding:6px 12px" onclick="vcPlay(\''+escj(m.id)+'\')">▶</button>'
+          +'<div style="flex:1;min-width:0"><div style="font-size:13px;color:var(--txt)">'+esc(m.fromName||_vcName(m.from))+' ⬅ '+esc(m.toLbl||(m.to||[]).map(_vcName).join(', '))+(m.replyTo?' <span style="color:var(--txt3)">↩</span>':'')+'</div>'
+          +'<div style="font-size:11px;color:var(--txt3)">'+_vcT(m.at)+' · '+Math.max(1,Math.round((m.dur||0)/1000))+' שנ\' · <span title="'+esc(h.map(_vcName).join(', '))+'">שמעו '+h.length+'/'+(m.to||[]).length+'</span></div></div></div>';}).join('')
+        :'<div style="font-size:12px;color:var(--txt3)">אין שיחות ב-3 הימים האחרונים</div>'):'')
     +'</div>';
 }
 const _vcRecTxt=()=>_vcRec?'🔴 מקליט… '+Math.round((Date.now()-_vcRec.t0)/1000)+' שנ\' — שחרר לשליחה · أفلت للإرسال':'';
@@ -12410,14 +12442,20 @@ function openModal(action,id){
           פעיל רק כשמתג האכיפה עצמו דלוק. <b>כל עקיפה וכל חסימה נרשמות ביומן</b> (לשונית 🏷️ ברקודים ← "📝 יומן שערים").
         </div>
       </div>`;})()}
-      ${(wRole==='manager'||wRole==='supervisor')?'':`
+      ${wRole==='manager'?'':(()=>{const vto=w?.voiceTo||[],others=S.workers.filter(x=>x.id!==w?.id&&!x.disabled),
+        deps=[...new Set(others.map(x=>x.dept||'—'))];return `
       <div class="field" style="background:var(--bg2);border-radius:var(--r);padding:10px 12px;margin-bottom:8px">
         <div style="display:flex;gap:8px;align-items:center">
           <span style="font-size:13px;color:var(--txt);font-weight:600;min-width:104px">🎙 מכשיר קשר</span>
-          <select id="mf-voice" style="font-size:12px;width:auto;flex:1;min-width:0;max-width:100%">${[['','רק תשובה'],['open','פתוח — גם מתחיל/ה שיחה'],['off','האזנה בלבד']].map(([v,l])=>`<option value="${v}" ${(w?.voiceMode||'')===v?'selected':''}>${l}</option>`).join('')}</select>
+          <select id="mf-voice" onchange="document.getElementById('mf-vto').style.display=this.value==='open'?'block':'none'" style="font-size:12px;width:auto;flex:1;min-width:0;max-width:100%">${[['','רק תשובה'],['open','פתוח — לנמענים שבחרתי'],['off','האזנה בלבד']].map(([v,l])=>`<option value="${v}" ${(w?.voiceMode||'')===v?'selected':''}>${l}</option>`).join('')}</select>
         </div>
-        <div style="font-size:11px;color:var(--txt3);margin-top:6px">מנהל ואחראי יכולים תמיד לשלוח. "פתוח" = העובד/ת יכול/ה לפנות בעצמו/ה למנהל או לאחראי.</div>
-      </div>`}
+        <div id="mf-vto" style="display:${(w?.voiceMode||'')==='open'?'block':'none'};margin-top:8px;max-height:220px;overflow:auto;border:0.5px solid var(--b);border-radius:8px;padding:6px 8px;background:var(--bg)">
+          <div style="font-size:11px;color:var(--txt3);margin-bottom:4px">למי מותר לו/לה לפנות (בלי סימון — מנהלים ואחראים):</div>
+          ${deps.map(d=>`<div style="margin-top:6px"><label style="font-size:12px;font-weight:700;display:flex;align-items:center;gap:6px;cursor:pointer"><input type="checkbox" style="width:auto" onchange="this.closest('div').querySelectorAll('.mf-vto').forEach(c=>c.checked=this.checked)"> 🏭 ${esc(d)}</label>
+            <div style="display:flex;flex-wrap:wrap;gap:4px 12px;padding-right:20px">${others.filter(x=>(x.dept||'—')===d).map(x=>`<label style="font-size:12px;display:flex;align-items:center;gap:4px;cursor:pointer"><input type="checkbox" class="mf-vto" data-id="${esc(x.id)}" style="width:auto" ${vto.includes(x.id)?'checked':''}>${x.role==='manager'?'👑 ':x.role==='supervisor'?'⭐ ':''}${esc(x.name)}</label>`).join('')}</div></div>`).join('')}
+        </div>
+        <div style="font-size:11px;color:var(--txt3);margin-top:6px">רק המנהל פתוח לכולם ושומע את כל השיחות. גם אחראי — רק למי שמסומן כאן. "רק תשובה" = משיב/ה למי שפנה אליו/ה.</div>
+      </div>`;})()}
       <div class="field" style="background:var(--bg2);border-radius:var(--r);padding:10px 12px">
         <label style="display:flex;align-items:center;gap:10px;cursor:pointer;font-size:13px;color:var(--txt)">
           <input type="checkbox" id="mf-face-auth" ${w?.faceAuth?'checked':''} style="width:auto;cursor:pointer"/>
@@ -12594,6 +12632,8 @@ async function resetPass(id){
     alert(`✅ סיסמה עודכנה עבור ${w.name}`);
   }catch(e){alert('שגיאה בעדכון סיסמה: '+e.message);}
 }
+// 🎙 רשימת הנמענים שסומנו בכרטיס — נשמרת רק כשהמצב "פתוח" (אחרת ריקה)
+const _mfVoiceTo=()=>document.getElementById('mf-voice')?.value==='open'?[...document.querySelectorAll('.mf-vto:checked')].map(c=>c.dataset.id):[];
 async function confirmModal(){
   // edit-att
   if(S.modalAction?.startsWith('edit-att:')){
@@ -12753,7 +12793,7 @@ async function confirmModal(){
     const nw={id:'w'+Date.now(),name,dept,role,user,status:'out',checkin:null,permissions:perms,faceAuth:false,breakStart:defBreakStart(),breakEnd:defBreakEnd(),breakActive:true,skills:skills||{},
       stationGateMode:document.getElementById('mf-gate-station')?.value||'',
       stepOrderGateMode:document.getElementById('mf-gate-order')?.value||'',
-      voiceMode:document.getElementById('mf-voice')?.value||''};
+      voiceMode:document.getElementById('mf-voice')?.value||'',voiceTo:_mfVoiceTo()};
     S.workers.push(nw);
     await fbSet('workers',nw.id,nw);
     try{await _setWorkerPassword(nw.id,pass);}catch(e){alert('העובד נוצר אך שמירת הסיסמה נכשלה: '+e.message);}
@@ -12770,7 +12810,7 @@ async function confirmModal(){
     w.deviceBinding=!!document.getElementById('mf-device-binding')?.checked;
     w.stationGateMode=document.getElementById('mf-gate-station')?.value||'';
     w.stepOrderGateMode=document.getElementById('mf-gate-order')?.value||'';
-    if(document.getElementById('mf-voice'))w.voiceMode=document.getElementById('mf-voice').value;
+    if(document.getElementById('mf-voice')){w.voiceMode=document.getElementById('mf-voice').value;w.voiceTo=_mfVoiceTo();}
     w.faceAuth=!!document.getElementById('mf-face-auth')?.checked;
     if(w.role==='supervisor'){
       w.oversightPrefs={punch_in:!!document.getElementById('mf-ov-punch_in')?.checked,punch_out:!!document.getElementById('mf-ov-punch_out')?.checked,task_start:!!document.getElementById('mf-ov-task_start')?.checked,task_end:!!document.getElementById('mf-ov-task_end')?.checked,worker_msg:!!document.getElementById('mf-ov-worker_msg')?.checked};
