@@ -15376,14 +15376,32 @@ function _ensureOhHours(months){
 }
 // לקוראים אסינכרוניים: מוודא שהשעות בפועל נטענו לפני חישוב התקורה
 function ohReady(){return _ensureOhHours(overheadBreakdown().incMonths);}
-// הכנסות חודש (YYYY-MM) — משלוחים שיצאו בו × (מחיר יחידה + מחיר גזירה). הזמנה בלי מחיר לא נספרת.
-function _incomeOfMonth(ym){
-  let s=0;
+// 🧾 הכנסה של תעודה (06/11/2026) = **בדיוק כמו בלשונית תעודות משלוח** (dnFiltered): עבודה
+// (dnUnitPrice × total; בלי מחיר תפירה ⇒ 0) + חומר אריזה שנצרב על התעודה (shipPackCost).
+// 📅 חודש ההכנסה = **חודש ההתחשבנות**: תעודה שבחשבונית עסקה ⇒ החודש של החשבונית (pfMonth) —
+// תעודות 01–04/10 נכנסות להתחשבנות 09, תעודה מ-02/11 ל-10. בלי חשבונית ⇒ לפי תאריך התעודה.
+function _pfMonth(d){
+  if(d?.month)return d.month;
+  const x=String(d?.date||'');if(!x)return '';
+  const pm=new Date(+x.slice(0,4),+x.slice(5,7)-2,1);return pm.getFullYear()+'-'+pad2(pm.getMonth()+1);
+}
+function _incShipRows(){
+  const out=[];
   (S.products||[]).forEach(p=>{
-    const pu=(+p.unitPrice||0)+(+p.cutPrice||0)+(+p.unitPrice?(+p.extraMatPrice||0):0); // 🧵 חומרים בתוספת — חלק מהחשבון ללקוחif(!(pu>0))return;
-    prodShipments(p).forEach(x=>{if(String(x.date||'').slice(0,7)===ym)s+=pu*(+x.total||0);});
+    const pr=dnUnitPrice(p);
+    prodShipments(p).forEach((s,i)=>{
+      const qty=+s.total||0,pack=shipPackCost(s),work=pr.missing?0:pr.unit*qty;
+      if(!(qty>0)&&!pack)return;
+      const inv=_pfList.length?dnInvOf({p,s,i}):null;
+      const date=String(s.date||'').slice(0,10);
+      out.push({p,s,date,month:(inv&&_pfMonth(inv))||date.slice(0,7),inv:!!inv,work,pack,noPrice:pr.missing&&qty>0});
+    });
   });
-  return s;
+  return out;
+}
+// הכנסות חודש התחשבנות (YYYY-MM) — עבודה + אריזה. משמש את ממוצע ההכנסות של התקורה (מסים+בנק).
+function _incomeOfMonth(ym){
+  return _incShipRows().reduce((t,r)=>t+(r.month===ym?r.work+r.pack:0),0);
 }
 function saveLoadedHourSettings(){
   const c=S.costs;
@@ -15929,18 +15947,23 @@ async function calcCosts(){
     </div>`;
   }
 
-  // 🧾 הכנסות בטווח — לפי תאריך כל משלוח (תעודה) × (מחיר יחידה + מחיר גזירה).
-  // הבסיס למסים ולעמלות הבנק באחוזים. הזמנה בלי מחיר — נספרת בנפרד ולא נכנסת.
-  let income=0, incShip=0, noPrice=0;
-  (S.products||[]).forEach(p=>{
-    const pu=(+p.unitPrice||0)+(+p.cutPrice||0)+(+p.unitPrice?(+p.extraMatPrice||0):0); // 🧵 חומרים בתוספת — חלק מהחשבון ללקוח
-    prodShipments(p).forEach(s=>{
-      const sd=String(s.date||'').slice(0,10);
-      if(!sd||sd<from||sd>to||!(+s.total>0))return;
-      if(pu>0){income+=pu*(+s.total);incShip++;}else noPrice++;
-    });
+  // 🧾 הכנסות בטווח — עבודה + חומר אריזה, כמו בלשונית תעודות משלוח (_incShipRows).
+  // טווח של חודשים שלמים (1 עד סוף חודש) ⇒ לפי **חודש ההתחשבנות** של כל תעודה;
+  // טווח חלקי (יום/שבוע) ⇒ לפי תאריך התעודה. הבסיס למסים ולעמלות הבנק באחוזים.
+  if(_canPricing()&&db&&S.fbConnected&&Date.now()-_pfAt>60000){try{await _pfLoad();_pfAt=Date.now();}catch(e){console.warn('pf:',e.message);}}
+  const _eom=d=>{const x=new Date(+d.slice(0,4),+d.slice(5,7),0);return d.slice(0,8)+pad2(x.getDate());};
+  const bySettle=from.slice(8,10)==='01'&&to===_eom(to);
+  const fm=from.slice(0,7),tm=to.slice(0,7);
+  let income=0, incWork=0, incPack=0, incShip=0, noPrice=0, noInv=0;
+  _incShipRows().forEach(r=>{
+    if(bySettle){if(!r.month||r.month<fm||r.month>tm)return;}
+    else if(!r.date||r.date<from||r.date>to)return;
+    if(r.noPrice)noPrice++;
+    if(!r.inv)noInv++;
+    incWork+=r.work;incPack+=r.pack;incShip++;
   });
-  Object.assign(S._costExp||(S._costExp={}),{ld:_ld,income,incShip,noPrice});
+  income=incWork+incPack;
+  Object.assign(S._costExp||(S._costExp={}),{ld:_ld,income,incWork,incPack,incShip,noPrice,noInv,bySettle});
 
   S._costData=enriched;
   renderCostTab();
@@ -16070,14 +16093,15 @@ function renderCostTab(){
       <div style="font-size:11px;color:var(--txt3);margin-bottom:6px">לפי שעות העבודה בטווח והגדרות "שעה עמוסה". נכללות ב"עלות מלאה" (שכר עמוס) — לא ב"עלות הוצאות".</div>
       <div style="${grid}">${LDL.map(([k,l])=>card(l,fmt(ld[k]||0))).join('')}${card('סה"כ נלוות',fmt(ldTot),'','--blue-txt')}</div>
       <div class="sec" style="font-size:13px">🏦 מסים ועמלות בנק</div>
-      <div style="font-size:11px;color:var(--txt3);margin-bottom:6px">הכנסות = משלוחים שיצאו בטווח × (מחיר יחידה + מחיר גזירה). האחוזים נקבעים בכרטיס "הוצאות קבועות".</div>
+      <div style="font-size:11px;color:var(--txt3);margin-bottom:6px">הכנסות = תעודות משלוח: עבודה (מחיר יחידה + גזירה) + חומר אריזה — כמו בלשונית תעודות משלוח. ${X.bySettle?'חודש שלם ⇒ לפי <b>חודש ההתחשבנות</b> של החשבונית (תעודה בלי חשבונית — לפי תאריכה).':'טווח חלקי ⇒ לפי תאריך התעודה.'} האחוזים נקבעים בכרטיס "הוצאות קבועות".</div>
       <div style="${grid}">
-        ${card('💵 הכנסות בטווח',fmt(inc),(X.incShip||0)+' משלוחים')}
+        ${card('💵 הכנסות '+(X.bySettle?'בהתחשבנות':'בטווח'),fmt(inc),(X.incShip||0)+' תעודות · עבודה '+fmt(X.incWork||0)+' + אריזה '+fmt(X.incPack||0))}
         ${card('🧮 מסים',fmt(tax),taxPct+'% מההכנסות')}
         ${card('🏦 עמלות בנק',fmt(bank),bankPct+'% מההכנסות')}
         ${card('סה"כ',fmt(tax+bank),'','--blue-txt')}
       </div>
-      ${X.noPrice?`<div style="font-size:11px;color:var(--amber-txt)">⚠️ ${X.noPrice} משלוחים בטווח של הזמנות בלי מחיר — לא נכנסו להכנסות.</div>`:''}
+      ${X.noPrice?`<div style="font-size:11px;color:var(--amber-txt)">⚠️ ${X.noPrice} תעודות בטווח של הזמנות בלי מחיר — העבודה שלהן לא נכנסה להכנסות.</div>`:''}
+      ${X.bySettle&&X.noInv?`<div style="font-size:11px;color:var(--amber-txt)">⏳ ${X.noInv} תעודות עוד בלי חשבונית עסקה — שויכו לפי תאריך התעודה; אחרי הפקת החשבונית יעברו לחודש ההתחשבנות שלה.</div>`:''}
       ${!taxPct&&!bankPct?`<div style="font-size:11px;color:var(--txt3)">לא הוזנו אחוזים — הזן בכרטיס "הוצאות קבועות" ולחץ שמור.</div>`:''}`;
     el.innerHTML=`
       <div class="sec" style="font-size:13px">📋 הוצאות רשומות (= "עלות הוצאות")</div>
