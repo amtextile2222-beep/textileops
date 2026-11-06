@@ -11706,8 +11706,14 @@ function openVoice(){
 function closeVoice(){
   if(_vcRec)vcUp(true);
   document.getElementById('vc-modal')?.remove();
-  if(_vcStream){_vcStream.getTracks().forEach(t=>t.stop());_vcStream=null;}
+  _vcMicOff();
 }
+// 🎙 שחרור המיקרופון (הנקודה הכתומה באייפון): 30 שנ' אחרי ההקלטה האחרונה, ביציאה מהאפליקציה/נעילה,
+// ובסגירת החלון. בינתיים נשאר פתוח — כדי שהקלטה ברצף לא תשאל כל פעם "לאפשר מיקרופון?"
+let _vcIdleT=null;
+function _vcMicOff(){clearTimeout(_vcIdleT);_vcIdleT=null;if(_vcRec)return;
+  if(_vcStream){_vcStream.getTracks().forEach(t=>t.stop());_vcStream=null;}}
+document.addEventListener('visibilitychange',()=>{if(document.hidden){if(_vcRec)vcUp(true);_vcMicOff();}});
 const _vcT=at=>{const d=new Date(at),t=pad2(d.getHours())+':'+pad2(d.getMinutes());return d.toDateString()===new Date().toDateString()?t:d.getDate()+'/'+(d.getMonth()+1)+' '+t;};
 // כפתור "לחץ ודבר": מחזיקים — מקליט, משחררים — נשלח. talk = 'new' או מזהה ההודעה שמשיבים לה
 const _vcTalk=(talk,lbl,big)=>'<button class="btn '+(big?'primary':'')+'" style="'+(big?'width:100%;padding:16px;font-size:17px;':'padding:6px 10px;font-size:13px;')+'touch-action:none;user-select:none;-webkit-user-select:none;-webkit-touch-callout:none" oncontextmenu="return false" onpointerdown="vcDown(event,\''+escj(talk)+'\')">'+lbl+'</button>';
@@ -11753,7 +11759,7 @@ function _vcMime(){
   return['audio/mp4;codecs=mp4a.40.2','audio/mp4','audio/webm;codecs=opus','audio/webm'].find(t=>MediaRecorder.isTypeSupported(t))||'';
 }
 async function vcDown(ev,talk){
-  ev.preventDefault();if(_vcRec||_vcBusy)return;
+  ev.preventDefault();if(_vcRec||_vcBusy)return;clearTimeout(_vcIdleT);
   const mime=_vcMime();if(mime===null){alert('המכשיר לא תומך בהקלטה · الجهاز لا يدعم التسجيل');return;}
   let to,lbl,replyTo='';
   if(talk==='new'){to=_vcResolve(_vcTarget);lbl=(_vcTargets().find(t=>t[0]===_vcTarget)||[])[1]||'';}
@@ -11764,7 +11770,7 @@ async function vcDown(ev,talk){
   catch(e){_vcBusy=false;removeEventListener('pointerup',early);alert('אין הרשאה למיקרופון · لا يوجد إذن للميكروفون');return;}
   _vcBusy=false;removeEventListener('pointerup',early);
   // הפעם הראשונה: חלון ההרשאה "אכל" את הלחיצה — מבקשים ללחוץ שוב
-  if(up){showToast('✅ המיקרופון מוכן — החזק את הכפתור ודבר · اضغط مطولاً','var(--green-txt)',3000);return;}
+  if(up){_vcIdleT=setTimeout(_vcMicOff,30000);showToast('✅ המיקרופון מוכן — החזק את הכפתור ודבר · اضغط مطولاً','var(--green-txt)',3000);return;}
   if(_vcPlaying){_vcPlaying.pause();_vcPlaying=null;}
   const mr=new MediaRecorder(_vcStream,mime?{mimeType:mime,audioBitsPerSecond:32000}:{audioBitsPerSecond:32000}),chunks=[];
   mr.ondataavailable=e=>{if(e.data&&e.data.size)chunks.push(e.data);};
@@ -11779,6 +11785,7 @@ function vcUp(cancel){
   clearInterval(r.tick);clearTimeout(r.lim);r.dur=Date.now()-r.t0;
   if(cancel||r.dur<700){r.cancel=true;if(!cancel)showToast('החזק את הכפתור בזמן הדיבור · اضغط مطولاً أثناء الكلام','var(--amber-txt)',2500);}
   try{r.mr.stop();}catch(e){}
+  clearTimeout(_vcIdleT);_vcIdleT=setTimeout(_vcMicOff,30000);
   _vcRender();
 }
 async function _vcSend(r){
