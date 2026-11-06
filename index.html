@@ -11651,10 +11651,22 @@ function _vcArrive(m){
   try{navigator.vibrate&&navigator.vibrate([150,80,150]);}catch(e){}
   _vcQ.push(m);if(!_vcPlaying)_vcNext();
 }
+// 🔓 נגן אחד לכל ההודעות (06/11/2026): אייפון חוסם play() של כל נגן חדש שלא נוצר מלחיצה —
+// ולכן כל הודעה נכנסת הקפיצה "▶ השמע". נגן שהופעל פעם אחת מלחיצה (צליל שקט בלחיצה הראשונה
+// באפליקציה) נשאר "פתוח", וכל ההודעות הבאות מתנגנות דרכו לבד.
+const _vcA=new Audio();let _vcUnl=false;
+const _vcSilent=(()=>{let u=null;return()=>{if(u)return u;const n=800,b=new ArrayBuffer(44+n),v=new DataView(b),w=(o,s)=>[...s].forEach((c,i)=>v.setUint8(o+i,c.charCodeAt(0)));
+  w(0,'RIFF');v.setUint32(4,36+n,true);w(8,'WAVE');w(12,'fmt ');v.setUint32(16,16,true);v.setUint16(20,1,true);v.setUint16(22,1,true);v.setUint32(24,8000,true);v.setUint32(28,8000,true);v.setUint16(32,1,true);v.setUint16(34,8,true);w(36,'data');v.setUint32(40,n,true);
+  for(let i=0;i<n;i++)v.setUint8(44+i,128);return u=URL.createObjectURL(new Blob([b],{type:'audio/wav'}));};})();
+function _vcUnlock(){
+  if(_vcUnl||_vcPlaying)return;_vcUnl=true;
+  try{_vcA.onended=_vcA.onerror=null;_vcA.src=_vcSilent();_vcA.play().then(()=>{if(_vcPlaying!==_vcA)_vcA.pause();document.removeEventListener('pointerdown',_vcUnlock,true);}).catch(()=>{_vcUnl=false;});}catch(e){_vcUnl=false;}
+}
+document.addEventListener('pointerdown',_vcUnlock,true);
 function _vcNext(){
   const m=_vcQ.shift();if(!m){_vcPlaying=null;return;}
   if(_vcRec){_vcQ.unshift(m);setTimeout(_vcNext,1500);return;} // לא מנגנים באמצע הקלטה
-  const a=new Audio(m.aud);_vcPlaying=a;
+  const a=_vcA;a.pause();a.src=m.aud;_vcPlaying=a;
   a.onended=a.onerror=()=>{_vcPlaying=null;setTimeout(_vcNext,300);};
   a.play().then(()=>{_vcHeard(m);showToast('🎙 '+(m.fromName||_vcName(m.from)),'var(--blue-txt)',2500);})
     .catch(()=>{_vcPlaying=null;_vcPopup(m);});
@@ -11678,7 +11690,7 @@ function _vcHeard(m){
 function vcPlay(id){
   const m=_vcIn.find(x=>x.id===id)||_vcOut.find(x=>x.id===id)||_vcOther.find(x=>x.id===id);if(!m)return;
   if(_vcPlaying){_vcPlaying.pause();_vcPlaying=null;}
-  const a=new Audio(m.aud);_vcPlaying=a;a.onended=a.onerror=()=>{_vcPlaying=null;_vcRender();setTimeout(_vcNext,300);};
+  const a=_vcA;a.pause();a.src=m.aud;_vcPlaying=a;_vcUnl=true;a.onended=a.onerror=()=>{_vcPlaying=null;_vcRender();setTimeout(_vcNext,300);};
   a.play().then(()=>{_vcHeard(m);_vcRender();}).catch(e=>{_vcPlaying=null;showToast('⚠ לא ניתן לנגן: '+e.message,'var(--red-txt)');});
 }
 // נמענים לבחירה: מנהל — נוכחים עכשיו / כולם / מחלקה / עובד; אחר "פתוח" — רק מי שברשימה שלו (voiceTo),
