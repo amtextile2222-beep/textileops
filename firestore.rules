@@ -48,7 +48,40 @@ service cloud.firestore {
         // פוטר את עצמו מהחסימה, ולכן היא נעולה למנהל כמו יתר שדות האבטחה
         && request.resource.data.get('stationGateMode', '') == resource.data.get('stationGateMode', '')
         && request.resource.data.get('stepOrderGateMode', '') == resource.data.get('stepOrderGateMode', '')
-        && request.resource.data.get('permissions', []) == resource.data.get('permissions', []));
+        && request.resource.data.get('permissions', []) == resource.data.get('permissions', [])
+        // 🎙 הרשאת קשר קולי (06/11/2026) — המנהל קובע; עובד לא פותח לעצמו ערוץ
+        && request.resource.data.get('voiceMode', '') == resource.data.get('voiceMode', ''));
+    }
+
+    // 🎙 הודעות קוליות (מכשיר קשר, 06/11/2026). to = רשימת נמענים, aud = הקלטה (data URL).
+    // מנהל/אחראי שולחים לכל אחד. עובד: voiceMode 'open' ⇒ לאחראי/מנהל אחד; ברירת מחדל ('') ⇒ רק תשובה
+    // לשולח של הודעה שקיבל (replyTo); 'off' ⇒ לא שולח בכלל. שינוי אחרי שליחה — רק "שמעתי" של הנמען עצמו.
+    function voiceTarget(uid) {
+      return get(/databases/$(database)/documents/workers/$(uid)).data.get('role', '') in ['manager', 'supervisor'];
+    }
+    function voiceReplyOk(d) {
+      return d.get('replyTo', '') is string && d.get('replyTo', '') != ''
+        && exists(/databases/$(database)/documents/voiceMsgs/$(d.replyTo))
+        && get(/databases/$(database)/documents/voiceMsgs/$(d.replyTo)).data.from == d.to[0]
+        && request.auth.uid in get(/databases/$(database)/documents/voiceMsgs/$(d.replyTo)).data.to;
+    }
+    match /voiceMsgs/{id} {
+      allow read: if hasRole() && (request.auth.uid in resource.data.to || resource.data.from == request.auth.uid);
+      allow create: if hasRole()
+        && request.resource.data.from == request.auth.uid
+        && request.resource.data.to is list
+        && request.resource.data.to.size() > 0
+        && request.resource.data.aud is string
+        && request.resource.data.aud.size() < 900000
+        && request.resource.data.heard == {}
+        && (isMgr() || isSup()
+          || (request.resource.data.to.size() == 1 && me().get('voiceMode', '') != 'off'
+            && ((me().get('voiceMode', '') == 'open' && voiceTarget(request.resource.data.to[0]))
+              || voiceReplyOk(request.resource.data))));
+      allow update: if hasRole() && request.auth.uid in resource.data.to
+        && request.resource.data.diff(resource.data).affectedKeys().hasOnly(['heard'])
+        && request.resource.data.heard.diff(resource.data.heard).affectedKeys().hasOnly([request.auth.uid]);
+      allow delete: if isMgr() || (hasRole() && resource.data.from == request.auth.uid);
     }
 
     // הגדרות אפליקציה: קריאה לכולם (עובדים צריכים shiftEnd/factoryIP/לקוחות/צבעים);
@@ -168,7 +201,8 @@ service cloud.firestore {
         && collection != 'bizSignature'
         && collection != 'checkImages'
         // עד 25/09/2026 חסר כאן — וחוק הקופה הייעודי (לקיחה בלבד, על שמך) לא נאכף בפועל
-        && collection != 'cashbox';
+        && collection != 'cashbox'
+        && collection != 'voiceMsgs';
     }
   }
 }

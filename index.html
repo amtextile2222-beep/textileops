@@ -4906,6 +4906,7 @@ function listenFb(){
     if(snap.empty)return;
     S.workers=snap.docs.map(d=>({id:d.id,...d.data()}));
     migrateBreaks(!snap.metadata.fromCache);
+    if(typeof _vcFab==='function')_vcFab(); // 🎙 המנהל שינה voiceMode — הכפתור מופיע/נעלם מיד
     // אם הנתונים מגיעים מה-cache המקומי — לא לאפס, רק לרנדר
     // (cache עלול להכיל sessions מאתמול ולגרום לאיפוס שגוי)
     if(snap.metadata.fromCache){renderAll();return;}
@@ -5741,6 +5742,7 @@ function finishLogin(w,autoPunch){
   setTimeout(()=>{_checkMultiTab();},9000);
   listenWorkerMessages();
   listenMgrInbox();
+  listenVoice();
   setTimeout(_saveMyLang,5000); // אחרי שכרטיסי העובדים נטענו
   if(w.role==='worker'||w.role==='helper')document.getElementById('worker-send-msg-bar').style.display='block';
   if(w.role!=='manager'&&w.role!=='supervisor'){
@@ -11580,6 +11582,181 @@ function replyToWorker(workerName){
   if(!w){showToast('⚠ עובד לא נמצא','var(--red-txt)');return;}
   mgrSendMsg(w.id,w.name);
 }
+// ─── 🎙 מכשיר קשר — הודעות קוליות (06/11/2026) ───────────────────────
+// voiceMsgs/{id} = {from,fromName,to:[ids],toLbl,aud(data URL),mime,dur,at,heard:{uid:ms},replyTo?}
+// מנהל/אחראי שולחים לכל אחד. עובד לפי workers.voiceMode שהמנהל קובע: '' = רק תשובה למי ששלח לו,
+// 'open' = יכול גם להתחיל (לאחראי/מנהל אחד), 'off' = רק שומע. נאכף ב-Rules. הודעות נמחקות אחרי 3 ימים (voiceCleanup).
+// Push לנמענים — voicePush בשרת. מי שהאפליקציה פתוחה אצלו שומע מיד (אם הדפדפן חוסם ניגון אוטומטי — חלון עם ▶).
+let _vcIn=[],_vcOut=[],_vcSince=0,_vcRec=null,_vcStream=null,_vcQ=[],_vcPlaying=null,_vcTarget='';
+const _vcMax=45000;
+const _vcMgr=()=>S.user&&(S.user.role==='manager'||S.user.role==='supervisor');
+const _vcMode=()=>_vcMgr()?'all':((S.workers.find(w=>w.id===S.user?.id)||S.user||{}).voiceMode||'');
+const _vcCanReply=()=>_vcMgr()||_vcMode()!=='off';
+const _vcName=id=>(S.workers.find(w=>w.id===id)||{}).name||'?';
+function listenVoice(){
+  if(!S.fbConnected||!db||!S.user)return;
+  const{collection,query,where}=window._fb;
+  _vcSince=Date.now();_vcIn=[];_vcOut=[];
+  _live('voiceIn',()=>query(collection(db,'voiceMsgs'),where('to','array-contains',S.user.id)),snap=>{
+    _vcIn=snap.docs.map(d=>({id:d.id,...d.data()})).filter(m=>m.at>Date.now()-3*864e5).sort((a,b)=>b.at-a.at);
+    snap.docChanges().forEach(c=>{if(c.type!=='added')return;const m={id:c.doc.id,...c.doc.data()};
+      if(m.at>_vcSince-5000&&m.from!==S.user.id&&!(m.heard||{})[S.user.id])_vcArrive(m);});
+    _vcFab();_vcRender();
+  });
+  if(_vcMgr())_live('voiceOut',()=>query(collection(db,'voiceMsgs'),where('from','==',S.user.id)),snap=>{
+    _vcOut=snap.docs.map(d=>({id:d.id,...d.data()})).filter(m=>m.at>Date.now()-3*864e5).sort((a,b)=>b.at-a.at);_vcRender();
+  });
+  _vcFab();
+}
+function _vcFab(){
+  let b=document.getElementById('vc-fab');
+  const show=S.user&&(_vcMgr()||_vcMode()==='open'||_vcIn.length);
+  if(!show){if(b)b.style.display='none';return;}
+  if(!b){b=document.createElement('button');b.id='vc-fab';b.onclick=openVoice;b.title='מכשיר קשר · جهاز اتصال';
+    b.style.cssText='position:fixed;bottom:84px;left:16px;z-index:9001;width:54px;height:54px;border-radius:50%;border:none;background:var(--blue-txt);color:#fff;font-size:24px;cursor:pointer;box-shadow:0 4px 16px rgba(0,0,0,.3)';
+    document.body.appendChild(b);}
+  const n=_vcIn.filter(m=>!(m.heard||{})[S.user.id]).length;
+  b.style.display='block';
+  b.innerHTML='🎙'+(n?'<span style="position:absolute;top:-4px;right:-4px;background:#e11;color:#fff;border-radius:999px;font-size:11px;min-width:20px;height:20px;line-height:20px;font-weight:700">'+n+'</span>':'');
+}
+// הודעה חדשה: צפצוף קצר ⇒ ניגון. ניגון אוטומטי חסום (אייפון בלי לחיצה) ⇒ חלון עם ▶
+function _vcArrive(m){
+  try{navigator.vibrate&&navigator.vibrate([150,80,150]);}catch(e){}
+  _vcQ.push(m);if(!_vcPlaying)_vcNext();
+}
+function _vcNext(){
+  const m=_vcQ.shift();if(!m){_vcPlaying=null;return;}
+  if(_vcRec){_vcQ.unshift(m);setTimeout(_vcNext,1500);return;} // לא מנגנים באמצע הקלטה
+  const a=new Audio(m.aud);_vcPlaying=a;
+  a.onended=a.onerror=()=>{_vcPlaying=null;setTimeout(_vcNext,300);};
+  a.play().then(()=>{_vcHeard(m);showToast('🎙 '+(m.fromName||_vcName(m.from)),'var(--blue-txt)',2500);})
+    .catch(()=>{_vcPlaying=null;_vcPopup(m);});
+}
+function _vcPopup(m){
+  document.getElementById('vc-pop')?.remove();
+  const d=document.createElement('div');d.id='vc-pop';
+  d.style.cssText='position:fixed;inset:0;background:rgba(0,0,0,.55);z-index:99999;display:flex;align-items:center;justify-content:center;padding:20px';
+  d.innerHTML='<div style="background:var(--bg);border-radius:var(--rl);padding:22px;max-width:320px;width:100%;text-align:center">'
+    +'<div style="font-size:40px">🎙</div><div style="font-size:14px;color:var(--txt2);margin:6px 0 16px">הודעה קולית מ'+esc(m.fromName||_vcName(m.from))+' · رسالة صوتية</div>'
+    +'<button class="btn primary" style="width:100%;padding:12px;font-size:16px" onclick="document.getElementById(\'vc-pop\').remove();vcPlay(\''+escj(m.id)+'\')">▶ השמע · تشغيل</button>'
+    +'<button class="btn" style="width:100%;margin-top:8px" onclick="document.getElementById(\'vc-pop\').remove();_vcNext()">אחר כך</button></div>';
+  document.body.appendChild(d);playAlertSound();
+}
+function _vcHeard(m){
+  if(!m||(m.heard||{})[S.user.id]||!(m.to||[]).includes(S.user.id))return;
+  m.heard={...(m.heard||{}),[S.user.id]:Date.now()};
+  const{doc,updateDoc}=window._fb;updateDoc(doc(db,'voiceMsgs',m.id),{['heard.'+S.user.id]:Date.now()}).catch(()=>{});
+  _vcFab();
+}
+function vcPlay(id){
+  const m=_vcIn.find(x=>x.id===id)||_vcOut.find(x=>x.id===id);if(!m)return;
+  if(_vcPlaying){_vcPlaying.pause();_vcPlaying=null;}
+  const a=new Audio(m.aud);_vcPlaying=a;a.onended=a.onerror=()=>{_vcPlaying=null;_vcRender();setTimeout(_vcNext,300);};
+  a.play().then(()=>{_vcHeard(m);_vcRender();}).catch(e=>{_vcPlaying=null;showToast('⚠ לא ניתן לנגן: '+e.message,'var(--red-txt)');});
+}
+// נמענים לבחירה: מנהל/אחראי — נוכחים עכשיו / כולם / מחלקה / עובד; עובד "פתוח" — מנהלים ואחראים
+function _vcTargets(){
+  const me=S.user.id,act=S.workers.filter(w=>w.id!==me&&!w.disabled);
+  if(!_vcMgr())return act.filter(w=>w.role==='manager'||w.role==='supervisor').map(w=>['w:'+w.id,(w.role==='manager'?'👑 ':'')+w.name]);
+  const deps=[...new Set(act.map(w=>w.dept).filter(Boolean))];
+  return[['in','🟢 כל הנוכחים עכשיו · الحاضرون'],['all','👥 כולם · الجميع'],...deps.map(d=>['d:'+d,'🏭 '+d]),...act.map(w=>['w:'+w.id,w.name+(w.status==='in'?' 🟢':'')])];
+}
+function _vcResolve(k){
+  const me=S.user.id,act=S.workers.filter(w=>w.id!==me&&!w.disabled);
+  if(k==='in')return act.filter(w=>w.status==='in').map(w=>w.id);
+  if(k==='all')return act.map(w=>w.id);
+  if(k.startsWith('d:'))return act.filter(w=>w.dept===k.slice(2)).map(w=>w.id);
+  if(k.startsWith('w:'))return[k.slice(2)];
+  return[];
+}
+function openVoice(){
+  document.getElementById('vc-modal')?.remove();
+  const w=document.createElement('div');w.id='vc-modal';
+  w.style.cssText='position:fixed;inset:0;background:rgba(0,0,0,.5);z-index:9500;display:flex;align-items:flex-end;justify-content:center';
+  w.onclick=e=>{if(e.target===w)closeVoice();};
+  document.body.appendChild(w);_vcRender();
+}
+function closeVoice(){
+  if(_vcRec)vcUp(true);
+  document.getElementById('vc-modal')?.remove();
+  if(_vcStream){_vcStream.getTracks().forEach(t=>t.stop());_vcStream=null;}
+}
+const _vcT=at=>{const d=new Date(at),t=pad2(d.getHours())+':'+pad2(d.getMinutes());return d.toDateString()===new Date().toDateString()?t:d.getDate()+'/'+(d.getMonth()+1)+' '+t;};
+// כפתור "לחץ ודבר": מחזיקים — מקליט, משחררים — נשלח. talk = 'new' או מזהה ההודעה שמשיבים לה
+const _vcTalk=(talk,lbl,big)=>'<button class="btn '+(big?'primary':'')+'" style="'+(big?'width:100%;padding:16px;font-size:17px;':'padding:6px 10px;font-size:13px;')+'touch-action:none;user-select:none;-webkit-user-select:none;-webkit-touch-callout:none" oncontextmenu="return false" onpointerdown="vcDown(event,\''+escj(talk)+'\')">'+lbl+'</button>';
+function _vcRender(){
+  const w=document.getElementById('vc-modal');if(!w||!S.user)return;
+  const me=S.user.id,mode=_vcMode(),canNew=_vcMgr()||mode==='open',tg=canNew?_vcTargets():[];
+  if(canNew&&!tg.some(t=>t[0]===_vcTarget))_vcTarget=tg[0]?.[0]||'';
+  const row=(m,out)=>{const h=Object.keys(m.heard||{}),unh=!out&&!(m.heard||{})[me];
+    return'<div style="display:flex;gap:8px;align-items:center;padding:8px 4px;border-bottom:0.5px solid var(--b)">'
+      +'<button class="btn" style="font-size:16px;padding:6px 12px" onclick="vcPlay(\''+escj(m.id)+'\')">▶</button>'
+      +'<div style="flex:1;min-width:0"><div style="font-size:13px;font-weight:'+(unh?800:500)+';color:var(--txt)">'+(unh?'🔵 ':'')+(out?'⬅ '+esc(m.toLbl||(m.to||[]).map(_vcName).join(', ')):esc(m.fromName||_vcName(m.from)))+(m.replyTo?' <span style="color:var(--txt3);font-weight:400">↩</span>':'')+'</div>'
+      +'<div style="font-size:11px;color:var(--txt3)">'+_vcT(m.at)+' · '+Math.max(1,Math.round((m.dur||0)/1000))+' שנ\''
+      +(out?' · <span title="'+esc(h.map(_vcName).join(', '))+'">שמעו '+h.length+'/'+(m.to||[]).length+'</span>':'')+'</div></div>'
+      +(!out&&_vcCanReply()?_vcTalk(m.id,'↩ החזק להשיב',false):'')+'</div>';};
+  const rec='<div id="vc-rec" style="text-align:center;color:#e11;font-weight:700;margin:8px 0">'+_vcRecTxt()+'</div>';
+  w.innerHTML='<div style="background:var(--bg);border-radius:16px 16px 0 0;padding:16px;width:100%;max-width:520px;max-height:85vh;overflow:auto;box-shadow:0 -4px 24px rgba(0,0,0,.3)">'
+    +'<div style="display:flex;align-items:center;gap:8px;margin-bottom:10px"><div style="font-size:17px;font-weight:800;flex:1">🎙 מכשיר קשר · جهاز اتصال</div><button class="btn" onclick="closeVoice()">✕</button></div>'
+    +(canNew?'<select id="vc-target" onchange="_vcTarget=this.value" style="width:100%;margin-bottom:8px;font-size:14px">'+tg.map(([k,l])=>'<option value="'+esc(k)+'"'+(k===_vcTarget?' selected':'')+'>'+esc(l)+'</option>').join('')+'</select>'
+      +_vcTalk('new','🎙 החזק ודבר · اضغط وتكلم',true)
+      :'<div style="font-size:12px;color:var(--txt3);margin-bottom:8px">'+(mode==='off'?'האזנה בלבד · استماع فقط':'אפשר להשיב להודעה שקיבלת · يمكنك الرد على رسالة وصلتك')+'</div>')
+    +rec
+    +'<div style="font-size:13px;font-weight:700;margin:14px 0 4px">📥 התקבלו · الواردة</div>'
+    +(_vcIn.length?_vcIn.map(m=>row(m,false)).join(''):'<div style="font-size:12px;color:var(--txt3)">אין הודעות ב-3 הימים האחרונים</div>')
+    +(_vcMgr()&&_vcOut.length?'<div style="font-size:13px;font-weight:700;margin:14px 0 4px">📤 נשלחו · المرسلة</div>'+_vcOut.slice(0,30).map(m=>row(m,true)).join(''):'')
+    +'</div>';
+}
+const _vcRecTxt=()=>_vcRec?'🔴 מקליט… '+Math.round((Date.now()-_vcRec.t0)/1000)+' שנ\' — שחרר לשליחה · أفلت للإرسال':'';
+// בזמן הקלטה מעדכנים רק את השורה הזאת — ציור מחדש של כל החלון היה מחליף את הכפתור שמתחת לאצבע
+function _vcTick(){const e=document.getElementById('vc-rec');if(e)e.textContent=_vcRecTxt();}
+let _vcBusy=false;
+function _vcMime(){
+  if(typeof MediaRecorder==='undefined')return null;
+  // mp4/AAC קודם — מתנגן גם באייפון וגם באנדרואיד; webm רק אם אין ברירה
+  return['audio/mp4;codecs=mp4a.40.2','audio/mp4','audio/webm;codecs=opus','audio/webm'].find(t=>MediaRecorder.isTypeSupported(t))||'';
+}
+async function vcDown(ev,talk){
+  ev.preventDefault();if(_vcRec||_vcBusy)return;
+  const mime=_vcMime();if(mime===null){alert('המכשיר לא תומך בהקלטה · الجهاز لا يدعم التسجيل');return;}
+  let to,lbl,replyTo='';
+  if(talk==='new'){to=_vcResolve(_vcTarget);lbl=(_vcTargets().find(t=>t[0]===_vcTarget)||[])[1]||'';}
+  else{const m=_vcIn.find(x=>x.id===talk);if(!m)return;to=[m.from];lbl=m.fromName||_vcName(m.from);replyTo=m.id;}
+  if(!to.length){showToast('⚠ אין נמענים · لا يوجد مستلمون','var(--red-txt)');return;}
+  let up=false;const early=()=>{up=true;};addEventListener('pointerup',early,{once:true});_vcBusy=true;
+  try{if(!_vcStream||!_vcStream.active)_vcStream=await navigator.mediaDevices.getUserMedia({audio:{echoCancellation:true,noiseSuppression:true}});}
+  catch(e){_vcBusy=false;removeEventListener('pointerup',early);alert('אין הרשאה למיקרופון · لا يوجد إذن للميكروفون');return;}
+  _vcBusy=false;removeEventListener('pointerup',early);
+  // הפעם הראשונה: חלון ההרשאה "אכל" את הלחיצה — מבקשים ללחוץ שוב
+  if(up){showToast('✅ המיקרופון מוכן — החזק את הכפתור ודבר · اضغط مطولاً','var(--green-txt)',3000);return;}
+  if(_vcPlaying){_vcPlaying.pause();_vcPlaying=null;}
+  const mr=new MediaRecorder(_vcStream,mime?{mimeType:mime,audioBitsPerSecond:32000}:{audioBitsPerSecond:32000}),chunks=[];
+  mr.ondataavailable=e=>{if(e.data&&e.data.size)chunks.push(e.data);};
+  const r={mr,chunks,t0:Date.now(),to,lbl,replyTo,cancel:false,tick:setInterval(_vcTick,500),lim:setTimeout(()=>vcUp(),_vcMax)};_vcRec=r;
+  mr.onstop=()=>_vcSend(r);
+  mr.start();try{navigator.vibrate&&navigator.vibrate(40);}catch(e){}
+  addEventListener('pointerup',()=>vcUp(),{once:true});addEventListener('pointercancel',()=>vcUp(true),{once:true});
+  _vcRender();
+}
+function vcUp(cancel){
+  const r=_vcRec;if(!r)return;_vcRec=null;
+  clearInterval(r.tick);clearTimeout(r.lim);r.dur=Date.now()-r.t0;
+  if(cancel||r.dur<700){r.cancel=true;if(!cancel)showToast('החזק את הכפתור בזמן הדיבור · اضغط مطولاً أثناء الكلام','var(--amber-txt)',2500);}
+  try{r.mr.stop();}catch(e){}
+  _vcRender();
+}
+async function _vcSend(r){
+  if(!r||r.cancel||!r.chunks.length){setTimeout(_vcNext,300);return;}
+  const blob=new Blob(r.chunks,{type:r.mr.mimeType||r.chunks[0].type||'audio/mp4'});
+  const aud=await new Promise(res=>{const fr=new FileReader();fr.onload=()=>res(fr.result);fr.onerror=()=>res('');fr.readAsDataURL(blob);});
+  if(!aud||aud.length>880000){showToast('⚠ ההקלטה ארוכה מדי · التسجيل طويل جداً','var(--red-txt)');return;}
+  const{collection,addDoc}=window._fb;
+  const d={from:S.user.id,fromName:S.user.name||'',to:r.to,toLbl:r.lbl,aud,mime:blob.type,dur:r.dur,at:Date.now(),heard:{}};
+  if(r.replyTo)d.replyTo=r.replyTo;
+  try{await addDoc(collection(db,'voiceMsgs'),d);showToast('✅ נשלח ל'+r.lbl+' · تم الإرسال','var(--green-txt)',2000);}
+  catch(e){showToast('❌ לא נשלח'+(String(e.code||'').includes('permission')?' — אין הרשאה · لا يوجد إذن':': '+e.message),'var(--red-txt)',5000);}
+  setTimeout(_vcNext,300);
+}
 function mgrBulkToggle(){
   window._mgrBulkMode=!window._mgrBulkMode;
   const bar=document.getElementById('mgr-bulk-bar');
@@ -12229,6 +12406,14 @@ function openModal(action,id){
           פעיל רק כשמתג האכיפה עצמו דלוק. <b>כל עקיפה וכל חסימה נרשמות ביומן</b> (לשונית 🏷️ ברקודים ← "📝 יומן שערים").
         </div>
       </div>`;})()}
+      ${(wRole==='manager'||wRole==='supervisor')?'':`
+      <div class="field" style="background:var(--bg2);border-radius:var(--r);padding:10px 12px;margin-bottom:8px">
+        <div style="display:flex;gap:8px;align-items:center">
+          <span style="font-size:13px;color:var(--txt);font-weight:600;min-width:104px">🎙 מכשיר קשר</span>
+          <select id="mf-voice" style="font-size:12px;width:auto;flex:1">${[['','רק תשובה — משיב/ה למי ששלח לו/לה'],['open','פתוח — יכול/ה גם להתחיל שיחה'],['off','האזנה בלבד']].map(([v,l])=>`<option value="${v}" ${(w?.voiceMode||'')===v?'selected':''}>${l}</option>`).join('')}</select>
+        </div>
+        <div style="font-size:11px;color:var(--txt3);margin-top:6px">מנהל ואחראי יכולים תמיד לשלוח. "פתוח" = העובד/ת יכול/ה לפנות בעצמו/ה למנהל או לאחראי.</div>
+      </div>`}
       <div class="field" style="background:var(--bg2);border-radius:var(--r);padding:10px 12px">
         <label style="display:flex;align-items:center;gap:10px;cursor:pointer;font-size:13px;color:var(--txt)">
           <input type="checkbox" id="mf-face-auth" ${w?.faceAuth?'checked':''} style="width:auto;cursor:pointer"/>
@@ -12563,7 +12748,8 @@ async function confirmModal(){
     if(!S.fbConnected){alert('אין חיבור לשרת — לא ניתן להוסיף עובד');return;}
     const nw={id:'w'+Date.now(),name,dept,role,user,status:'out',checkin:null,permissions:perms,faceAuth:false,breakStart:defBreakStart(),breakEnd:defBreakEnd(),breakActive:true,skills:skills||{},
       stationGateMode:document.getElementById('mf-gate-station')?.value||'',
-      stepOrderGateMode:document.getElementById('mf-gate-order')?.value||''};
+      stepOrderGateMode:document.getElementById('mf-gate-order')?.value||'',
+      voiceMode:document.getElementById('mf-voice')?.value||''};
     S.workers.push(nw);
     await fbSet('workers',nw.id,nw);
     try{await _setWorkerPassword(nw.id,pass);}catch(e){alert('העובד נוצר אך שמירת הסיסמה נכשלה: '+e.message);}
@@ -12580,6 +12766,7 @@ async function confirmModal(){
     w.deviceBinding=!!document.getElementById('mf-device-binding')?.checked;
     w.stationGateMode=document.getElementById('mf-gate-station')?.value||'';
     w.stepOrderGateMode=document.getElementById('mf-gate-order')?.value||'';
+    if(document.getElementById('mf-voice'))w.voiceMode=document.getElementById('mf-voice').value;
     w.faceAuth=!!document.getElementById('mf-face-auth')?.checked;
     if(w.role==='supervisor'){
       w.oversightPrefs={punch_in:!!document.getElementById('mf-ov-punch_in')?.checked,punch_out:!!document.getElementById('mf-ov-punch_out')?.checked,task_start:!!document.getElementById('mf-ov-task_start')?.checked,task_end:!!document.getElementById('mf-ov-task_end')?.checked,worker_msg:!!document.getElementById('mf-ov-worker_msg')?.checked};

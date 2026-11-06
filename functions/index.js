@@ -2054,3 +2054,50 @@ exports.customerNotify = functions.runWith({ memory: '1GB', timeoutSeconds: 300 
   }
   return null;
 });
+
+// 🎙 מכשיר קשר (06/11/2026): הודעה קולית חדשה ⇒ Push לכל נמען (גם כשהאפליקציה סגורה).
+// עובד ⇒ workers/{id}.fcmToken · מנהל/אחראי ⇒ appSettings/pushSettings.tokens עם workerId שלו.
+// מי שהאפליקציה פתוחה אצלו שומע מיד מהמאזין; ה-Push הוא לטלפון בכיס. ההרשאות (מי רשאי לשלוח) נאכפות ב-Rules.
+exports.voicePush = functions.firestore.document('voiceMsgs/{id}').onCreate(async (snap) => {
+  const d = snap.data() || {};
+  const to = (Array.isArray(d.to) ? d.to : []).filter(x => typeof x === 'string' && x && x !== d.from).slice(0, 300);
+  if (!to.length) return null;
+  const from = await db.collection('workers').doc(String(d.from || '-')).get();
+  const name = (from.exists && from.data().name) || 'מנהל';
+  const sec = Math.round((+d.dur || 0) / 1000);
+  const title = '🎙 ' + name, body = 'הודעה קולית' + (sec ? ' · ' + sec + ' שנ\'' : '') + ' — לחצי לשמיעה · رسالة صوتية';
+  const msg = token => withTtl({
+    token, notification: { title, body },
+    android: { priority: 'high', notification: { sound: 'default', channelId: 'textileops' } },
+    apns: { payload: { aps: { sound: 'default', contentAvailable: true } }, headers: { 'apns-priority': '10', 'apns-push-type': 'alert' } },
+    webpush: { notification: { icon: 'https://amtextile2222-beep.github.io/textileops/icon-192.png', requireInteraction: true, vibrate: [200, 100, 200] } }
+  }, PUSH_TTL_ALERT);
+  const want = new Set(to);
+  const pushRef = db.collection('appSettings').doc('pushSettings');
+  const pushSnap = await pushRef.get();
+  const tokens = (pushSnap.exists && pushSnap.data().tokens) || {};
+  const jobs = [];
+  Object.entries(tokens).forEach(([key, t]) => {
+    if (!t || typeof t !== 'object' || !t.token || !want.has(t.workerId)) return;
+    jobs.push(admin.messaging().send(msg(t.token)).catch(err => {
+      if (DEAD_FCM_CODES.includes(err.code)) return pushRef.update(new admin.firestore.FieldPath('tokens', key), FieldValue.delete()).catch(() => {});
+    }));
+  });
+  // נמענים שהם עובדים — fcmToken בכרטיס (קריאה במנות של 30 עם 'in')
+  for (let i = 0; i < to.length; i += 30) {
+    const ws = await db.collection('workers').where(admin.firestore.FieldPath.documentId(), 'in', to.slice(i, i + 30)).get();
+    ws.forEach(w => { const tk = w.data().fcmToken; if (tk && !w.data().disabled) jobs.push(admin.messaging().send(msg(tk)).catch(() => {})); });
+  }
+  await Promise.all(jobs);
+  return null;
+});
+
+// 🧹 הודעות קוליות נמחקות אחרי 3 ימים (המאזין קורא את כל התיבה בכל כניסה — שומרים אותה קטנה)
+exports.voiceCleanup = functions.pubsub.schedule('15 3 * * *').timeZone('Asia/Jerusalem').onRun(async () => {
+  const cut = Date.now() - 3 * 24 * 3600 * 1000;
+  const old = await db.collection('voiceMsgs').where('at', '<', cut).limit(400).get();
+  if (old.empty) return null;
+  const b = db.batch(); old.forEach(x => b.delete(x.ref)); await b.commit();
+  console.log('voiceCleanup: deleted', old.size);
+  return null;
+});
