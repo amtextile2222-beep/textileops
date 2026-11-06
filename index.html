@@ -11666,6 +11666,7 @@ document.addEventListener('pointerdown',_vcUnlock,true);
 function _vcNext(){
   const m=_vcQ.shift();if(!m){_vcPlaying=null;return;}
   if(_vcRec){_vcQ.unshift(m);setTimeout(_vcNext,1500);return;} // לא מנגנים באמצע הקלטה
+  _vcMicOff(); // אייפון: השמעה בזמן שהמיקרופון פתוח "מרדימה" אותו ⇒ התשובה לא נקלטה עד שהשתחרר. סוגרים, ובהקלטה הבאה נפתח מחדש
   const a=_vcA;a.pause();a.src=m.aud;_vcPlaying=a;
   a.onended=a.onerror=()=>{_vcPlaying=null;setTimeout(_vcNext,300);};
   a.play().then(()=>{_vcHeard(m);showToast('🎙 '+(m.fromName||_vcName(m.from)),'var(--blue-txt)',2500);})
@@ -11690,7 +11691,7 @@ function _vcHeard(m){
 function vcPlay(id){
   const m=_vcIn.find(x=>x.id===id)||_vcOut.find(x=>x.id===id)||_vcOther.find(x=>x.id===id);if(!m)return;
   if(_vcPlaying){_vcPlaying.pause();_vcPlaying=null;}
-  const a=_vcA;a.pause();a.src=m.aud;_vcPlaying=a;_vcUnl=true;a.onended=a.onerror=()=>{_vcPlaying=null;_vcRender();setTimeout(_vcNext,300);};
+  _vcMicOff();const a=_vcA;a.pause();a.src=m.aud;_vcPlaying=a;_vcUnl=true;a.onended=a.onerror=()=>{_vcPlaying=null;_vcRender();setTimeout(_vcNext,300);};
   a.play().then(()=>{_vcHeard(m);_vcRender();}).catch(e=>{_vcPlaying=null;showToast('⚠ לא ניתן לנגן: '+e.message,'var(--red-txt)');});
 }
 // נמענים לבחירה: מנהל — נוכחים עכשיו / כולם / מחלקה / עובד; אחר "פתוח" — רק מי שברשימה שלו (voiceTo),
@@ -11783,6 +11784,8 @@ async function vcDown(ev,talk){
   else{const m=_vcIn.find(x=>x.id===talk);if(!m)return;to=[m.from];lbl=m.fromName||_vcName(m.from);replyTo=m.id;}
   if(!to.length){showToast('⚠ אין נמענים · لا يوجد مستلمون','var(--red-txt)');return;}
   let up=false;const early=()=>{up=true;};addEventListener('pointerup',early,{once:true});_vcBusy=true;
+  // מיקרופון "פתוח" שהמערכת השתיקה/סגרה (השמעה, שיחת טלפון) — לא מקליטים שקט: פותחים מחדש
+  if(_vcStream&&!_vcStream.getAudioTracks().every(t=>t.readyState==='live'&&!t.muted&&t.enabled)){_vcStream.getTracks().forEach(t=>t.stop());_vcStream=null;}
   try{if(!_vcStream||!_vcStream.active)_vcStream=await navigator.mediaDevices.getUserMedia({audio:{echoCancellation:true,noiseSuppression:true}});}
   catch(e){_vcBusy=false;removeEventListener('pointerup',early);alert('אין הרשאה למיקרופון · لا يوجد إذن للميكروفون');return;}
   _vcBusy=false;removeEventListener('pointerup',early);
