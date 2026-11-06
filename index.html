@@ -12410,7 +12410,7 @@ function openModal(action,id){
       <div class="field" style="background:var(--bg2);border-radius:var(--r);padding:10px 12px;margin-bottom:8px">
         <div style="display:flex;gap:8px;align-items:center">
           <span style="font-size:13px;color:var(--txt);font-weight:600;min-width:104px">🎙 מכשיר קשר</span>
-          <select id="mf-voice" style="font-size:12px;width:auto;flex:1">${[['','רק תשובה — משיב/ה למי ששלח לו/לה'],['open','פתוח — יכול/ה גם להתחיל שיחה'],['off','האזנה בלבד']].map(([v,l])=>`<option value="${v}" ${(w?.voiceMode||'')===v?'selected':''}>${l}</option>`).join('')}</select>
+          <select id="mf-voice" style="font-size:12px;width:auto;flex:1;min-width:0;max-width:100%">${[['','רק תשובה'],['open','פתוח — גם מתחיל/ה שיחה'],['off','האזנה בלבד']].map(([v,l])=>`<option value="${v}" ${(w?.voiceMode||'')===v?'selected':''}>${l}</option>`).join('')}</select>
         </div>
         <div style="font-size:11px;color:var(--txt3);margin-top:6px">מנהל ואחראי יכולים תמיד לשלוח. "פתוח" = העובד/ת יכול/ה לפנות בעצמו/ה למנהל או לאחראי.</div>
       </div>`}
