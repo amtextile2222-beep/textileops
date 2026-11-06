@@ -11749,7 +11749,7 @@ function _vcRender(){
         :'<div style="font-size:12px;color:var(--txt3)">אין שיחות ב-3 הימים האחרונים</div>'):'')
     +'</div>';
 }
-const _vcRecTxt=()=>_vcRec?'🔴 מקליט… '+Math.round((Date.now()-_vcRec.t0)/1000)+' שנ\' — שחרר לשליחה · أفلت للإرسال':'';
+const _vcRecTxt=()=>_vcRec?'🔴 מקליט… '+Math.round((Date.now()-_vcRec.t0)/1000)+' שנ\' — '+(_vcRec.toggle?'לחץ שוב על הכפתור לשליחה · اضغط مرة أخرى للإرسال':'שחרר לשליחה · أفلت للإرسال'):'';
 // בזמן הקלטה מעדכנים רק את השורה הזאת — ציור מחדש של כל החלון היה מחליף את הכפתור שמתחת לאצבע
 function _vcTick(){const e=document.getElementById('vc-rec');if(e)e.textContent=_vcRecTxt();}
 let _vcBusy=false;
@@ -11759,7 +11759,7 @@ function _vcMime(){
   return['audio/mp4;codecs=mp4a.40.2','audio/mp4','audio/webm;codecs=opus','audio/webm'].find(t=>MediaRecorder.isTypeSupported(t))||'';
 }
 async function vcDown(ev,talk){
-  ev.preventDefault();if(_vcRec||_vcBusy)return;clearTimeout(_vcIdleT);
+  ev.preventDefault();if(_vcRec){if(_vcRec.toggle)vcUp();return;}if(_vcBusy)return;clearTimeout(_vcIdleT);
   const mime=_vcMime();if(mime===null){alert('המכשיר לא תומך בהקלטה · الجهاز لا يدعم التسجيل');return;}
   let to,lbl,replyTo='';
   if(talk==='new'){to=_vcResolve(_vcTarget);lbl=(_vcTargets().find(t=>t[0]===_vcTarget)||[])[1]||'';}
@@ -11769,15 +11769,15 @@ async function vcDown(ev,talk){
   try{if(!_vcStream||!_vcStream.active)_vcStream=await navigator.mediaDevices.getUserMedia({audio:{echoCancellation:true,noiseSuppression:true}});}
   catch(e){_vcBusy=false;removeEventListener('pointerup',early);alert('אין הרשאה למיקרופון · لا يوجد إذن للميكروفون');return;}
   _vcBusy=false;removeEventListener('pointerup',early);
-  // הפעם הראשונה: חלון ההרשאה "אכל" את הלחיצה — מבקשים ללחוץ שוב
-  if(up){_vcIdleT=setTimeout(_vcMicOff,30000);showToast('✅ המיקרופון מוכן — החזק את הכפתור ודבר · اضغط مطولاً','var(--green-txt)',3000);return;}
+  // שחררו לפני שהמיקרופון עלה (חלון ההרשאה, או אייפון שמפעיל מיקרופון שוחרר — לוקח רגע):
+  // לא מאבדים את הלחיצה — מתחילים להקליט במצב "לחיצה": לחיצה נוספת על הכפתור = שליחה (06/11/2026)
   if(_vcPlaying){_vcPlaying.pause();_vcPlaying=null;}
   const mr=new MediaRecorder(_vcStream,mime?{mimeType:mime,audioBitsPerSecond:32000}:{audioBitsPerSecond:32000}),chunks=[];
   mr.ondataavailable=e=>{if(e.data&&e.data.size)chunks.push(e.data);};
-  const r={mr,chunks,t0:Date.now(),to,lbl,replyTo,cancel:false,tick:setInterval(_vcTick,500),lim:setTimeout(()=>vcUp(),_vcMax)};_vcRec=r;
+  const r={mr,chunks,t0:Date.now(),to,lbl,replyTo,cancel:false,toggle:up,tick:setInterval(_vcTick,500),lim:setTimeout(()=>vcUp(),_vcMax)};_vcRec=r;
   mr.onstop=()=>_vcSend(r);
   mr.start();try{navigator.vibrate&&navigator.vibrate(40);}catch(e){}
-  addEventListener('pointerup',()=>vcUp(),{once:true});addEventListener('pointercancel',()=>vcUp(true),{once:true});
+  if(!up){addEventListener('pointerup',()=>{if(_vcRec===r)vcUp();},{once:true});addEventListener('pointercancel',()=>{if(_vcRec===r)vcUp(true);},{once:true});}
   _vcRender();
 }
 function vcUp(cancel){
