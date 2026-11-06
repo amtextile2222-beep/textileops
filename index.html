@@ -11718,7 +11718,7 @@ function _vcRender(){
   const row=(m,out)=>{const h=Object.keys(m.heard||{}),unh=!out&&!(m.heard||{})[me];
     return'<div style="display:flex;gap:8px;align-items:center;padding:8px 4px;border-bottom:0.5px solid var(--b)">'
       +'<button class="btn" style="font-size:16px;padding:6px 12px" onclick="vcPlay(\''+escj(m.id)+'\')">▶</button>'
-      +'<div style="flex:1;min-width:0"><div style="font-size:13px;font-weight:'+(unh?800:500)+';color:var(--txt)">'+(unh?'🔵 ':'')+(out?'⬅ '+esc(m.toLbl||(m.to||[]).map(_vcName).join(', ')):esc(m.fromName||_vcName(m.from)))+(m.replyTo?' <span style="color:var(--txt3);font-weight:400">↩</span>':'')+'</div>'
+      +'<div style="flex:1;min-width:0"><div style="font-size:13px;font-weight:'+(unh?800:500)+';color:var(--txt)">'+(unh?'🔵 ':'')+(out?'⬅ <bdi>'+esc(m.toLbl||(m.to||[]).map(_vcName).join(', '))+'</bdi>':'<bdi>'+esc(m.fromName||_vcName(m.from))+'</bdi>')+(m.replyTo?' <span style="color:var(--txt3);font-weight:400">↩</span>':'')+'</div>'
       +'<div style="font-size:11px;color:var(--txt3)">'+_vcT(m.at)+' · '+Math.max(1,Math.round((m.dur||0)/1000))+' שנ\''
       +(out?' · <span title="'+esc(h.map(_vcName).join(', '))+'">שמעו '+h.length+'/'+(m.to||[]).length+'</span>':'')+'</div></div>'
       +(!out&&_vcCanReply()?_vcTalk(m.id,'↩ החזק להשיב',false):'')+'</div>';};
@@ -11738,7 +11738,7 @@ function _vcRender(){
       +(_vcOther.length?_vcOther.slice(0,40).map(m=>{const h=Object.keys(m.heard||{});
         return'<div style="display:flex;gap:8px;align-items:center;padding:8px 4px;border-bottom:0.5px solid var(--b)">'
           +'<button class="btn" style="font-size:16px;padding:6px 12px" onclick="vcPlay(\''+escj(m.id)+'\')">▶</button>'
-          +'<div style="flex:1;min-width:0"><div style="font-size:13px;color:var(--txt)">'+esc(m.fromName||_vcName(m.from))+' ⬅ '+esc(m.toLbl||(m.to||[]).map(_vcName).join(', '))+(m.replyTo?' <span style="color:var(--txt3)">↩</span>':'')+'</div>'
+          +'<div style="flex:1;min-width:0"><div dir="rtl" style="font-size:13px;color:var(--txt)"><bdi>'+esc(m.fromName||_vcName(m.from))+'</bdi> ⬅ <bdi>'+esc(m.toLbl||(m.to||[]).map(_vcName).join(', '))+'</bdi>'+(m.replyTo?' <span style="color:var(--txt3)">↩</span>':'')+'</div>'
           +'<div style="font-size:11px;color:var(--txt3)">'+_vcT(m.at)+' · '+Math.max(1,Math.round((m.dur||0)/1000))+' שנ\' · <span title="'+esc(h.map(_vcName).join(', '))+'">שמעו '+h.length+'/'+(m.to||[]).length+'</span></div></div></div>';}).join('')
         :'<div style="font-size:12px;color:var(--txt3)">אין שיחות ב-3 הימים האחרונים</div>'):'')
     +'</div>';
