@@ -7750,7 +7750,7 @@ function renderTasks(){
     return dh+_tkCardHtml(g);}).join('');}
   renderTaskHist();
 }
-// 🏭 סידור המשימות הפעילות: לפי מחלקה (בסדר הייצור) ← סדר השלב במוצר (workSteps) ← מוצר ← עובד.
+// 🏭 סידור המשימות הפעילות: לפי מחלקה (בסדר הייצור) ← מוצר ← סדר השלב במוצר (workSteps) ← עובד.
 // קבוצה (כמה שלבים) ממוקמת לפי השלב המוקדם שבה.
 function _tkStepIdx(t){
   const p=t.bc?bcOrderProd(t.bc):findProd(t.cust,t.prod);
@@ -7763,8 +7763,8 @@ function _tkSortGroups(groups,byDept){
   const R={recv:0,sew:1,pack:2},di=d=>{const f=R[pipeFamOfDept(d)];return f==null?3:f;};
   groups.forEach(g=>{g.dept=g.tasks[0].dept||'';g.si=Math.min(...g.tasks.map(_tkStepIdx));});
   const cnt={};groups.forEach(g=>cnt[g.dept]=(cnt[g.dept]||0)+1);groups.forEach(g=>g.cnt=cnt[g.dept]);
-  return groups.slice().sort((a,b)=>di(a.dept)-di(b.dept)||a.dept.localeCompare(b.dept,undefined,{numeric:true})||a.si-b.si
-    ||String(a.tasks[0].prod).localeCompare(String(b.tasks[0].prod))||String(a.tasks[0].workerName||'').localeCompare(String(b.tasks[0].workerName||'')));
+  return groups.slice().sort((a,b)=>di(a.dept)-di(b.dept)||a.dept.localeCompare(b.dept,undefined,{numeric:true})
+    ||String(a.tasks[0].cust+a.tasks[0].prod).localeCompare(String(b.tasks[0].cust+b.tasks[0].prod))||a.si-b.si||String(a.tasks[0].workerName||'').localeCompare(String(b.tasks[0].workerName||'')));
 }
 function _tkCardHtml(g){
     const T=LANGS[currentLang],thresh=S.settings.thresh*60;
