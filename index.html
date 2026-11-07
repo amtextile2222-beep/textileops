@@ -7744,7 +7744,29 @@ function renderTasks(){
     const emptyMsg=isMgr?'📷 '+(T.scan_to_start||'סרוק ברקוד להתחלת משימה'):'⏳ '+(T.no_task_worker||'אין משימה פעילה כרגע — המתן עד שהאחראי יפתח לך משימה');
     al.innerHTML=`<div style="text-align:center;padding:3rem 1rem;color:var(--txt3);font-size:14px">${emptyMsg}</div>`;
   }
-  else{al.innerHTML=_taskGroups(visActive).map(g=>{
+  else{let _lastDept=null;al.innerHTML=_tkSortGroups(_taskGroups(visActive),isMgr).map(g=>{
+    // 🏭 כותרת מחלקה (מנהל/אחראי) — לפני הקבוצה הראשונה של כל מחלקה
+    const dh=isMgr&&g.dept!==_lastDept?`<div class="sec" style="margin:${_lastDept===null?'0':'14px'} 0 6px;font-size:13px">🏭 ${esc(g.dept||'ללא מחלקה')} <span class="badge gray" style="font-size:10px">${g.cnt}</span></div>`:'';_lastDept=g.dept;
+    return dh+_tkCardHtml(g);}).join('');}
+  renderTaskHist();
+}
+// 🏭 סידור המשימות הפעילות: לפי מחלקה (בסדר S.depts) ← סדר השלב במוצר (workSteps) ← מוצר ← עובד.
+// קבוצה (כמה שלבים) ממוקמת לפי השלב המוקדם שבה.
+function _tkStepIdx(t){
+  const p=t.bc?bcOrderProd(t.bc):findProd(t.cust,t.prod);
+  const i=(p?.workSteps||[]).findIndex(s=>stepName(s)===t.taskType);
+  return i<0?999:i;
+}
+function _tkSortGroups(groups,byDept){
+  if(!byDept)return groups;
+  const di=d=>{const i=S.depts.indexOf(d);return i<0?999:i;};
+  groups.forEach(g=>{g.dept=g.tasks[0].dept||'';g.si=Math.min(...g.tasks.map(_tkStepIdx));});
+  const cnt={};groups.forEach(g=>cnt[g.dept]=(cnt[g.dept]||0)+1);groups.forEach(g=>g.cnt=cnt[g.dept]);
+  return groups.slice().sort((a,b)=>di(a.dept)-di(b.dept)||a.dept.localeCompare(b.dept)||a.si-b.si
+    ||String(a.tasks[0].prod).localeCompare(String(b.tasks[0].prod))||String(a.tasks[0].workerName||'').localeCompare(String(b.tasks[0].workerName||'')));
+}
+function _tkCardHtml(g){
+    const T=LANGS[currentLang],thresh=S.settings.thresh*60;
     const tasks=g.tasks,lead=tasks[0],multi=tasks.length>1;
     const allPaused=tasks.every(t=>t.paused);
     const {elapsedSec,expSec,hasExp}=_groupTiming(tasks);
@@ -7793,8 +7815,6 @@ function renderTasks(){
       </div>
       ${_prevTotalHtml(lead)}
     </div>`;
-  }).join('');}
-  renderTaskHist();
 }
 
 let _tkHistLimit=20;
