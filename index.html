@@ -20355,7 +20355,7 @@ async function saveProdImgs(id,imgs,extra){
   try{await _prodThumb(id,imgs);}catch(e){}
 }
 // 🖼 תמונות לדף הלקוח (08/11/2026) — thumbs/{מזהה} = {img (JPEG מוקטן), at}. אוסף נפרד: מסמך המוצר נטען לכל טלפון.
-// מוצר: התמונה הראשונה (360px) + products.thumbAt/thumbSig (חתימה של התמונה הראשונה — לא כותבים שוב כשלא השתנתה).
+// מוצר: התמונה הראשונה (TH_PX=800px) + products.thumbAt/thumbSig (חתימה של התמונה הראשונה — לא כותבים שוב כשלא השתנתה).
 // חומר של לקוח: thumbs/pk_<לקוח>_<פריט> + packStock.imgs['לקוח|פריט']=at (חלון המלאי, מנהל).
 // customerTrack ?img= מגיש לדף הלקוח רק תמונה של אותו לקוח. ⚠️ trackThumb בשרת: הזמנה בלי — של הזמנה אחרת של הדגם
 function _thumbShrink(src,max){
@@ -20366,11 +20366,13 @@ function _thumbShrink(src,max){
       try{res(c.toDataURL('image/jpeg',0.75));}catch(e){res('');}};
     im.src=src;});
 }
-const _thumbSig=src=>{src=String(src||'');return src?src.length+':'+src.slice(-40):'';};
+// v2 (08/11/2026): 800px במקום 360 — החתימה כוללת את הגרסה ⇒ תמונה מגרסה קודמת נבנית מחדש (בשמירה / ברקע)
+const TH_V='v2',TH_PX=800;
+const _thumbSig=src=>{src=String(src||'');return src?TH_V+':'+src.length+':'+src.slice(-40):'';};
 async function _prodThumb(id,imgs){
   id=String(id);const p=S.products.find(x=>String(x.id)===id),src=(imgs||[]).find(x=>/^data:image\//.test(String(x||''))),sig=_thumbSig(src);
   if(p&&(p.thumbSig||'')===sig&&(!sig||+p.thumbAt))return;
-  const img=sig?await _thumbShrink(src,360):'';
+  const img=sig?await _thumbShrink(src,TH_PX):'';
   let at=0;
   if(img){at=Date.now();await fbSet('thumbs',id,{img,at});}else{try{await fbDel('thumbs',id);}catch(e){}}
   if(p)Object.assign(p,{thumbAt:at,thumbSig:sig});
@@ -20383,11 +20385,15 @@ async function _thumbBackfill(){
   const rk=x=>+x.createdAt||parseInt(String(x.id).replace(/\D/g,''))||0,from=Date.now()-120*86400000,mdl={};
   (S.products||[]).forEach(p=>{const k=p.cust+'|'+p.prod;(mdl[k]=mdl[k]||[]).push(p);});
   for(const l of Object.values(mdl)){
-    if(l.some(p=>+p.thumbAt>0)||!l.some(p=>rk(p)>=from))continue;
-    const p=l.filter(x=>prodImgCount(x)>0).sort((a,b)=>rk(b)-rk(a))[0];
-    if(!p||_thumbBfDone.has(p.id))continue;
-    _thumbBfDone.add(p.id);
-    try{const imgs=await fetchProdImgs(p.id,true);if(imgs.length)await _prodThumb(p.id,imgs);}catch(e){}
+    if(!l.some(p=>rk(p)>=from))continue;
+    // תמונה מגרסה קודמת ⇒ כל הזמנה שיש לה; בלי אף תמונה ⇒ ההזמנה החדשה ביותר עם תמונות
+    const old=l.filter(p=>+p.thumbAt>0&&!String(p.thumbSig||'').startsWith(TH_V+':'));
+    const go=old.length?old:l.some(p=>+p.thumbAt>0)?[]:l.filter(x=>prodImgCount(x)>0).sort((a,b)=>rk(b)-rk(a)).slice(0,1);
+    for(const p of go){
+      if(_thumbBfDone.has(p.id))continue;
+      _thumbBfDone.add(p.id);
+      try{const imgs=await fetchProdImgs(p.id,true);if(imgs.length)await _prodThumb(p.id,imgs);}catch(e){}
+    }
   }
 }
 // כמה תמונות יש למוצר, בלי להוריד אותן. imgCount נכתב בשמירה; לרשומות שטרם עברו
