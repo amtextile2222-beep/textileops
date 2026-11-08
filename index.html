@@ -615,10 +615,10 @@ thead th{font-weight:600}
         <label style="font-size:11px;color:var(--txt2)">עד</label>
         <input type="date" id="rf-to" style="font-size:12px;width:auto" onchange="buildRep()"/>
       </div>
-      <span id="rf-prod-note" style="display:none;font-size:11px;color:var(--amber-txt)">📦 מוצר נבחר — מוצגות כל המשימות שלו, בלי קשר לתאריכים</span>
-      <select id="rf-w" style="font-size:12px" onchange="buildRep()"><option value="">כל העובדים</option></select>
+      <span id="rf-prod-note" style="display:none;font-size:11px;color:var(--amber-txt)">📦 מוצר נבחר — מוצגות כל המשימות שלו, בלי קשר לתאריכים</span>      <select id="rf-w" style="font-size:12px" onchange="buildRep()"><option value="">כל העובדים</option></select>
       <select id="rf-c" style="font-size:12px" onchange="buildRep()"><option value="">כל הלקוחות</option></select>
       <select id="rf-p" style="font-size:12px" onchange="buildRep()"><option value="">כל המוצרים</option></select>
+      <select id="rf-o" style="font-size:12px;display:none" onchange="buildRep()"><option value="">כל ההזמנות</option></select>
       <button class="btn success" onclick="exportCSV()">⬇ ייצוא CSV</button>
       <button class="btn" onclick="buildRep()">🔄</button>
       <button class="btn" onclick="showPrintChoice()">🖨 הדפס</button>
@@ -8554,6 +8554,19 @@ function buildAttDayTable(uid,fromD,toD,T,att){
   </div>`;
 }
 // ─── REPORTS ────────────────────────────────────────────────
+// 🔢 (08/11/2026) בחירת הזמנה של המוצר הנבחר — מוצג רק כשלמוצר יותר מהזמנה אחת. השיוך משימה⇒הזמנה
+// דרך taskOrderStamp (נקודת האמת היחידה, כמו בדוח הרווח). מחזיר {cust,st} של ההזמנה הנבחרת או null.
+function _rfOrderSel(pf,cf){
+  const sel=document.getElementById('rf-o');if(!sel)return null;
+  const recs=pf?S.products.filter(p=>p.prod===pf&&(!cf||p.cust===cf)).sort((a,b)=>prodStampOf(a)-prodStampOf(b)):[];
+  if(sel.dataset.pf!==pf+'|'+cf){sel.dataset.pf=pf+'|'+cf;sel.value='';} // מוצר/לקוח אחר ⇒ חוזרים ל"כל ההזמנות"
+  const cur=sel.value;
+  sel.style.display=recs.length>1?'':'none';
+  sel.innerHTML='<option value="">כל ההזמנות</option>'+recs.map(p=>{const v=p.cust+'|'+prodStampOf(p);
+    return`<option value="${v}" ${v===cur?'selected':''}>${p.orderNo?'הזמנה #'+esc(String(p.orderNo).padStart(3,'0'))+' · ':''}${esc(p.name||'')}${!cf&&new Set(recs.map(r=>r.cust)).size>1?' · לקוח '+p.cust:''}</option>`;}).join('');
+  if(recs.length<2||!cur||!recs.some(p=>p.cust+'|'+prodStampOf(p)===cur)){sel.value='';return null;}
+  const[c,s]=cur.split('|');return{cust:c,st:+s};
+}
 async function buildRep(){
   const T=LANGS[currentLang];
   const wf=document.getElementById('rf-w').value;
@@ -8565,9 +8578,11 @@ async function buildRep(){
   const rfn=document.getElementById('rf-prod-note');if(rfn)rfn.style.display=pf?'':'none';
   const hist=pf?await loadHistProd(pf):await loadHistRange(fromD,toD);
   const all=[...S.activeTasks.map(t=>({...t,done:false})),...hist.map(t=>({...t,done:true}))];
+  const of=_rfOrderSel(pf,cf),_oc={};
   const fl=all.filter(t=>{
     const d=new Date(t.startTime).toISOString().slice(0,10);
-    return(!wf||t.workerName===wf)&&(!cf||t.cust===cf)&&(!pf||t.prod===pf)&&(!fromD||d>=fromD)&&(!toD||d<=toD);
+    return(!wf||t.workerName===wf)&&(!cf||t.cust===cf)&&(!pf||t.prod===pf)&&(!fromD||d>=fromD)&&(!toD||d<=toD)
+      &&(!of||(t.cust===of.cust&&taskOrderStamp(t,_oc)===of.st));
   });
   document.getElementById('rp-tot').textContent=fl.length;
   const totalS=calcActualTaskTime(fl);
@@ -9637,9 +9652,11 @@ async function exportCSV(){
   const toD=pf?'':document.getElementById('rf-to')?.value||'';
   const hist=pf?await loadHistProd(pf):await loadHistRange(fromD,toD);
   const allRaw=[...S.activeTasks.map(t=>({...t,done:false})),...hist.map(t=>({...t,done:true}))];
+  const of=_rfOrderSel(pf,cf),_oc={}; // 🔢 הזמנה נבחרת (כמו buildRep)
   const all=allRaw.filter(t=>{
     const d=new Date(t.startTime).toISOString().slice(0,10);
-    return(!wf||t.workerName===wf)&&(!cf||t.cust===cf)&&(!pf||t.prod===pf)&&(!fromD||d>=fromD)&&(!toD||d<=toD);
+    return(!wf||t.workerName===wf)&&(!cf||t.cust===cf)&&(!pf||t.prod===pf)&&(!fromD||d>=fromD)&&(!toD||d<=toD)
+      &&(!of||(t.cust===of.cust&&taskOrderStamp(t,_oc)===of.st));
   });
   const rows=[['עובד','מחלקה','לקוח','מוצר','מידה','כמות','צבע','שעת התחלה','שעת סיום','משך (דק)','סטטוס','תאריך']];
   all.forEach(t=>{
