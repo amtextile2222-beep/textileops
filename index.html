@@ -8590,11 +8590,11 @@ function buildAttDayTable(uid,fromD,toD,T,att){
 // 🌐 תוויות התוספות של 07-08/11/2026 (מחלקות במשימות, מוצר/הזמנה בדוחות, מוקצב מול בפועל לפי מחלקה)
 const RL_LBL={
   he:{prod_note:'📦 מוצר נבחר — מוצגות כל המשימות שלו, בלי קשר לתאריכים',all_orders:'כל ההזמנות',order:'הזמנה',cust:'לקוח',
-    dept:'מחלקה',units:"יח'",planned:'מוקצב',actual:'בפועל',left:'נותר',over:'חריגה',no_dept:'ללא מחלקה',clock:'שעון',clock_t:'בפועל = דקות שעון × תעריף העובדת ÷ התעריף הממוצע של המוצר'},
+    dept:'מחלקה',units:"יח'",planned:'מוקצב',actual:'בפועל',left:'נותר',over:'חריגה',no_dept:'ללא מחלקה',cplan:'עלות מתוכננת',cact:'עלות בפועל',cdiff:'הפרש ₪',cplan_t:'הדקות שהוזנו לשלבים × תעריף השלב (ממוצע העובדות הכשירות + תקורה) × היחידות',cact_t:'השעות נטו של כל משימה × תעריף העובדת שעשתה אותה + תקורה',over_cost:'עלות החריגות',over_cost_t:'סכום העלות מעבר לעלות המתוכננת בכל מחלקה שחרגה (לפי תעריף כל עובדת)',profit_loss:'הפסד ברווח',profit_loss_t:'רק החלק שעבר את התקציב של המחלקה (המחיר פחות רווח היעד) — עד התקציב הרווח עוד לא נפגע',target_profit:'רווח יעד להזמנה',exp_profit:'נשאר',of_target:'מהיעד',no_loss:'אין חריגה בעלות — העבודה בתוך העלות המתוכננת',clock:'שעון',clock_t:'בפועל = דקות שעון × תעריף העובדת ÷ התעריף הממוצע של המוצר'},
   ar:{prod_note:'📦 منتج محدد — تُعرض كل مهامه بغض النظر عن التواريخ',all_orders:'كل الطلبيات',order:'طلبية',cust:'زبون',
-    dept:'القسم',units:'قطعة',planned:'المخصص',actual:'الفعلي',left:'متبقٍ',over:'تجاوز',no_dept:'بدون قسم',clock:'الساعة',clock_t:'الفعلي = دقائق الساعة × أجر العاملة ÷ متوسط أجر المنتج'},
+    dept:'القسم',units:'قطعة',planned:'المخصص',actual:'الفعلي',left:'متبقٍ',over:'تجاوز',no_dept:'بدون قسم',cplan:'التكلفة المخططة',cact:'التكلفة الفعلية',cdiff:'الفرق ₪',cplan_t:'الدقائق المدخلة للمراحل × أجر المرحلة + المصاريف × عدد القطع',cact_t:'ساعات كل مهمة × أجر العاملة التي نفذتها + المصاريف',over_cost:'تكلفة التجاوزات',over_cost_t:'التكلفة الزائدة عن المخطط في كل قسم تجاوز (حسب أجر كل عاملة)',profit_loss:'خسارة في الربح',profit_loss_t:'فقط ما تجاوز ميزانية القسم (السعر ناقص الربح المستهدف)',target_profit:'الربح المستهدف للطلبية',exp_profit:'المتبقي',of_target:'من الهدف',no_loss:'لا تجاوز في التكلفة — العمل ضمن التكلفة المخططة',clock:'الساعة',clock_t:'الفعلي = دقائق الساعة × أجر العاملة ÷ متوسط أجر المنتج'},
   en:{prod_note:'📦 Product selected — all its tasks are shown, regardless of dates',all_orders:'All orders',order:'Order',cust:'Customer',
-    dept:'Department',units:'pcs',planned:'Planned',actual:'Actual',left:'Left',over:'Over',no_dept:'No department',clock:'clock',clock_t:'Actual = clock minutes × worker rate ÷ product average rate'}
+    dept:'Department',units:'pcs',planned:'Planned',actual:'Actual',left:'Left',over:'Over',no_dept:'No department',cplan:'Planned cost',cact:'Actual cost',cdiff:'Diff ₪',cplan_t:'Entered step minutes × step rate (+overhead) × units',cact_t:'Net hours of each task × the worker rate + overhead',over_cost:'Overrun cost',over_cost_t:'Cost above plan in each department that overran (by each worker rate)',profit_loss:'Profit loss',profit_loss_t:'Only what exceeded the department budget (price minus target profit)',target_profit:'Order target profit',exp_profit:'Left',of_target:'of target',no_loss:'No cost overrun — within planned cost',clock:'clock',clock_t:'Actual = clock minutes × worker rate ÷ product average rate'}
 };
 const _rl=k=>(RL_LBL[currentLang]||RL_LBL.he)[k]??RL_LBL.he[k];
 // 🏭 מוקצב לפי מחלקה — נקודת אמת אחת לדוח "רווח מול יעד", ללשונית משימות ולמסך התצוגה.
@@ -8603,12 +8603,14 @@ function _dTimeKey(st){let k=st?String(st).split('::')[0]:'';if(pipeFamOfDept(k)
 // דקות ליחידה פר מחלקה. מנהל עם תמחור ⇒ בדיוק כמו הדוח (שהוזנו, ובלי — הנגזרות מהתקציב, _prodBudget);
 // אחרת (אחראי — אין לו עלויות) ⇒ רק הדקות שהוזנו ידנית בשלבים.
 function _ordDeptPlan(p,ctx){
-  const stepKey={},plan={},ord=[],add=k=>{if(!(k in plan)){plan[k]=0;ord.push(k);}};
-  const pb=ctx&&p&&+p.unitPrice?_prodBudget(p,ctx):null,mins={};
-  if(pb){pb.lvl.forEach((s,i)=>{const b=pb.stepBud[i];mins[stepName(s)]=b.typed>0?b.typed:b.min;});pb.cutLvl.forEach((s,i)=>{const b=pb.cutStepBud[i];mins[stepName(s)]=b.typed>0?b.typed:b.min;});}
+  const stepKey={},plan={},ord=[],pc={},bc={},add=k=>{if(!(k in plan)){plan[k]=0;pc[k]=0;bc[k]=0;ord.push(k);}};
+  const pb=ctx&&p&&+p.unitPrice?_prodBudget(p,ctx):null,mins={},sc={};
+  // 💸 pc = עלות מתוכננת ₪/יח' (דקות שהוזנו × תעריף השלב+תקורה), bc = התקציב ₪/יח' (חלק השלב מתקציב המחיר)
+  if(pb){pb.lvl.forEach((s,i)=>{const b=pb.stepBud[i],m=b.typed>0?b.typed:b.min;mins[stepName(s)]=m;sc[stepName(s)]=[m*pb.rates[i]/60,b.ils];});
+    pb.cutLvl.forEach((s,i)=>{const b=pb.cutStepBud[i],m=b.typed>0?b.typed:b.min;mins[stepName(s)]=m;sc[stepName(s)]=[m*pb.cutRates[i]/60,b.ils];});}
   (p?.workSteps||[]).forEach(s=>{const n=stepName(s);if(!n||n in stepKey)return;const k=(stepIsCut(s)?'✂ ':'')+(_dTimeKey(stepStation(s))||_rl('no_dept'));
-    stepKey[n]=k;add(k);plan[k]+=pb?(mins[n]||0):stepManualMin(s);});
-  return{stepKey,plan,ord,add};
+    stepKey[n]=k;add(k);plan[k]+=pb?(mins[n]||0):stepManualMin(s);if(sc[n]){pc[k]+=sc[n][0];bc[k]+=sc[n][1];}});
+  return{stepKey,plan,ord,add,pc,bc};
 }
 // מוקצב מול בפועל לפי מחלקה להזמנה פעילה — ללשונית משימות ולמסך התצוגה. ⚠️ **אפס קריאות Firestore**:
 // S.histTasks (החלון החי, HIST_WINDOW_DAYS) + המשימות הרצות עכשיו — אותה החלטה כמו _kioskProdPanel,
@@ -9533,9 +9535,11 @@ function buildProfitReport(fl){
     // 🏭 (08/11/2026 — בקשת המשתמש) מוקצב מול בפועל **לפי מחלקה**: המוקצב = הדקות ליחידה של כל שלב
     // (שהוזנו, ובלי — הנגזרות; כמו "זמן להזמנה לפי מחלקה" בחלון המוצר) לפי המחלקה שבתחנה הראשית;
     // הבפועל = זמן המשימות לפי המחלקה של השלב שלהן (שלב לא מוכר ⇒ מחלקת העובד).
-    const dp=_ordDeptPlan(p,ctx),dAct={},dClk={}; // אותו חישוב מוקצב כמו בלשונית משימות ובמסך התצוגה
-    pTasks.forEach(t=>{const k=dp.stepKey[t.taskType]||_dTimeKey(t.dept)||_rl('no_dept');dp.add(k);const m=(nd[t.id]||0)/60;dClk[k]=(dClk[k]||0)+m;dAct[k]=(dAct[k]||0)+m*_rwOf(t.workerId,p,k.startsWith('✂ '));});
-    const deptRows=dp.ord.filter(k=>dp.plan[k]>0||dAct[k]>0).map(k=>({k,planU:dp.plan[k],act:dAct[k]||0,clk:dClk[k]||0}));
+    const dp=_ordDeptPlan(p,ctx),dAct={},dClk={},dCost={}; // אותו חישוב מוקצב כמו בלשונית משימות ובמסך התצוגה
+    // 💸 dCost = עלות אמיתית: שעות נטו של כל משימה × (תעריף העובדת ביום המשימה + תקורה) — כמו actPU בשורות השלבים
+    pTasks.forEach(t=>{const k=dp.stepKey[t.taskType]||_dTimeKey(t.dept)||_rl('no_dept');dp.add(k);const m=(nd[t.id]||0)/60;dClk[k]=(dClk[k]||0)+m;dAct[k]=(dAct[k]||0)+m*_rwOf(t.workerId,p,k.startsWith('✂ '));
+      dCost[k]=(dCost[k]||0)+m/60*((loadedHourlyRate(t.workerId,_tDay(t))||ctx.avgAll)+ctx.oh);});
+    const deptRows=dp.ord.filter(k=>dp.plan[k]>0||dAct[k]>0).map(k=>({k,planU:dp.plan[k],act:dAct[k]||0,clk:dClk[k]||0,pcU:dp.pc[k]||0,bcU:dp.bc[k]||0,cost:dCost[k]||0}));
     blocks.push({p,pb,stepRows,cutRows,cutActMin,withData,profit,profitPct,shipped,planned,actMinTot,deptRows});
   }
   if(!blocks.length){el.innerHTML='<div style="color:var(--txt3);font-size:12px;padding:.5rem 0">אין מוצרים מתומחרים עם משימות שהושלמו בטווח הנבחר</div>';return;}
@@ -9583,10 +9587,24 @@ function buildProfitReport(fl){
           if(!b.deptRows.length||!(base>0))return'';
           const td='padding:3px 8px;text-align:right';
           return`<div style="flex-basis:100%;margin-top:4px"><table style="border-collapse:collapse;font-size:12px;min-width:min(100%,460px)">
-            <thead><tr style="color:var(--txt3);border-bottom:1px solid var(--brd)"><th style="${td}">🏭 ${_rl('dept')} (${base} ${_rl('units')})</th><th style="${td}">${_rl('planned')}</th><th style="${td}">${_rl('actual')}</th><th style="${td}"></th></tr></thead>
-            <tbody>${b.deptRows.map(r=>{const pl=r.planU*base,l=pl-r.act;
+            <thead><tr style="color:var(--txt3);border-bottom:1px solid var(--brd)"><th style="${td}">🏭 ${_rl('dept')} (${base} ${_rl('units')})</th><th style="${td}">${_rl('planned')}</th><th style="${td}">${_rl('actual')}</th><th style="${td}"></th><th style="${td}" title="${esc(_rl('cplan_t'))}">${_rl('cplan')}</th><th style="${td}" title="${esc(_rl('cact_t'))}">${_rl('cact')}</th><th style="${td}">${_rl('cdiff')}</th></tr></thead>
+            <tbody>${b.deptRows.map(r=>{const pl=r.planU*base,l=pl-r.act,cp=r.pcU*base,cd=cp-r.cost,ils=v=>'₪'+Math.round(v).toLocaleString();
               return`<tr style="border-bottom:0.5px dashed var(--brd)"><td style="${td}">${esc(r.k)}</td><td style="${td}">${pl>0?fmtExpMin(pl):'—'}</td><td style="${td};font-weight:600">${r.act>0?fmtExpMin(r.act):'—'}${r.clk>0&&Math.abs(r.clk-r.act)>=1?`<div style="font-size:10px;font-weight:400;color:var(--txt3)" title="${esc(_rl('clock_t'))}">${_rl('clock')} ${fmtExpMin(r.clk)}</div>`:''}</td>
-                <td style="${td};font-weight:700;color:${l<0?'var(--red-txt)':'var(--green-txt,#16a34a)'}">${pl>0?_rl(l<0?'over':'left')+' '+fmtExpMin(Math.abs(l)):''}</td></tr>`;}).join('')}</tbody></table></div>`;
+                <td style="${td};font-weight:700;color:${l<0?'var(--red-txt)':'var(--green-txt,#16a34a)'}">${pl>0?_rl(l<0?'over':'left')+' '+fmtExpMin(Math.abs(l)):''}</td>
+                <td style="${td}">${cp>0?ils(cp):'—'}</td><td style="${td};font-weight:600">${r.cost>0?ils(r.cost):'—'}</td>
+                <td style="${td};font-weight:700;color:${cd<0?'var(--red-txt)':'var(--green-txt,#16a34a)'}">${cp>0&&r.cost>0?(cd<0?_rl('over')+' ':_rl('left')+' ')+ils(Math.abs(cd)):''}</td></tr>`;}).join('')}</tbody></table>
+            ${(()=>{ // 💸 סיכום: עלות החריגות (מול הזמנים שהוזנו) + ההפסד ברווח (רק מה שעבר את תקציב המחלקה — עד שם הרווח עוד מוגן)
+              const oc=b.deptRows.reduce((t,r)=>t+Math.max(0,r.cost-r.pcU*base),0);
+              const loss=b.deptRows.reduce((t,r)=>t+Math.max(0,r.cost-r.bcU*base),0);
+              const hasCut=b.deptRows.some(r=>r.k.startsWith('✂ ')&&(r.cost>0||r.bcU>0));
+              const tp=base*(b.pb.price*b.pb.targetPct/100+(hasCut&&b.pb.cutPrice>0?b.pb.cutPrice*b.pb.cutPct/100:0));
+              if(!(oc>0)&&!(loss>0))return`<div style="font-size:12px;margin-top:4px;color:var(--green-txt,#16a34a);font-weight:600">💰 ${_rl('no_loss')}</div>`;
+              const ils=v=>'₪'+Math.round(v).toLocaleString(),left=tp-loss;
+              return`<div style="font-size:12px;margin-top:6px;line-height:1.8">
+                <span style="font-weight:700;color:var(--red-txt)" title="${esc(_rl('over_cost_t'))}">💸 ${_rl('over_cost')}: ${ils(oc)}</span>
+                · <span style="font-weight:700;color:${loss>0?'var(--red-txt)':'var(--green-txt,#16a34a)'}" title="${esc(_rl('profit_loss_t'))}">📉 ${_rl('profit_loss')}: ${ils(loss)}</span>
+                ${tp>0?`· <span style="color:var(--txt2)">${_rl('target_profit')} ${ils(tp)} ⇐ <b style="color:${left<tp?'var(--red-txt)':'inherit'}">${_rl('exp_profit')} ${ils(left)} (${(left/tp*100).toFixed(0)}% ${_rl('of_target')})</b></span>`:''}</div>`;
+            })()}</div>`;
         })()}
       </summary>
       <div style="padding:6px 8px 2px">${b.stepRows.map(s=>{
