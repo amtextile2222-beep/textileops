@@ -15857,6 +15857,7 @@ function _pubRateCache(){clearTimeout(_rcT);_rcT=setTimeout(_pubRateCacheNow,300
 function _pubRateCacheNow(){
   _pubRateW();
   _crBackfill().catch(()=>{});
+  _thumbBackfill().catch(()=>{});
   try{
     if(S.user?.role!=='manager'||!S.fbConnected||!S.costs)return;
     const ob=overheadBreakdown();if(!ob.actual||!(ob.perHour>=0))return;
@@ -18527,9 +18528,11 @@ function renderPackStock(){
       if(!m.bySize)return [[pool+'|'+m.id,m.name]];
       const pre=pool+'|'+m.id+'|',zs=[...new Set([...Object.keys(bal),...Object.keys(need),...Object.keys(min)].filter(k=>k.startsWith(pre)).map(k=>k.slice(pre.length)))].sort();
       return zs.length?zs.map(z=>[pre+z,m.name+' · מידה '+z]):[[pre+'?',m.name+' (לפי מידה — רשום ספירה לכל מידה)']];
-    }).map(([key,label])=>{const m={id:key.split('|')[1]},has=key in bal,b=bal[key],mn=+min[key]||0,nd=need[key]||0,miss=has&&nd>0&&b<nd-0.0001,low=has&&mn>0&&b<mn||miss;
+    }).map(([key,label],ri,ra)=>{const m={id:key.split('|')[1]},has=key in bal,b=bal[key],mn=+min[key]||0,nd=need[key]||0,miss=has&&nd>0&&b<nd-0.0001,low=has&&mn>0&&b<mn||miss;
       return `<div style="display:flex;align-items:center;gap:8px;padding:6px 10px;border-top:1px solid var(--brd);font-size:13px${low?';background:var(--red-bg,#fee2e2)':''}">
         <span style="flex:1">${esc(label)}${nd>0?`<div style="font-size:11px;font-weight:600;color:${miss?'var(--red-txt)':'var(--txt3)'}">📋 נדרש ${pstkFmt(nd)}${esc(pstkUnit(m.id))} ${cnt[key]===1?'להזמנה פתוחה אחת':'ל-'+cnt[key]+' הזמנות פתוחות'}${miss?' · חסר '+pstkFmt(nd-b):has?' · יש מספיק':''}</div>`:''}</span>
+        ${mgr&&pool!==PSTK_F&&(!ri||ra[ri-1][0].split('|')[1]!==m.id)?(()=>{const im=+(st.imgs||{})[pool+'|'+m.id];
+          return `<button class="btn" style="font-size:12px;padding:3px 6px${im?';border-color:var(--green-txt)':''}" title="${im?'תמונת החומר בדף הלקוח — הצג / החלף / מחק':'הוסף תמונה — מוצגת ללקוח בדף המעקב'}" onclick="pstkImg('${escj(pool)}','${escj(m.id)}')">${im?'🖼':'📷'}</button>`;})():''}
         <b style="min-width:70px;text-align:center;color:${!has?'var(--txt3)':b<0||low?'var(--red-txt)':'var(--txt)'}">${has?pstkFmt(b)+esc(pstkUnit(m.id)):'לא נספר'}</b>
         <span style="font-size:11px;color:var(--txt3)">מינימום</span>
         ${mgr&&!key.endsWith('|?')?`<input type="number" min="0" step="any" value="${mn||''}" placeholder="—" onchange="pstkSetMin('${escj(key)}',this.value)" style="width:64px;font-size:12px;padding:4px;border-radius:6px;border:1px solid var(--brd);background:var(--bg);color:var(--txt)"/>`
@@ -18544,6 +18547,28 @@ function renderPackStock(){
       ${mgr?`<button class="btn" style="font-size:11px;padding:3px 7px" onclick="pstkDel('${escj(m.id)}')">🗑</button>`:''}
     </div>`).join(''):'<div style="font-size:12px;color:var(--txt3)">עדיין לא נרשמה שום תנועה. התחל בספירה של מה שיש היום במלאי.</div>';
   renderPstkItems();
+}
+// 🖼 תמונת חומר של לקוח (08/11/2026) — מוצגת ליד החומר בדף המעקב. thumbs/pk_<לקוח>_<פריט> + packStock.imgs (ראה _prodThumb)
+async function pstkImg(pool,id){
+  if(S.user?.role!=='manager')return;
+  if(!S.fbConnected){alert('אין חיבור לשרת');return;}
+  const ik=pool+'|'+id,tid='pk_'+pool+'_'+id,nm=pstkItemName(id);
+  if(+((S.packStock||{}).imgs||{})[ik]){
+    const c=await showConfirm3('🖼 '+nm,'התמונה מוצגת ל'+pstkPoolName(pool).replace(/^\S+ /,'')+' בדף המעקב, ליד החומר.','👁 הצג','📷 החלף','🗑 מחק');
+    if(c===0){const d=await fbGet('thumbs',tid).catch(()=>null);if(d?.img)viewImg(null,d.img);else alert('התמונה לא נמצאה');return;}
+    if(c===2){if(!await showConfirm('מחיקת תמונה','למחוק את התמונה של "'+nm+'"? הלקוח לא יראה אותה יותר.','מחק','ביטול'))return;
+      try{await fbDel('thumbs',tid);}catch(e){}
+      if(await pstkWrite(d=>{const imgs={...(d.imgs||{})};delete imgs[ik];return {...d,imgs};})){showToast('🗑 התמונה נמחקה');renderPackStock();}
+      return;}
+  }
+  const fi=document.createElement('input');fi.type='file';fi.accept='image/*';
+  fi.onchange=async()=>{const file=fi.files?.[0];if(!file)return;
+    let img='';try{img=await compressImageFile(file,800,0.75);}catch(e){}
+    if(!img){alert('לא הצלחתי לקרוא את התמונה');return;}
+    const at=Date.now();
+    try{await fbSet('thumbs',tid,{img,at});}catch(e){alert('שמירת התמונה נכשלה: '+(e?.message||e));return;}
+    if(await pstkWrite(d=>({...d,imgs:{...(d.imgs||{}),[ik]:at}}))){showToast('✅ התמונה נשמרה — הלקוח יראה אותה ליד "'+nm+'"');renderPackStock();}};
+  fi.click();
 }
 // ⚙️ ניהול הפריטים (מנהל): כל שינוי נשמר מיד. פריט שנמחק — גם התנועות והמינימום שלו נמחקים
 function renderPstkItems(){
@@ -20327,6 +20352,43 @@ async function saveProdImgs(id,imgs,extra){
   for(let i=1;i<ch.length;i++)await fbSet('productImages',id+'__'+i,{images:ch[i],part:i,of:id});
   await fbSet('productImages',id,{...(extra||{}),images:ch[0],count:imgs.length,parts:ch.length});
   for(let i=ch.length;i<old;i++){try{await fbDel('productImages',id+'__'+i);}catch(e){}}
+  try{await _prodThumb(id,imgs);}catch(e){}
+}
+// 🖼 תמונות לדף הלקוח (08/11/2026) — thumbs/{מזהה} = {img (JPEG מוקטן), at}. אוסף נפרד: מסמך המוצר נטען לכל טלפון.
+// מוצר: התמונה הראשונה (360px) + products.thumbAt/thumbSig (חתימה של התמונה הראשונה — לא כותבים שוב כשלא השתנתה).
+// חומר של לקוח: thumbs/pk_<לקוח>_<פריט> + packStock.imgs['לקוח|פריט']=at (חלון המלאי, מנהל).
+// customerTrack ?img= מגיש לדף הלקוח רק תמונה של אותו לקוח. ⚠️ trackThumb בשרת: הזמנה בלי — של הזמנה אחרת של הדגם
+function _thumbShrink(src,max){
+  return new Promise(res=>{if(!/^data:image\//.test(String(src||''))){res('');return;}
+    const im=new Image();im.onerror=()=>res('');
+    im.onload=()=>{let w=im.width,h=im.height;const k=Math.min(1,max/Math.max(w,h,1));w=Math.max(1,Math.round(w*k));h=Math.max(1,Math.round(h*k));
+      const c=document.createElement('canvas');c.width=w;c.height=h;const x=c.getContext('2d');x.fillStyle='#fff';x.fillRect(0,0,w,h);x.drawImage(im,0,0,w,h);
+      try{res(c.toDataURL('image/jpeg',0.75));}catch(e){res('');}};
+    im.src=src;});
+}
+const _thumbSig=src=>{src=String(src||'');return src?src.length+':'+src.slice(-40):'';};
+async function _prodThumb(id,imgs){
+  id=String(id);const p=S.products.find(x=>String(x.id)===id),src=(imgs||[]).find(x=>/^data:image\//.test(String(x||''))),sig=_thumbSig(src);
+  if(p&&(p.thumbSig||'')===sig&&(!sig||+p.thumbAt))return;
+  const img=sig?await _thumbShrink(src,360):'';
+  let at=0;
+  if(img){at=Date.now();await fbSet('thumbs',id,{img,at});}else{try{await fbDel('thumbs',id);}catch(e){}}
+  if(p)Object.assign(p,{thumbAt:at,thumbSig:sig});
+  await fbUpdateOnly('products',id,{thumbAt:at,thumbSig:sig}); // מוצר חדש עוד לא קיים ⇒ נכשל, ושמירת המוצר (fbSet של p) נושאת את השדות
+}
+// הזמנות שנשמרו לפני כן: המנהל מכין ברקע תמונה אחת לכל דגם (ההזמנה החדשה ביותר עם תמונות) — דגמים מ-120 הימים האחרונים
+const _thumbBfDone=new Set();
+async function _thumbBackfill(){
+  if(S.user?.role!=='manager'||!S.fbConnected)return;
+  const rk=x=>+x.createdAt||parseInt(String(x.id).replace(/\D/g,''))||0,from=Date.now()-120*86400000,mdl={};
+  (S.products||[]).forEach(p=>{const k=p.cust+'|'+p.prod;(mdl[k]=mdl[k]||[]).push(p);});
+  for(const l of Object.values(mdl)){
+    if(l.some(p=>+p.thumbAt>0)||!l.some(p=>rk(p)>=from))continue;
+    const p=l.filter(x=>prodImgCount(x)>0).sort((a,b)=>rk(b)-rk(a))[0];
+    if(!p||_thumbBfDone.has(p.id))continue;
+    _thumbBfDone.add(p.id);
+    try{const imgs=await fetchProdImgs(p.id,true);if(imgs.length)await _prodThumb(p.id,imgs);}catch(e){}
+  }
 }
 // כמה תמונות יש למוצר, בלי להוריד אותן. imgCount נכתב בשמירה; לרשומות שטרם עברו
 // מיגרציה נופלים חזרה ל-p.images שעדיין קיים — ולכן הקוד עובד גם לפני שלב הניקוי.

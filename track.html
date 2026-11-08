@@ -94,6 +94,12 @@ h2{font-size:14px;color:var(--txt2);margin:20px 0 8px}
 .cutm-h #cutp:disabled{opacity:.5}
 #cutc{flex:1;display:flex}
 .cutf{flex:1;width:100%;border:0;background:#fff}
+/* 🖼 תמונות (08/11/2026) */
+.thumb{flex:0 0 auto;width:56px;height:56px;object-fit:cover;border-radius:10px;border:1px solid var(--brd);background:var(--track);cursor:zoom-in}
+.sthumb{float:left;width:40px;height:40px;object-fit:cover;border-radius:8px;border:1px solid var(--brd);margin:0 0 4px 8px;cursor:zoom-in}
+.stk::after{content:"";display:block;clear:both}
+.imgm-b{max-width:95vw;max-height:92vh;text-align:center;color:#fff;font-size:14px}
+.imgm-b img{display:block;max-width:95vw;max-height:85vh;border-radius:12px;margin:0 auto 8px;background:#fff}
 footer{font-size:11px;color:var(--txt3);text-align:center;margin:20px 0 8px}
 footer button{background:none;border:0;color:var(--blue);font:inherit;cursor:pointer;text-decoration:underline;padding:0}
 .login{max-width:380px;margin:30px auto;text-align:center}
@@ -163,7 +169,7 @@ function card(o){
     ?`<div class="short res">✓ ${esc(STAGES[x.st]||'')}: ${esc(x.txt)} · ${dm(x.at)} · נפתר ${dm(x.res)}</div>`
     :`<div class="short">⚠ חוסר · ${esc(STAGES[x.st]||'')}: ${esc(x.txt)} · ${dm(x.at)}</div>`).join('');
   return `<div class="card">
-    <div class="top"><div><div class="nm">${esc(o.name||('דגם '+o.prod))}</div>
+    <div class="top">${imgTag(o.img,o.iv,'thumb',o.name||('דגם '+o.prod))}<div style="flex:1;min-width:0"><div class="nm">${esc(o.name||('דגם '+o.prod))}</div>
       <div class="meta">${no}${o.qty?o.qty+" יח' · ":o.est?'~'+o.est+" יח' (משוער) · ":''}${done?'נשלח '+fmtD(o.ship):'התקבל '+fmtD(o.entry)}</div></div>
       <span class="badge ${done?'done':''}">${esc(STAGES[o.stage]||'')}${pct!=null?' '+pct+'%':''}</span></div>
     <div class="bar ${done?'done':''}">${segs}</div>
@@ -194,7 +200,32 @@ async function openCut(pid,nm){
     const pb=$('cutp');pb.disabled=false;pb.onclick=()=>{try{f.contentWindow.focus();f.contentWindow.print();}catch(e){alert('ההדפסה לא נתמכת בדפדפן הזה');}};
   }catch(e){const c=$('cutc');if(c)c.textContent='⚠️ לא ניתן לטעון את הדוח כרגע. נסו שוב בעוד רגע.';}
 }
-appEl.addEventListener('click',e=>{const b=e.target.closest('.cutb');if(b)openCut(b.dataset.cut,b.dataset.nm);});
+appEl.addEventListener('click',e=>{const b=e.target.closest('.cutb');if(b)openCut(b.dataset.cut,b.dataset.nm);
+  const im=e.target.closest('img[data-img][src]');if(im)bigImg(im.src,im.alt);});
+// 🖼 תמונות (08/11/2026) — דגם בכרטיס, חומר במלאי. נטענות מהשרת (?img=) פעם אחת לכל מועד (v) ונשמרות בזיכרון,
+// כך שהרענון כל דקה לא טוען שוב. לחיצה = הגדלה
+const imgMem=new Map(),imgBusy=new Set();
+function imgTag(id,v,cls,alt){
+  if(!id||!v)return '';const k=id+'@'+v,src=imgMem.get(k);
+  return `<img class="${cls}" data-img="${esc(id)}" data-v="${esc(v)}" alt="${esc(alt||'')}"${src?` src="${src}"`:' style="visibility:hidden"'}>`;
+}
+async function loadImgs(){
+  const u=(AS?mAuth:auth).currentUser;if(!u)return;
+  for(const el of appEl.querySelectorAll('img[data-img]:not([src])')){
+    const id=el.dataset.img,v=el.dataset.v,k=id+'@'+v;
+    if(imgMem.has(k)){el.src=imgMem.get(k);el.style.visibility='';continue;}
+    if(imgBusy.has(k))continue;imgBusy.add(k);
+    try{const r=await fetch(URL_FN+'?img='+encodeURIComponent(id)+'&v='+encodeURIComponent(v)+(AS?'&cust='+encodeURIComponent(AS):''),{headers:{Authorization:'Bearer '+await u.getIdToken(),'X-Dev':devId()}});
+      if(r.ok){const j=await r.json();if(j.img){imgMem.set(k,j.img);appEl.querySelectorAll('img[data-img]').forEach(x=>{if(x.dataset.img===id&&x.dataset.v===v){x.src=j.img;x.style.visibility='';}});}}
+      else if(r.status===404)appEl.querySelectorAll('img[data-img]').forEach(x=>{if(x.dataset.img===id)x.remove();});
+    }catch(e){}finally{imgBusy.delete(k);}
+  }
+}
+function bigImg(src,alt){
+  $('imgm')?.remove();const m=document.createElement('div');m.id='imgm';m.className='cutm';
+  m.innerHTML=`<div class="imgm-b"><img src="${src}" alt="${esc(alt)}"><div>${esc(alt)}</div></div>`;
+  m.onclick=()=>m.remove();document.body.appendChild(m);
+}
 const outBtn=()=>'<button id="out">התנתקות</button>';
 // התנתקות ⇒ גם ביטול ההתראות במכשיר (אחרת מכשיר שהתנתק היה ממשיך לקבל עדכונים)
 const bindOut=()=>{const b=$('out');if(b)b.onclick=async()=>{if(pushSt?.on)try{await pushCall('POST',{off:true});}catch(e){}pushSt=null;$('pushbar').innerHTML='';signOut(auth);};};
@@ -332,15 +363,17 @@ async function load(){
     const r2=x=>Math.round(x*100)/100,unitOf=s=>s.unit&&s.unit!=="יח'"?' '+esc(s.unit):'';
     const stOf=s=>{const nd=Number(s.need)||0,n=Number(s.n)||0,miss=nd>0&&n<nd;return{nd,n,miss,bad:n<0||!!s.low||miss};};
     const stkRow=s=>{const{nd,n,miss,bad}=stOf(s),u=unitOf(s);
-      return `<div class="stk${bad?' bad':''}"><div class="stk-n">${esc(s.name)}</div><div class="stk-q">
+      return `<div class="stk${bad?' bad':''}">${stkImg(s)}<div class="stk-n">${esc(s.name)}</div><div class="stk-q">
         <span>במפעל <b style="${bad?'color:var(--red)':''}">${n}</b>${u}</span>${nd>0?`<span>נדרש ${r2(nd)}${u}</span>`:''}
         ${miss?`<span class="stk-miss">⚠ חסר ${r2(nd-n)}${u} — כדאי לשלוח עוד</span>`:bad?'<span class="stk-miss">⚠ כדאי לשלוח עוד</span>':nd>0?'<span class="stk-ok">✓ יש מספיק</span>':''}</div></div>`;};
     const stkSz=(name,l)=>{const u=unitOf(l[0]),hasNd=l.some(s=>Number(s.need)>0),bad=l.some(s=>stOf(s).bad);
-      return `<div class="stk${bad?' bad':''}"><div class="stk-n">${esc(name)}</div><table class="stk-t"><tr><th>מידה</th><th>במפעל</th>${hasNd?'<th>נדרש</th><th></th>':''}</tr>${l.map(s=>{const o=stOf(s);
+      return `<div class="stk${bad?' bad':''}">${stkImg(l[0])}<div class="stk-n">${esc(name)}</div><table class="stk-t"><tr><th>מידה</th><th>במפעל</th>${hasNd?'<th>נדרש</th><th></th>':''}</tr>${l.map(s=>{const o=stOf(s);
         return `<tr${o.bad?' class="bad"':''}><td>${esc(s.sz)}</td><td>${o.n}${u}</td>${hasNd?`<td>${o.nd>0?r2(o.nd)+u:'—'}</td><td>${o.miss?'חסר '+r2(o.nd-o.n):o.bad?'⚠':o.nd>0?'<span class="stk-ok">✓</span>':''}</td>`:''}</tr>`;}).join('')}</table></div>`;};
     const stkList=l=>{const out=[],grp={};l.forEach(s=>{const m=String(s.k||'').includes('|')&&/^(.*) · מידה (.*)$/.exec(s.name||'');
         if(!m){out.push(s);return;}const b=String(s.k).split('|')[0];if(!grp[b]){grp[b]={name:m[1],l:[]};out.push(grp[b]);}grp[b].l.push({...s,sz:m[2]});});
       return out.map(x=>x.l?stkSz(x.name,x.l):stkRow(x)).join('');};
+    // 🖼 תמונת החומר (08/11/2026) — img = מועד; המזהה לפי הפריט (בלי מידה)
+    const stkImg=s=>s.img&&s.imgId?imgTag(s.imgId,s.img,'sthumb',s.name):'';
     const nBad=new Set(stk.filter(s=>stOf(s).bad).map(s=>String(s.k||'').split('|')[0])).size; // מידות של אותו פריט = חומר אחד
     const stkHtml=stk.length?`<h2>📦 החומרים שלכם במפעל</h2><div class="card">${nBad?`<div class="stk-sum">⚠ ${nBad===1?'חומר אחד':nBad+' חומרים'} — כדאי לשלוח עוד</div>`:'<div class="stk-sum ok">✓ יש מספיק מכל החומרים</div>'}${multi
         ?Object.keys(DEPT).map(d=>{const l=stk.filter(s=>(s.dept||'pack')===d);return l.length?`<div class="stk-d">${DEPT[d]}</div>`+stkList(l):'';}).join('')
@@ -350,6 +383,7 @@ async function load(){
       (act.length?`<h2>🏭 בייצור (${act.length})</h2>`+act.map(card).join(''):'')+
       (shp.length?`<h2>✅ נשלחו ב-30 הימים האחרונים (${shp.length})</h2>`+shp.map(card).join(''):''))+
       `</main>${stk.length?'<aside>'+stkHtml+'</aside>':''}</div>`;
+    loadImgs();
     const t=new Date(d.at);
     const upd=' · עודכן '+t.toLocaleString('he-IL',{day:'2-digit',month:'2-digit',hour:'2-digit',minute:'2-digit'});
     if(AS){ft.innerHTML='👁 תצוגת מנהל — כך הלקוח רואה את הדף'+upd;return;}

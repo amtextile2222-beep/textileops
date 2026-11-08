@@ -1603,8 +1603,16 @@ function trackPackStock(cust, prods, ps) {
     }));
   return list.filter(x => x.k in bal).sort((a, b) => (DEPT_ORD[a.dept] ?? 3) - (DEPT_ORD[b.dept] ?? 3)).map(x => {
     const mn = +min[cust + '|' + x.k] || 0, n = Math.round(bal[x.k] * 100) / 100;
-    return { ...x, n, low: mn > 0 && bal[x.k] < mn, need: Math.round((need[x.k] || 0) * 100) / 100 };
+    // 🖼 img = מועד תמונת החומר (packStock.imgs[לקוח|פריט], 08/11/2026) — הדף טוען אותה ב-?img=pk_<לקוח>_<פריט>
+    const ib = String(x.k).split('|')[0], img = +((ps.imgs || {})[cust + '|' + ib]) || 0;
+    return { ...x, n, low: mn > 0 && bal[x.k] < mn, need: Math.round((need[x.k] || 0) * 100) / 100, ...(img ? { img, imgId: 'pk_' + cust + '_' + ib } : {}) };
   });
+}
+// 🖼 {img: מזהה המסמך ב-thumbs, iv: מועד} — products.thumbAt נכתב באפליקציה בשמירת תמונות
+function trackThumb(p, prods) {
+  let b = +p.thumbAt > 0 ? p : null;
+  if (!b) for (const x of prods) if (x.prod === p.prod && +x.thumbAt > 0 && (!b || trackStamp(x) > trackStamp(b))) b = x;
+  return b ? { img: b.id, iv: +b.thumbAt } : {};
 }
 // prods = כל רשומות המוצר של הלקוח (prodByOrderNo/findProd/prodStampOldest מסננים ממילא לפי לקוח)
 function trackStates(prods, tasks) {
@@ -1708,6 +1716,8 @@ function trackStates(prods, tasks) {
       ship: departed ? trackShipDate(p) : '', stage: st, sewPct, packPct, split, dates,
       // ✂️ דוח גזירה (08/11/2026): מזהה המוצר כשיש עותק מעודכן ב-cutPrints (pAt = at) — הדף טוען אותו בלחיצה (?cutp=)
       cut: p.cutReport && +p.cutReport.pAt && +p.cutReport.pAt === +p.cutReport.at ? p.id : '',
+      // 🖼 תמונת הדגם (08/11/2026): thumbs/{מזהה} של ההזמנה, ובלי — של ההזמנה החדשה ביותר של הדגם שיש לה (תמונות לא עוברות להזמנה חדשה)
+      ...trackThumb(p, prods),
       // out = יחידות שיצאו: משלוח חלקי, או כמה תעודות שרק חלקן סומנו כיציאה (A251, 22/10/2026 — כמו parts בלוח)
       out: partial || (shipped && depU > 0 && depU < outU) ? depU : 0,
       // ⚠ הערות חוסרים לפי שלב (25/10/2026, products.shortages — נכתב מלוח מצב הזמנות). פתוחות — כולן,
@@ -1936,6 +1946,23 @@ exports.customerTrack = functions.runWith({ memory: '1GB' }).https.onRequest(asy
       const p = ps.data(), c = cs.data();
       if (!p || String(p.cust) !== cust || !c || !c.html) { res.status(404).json({ error: 'none' }); return; }
       res.json({ html: String(c.html), at: +c.at || 0 }); return;
+    }
+    // 🖼 תמונה (08/11/2026): pk_<לקוח>_<פריט> = חומר של הלקוח הזה; אחרת מזהה מוצר שלו. בלחיצה/טעינה בלבד, והדפדפן
+    // שומר (הכתובת כוללת &v=מועד ⇒ תמונה חדשה = כתובת חדשה)
+    const imgId = String(req.query.img || '');
+    if (imgId) {
+      if (!/^[\w-]{1,160}$/.test(imgId)) { res.status(400).json({ error: 'img' }); return; }
+      if (imgId.startsWith('pk_')) { if (!imgId.startsWith('pk_' + cust + '_')) { res.status(404).json({ error: 'none' }); return; } }
+      else {
+        const hit = _trackCache.get(cust);
+        let own = !!(hit && hit.prods.some(p => p.id === imgId));
+        if (!own) { const ps = await db.doc('products/' + imgId).get(); own = ps.exists && String((ps.data() || {}).cust) === cust; }
+        if (!own) { res.status(404).json({ error: 'none' }); return; }
+      }
+      const t = (await db.doc('thumbs/' + imgId).get()).data();
+      if (!t || !t.img) { res.status(404).json({ error: 'none' }); return; }
+      res.set('Cache-Control', 'private, max-age=604800');
+      res.json({ img: String(t.img), at: +t.at || 0 }); return;
     }
     // ⏱ מטמון 15 דק' (trackBody): הדף מרענן כל דקה; תנועת מלאי (מסמך packStock) מגיעה ללקוח תוך דקה.
     // גם תצוגת המנהל (asCust) דרך המטמון — בלעדיו דף פתוח קרא את כל ההיסטוריה בכל דקה.
