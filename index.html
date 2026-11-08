@@ -5017,7 +5017,7 @@ function listenFb(){
     S.products=snap.docs.map(d=>({id:d.id,...d.data()}));
     _applyPricing();
     if(!snap.metadata.fromCache)_migratePricing(snap.docs);
-    saveLS();renderProducts();
+    saveLS();renderProducts();_pubRateCache();
     // 📄 תעודת משלוח נשמרת **בתוך** מסמך המוצר (p.shipments), ולשונית התעודות בונה
     // את הרשימה מ-S.products. המאזין קרא רק ל-renderProducts ⇒ מי שעמד על הלשונית
     // (או צפה בה ממכשיר שני) ראה רשימה קפואה עד ניווט או רענון, בזמן שהנתון כבר הגיע.
@@ -5033,6 +5033,7 @@ function listenFb(){
       if(d.id==='company'){S.settings.company={...(S.settings.company||{}),...data};saveLS();}
       if(d.id==='packPrices'){S.settings.packPrices={...(S.settings.packPrices||{}),...data};saveLS();}
       if(d.id==='breakDefault'&&data.start&&data.end){S.settings.breakDefault={start:data.start,end:data.end};saveLS();}
+      if(d.id==='rateW'){S.rateW=data;}
       if(d.id==='packStock'){S.packStock=data;try{pstkBadge();if(document.getElementById('pstk-wrap'))renderPackStock();}catch(e){}}
       // 🕳 יומן הביטולים משותף לכל המכשירים — מי שמחק תעודה בנייד, והמנהל
       // שמסתכל במסך הגדול, חייבים לראות את אותו חור עם אותו הסבר.
@@ -8575,11 +8576,11 @@ function buildAttDayTable(uid,fromD,toD,T,att){
 // 🌐 תוויות התוספות של 07-08/11/2026 (מחלקות במשימות, מוצר/הזמנה בדוחות, מוקצב מול בפועל לפי מחלקה)
 const RL_LBL={
   he:{prod_note:'📦 מוצר נבחר — מוצגות כל המשימות שלו, בלי קשר לתאריכים',all_orders:'כל ההזמנות',order:'הזמנה',cust:'לקוח',
-    dept:'מחלקה',units:"יח'",planned:'מוקצב',actual:'בפועל',left:'נותר',over:'חריגה',no_dept:'ללא מחלקה'},
+    dept:'מחלקה',units:"יח'",planned:'מוקצב',actual:'בפועל',left:'נותר',over:'חריגה',no_dept:'ללא מחלקה',clock:'שעון',clock_t:'בפועל = דקות שעון × תעריף העובדת ÷ התעריף הממוצע של המוצר'},
   ar:{prod_note:'📦 منتج محدد — تُعرض كل مهامه بغض النظر عن التواريخ',all_orders:'كل الطلبيات',order:'طلبية',cust:'زبون',
-    dept:'القسم',units:'قطعة',planned:'المخصص',actual:'الفعلي',left:'متبقٍ',over:'تجاوز',no_dept:'بدون قسم'},
+    dept:'القسم',units:'قطعة',planned:'المخصص',actual:'الفعلي',left:'متبقٍ',over:'تجاوز',no_dept:'بدون قسم',clock:'الساعة',clock_t:'الفعلي = دقائق الساعة × أجر العاملة ÷ متوسط أجر المنتج'},
   en:{prod_note:'📦 Product selected — all its tasks are shown, regardless of dates',all_orders:'All orders',order:'Order',cust:'Customer',
-    dept:'Department',units:'pcs',planned:'Planned',actual:'Actual',left:'Left',over:'Over',no_dept:'No department'}
+    dept:'Department',units:'pcs',planned:'Planned',actual:'Actual',left:'Left',over:'Over',no_dept:'No department',clock:'clock',clock_t:'Actual = clock minutes × worker rate ÷ product average rate'}
 };
 const _rl=k=>(RL_LBL[currentLang]||RL_LBL.he)[k]??RL_LBL.he[k];
 // 🏭 מוקצב לפי מחלקה — נקודת אמת אחת לדוח "רווח מול יעד", ללשונית משימות ולמסך התצוגה.
@@ -8602,21 +8603,24 @@ function _ordDeptPlan(p,ctx){
 function _liveOrdDeptTime(cust,prod,stamp){
   const p=prodByStamp(cust,prod,stamp);if(!p)return null;
   const units=Math.max(_prodQty(p),+p.shippedQty||0)||(+p.estQty||0);if(!units)return null;
-  const d=_ordDeptPlan(p,_pricingCtx()),act={},oc={};
+  const d=_ordDeptPlan(p,_pricingCtx()),act={},clk={},oc={};
   const mine=t=>t.cust===cust&&t.prod===prod&&taskOrderStamp(t,oc)===stamp;
   const keyOf=t=>{const k=d.stepKey[t.taskType]||_dTimeKey(t.dept)||_rl('no_dept');d.add(k);return k;};
+  // ⚖ בפועל = דקות שעון × מקדם העובדת (_rwOf) — עובדת יקרה "צורכת" יותר מהמוקצב; clk = שעון נטו לתצוגה
+  const addT=(t,min)=>{const k=keyOf(t);clk[k]=(clk[k]||0)+min;act[k]=(act[k]||0)+min*_rwOf(t.workerId,p,k.startsWith('✂ '));};
   const done=S.histTasks.filter(t=>mine(t)&&(t.duration||0)>0),nd=normalizeBatchDurations(done);
-  done.forEach(t=>{const k=keyOf(t);act[k]=(act[k]||0)+(nd[t.id]||0)/60;});
+  done.forEach(t=>addT(t,(nd[t.id]||0)/60));
   const runN={};S.activeTasks.forEach(t=>{if(!t.paused)runN[t.workerId]=(runN[t.workerId]||0)+1;});
-  S.activeTasks.forEach(t=>{if(!mine(t))return;const k=keyOf(t);
-    const sec=t.paused?(t.accumulatedSec||0):(t.elapsed||0)/(runN[t.workerId]||1);act[k]=(act[k]||0)+sec/60;});
-  const rows=d.ord.filter(k=>d.plan[k]>0||act[k]>0).map(k=>({k,plan:d.plan[k]*units,act:act[k]||0}));
+  S.activeTasks.forEach(t=>{if(!mine(t))return;
+    const sec=t.paused?(t.accumulatedSec||0):(t.elapsed||0)/(runN[t.workerId]||1);addT(t,sec/60);});
+  const rows=d.ord.filter(k=>d.plan[k]>0||act[k]>0).map(k=>({k,plan:d.plan[k]*units,act:act[k]||0,clk:clk[k]||0}));
   return{p,units,rows};
 }
 // שורת מחלקה אחת: "מוקצב X · בפועל Y · נותר/חריגה Z"
 function _deptTimeLine(r){
   const l=r.plan-r.act,c=l<0?'var(--red-txt)':'var(--green-txt,#16a34a)';
-  return`${_rl('planned')} ${r.plan>0?fmtExpMin(r.plan):'—'} · ${_rl('actual')} <b>${r.act>0?fmtExpMin(r.act):'—'}</b>${r.plan>0?` · <b style="color:${c}">${_rl(l<0?'over':'left')} ${fmtExpMin(Math.abs(l))}</b>`:''}`;
+  const ck=r.clk>0&&Math.abs(r.clk-r.act)>=1?` <span style="opacity:.65;font-weight:400" title="${esc(_rl('clock_t'))}">(${_rl('clock')} ${fmtExpMin(r.clk)})</span>`:'';
+  return`${_rl('planned')} ${r.plan>0?fmtExpMin(r.plan):'—'} · ${_rl('actual')} <b>${r.act>0?fmtExpMin(r.act):'—'}</b>${ck}${r.plan>0?` · <b style="color:${c}">${_rl(l<0?'over':'left')} ${fmtExpMin(Math.abs(l))}</b>`:''}`;
 }
 // 🔢 (08/11/2026) בחירת הזמנה של המוצר הנבחר — מוצג רק כשלמוצר יותר מהזמנה אחת. השיוך משימה⇒הזמנה
 // דרך taskOrderStamp (נקודת האמת היחידה, כמו בדוח הרווח). מחזיר {cust,st} של ההזמנה הנבחרת או null.
@@ -9513,9 +9517,9 @@ function buildProfitReport(fl){
     // 🏭 (08/11/2026 — בקשת המשתמש) מוקצב מול בפועל **לפי מחלקה**: המוקצב = הדקות ליחידה של כל שלב
     // (שהוזנו, ובלי — הנגזרות; כמו "זמן להזמנה לפי מחלקה" בחלון המוצר) לפי המחלקה שבתחנה הראשית;
     // הבפועל = זמן המשימות לפי המחלקה של השלב שלהן (שלב לא מוכר ⇒ מחלקת העובד).
-    const dp=_ordDeptPlan(p,ctx),dAct={}; // אותו חישוב מוקצב כמו בלשונית משימות ובמסך התצוגה
-    pTasks.forEach(t=>{const k=dp.stepKey[t.taskType]||_dTimeKey(t.dept)||_rl('no_dept');dp.add(k);dAct[k]=(dAct[k]||0)+(nd[t.id]||0)/60;});
-    const deptRows=dp.ord.filter(k=>dp.plan[k]>0||dAct[k]>0).map(k=>({k,planU:dp.plan[k],act:dAct[k]||0}));
+    const dp=_ordDeptPlan(p,ctx),dAct={},dClk={}; // אותו חישוב מוקצב כמו בלשונית משימות ובמסך התצוגה
+    pTasks.forEach(t=>{const k=dp.stepKey[t.taskType]||_dTimeKey(t.dept)||_rl('no_dept');dp.add(k);const m=(nd[t.id]||0)/60;dClk[k]=(dClk[k]||0)+m;dAct[k]=(dAct[k]||0)+m*_rwOf(t.workerId,p,k.startsWith('✂ '));});
+    const deptRows=dp.ord.filter(k=>dp.plan[k]>0||dAct[k]>0).map(k=>({k,planU:dp.plan[k],act:dAct[k]||0,clk:dClk[k]||0}));
     blocks.push({p,pb,stepRows,cutRows,cutActMin,withData,profit,profitPct,shipped,planned,actMinTot,deptRows});
   }
   if(!blocks.length){el.innerHTML='<div style="color:var(--txt3);font-size:12px;padding:.5rem 0">אין מוצרים מתומחרים עם משימות שהושלמו בטווח הנבחר</div>';return;}
@@ -9565,7 +9569,7 @@ function buildProfitReport(fl){
           return`<div style="flex-basis:100%;margin-top:4px"><table style="border-collapse:collapse;font-size:12px;min-width:min(100%,460px)">
             <thead><tr style="color:var(--txt3);border-bottom:1px solid var(--brd)"><th style="${td}">🏭 ${_rl('dept')} (${base} ${_rl('units')})</th><th style="${td}">${_rl('planned')}</th><th style="${td}">${_rl('actual')}</th><th style="${td}"></th></tr></thead>
             <tbody>${b.deptRows.map(r=>{const pl=r.planU*base,l=pl-r.act;
-              return`<tr style="border-bottom:0.5px dashed var(--brd)"><td style="${td}">${esc(r.k)}</td><td style="${td}">${pl>0?fmtExpMin(pl):'—'}</td><td style="${td};font-weight:600">${r.act>0?fmtExpMin(r.act):'—'}</td>
+              return`<tr style="border-bottom:0.5px dashed var(--brd)"><td style="${td}">${esc(r.k)}</td><td style="${td}">${pl>0?fmtExpMin(pl):'—'}</td><td style="${td};font-weight:600">${r.act>0?fmtExpMin(r.act):'—'}${r.clk>0&&Math.abs(r.clk-r.act)>=1?`<div style="font-size:10px;font-weight:400;color:var(--txt3)" title="${esc(_rl('clock_t'))}">${_rl('clock')} ${fmtExpMin(r.clk)}</div>`:''}</td>
                 <td style="${td};font-weight:700;color:${l<0?'var(--red-txt)':'var(--green-txt,#16a34a)'}">${pl>0?_rl(l<0?'over':'left')+' '+fmtExpMin(Math.abs(l)):''}</td></tr>`;}).join('')}</tbody></table></div>`;
         })()}
       </summary>
@@ -15757,9 +15761,37 @@ var _ohAttH={}, _ohAttP=null;
 // ועמלות בתקורה, תקורה לפי שעות תיאורטיות) ⇒ שעה זולה ב-~22% והצפי בסריקה גבוה ב-~28% מהדוחות
 // (אימאן: ₪15.54 בשרת מול ₪19.99 כאן). נכתב רק כשהתקורה מחושבת משעות הנוכחות בפועל (ob.actual)
 // ורק כשמשהו השתנה — אחרת כל פתיחה של המנהל הייתה כותבת. מנהל בלבד (adminSettings).
+// ⚖ (08/11/2026) מקדם עלות לשורת "מוקצב מול בפועל" לפי מחלקה: דקת שעון של עובדת × (תעריף שלה+תקורה) ÷
+// הממוצע של המוצר (אותו ₪20.44 שבחלון המוצר — ממוצע השלבים של _pricingStepRate+תקורה; ✂ גזירה בנפרד).
+// אחראי/מסך תצוגה לא קוראים שכר ⇒ המנהל מפרסם יחסים בלבד ל-appSettings/rateW: w={עובד: (תעריף+תקורה)/R},
+// p={מוצר:[תפירה/R, גזירה/R]}, R=ממוצע כללי+תקורה. מקדם = w/p; חסר ⇒ 1 (זמן שעון).
+function _rateWCalc(){
+  const ctx=_pricingCtx();if(!ctx)return null;
+  const R=(ctx.avgAll+ctx.oh)||0;if(!(R>0))return null;
+  const r3=v=>Math.round(v*1000)/1000,w={},p={};
+  _costWorkers().forEach(x=>{const r=loadedHourlyRate(x.id);if(r>0)w[x.id]=r3((r+ctx.oh)/R);});
+  const avg=a=>a.length?a.reduce((s,x)=>s+_pricingStepRate(stepStationKeys(x),stepLevel(x),ctx.avgAll)+ctx.oh,0)/a.length/R:0;
+  S.products.forEach(pr=>{const st=(pr.workSteps||[]).filter(s=>stepLevel(s)||stepManualMin(s)>0);if(!st.length)return;
+    const sw=r3(avg(st.filter(s=>!stepIsCut(s)))),ct=r3(avg(st.filter(stepIsCut)));if(sw||ct)p[pr.id]=[sw,ct];});
+  return Object.keys(w).length?{w,p}:null;
+}
+function _pubRateW(){
+  try{
+    if(S.user?.role!=='manager'||!S.fbConnected||!S.costs)return;
+    const v=_rateWCalc();if(!v)return;
+    const pv=S.rateW||{},eq=(a,b)=>{a=a||{};b=b||{};const ka=Object.keys(a);return ka.length===Object.keys(b).length&&ka.every(k=>JSON.stringify(a[k])===JSON.stringify(b[k]));};
+    if(eq(v.w,pv.w)&&eq(v.p,pv.p))return;
+    S.rateW={...v,at:Date.now()};
+    // updateDoc ולא merge (merge משאיר מפתחות של עובדים/מוצרים שהוסרו ⇒ השוואה שלא מתייצבת); מסמך חדש ⇒ fbSet
+    fbReplaceFields('appSettings','rateW',S.rateW).catch(()=>fbSet('appSettings','rateW',S.rateW)).catch(e=>console.error('_pubRateW:',e));
+  }catch(e){console.error('_pubRateW:',e);}
+}
+// מקדם לעובד במשימה של מוצר p (cut = שלב גזירה)
+function _rwOf(wid,p,cut){const d=S.rateW;const a=+d?.w?.[wid],b=+(d?.p?.[p?.id]||[])[cut?1:0];return a>0&&b>0?a/b:1;}
 let _rcT=null;
 function _pubRateCache(){clearTimeout(_rcT);_rcT=setTimeout(_pubRateCacheNow,3000);}
 function _pubRateCacheNow(){
+  _pubRateW();
   try{
     if(S.user?.role!=='manager'||!S.fbConnected||!S.costs)return;
     const ob=overheadBreakdown();if(!ob.actual||!(ob.perHour>=0))return;
