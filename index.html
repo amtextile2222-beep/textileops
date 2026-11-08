@@ -20408,9 +20408,11 @@ async function loadProdImgs(id){
 function refreshImgPreview(){
   const el=document.getElementById('prod-img-preview');
   if(!el)return;
-  el.innerHTML=_prodImgs.map((img,i)=>`<div style="position:relative"><img src="${img}" title="לחיצה — חיתוך" onclick="recropProdImg(${i})" style="width:72px;height:72px;object-fit:cover;border-radius:6px;border:1px solid var(--brd);cursor:pointer"><button type="button" onclick="removeProdImg(${i})" style="position:absolute;top:-4px;right:-4px;background:var(--red);color:#fff;border:none;border-radius:50%;width:18px;height:18px;font-size:11px;cursor:pointer;line-height:1">✕</button><button type="button" title="חיתוך" onclick="recropProdImg(${i})" style="position:absolute;bottom:-4px;right:-4px;background:#333;color:#fff;border:none;border-radius:50%;width:20px;height:20px;font-size:11px;cursor:pointer;line-height:1">✂</button></div>`).join('');
+  el.innerHTML=_prodImgs.map((img,i)=>`<div style="position:relative"><img src="${img}" title="לחיצה — חיתוך" onclick="recropProdImg(${i})" style="width:72px;height:72px;object-fit:cover;border-radius:6px;border:1px solid var(--brd);cursor:pointer"><button type="button" onclick="removeProdImg(${i})" style="position:absolute;top:-4px;right:-4px;background:var(--red);color:#fff;border:none;border-radius:50%;width:18px;height:18px;font-size:11px;cursor:pointer;line-height:1">✕</button>${i?`<button type="button" title="תמונה ראשית — מוצגת ללקוח בדף המעקב" onclick="mainProdImg(${i})" style="position:absolute;top:-4px;left:-4px;background:#fff;color:#f59e0b;border:1px solid var(--brd);border-radius:50%;width:20px;height:20px;font-size:11px;cursor:pointer;line-height:1;padding:0">☆</button>`:`<span title="תמונה ראשית — מוצגת ללקוח בדף המעקב" style="position:absolute;top:-4px;left:-4px;background:#f59e0b;color:#fff;border-radius:50%;width:20px;height:20px;font-size:11px;line-height:20px;text-align:center">⭐</span>`}<button type="button" title="חיתוך" onclick="recropProdImg(${i})" style="position:absolute;bottom:-4px;right:-4px;background:#333;color:#fff;border:none;border-radius:50%;width:20px;height:20px;font-size:11px;cursor:pointer;line-height:1">✂</button></div>`).join('');
 }
 
+// ⭐ תמונה ראשית (08/11/2026) — הראשונה ברשימה היא תמונת הדגם בדף הלקוח (_prodThumb בשמירה)
+function mainProdImg(i){if(i>0&&i<_prodImgs.length){_prodImgs.unshift(..._prodImgs.splice(i,1));refreshImgPreview();}}
 function removeProdImg(i){_prodImgs.splice(i,1);refreshImgPreview();}
 
 async function addProdDocs(input){
