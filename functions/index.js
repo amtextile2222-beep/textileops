@@ -539,14 +539,30 @@ exports.calcTaskExpected = functions.https.onCall(async (data, context) => {
   const costsSnap = await db.collection('adminSettings').doc('costs').get();
   if (!costsSnap.exists) return { ok: false, reason: 'no-costs' };
   const costs = costsSnap.data();
-  const workersSnap = await db.collection('workers').get();
-  const active = workersSnap.docs.map(x => ({ id: x.id, ...x.data() })).filter(w => w.role !== 'manager' && !w.disabled);
-  const nW = active.length || 1;
-  const oh = overheadPerHourServer(costs, nW);
-  let rate = loadedRateServer(costs, nW, workerId);
-  if (!rate) { // אין שכר לעובד — ממוצע כל העובדים עם שכר (כמו fallback בלקוח)
-    const rated = active.filter(w => (costs.workerRates || {})[w.id]);
-    rate = rated.length ? rated.reduce((s, w) => s + loadedRateServer(costs, nW, w.id), 0) / rated.length : 0;
+  // 💱 (08/11/2026) rateCache = עלות השעה של כל עובד + התקורה **כפי שהלקוח מחשב אותן** (_pubRateCache,
+  // נכתב מהמנהל). הנוסחה שכאן למטה התיישנה מול הלקוח: בלי מתנות/טיול לעובד, בלי מסים ועמלות בתקורה,
+  // ותקורה לפי שעות תיאורטיות ⇒ שעה זולה ב-~22% וצפי גבוה ב-~28% מהדוחות (אימאן: 15.54 מול 19.99).
+  // היא נשארת רק כ-fallback כשאין עדיין rateCache.
+  const rc = costs.rateCache;
+  const hasRc = rc && rc.w && typeof rc.w === 'object' && Object.keys(rc.w).length && isFinite(+rc.oh);
+  let oh, rate;
+  if (hasRc) {
+    oh = +rc.oh || 0;
+    rate = +rc.w[workerId] || 0;
+    if (!rate) { // אין שכר לעובד — ממוצע כל העובדים עם שכר (כמו avgAll בלקוח)
+      const v = Object.values(rc.w).map(Number).filter(x => x > 0);
+      rate = v.length ? v.reduce((a, b) => a + b, 0) / v.length : 0;
+    }
+  } else {
+    const workersSnap = await db.collection('workers').get(); // רק במסלול הישן — חוסך קריאה של כל העובדים בכל סריקה
+    const active = workersSnap.docs.map(x => ({ id: x.id, ...x.data() })).filter(w => w.role !== 'manager' && !w.disabled);
+    const nW = active.length || 1;
+    oh = overheadPerHourServer(costs, nW);
+    rate = loadedRateServer(costs, nW, workerId);
+    if (!rate) { // אין שכר לעובד — ממוצע כל העובדים עם שכר (כמו fallback בלקוח)
+      const rated = active.filter(w => (costs.workerRates || {})[w.id]);
+      rate = rated.length ? rated.reduce((s, w) => s + loadedRateServer(costs, nW, w.id), 0) / rated.length : 0;
+    }
   }
   const hourCost = rate + oh;
   if (!(hourCost > 0)) return { ok: false, reason: 'no-rate' };

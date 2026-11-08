@@ -4886,7 +4886,7 @@ function startDataListeners(){
     const{collection,onSnapshot}=window._fb;
     _live('adminSettings',()=>collection(db,'adminSettings'),snap=>{
       snap.docs.forEach(d=>{
-        if(d.id==='costs'){S.costs={...S.costs,...d.data()};saveLS();}
+        if(d.id==='costs'){S.costs={...S.costs,...d.data()};saveLS();_pubRateCache();}
         // 📧 מיילים מורשים למעקב הזמנות — בזיכרון בלבד, לא ב-localStorage
         if(d.id==='custLinks'){_custEmails=d.data()?.emails||{};_custLinkRefresh();}
         if(d.id==='custTrackLog'){_custLog=d.data()?.entries||{};_custLinkRefresh();}
@@ -15752,6 +15752,28 @@ function overheadBreakdown(){
 }
 // שעות נוכחות נטו בפועל לחודש (YYYY-MM), בלי מנהלים — המכנה של התקורה לשעה. נטען פעם אחת לחודש.
 var _ohAttH={}, _ohAttP=null;
+// 💱 (08/11/2026) עלות השעה של כל עובד + התקורה **כפי שהלקוח מחשב אותן** ⇒ adminSettings/costs.rateCache,
+// ו-calcTaskExpected בשרת משתמש בהן. עד היום השרת חישב בנוסחה ישנה (בלי מתנות/טיול לעובד, בלי מסים
+// ועמלות בתקורה, תקורה לפי שעות תיאורטיות) ⇒ שעה זולה ב-~22% והצפי בסריקה גבוה ב-~28% מהדוחות
+// (אימאן: ₪15.54 בשרת מול ₪19.99 כאן). נכתב רק כשהתקורה מחושבת משעות הנוכחות בפועל (ob.actual)
+// ורק כשמשהו השתנה — אחרת כל פתיחה של המנהל הייתה כותבת. מנהל בלבד (adminSettings).
+let _rcT=null;
+function _pubRateCache(){clearTimeout(_rcT);_rcT=setTimeout(_pubRateCacheNow,3000);}
+function _pubRateCacheNow(){
+  try{
+    if(S.user?.role!=='manager'||!S.fbConnected||!S.costs)return;
+    const ob=overheadBreakdown();if(!ob.actual||!(ob.perHour>=0))return;
+    const r2=v=>Math.round(v*100)/100,w={};
+    _costWorkers().forEach(x=>{const r=loadedHourlyRate(x.id);if(r>0)w[x.id]=r2(r);});
+    if(!Object.keys(w).length)return;
+    const oh=r2(ob.perHour),prev=S.costs.rateCache||{},pw=prev.w||{};
+    const same=prev.oh===oh&&Object.keys(w).length===Object.keys(pw).length&&Object.keys(w).every(k=>pw[k]===w[k]);
+    if(same)return;
+    S.costs.rateCache={oh,w,at:Date.now()};
+    // updateDoc ולא merge: merge משאיר בתוך w עובדים שהוסרו ⇒ ההשוואה למעלה לא הייתה מתייצבת (כתיבה כל 3 שנ')
+    fbReplaceFields('adminSettings','costs',{rateCache:S.costs.rateCache}).catch(e=>console.error('_pubRateCache:',e));
+  }catch(e){console.error('_pubRateCache:',e);}
+}
 function _ensureOhHours(months){
   const miss=(months||[]).filter(m=>_ohAttH[m]==null);
   if(!miss.length)return Promise.resolve();
@@ -15766,6 +15788,7 @@ function _ensureOhHours(months){
   }).catch(e=>console.error('_ensureOhHours:',e)).finally(()=>{
     _ohAttP=null;
     try{renderOverheadResult();renderLoadedHourTable();}catch(e){}
+    _pubRateCache(); // שעות הנוכחות נטענו ⇒ התקורה עכשיו בפועל — לעדכן את השרת
   });
   return _ohAttP;
 }
