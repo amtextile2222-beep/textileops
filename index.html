@@ -8693,8 +8693,10 @@ async function buildRep(){
   }).join('');
   // update filters
   const wOpts=[...new Set(all.map(t=>t.workerName))];
-  const cOpts=[...new Set(all.map(t=>t.cust))];
-  const pOpts=[...new Set(all.map(t=>t.prod))];
+  const cOpts=[...new Set([...all.map(t=>t.cust),...S.products.map(p=>p.cust).filter(Boolean)])].sort();
+  // 📦 (08/11/2026) גם כל המוצרים שבכרטיסים (לפי הלקוח הנבחר) — אחרת אפשר היה לבחור רק מוצר עם משימות בטווח
+  // התאריכים, ואחרי בחירה הרשימה הצטמצמה למוצר הנבחר + הרצים (14771 שלא נסרק היום לא הופיע)
+  const pOpts=[...new Set([...all.map(t=>t.prod),...S.products.filter(p=>p.prod&&(!cf||p.cust===cf)).map(p=>String(p.prod))])].sort((a,b)=>a.localeCompare(b,undefined,{numeric:true}));
   const rfw=document.getElementById('rf-w');const rfc=document.getElementById('rf-c');const rfp=document.getElementById('rf-p');
   rfw.innerHTML='<option value="">כל העובדים</option>'+wOpts.map(w=>`<option value="${esc(w)}" ${w===wf?'selected':''}>${esc(w)}</option>`).join('');
   rfc.innerHTML='<option value="">כל הלקוחות</option>'+cOpts.map(c=>`<option value="${c}" ${c===cf?'selected':''}>לקוח ${c}</option>`).join('');
