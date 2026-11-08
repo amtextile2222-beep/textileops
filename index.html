@@ -8611,8 +8611,8 @@ function _liveOrdDeptTime(cust,prod,stamp){
   const done=S.histTasks.filter(t=>mine(t)&&(t.duration||0)>0),nd=normalizeBatchDurations(done);
   done.forEach(t=>addT(t,(nd[t.id]||0)/60));
   const runN={};S.activeTasks.forEach(t=>{if(!t.paused)runN[t.workerId]=(runN[t.workerId]||0)+1;});
-  S.activeTasks.forEach(t=>{if(!mine(t))return;
-    const sec=t.paused?(t.accumulatedSec||0):(t.elapsed||0)/(runN[t.workerId]||1);addT(t,sec/60);});
+  S.activeTasks.forEach(t=>{if(!mine(t))return; // elapsed ריק אחרי snapshot עד ה-tick הבא ⇒ מחשבים כאן (אחרת קפיצה זמנית למטה)
+    const sec=t.paused?(t.accumulatedSec||0):(t.elapsed>0?t.elapsed:(t.accumulatedSec||0)+calcTaskDurSec(t.startTime,new Date(),t.workerId))/(runN[t.workerId]||1);addT(t,sec/60);});
   const rows=d.ord.filter(k=>d.plan[k]>0||act[k]>0).map(k=>({k,plan:d.plan[k]*units,act:act[k]||0,clk:clk[k]||0}));
   return{p,units,rows};
 }
