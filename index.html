@@ -7752,9 +7752,9 @@ function renderTasks(){
     const deptTimeHtml=dept=>{
       const dk=_dTimeKey(dept)||_rl('no_dept'),seen=new Set();let h='';
       _sg.filter(g=>g.dept===dept).forEach(g=>{const t=g.tasks[0],st=taskOrderStamp(t,_oc),key=t.cust+'|'+t.prod+'|'+st;
-        if(seen.has(key))return;seen.add(key);
+        if(seen.has(key))return;seen.add(key);(_dtArgs??={})[key]=[t.cust,t.prod,st];
         const r=(_dtCache[key]??=_liveOrdDeptTime(t.cust,t.prod,st))?.rows.find(x=>x.k===dk);if(!r)return;
-        h+=`<div style="font-size:12px;color:var(--txt2);margin:-2px 0 6px;padding:4px 10px;background:var(--bg2);border-radius:8px">⏱ <span class="bc-seg bc-p">${esc(t.prod)}</span>${taskOrderLbl(t)?' <b style="color:var(--green-txt,#16a34a)">#'+taskOrderLbl(t).replace(/^#/,'')+'</b>':''} · ${_deptTimeLine(r)}</div>`;});
+        h+=`<div data-dtk="${esc(key)}" data-dtd="${esc(dk)}" style="font-size:12px;color:var(--txt2);margin:-2px 0 6px;padding:4px 10px;background:var(--bg2);border-radius:8px">⏱ <span class="bc-seg bc-p">${esc(t.prod)}</span>${taskOrderLbl(t)?' <b style="color:var(--green-txt,#16a34a)">#'+taskOrderLbl(t).replace(/^#/,'')+'</b>':''} · <span class="dt-ln">${_deptTimeLine(r)}</span></div>`;});
       return h;};
     al.innerHTML=_sg.map(g=>{
     // 🏭 כותרת מחלקה (מנהל/אחראי) — לפני הקבוצה הראשונה של כל מחלקה
@@ -8340,6 +8340,20 @@ function injectKioskCss(){
   document.head.appendChild(s);
 }
 
+// ⏱ (08/11/2026) רענון "מוקצב מול בפועל" פעם בדקה — בלי זה השורה זזה רק כשמגיע שינוי מהשרת (סריקה/סגירה),
+// ובזמן שקט נשארת קפואה. לשונית משימות: רק שורות המחלקה (data-dtk/data-dtd) — לא כל הרשימה. מסך תצוגה: renderKiosk.
+// אפס קריאות Firestore (S.histTasks + S.activeTasks בזיכרון). _dtArgs = [לקוח,מוצר,stamp] לפי מפתח (stamp יכול להיות null).
+var _dtArgs=_dtArgs||{}; // var: renderTasks יכול לרוץ לפני השורה הזאת (TDZ)
+setInterval(()=>{
+  if(document.hidden)return;
+  try{
+    if(typeof _kioskOpen!=='undefined'&&_kioskOpen){renderKiosk();return;}
+    const els=document.querySelectorAll('#page-tasks.active [data-dtk]');if(!els.length)return;
+    const c={};els.forEach(el=>{const k=el.dataset.dtk,a=_dtArgs[k];if(!a)return;
+      const r=(c[k]??=_liveOrdDeptTime(...a))?.rows.find(x=>x.k===el.dataset.dtd);
+      const ln=el.querySelector('.dt-ln');if(r&&ln)ln.innerHTML=_deptTimeLine(r);});
+  }catch(e){console.error('dept time refresh:',e);}
+},60000);
 // ─── TIMER TICK ─────────────────────────────────────────────
 setInterval(()=>{
   if(document.hidden)return;
