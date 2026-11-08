@@ -9446,7 +9446,17 @@ function buildProfitReport(fl){
     // כמות שיצאה בפועל (מברקוד "יצא ללקוח") — לרווח האמיתי של ההזמנה: הכנסה רק על מה שיצא
     const shipped=p.shippedQty!=null?Math.max(0,+p.shippedQty||0):null;
     const planned=_prodQty(p); // פר-רשומה — אותו באג בדיוק כמו בדוח "כמות שהושלמה לפי שלב"
-    blocks.push({p,pb,stepRows,cutRows,cutActMin,withData,profit,profitPct,shipped,planned,actMinTot});
+    // 🏭 (08/11/2026 — בקשת המשתמש) מוקצב מול בפועל **לפי מחלקה**: המוקצב = הדקות ליחידה של כל שלב
+    // (שהוזנו, ובלי — הנגזרות; כמו "זמן להזמנה לפי מחלקה" בחלון המוצר) לפי המחלקה שבתחנה הראשית;
+    // הבפועל = זמן המשימות לפי המחלקה של השלב שלהן (שלב לא מוכר ⇒ מחלקת העובד).
+    const dKey=st=>{let k=st?String(st).split('::')[0]:'';if(pipeFamOfDept(k)==='sew')k=k.replace(/\s*\d+\s*$/,'');return k;};
+    const dPlan={},dAct={},dOrd=[],dAdd=k=>{if(!(k in dPlan)){dPlan[k]=0;dAct[k]=0;dOrd.push(k);}};
+    const stepKey={};(p.workSteps||[]).forEach(s=>{const n=stepName(s);if(!n||n in stepKey)return;const k=(stepIsCut(s)?'✂ ':'')+(dKey(stepStation(s))||'ללא מחלקה');stepKey[n]=k;dAdd(k);});
+    pb.lvl.forEach((s,i)=>{const b=pb.stepBud[i];dPlan[stepKey[stepName(s)]]+=(b.typed>0?b.typed:b.min);});
+    pb.cutLvl.forEach((s,i)=>{const b=pb.cutStepBud[i];dPlan[stepKey[stepName(s)]]+=(b.typed>0?b.typed:b.min);});
+    pTasks.forEach(t=>{const k=stepKey[t.taskType]||dKey(t.dept)||'ללא מחלקה';dAdd(k);dAct[k]+=(nd[t.id]||0)/60;});
+    const deptRows=dOrd.filter(k=>dPlan[k]>0||dAct[k]>0).map(k=>({k,planU:dPlan[k],act:dAct[k]}));
+    blocks.push({p,pb,stepRows,cutRows,cutActMin,withData,profit,profitPct,shipped,planned,actMinTot,deptRows});
   }
   if(!blocks.length){el.innerHTML='<div style="color:var(--txt3);font-size:12px;padding:.5rem 0">אין מוצרים מתומחרים עם משימות שהושלמו בטווח הנבחר</div>';return;}
   el.innerHTML=`<div style="font-size:11px;color:var(--txt3);margin-bottom:6px">רווח בפועל ליחידה = מחיר − חומרים − עלות עבודה+תקורה בפועל · שלבים בלי נתונים מחושבים לפי המוקצב · 🚚 אמיתי = הכנסה רק על הכמות שיצאה ללקוח בפועל</div>`+blocks.map(b=>{
@@ -9488,6 +9498,16 @@ function buildProfitReport(fl){
         })()}
         ${b.pb.cutPrice>0?`<span class="badge gray" title="הגזירה מתומחרת בנפרד עם אחוז רווח משלה ונמדדת בכרטיס '✂ גזירה — תקציב מול בפועל'. הרווח שמוצג כאן הוא על מחיר המכירה בלבד, ללא שעות הגזירה.">✂ +₪${b.pb.cutPrice.toFixed(2)}/יח' · רווח ${b.pb.cutPct.toFixed(0)}%${b.pb.cutHasPct?'':' ⚠'} — נמדד בנפרד</span>`:''}
         <span style="font-size:11px;color:var(--txt3)">${b.withData}/${b.stepRows.length} שלבים עם נתונים</span>
+        ${(()=>{ // 🏭 מוקצב מול בפועל לפי מחלקה — יחידות = המקסימום מתוכנן/יצא, כמו בשורת הזמן
+          const base=Math.max(b.planned,b.shipped||0);
+          if(!b.deptRows.length||!(base>0))return'';
+          const td='padding:3px 8px;text-align:right';
+          return`<div style="flex-basis:100%;margin-top:4px"><table style="border-collapse:collapse;font-size:12px;min-width:min(100%,460px)">
+            <thead><tr style="color:var(--txt3);border-bottom:1px solid var(--brd)"><th style="${td}">🏭 מחלקה (${base} יח')</th><th style="${td}">מוקצב</th><th style="${td}">בפועל</th><th style="${td}"></th></tr></thead>
+            <tbody>${b.deptRows.map(r=>{const pl=r.planU*base,l=pl-r.act;
+              return`<tr style="border-bottom:0.5px dashed var(--brd)"><td style="${td}">${esc(r.k)}</td><td style="${td}">${pl>0?fmtExpMin(pl):'—'}</td><td style="${td};font-weight:600">${r.act>0?fmtExpMin(r.act):'—'}</td>
+                <td style="${td};font-weight:700;color:${l<0?'var(--red-txt)':'var(--green-txt,#16a34a)'}">${pl>0?(l<0?'חריגה ':'נותר ')+fmtExpMin(Math.abs(l)):''}</td></tr>`;}).join('')}</tbody></table></div>`;
+        })()}
       </summary>
       <div style="padding:6px 8px 2px">${b.stepRows.map(s=>{
         const has=s.actPU!=null;
