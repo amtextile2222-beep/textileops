@@ -83,6 +83,17 @@ h2{font-size:14px;color:var(--txt2);margin:20px 0 8px}
 .lay.has-stk{display:grid;grid-template-columns:minmax(0,1fr) 300px;gap:16px;align-items:start}
 .lay.has-stk aside{position:sticky;top:12px;max-height:calc(100vh - 24px);overflow-y:auto;overscroll-behavior:contain}
 @media (max-width:760px){.lay.has-stk{display:flex;flex-direction:column;gap:0}.lay.has-stk aside{order:-1;position:static;max-height:none;overflow:visible}}
+/* ✂️ דוח גזירה (08/11/2026): שורה בכרטיס ⇒ חלון עם הדוח (iframe) והדפסה */
+.cutb{display:flex;align-items:center;width:100%;margin-top:8px;padding:8px 10px;border-radius:10px;border:1px solid var(--brd);background:var(--blue-bg);color:var(--blue);font:inherit;font-size:13px;font-weight:700;cursor:pointer;text-align:right}
+.cutb span{margin-right:auto;font-size:16px}
+.cutm{position:fixed;inset:0;background:rgba(0,0,0,.5);display:flex;align-items:center;justify-content:center;padding:10px;z-index:50}
+.cutm-b{background:var(--card);border-radius:14px;width:100%;max-width:900px;height:100%;max-height:92vh;display:flex;flex-direction:column;overflow:hidden}
+.cutm-h{display:flex;align-items:center;gap:8px;padding:10px 12px;border-bottom:1px solid var(--brd);font-size:14px}
+.cutm-h button{font:inherit;font-size:14px;padding:6px 12px;border-radius:10px;border:1px solid var(--brd);background:var(--card);color:var(--txt);cursor:pointer}
+.cutm-h #cutp{background:var(--acc);color:#fff;border:0;font-weight:700}
+.cutm-h #cutp:disabled{opacity:.5}
+#cutc{flex:1;display:flex}
+.cutf{flex:1;width:100%;border:0;background:#fff}
 footer{font-size:11px;color:var(--txt3);text-align:center;margin:20px 0 8px}
 footer button{background:none;border:0;color:var(--blue);font:inherit;cursor:pointer;text-decoration:underline;padding:0}
 .login{max-width:380px;margin:30px auto;text-align:center}
@@ -161,8 +172,29 @@ function card(o){
     ${pct!=null?`<div class="pct" title="${pct}%"><b style="width:${Math.max(0,Math.min(100,pct))}%"></b></div>`:''}
     ${o.out>0?`<div class="stage">🚚 נשלחו ${o.out} יח' · השאר: ${esc(STAGES[o.stage]||'בייצור')}</div>`:''}
     ${shHtml}
+    ${o.cut?`<button class="cutb" data-cut="${esc(o.cut)}" data-nm="${esc(o.name||('דגם '+o.prod))}">✂️ דוח גזירה <span>‹</span></button>`:''}
   </div>`;
 }
+// ✂️ דוח גזירה (08/11/2026) — אותו דף שמודפס במפעל (cutPrints), נטען מהשרת רק בלחיצה. iframe בלי סקריפטים
+async function openCut(pid,nm){
+  const u=(AS?mAuth:auth).currentUser;if(!u)return;
+  $('cutm')?.remove();
+  const m=document.createElement('div');m.id='cutm';m.className='cutm';
+  m.innerHTML=`<div class="cutm-b"><div class="cutm-h"><b>✂️ דוח גזירה · ${esc(nm)}</b><span style="flex:1"></span>
+    <button id="cutp" disabled>🖨 הדפסה</button><button id="cutx">✕</button></div><div id="cutc" class="msg">⏳ טוען…</div></div>`;
+  document.body.appendChild(m);
+  const close=()=>m.remove();
+  $('cutx').onclick=close;m.onclick=e=>{if(e.target===m)close();};
+  try{
+    const r=await fetch(URL_FN+'?cutp='+encodeURIComponent(pid)+(AS?'&cust='+encodeURIComponent(AS):''),{cache:'no-store',headers:{Authorization:'Bearer '+await u.getIdToken(),'X-Dev':devId()}});
+    if(!r.ok)throw new Error(r.status);
+    const d=await r.json();
+    const f=document.createElement('iframe');f.className='cutf';f.setAttribute('sandbox','allow-same-origin allow-modals');f.srcdoc=d.html;
+    const c=$('cutc');c.className='';c.innerHTML='';c.appendChild(f);
+    const pb=$('cutp');pb.disabled=false;pb.onclick=()=>{try{f.contentWindow.focus();f.contentWindow.print();}catch(e){alert('ההדפסה לא נתמכת בדפדפן הזה');}};
+  }catch(e){const c=$('cutc');if(c)c.textContent='⚠️ לא ניתן לטעון את הדוח כרגע. נסו שוב בעוד רגע.';}
+}
+appEl.addEventListener('click',e=>{const b=e.target.closest('.cutb');if(b)openCut(b.dataset.cut,b.dataset.nm);});
 const outBtn=()=>'<button id="out">התנתקות</button>';
 // התנתקות ⇒ גם ביטול ההתראות במכשיר (אחרת מכשיר שהתנתק היה ממשיך לקבל עדכונים)
 const bindOut=()=>{const b=$('out');if(b)b.onclick=async()=>{if(pushSt?.on)try{await pushCall('POST',{off:true});}catch(e){}pushSt=null;$('pushbar').innerHTML='';signOut(auth);};};

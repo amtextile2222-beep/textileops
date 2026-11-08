@@ -2957,16 +2957,7 @@ function _crCalc(r){
 const cutReportBtnHtml=v=>bcOrderProd(v)?`<button class="btn" style="width:100%;margin-top:6px;font-size:14px;font-weight:700;border-color:var(--blue-txt);color:var(--blue-txt)" onclick="openCutReport('${escj(String(bcOrderProd(v).id))}')">✂️ דוח גזירה · تقرير القص</button>`:'';
 function openCutReport(pid){
   const p=(S.products||[]).find(x=>String(x.id)===String(pid));if(!p){showToast('⚠ ההזמנה לא נמצאה','var(--red-txt)');return;}
-  const r=p.cutReport||{};
-  _cr={markers:JSON.parse(JSON.stringify(r.markers||[])),rolls:JSON.parse(JSON.stringify(r.rolls||[])),strips:JSON.parse(JSON.stringify(r.strips||[])),baseAt:+r.at||0,extra:{}};
-  (r.extra||[]).forEach(x=>{if(+x.m>0)_cr.extra[x.c]=+x.m;});
-  const sz=new Set((p.quantities||[]).map(q=>String(q.size||'')).filter(s=>/^\d$/.test(s)));
-  _cr.markers.forEach(m=>(m.sz||[]).forEach(z=>sz.add(String(z.s))));
-  _cr.sizes=[...sz].sort();if(!_cr.sizes.length)_cr.sizes=['1','2','3','4','5'];
-  _cr.markers.sort((a,b)=>(+b.len||0)-(+a.len||0)); // הארוכה (הציור המלא) ראשונה
-  // 🎯 כמה צריך — נשמר בדוח (טבלת הכמויות מוחלפת בשמירה במה שנגזר, אז היא לא יכולה להיות היעד). בפתיחה ראשונה — מטבלת הכמויות
-  _cr.need=Array.isArray(r.need)?JSON.parse(JSON.stringify(r.need)):(p.quantities||[]).filter(q=>+q.qty>0&&q.color&&/^\d$/.test(String(q.size))).map(q=>({c:String(q.color),s:String(q.size),n:+q.qty}));
-  _cr.pcols=[...new Set((p.quantities||[]).map(q=>String(q.color||'')).filter(Boolean))];
+  _cr=_crState(p);
   if(!_cr.markers.length)_cr.markers.push({id:_crId(),len:'',sz:[]});
   if(!_cr.rolls.length)_cr.rolls.push(_crNewRoll(p));
   document.getElementById('cr-wrap')?.remove();
@@ -2974,6 +2965,38 @@ function openCutReport(pid){
   wrap.style.cssText='position:fixed;inset:0;background:rgba(0,0,0,.5);display:flex;align-items:flex-start;justify-content:center;z-index:9999;padding:12px;overflow-y:auto';
   document.body.appendChild(wrap);
   renderCutReport();
+}
+// מצב החלון מהדוח השמור (גם ל-_crPublish — בלי חלון)
+function _crState(p){
+  const r=p.cutReport||{};
+  const c={markers:JSON.parse(JSON.stringify(r.markers||[])),rolls:JSON.parse(JSON.stringify(r.rolls||[])),strips:JSON.parse(JSON.stringify(r.strips||[])),baseAt:+r.at||0,extra:{}};
+  (r.extra||[]).forEach(x=>{if(+x.m>0)c.extra[x.c]=+x.m;});
+  const sz=new Set((p.quantities||[]).map(q=>String(q.size||'')).filter(s=>/^\d$/.test(s)));
+  c.markers.forEach(m=>(m.sz||[]).forEach(z=>sz.add(String(z.s))));
+  c.sizes=[...sz].sort();if(!c.sizes.length)c.sizes=['1','2','3','4','5'];
+  c.markers.sort((a,b)=>(+b.len||0)-(+a.len||0)); // הארוכה (הציור המלא) ראשונה
+  // 🎯 כמה צריך — נשמר בדוח (טבלת הכמויות מוחלפת בשמירה במה שנגזר, אז היא לא יכולה להיות היעד). בפתיחה ראשונה — מטבלת הכמויות
+  c.need=Array.isArray(r.need)?JSON.parse(JSON.stringify(r.need)):(p.quantities||[]).filter(q=>+q.qty>0&&q.color&&/^\d$/.test(String(q.size))).map(q=>({c:String(q.color),s:String(q.size),n:+q.qty}));
+  c.pcols=[...new Set((p.quantities||[]).map(q=>String(q.color||'')).filter(Boolean))];
+  return c;
+}
+// 📦 דוח גזירה בדף הלקוח (08/11/2026): בכל שמירה — אותו דף הדפסה נשמר ב-cutPrints/{מזהה מוצר} = {html,at,cust,prod},
+// ו-cutReport.pAt = at מסמן שהעותק עדכני. customerTrack מציג שורה "דוח גזירה" רק כשיש pAt, וטוען את ה-html בלחיצה.
+// דוח שנשמר לפני כן / בגרסה ישנה (pAt ≠ at) — המנהל מפרסם ברקע (_crBackfill)
+async function _crPublish(p,st){
+  const at=+p.cutReport?.at||0;if(!at)return false;
+  const keep=_cr;_cr=st||_crState(p);
+  let html;try{html=_crHtml(p,'עודכן '+new Date(at).toLocaleString('he-IL',{day:'2-digit',month:'2-digit',year:'numeric',hour:'2-digit',minute:'2-digit'}));}finally{_cr=keep;}
+  try{await fbSet('cutPrints',String(p.id),{html,at,cust:String(p.cust||''),prod:String(p.prod||'')});}catch(e){return false;}
+  return true;
+}
+const _crBfDone=new Set();
+async function _crBackfill(){
+  if(S.user?.role!=='manager'||!S.fbConnected)return;
+  for(const p of (S.products||[])){const r=p.cutReport;
+    if(!r||!+r.at||+r.pAt===+r.at||!(r.rolls||[]).length||_crBfDone.has(p.id+'_'+r.at))continue;
+    _crBfDone.add(p.id+'_'+r.at);
+    if(await _crPublish(p))await fbUpdateOnly('products',String(p.id),{'cutReport.pAt':+r.at});}
 }
 function _crNewRoll(p){
   const last=_cr?.rolls?.[_cr.rolls.length-1];
@@ -3184,6 +3207,14 @@ function crCalcView(){
 // 🖨 הדפסת הדוח (27/10/2026) — מהחלון הפתוח, כולל שינויים שלא נשמרו. A4; באייפון PDF ⇒ שיתוף, כמו דף השלבים
 async function printCutReport(){
   const p=(S.products||[]).find(x=>String(x.id)===String(document.getElementById('cr-wrap')?.dataset.pid));if(!p||!_cr)return;
+  const html=_crHtml(p,'הודפס '+new Date().toLocaleString('he-IL',{day:'2-digit',month:'2-digit',year:'numeric',hour:'2-digit',minute:'2-digit'}));
+  if(!_isIOS()){printViaIframe(html);return;}
+  showToast('⏳ מכין PDF…','var(--txt3)',4000);
+  let blob;try{blob=await _dnPdfBlob(html);}catch(e){alert('הכנת ה-PDF נכשלה: '+(e?.message||e));return;}
+  await _printPdfBlob(blob,'cut-report-'+(p.prod||'0')+'.pdf');
+}
+// דף ההדפסה מ-_cr (החלון הפתוח, או מצב שמור ב-_crPublish). sub = "הודפס …" / "עודכן …"
+function _crHtml(p,sub){
   const c=_crCalc(_cr),steps=_cr.markers.filter(m=>+m.len>0),cn=c=>esc((COLORS[c]||c)+'');
   const sizes=[...new Set([...Object.keys(c.units).map(k=>k.split('|')[0]),..._cr.need.map(x=>x.s)])].sort();
   const cols=[...new Set([...Object.keys(c.units).map(k=>k.split('|')[1]),..._cr.need.filter(x=>+x.n>0).map(x=>x.c)])];
@@ -3214,16 +3245,13 @@ async function printCutReport(){
     table{width:100%;border-collapse:collapse}td,th{border:1px solid #888;padding:4px 5px;text-align:center;vertical-align:top}th{background:#eee}
     .s{font-size:10px;color:#555}.neg{color:#b91c1c;font-weight:700}.note{margin-top:6px;font-size:12px}.tot{margin-top:10px;font-size:13px;font-weight:700}
     tr{page-break-inside:avoid}</style></head><body>
-    <h2>${esc(title)}</h2><div class="sub">${p.name?esc(p.name)+' · ':''}הודפס ${new Date().toLocaleString('he-IL',{day:'2-digit',month:'2-digit',year:'numeric',hour:'2-digit',minute:'2-digit'})}${p.cutReport?.byName?' · נשמר ע"י '+esc(p.cutReport.byName):''}</div>
+    <h2>${esc(title)}</h2><div class="sub">${p.name?esc(p.name)+' · ':''}${sub}${p.cutReport?.byName?' · נשמר ע"י '+esc(p.cutReport.byName):''}</div>
     ${stepTbl}${stripTxt}${rollTbl}${sumTbl}
     <div class="tot">סה"כ ${Object.values(c.units).reduce((a,b)=>a+b,0)} יח'${gn?' מתוך '+gn:''} · נוצל ${_crM(used)} מ'${gt?' · '+_crM(used/gt)+" מ' ליחידה":''}${left?' · שארית '+_crM(left)+" מ'":''}${bad?' · סוג ב '+_crM(bad)+" מ'":''}${short?' · חסר מהמדבקות '+_crM(short)+" מ'":''}</div>
     ${exTbl}
     ${plan.length?`<h3>נשאר לפרוס (פרסות)</h3><table><tr><th>צבע</th>${steps.map(m=>`<th>${_crM(+m.len)}</th>`).join('')}</tr>${plan.map(x=>`<tr><td>${cn(x.col)}</td>${steps.map(m=>{const r=x.rows.find(y=>y.m.id===m.id);return`<td>${r&&r.n?'<b>'+r.n+'</b>':''}</td>`;}).join('')}</tr>`).join('')}</table>`:''}
     </body></html>`;
-  if(!_isIOS()){printViaIframe(html);return;}
-  showToast('⏳ מכין PDF…','var(--txt3)',4000);
-  let blob;try{blob=await _dnPdfBlob(html);}catch(e){alert('הכנת ה-PDF נכשלה: '+(e?.message||e));return;}
-  await _printPdfBlob(blob,'cut-report-'+(p.prod||'0')+'.pdf');
+  return html;
 }
 async function saveCutReport(){
   const wrap=document.getElementById('cr-wrap');
@@ -3251,6 +3279,8 @@ async function saveCutReport(){
   const need=_cr.need.filter(x=>+x.n>0).map(x=>({c:x.c,s:x.s,n:+x.n}));
   const extra=Object.entries(_cr.extra||{}).filter(([,m])=>+m>0).map(([c,m])=>({c,m:+m}));
   const upd={cutReport:{markers,rolls,strips,need,extra,by:S.user?.id||'',byName:S.user?.name||'',at:Date.now()},quantities};
+  // 📦 העותק לדף הלקוח — לפני שמירת המוצר; נכשל ⇒ בלי pAt, והמנהל יפרסם ברקע
+  if(rolls.length&&await _crPublish({...p,...upd},_cr))upd.cutReport.pAt=upd.cutReport.at;
   if(!await fbUpdateOnly('products',p.id,upd)){alert('השמירה נכשלה — בדוק חיבור · فشل الحفظ');return;}
   Object.assign(p,upd);saveLS();
   wrap.remove();_cr=null;
@@ -15826,6 +15856,7 @@ let _rcT=null;
 function _pubRateCache(){clearTimeout(_rcT);_rcT=setTimeout(_pubRateCacheNow,3000);}
 function _pubRateCacheNow(){
   _pubRateW();
+  _crBackfill().catch(()=>{});
   try{
     if(S.user?.role!=='manager'||!S.fbConnected||!S.costs)return;
     const ob=overheadBreakdown();if(!ob.actual||!(ob.perHour>=0))return;

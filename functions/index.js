@@ -1706,6 +1706,8 @@ function trackStates(prods, tasks) {
     // est = כמות משוערת (products.estQty) כשאין עדיין כמות בטבלה — כמו "~N משוער" בלוח
     return { no: parseInt(p.orderNo, 10) || 0, prod: p.prod, name: p.name || '', qty, est: qty ? 0 : Math.max(0, parseInt(p.estQty) || 0), entry: trackEntryDate(p),
       ship: departed ? trackShipDate(p) : '', stage: st, sewPct, packPct, split, dates,
+      // ✂️ דוח גזירה (08/11/2026): מזהה המוצר כשיש עותק מעודכן ב-cutPrints (pAt = at) — הדף טוען אותו בלחיצה (?cutp=)
+      cut: p.cutReport && +p.cutReport.pAt && +p.cutReport.pAt === +p.cutReport.at ? p.id : '',
       // out = יחידות שיצאו: משלוח חלקי, או כמה תעודות שרק חלקן סומנו כיציאה (A251, 22/10/2026 — כמו parts בלוח)
       out: partial || (shipped && depU > 0 && depU < outU) ? depU : 0,
       // ⚠ הערות חוסרים לפי שלב (25/10/2026, products.shortages — נכתב מלוח מצב הזמנות). פתוחות — כולן,
@@ -1926,6 +1928,15 @@ exports.customerTrack = functions.runWith({ memory: '1GB' }).https.onRequest(asy
     const a = await trackAuth(req, res);
     if (!a) return;
     const { cust } = a;
+    // ✂️ דוח גזירה של הזמנה (08/11/2026) — רק בלחיצה: 2 קריאות (המוצר — לוודא שהוא של הלקוח הזה, ודף ההדפסה)
+    const cutp = String(req.query.cutp || '');
+    if (cutp) {
+      if (!/^[\w-]{1,128}$/.test(cutp)) { res.status(400).json({ error: 'cutp' }); return; }
+      const [ps, cs] = await Promise.all([db.doc('products/' + cutp).get(), db.doc('cutPrints/' + cutp).get()]);
+      const p = ps.data(), c = cs.data();
+      if (!p || String(p.cust) !== cust || !c || !c.html) { res.status(404).json({ error: 'none' }); return; }
+      res.json({ html: String(c.html), at: +c.at || 0 }); return;
+    }
     // ⏱ מטמון 15 דק' (trackBody): הדף מרענן כל דקה; תנועת מלאי (מסמך packStock) מגיעה ללקוח תוך דקה.
     // גם תצוגת המנהל (asCust) דרך המטמון — בלעדיו דף פתוח קרא את כל ההיסטוריה בכל דקה.
     res.json(await trackBody(cust));
