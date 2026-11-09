@@ -1600,7 +1600,7 @@ const trackEmailEnt = x => typeof x === 'string' ? { e: x.toLowerCase(), at: 0, 
 // devId = UUID שהדף יוצר ושומר ב-localStorage (כותרת X-Dev). st: ok | pending (ממתין לאישור מנהל) | blocked.
 // מכשיר חדש: יש מקום (max) ⇒ ok אוטומטית; אין ⇒ pending + טלגרם, והמנהל מאשר/חוסם בחלון "פרטי לקוח".
 // רשומה מלפני הוספת המייל מחדש (at < ent.at) לא נחשבת — הוספה מחדש מאפסת גם את המכשירים.
-// השרת כותב רק רשומות חדשות/שינוי מצב, ו-seen לכל היותר פעם ב-6 שעות (כדי לא לרענן את חלון המנהל בכל טעינה).
+// השרת כותב רק רשומות חדשות/שינוי מצב, ו-seen לכל היותר פעם ב-15 דק' (09/11/2026, היה 6 שעות; כדי לא לרענן את חלון המנהל בכל טעינה).
 const TRACK_DEV_RE = /^[A-Za-z0-9-]{8,64}$/;
 async function trackDeviceGate(email, cust, ent, devId, req) {
   if (!TRACK_DEV_RE.test(devId)) return ent.max ? 'pending' : 'ok'; // דף ישן בלי מזהה — חוסם רק כשיש הגבלה
@@ -1612,7 +1612,7 @@ async function trackDeviceGate(email, cust, ent, devId, req) {
     const cur = all[devId];
     const valid = cur && cur.e === email && (+cur.at || 0) >= ent.at - 120000;
     if (valid && cur.st === 'ok') {
-      if (now - (+cur.seen || 0) > 6 * 3600000) tx.update(ref, { ['entries.' + devId + '.seen']: now });
+      if (now - (+cur.seen || 0) > 15 * 60000) tx.update(ref, { ['entries.' + devId + '.seen']: now });
       return { st: 'ok' };
     }
     if (valid && cur.st === 'blocked') return { st: 'blocked' };
