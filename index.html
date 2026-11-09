@@ -1851,13 +1851,16 @@ function stockNeed(ps,prods,now){
     cons.forEach(c=>{
       const it=stockItemOf(items,c.id);if(!it)return;
       const own=it.builtin?!!c.own:!!it.own,key=(own?p.cust:'F')+'|'+c.id;
+      // 🔢 (09/11/2026, החלטת המשתמש) חומר שנספר ביחידות — עיגול **למעלה בכל הזמנה** (אין חצי ניילון:
+      // 133 יח' × 0.2 = 26.6 ⇒ 27). מטר/ק"ג/גליל נשארים מדויקים. 1e-9 — שגיאת נקודה צפה (0.2×5) לא מעגלת
+      const q=v=>(it.unit||"יח'")==="יח'"?Math.ceil(v-1e-9):v;
       if(it.bySize){
         if(!remSz){remSz={};(p.quantities||[]).forEach(q=>{const z=String(q.size??''),n=parseInt(q.qty)||0;if(n>0)remSz[z]=(remSz[z]||0)+n;});
           sh.forEach(s=>Object.entries(stockSizeUnits(s.rows)).forEach(([z,n])=>{if(z in remSz)remSz[z]-=n;}));}
-        Object.entries(remSz).forEach(([z,n])=>{if(n>0){const kz=key+'|'+z;need[kz]=(need[kz]||0)+(+c.n)*n;cnt[kz]=(cnt[kz]||0)+1;}});
+        Object.entries(remSz).forEach(([z,n])=>{if(n>0){const kz=key+'|'+z;need[kz]=(need[kz]||0)+q((+c.n)*n);cnt[kz]=(cnt[kz]||0)+1;}});
         return;
       }
-      need[key]=(need[key]||0)+(+c.n)*rem;cnt[key]=(cnt[key]||0)+1;
+      need[key]=(need[key]||0)+q((+c.n)*rem);cnt[key]=(cnt[key]||0)+1;
     });
   });
   return {need,cnt};
