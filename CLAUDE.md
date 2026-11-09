@@ -6,7 +6,12 @@
 
 ## ארכיטקטורה — קובץ אחד!
 
-- **כל האפליקציה היא קובץ אחד: `index.html`** (~16,500 שורות) — HTML + CSS + JS באותו קובץ. אין build, אין framework.
+- **הקוד נערך ב-`src/`, והאתר הוא קובץ אחד: `index.html`** (~21,700 שורות, נבנה — 09/11/2026). אין framework.
+  - `src/js/NN-נושא.js` (28 קבצים: 01-lang, 03-cut, 09-scan, 11-reports, 19-costs, 22-delivery-notes...) · `src/css/app.css` · `src/shell.html` (ה-HTML, ה-head וה-module של Firebase).
+  - `node tools/build.js` מחבר אותם **לפי סדר השמות** לבלוק `<script>` אחד ב-`index.html` (+ בדיקת תחביר). `--check` = תואם? · `--where N` = שורה N ב-index.html (משגיאה בקונסול) ⇒ קובץ:שורה.
+  - 🛑 **לא לערוך את `index.html` ישירות** — הבנייה הבאה דורסת. לחפש ולערוך ב-`src/`.
+  - 🛑 **לא לטעון את הקבצים כ-`<script src>` נפרדים:** הקוד מניח סקריפט אחד — `_guardReentrant('confirmShip')` עוטף פונקציות מקבצים מאוחרים, `runDailyReset`/`setLang` רצים בטעינה וקוראים לכל הקוד. בקבצים נפרדים זה נשבר בשקט.
+  - קובץ חדש = מספר שקובע את מקומו בסדר. הגבולות הם בין פקודות ברמה העליונה.
 - **פריסה:** push ל-`main` ← GitHub Pages מפרסם אוטומטית תוך 2-3 דקות ל-https://amtextile2222-beep.github.io/textileops/
 - **בסיס נתונים:** Firebase Firestore (פרויקט `textileops-aef4a`), סנכרון בזמן אמת בין מכשירים דרך `onSnapshot`. יש גם עותק מקומי ב-localStorage (`txops_v3`) לעבודה לא מקוונת.
 - **אימות Firebase (שלב 2 — 03/07/2026):** אין יותר התחברות אנונימית. `doLogin()` קורא ל-Cloud Function `login` (מאמתת סיסמה/פנים/מכשיר/IP בצד שרת) שמחזירה **Custom Token עם `role` claim**; הלקוח נכנס עם `signInWithCustomToken`. ה-Rules דורשים `role` בטוקן — בלי כניסה דרך הפונקציה שום דבר לא נטען. ה-listeners (`startDataListeners`) מתחילים רק אחרי כניסה.
@@ -39,11 +44,7 @@
 
 ## חובה לפני כל commit
 
-1. בדיקת תחביר לשני בלוקי הסקריפט (הקובץ גדול מכדי לסמוך על העין):
-   ```bash
-   # לחלץ את התוכן של <script>...</script> ושל <script type="module">...</script>
-   # ולהריץ עליהם node --check
-   ```
+1. **`node tools/build.js`** — בונה את `index.html` מ-`src/` ובודק תחביר לשני בלוקי הסקריפט. ה-commit חייב לכלול את `src/` **ואת** `index.html` יחד (`node tools/build.js --check` ⇒ ✓).
 2. אסור להכניס לקוד או ל-repo סודות: טוקן הטלגרם, קוד החירום ומפתחות ה-AI נשמרים רק ב-`functions:config` בשרת — לעולם לא בקוד ולא בלקוח. הרפו **ציבורי**.
 4. **שינוי ב-`firestore.rules` — בדיקה מול אמולטור Firestore לפני פרסום** (`@firebase/rules-unit-testing`, פרויקט `demo-test`; דורש Java). לבדוק גם שפעולות רגילות של עובדים ממשיכות לעבוד.
 5. **פריסות (`firebase deploy`) מריץ המשתמש בעצמו בטרמינל.** פונקציות: `$env:FUNCTIONS_DISCOVERY_TIMEOUT=120; firebase deploy --only functions:<שם>`. בשינוי שמשפיע על שרת ולקוח — לפרוס קודם את הצד שהשני תלוי בו.

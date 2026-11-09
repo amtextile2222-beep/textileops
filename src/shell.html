@@ -1,0 +1,1447 @@
+<!DOCTYPE html>
+<!-- ⚠️ קובץ שנבנה מ-src/ (node tools/build.js) — לא לערוך כאן; לערוך ב-src/js, src/css, src/shell.html -->
+<html lang="he" dir="rtl">
+<head>
+<meta charset="UTF-8"/>
+<meta name="viewport" content="width=device-width,initial-scale=1"/>
+<meta http-equiv="Cache-Control" content="no-cache, no-store, must-revalidate"/>
+<meta http-equiv="Pragma" content="no-cache"/>
+<meta http-equiv="Expires" content="0"/>
+<title>TextileOps — ניהול מפעל בגדים</title>
+<meta name="theme-color" content="#2D6470"/>
+<meta name="google" content="notranslate"/>
+<link rel="manifest" href="manifest.json"/>
+<link rel="icon" type="image/png" href="icon-192.png"/>
+<link rel="apple-touch-icon" href="icon-180.png"/>
+<meta name="apple-mobile-web-app-capable" content="yes"/>
+<meta name="apple-mobile-web-app-status-bar-style" content="default"/>
+<meta name="apple-mobile-web-app-title" content="TextileOps"/>
+<style>
+/*@@CSS@@*/
+</style>
+</head>
+<body>
+
+<!-- FIREBASE STATUS -->
+<div id="fb-status" class="loading">⏳ מתחבר...</div>
+<div id="mgr-bulk-bar" style="display:none;position:fixed;bottom:0;right:0;left:0;z-index:400;background:var(--bg);border-top:2px solid var(--green-txt);padding:10px 16px;align-items:center;gap:10px;flex-wrap:wrap;box-shadow:0 -2px 12px rgba(0,0,0,.15)">
+  <span style="font-size:13px;font-weight:600;color:var(--green-txt)">✅ כניסה קבוצתית</span>
+  <span style="font-size:12px;color:var(--txt2)">שעת כניסה:</span>
+  <input type="time" id="mgr-bulk-time" style="font-size:14px;padding:5px 10px;border:1px solid var(--b);border-radius:6px;background:var(--bg2);color:var(--txt);font-weight:600"/>
+  <button class="btn success" style="font-size:13px;padding:6px 18px;font-weight:600" onclick="mgrBulkPunchIn()">החתם נבחרים</button>
+  <button class="btn" style="font-size:12px;padding:6px 12px" onclick="mgrBulkCancel()">ביטול</button>
+  <span id="mgr-bulk-count" style="font-size:12px;color:var(--txt3)"></span>
+</div>
+
+<!-- LOGIN -->
+<div id="login-screen">
+  <div class="lang-switcher" style="justify-content:center">
+    <button onclick="setLang('he')" class="lang-btn" id="lb-he-login">🇮🇱</button>
+    <button onclick="setLang('ar')" class="lang-btn" id="lb-ar-login">🇸🇦</button>
+  </div>
+  <div style="text-align:center" onclick="handleLogoClick()" style="cursor:default">
+    <div style="font-size:42px;margin-bottom:8px;cursor:pointer" id="login-logo">✂️</div>
+    <div style="font-size:24px;font-weight:700;color:var(--blue-txt)">TextileOps</div>
+    <div style="font-size:13px;color:var(--txt2);margin-top:4px">מערכת ניהול מפעל בגדים</div>
+  </div>
+  <div class="login-box">
+    <div class="login-title" data-i18n="login_title">כניסה למערכת</div>
+    <div class="login-sub" data-i18n="login_sub">הזן פרטי משתמש</div>
+    <div class="field"><label data-i18n="username">שם משתמש</label><input id="l-user" type="text" placeholder="שם משתמש" data-i18n-ph="username" autocomplete="username" oninput="onUserInput(this.value)"/></div>
+    <div class="field" id="l-pass-wrap"><label data-i18n="password">סיסמה</label><input id="l-pass" type="password" placeholder="סיסמה" data-i18n-ph="password" autocomplete="current-password" onkeydown="if(event.key==='Enter')doLogin()"/></div>
+    <div id="l-face-hint" style="display:none;text-align:center;font-size:13px;color:var(--green-txt);margin-bottom:8px">📷 זיהוי פנים — לחץ כניסה</div>
+    <div id="l-bc-hint" style="display:none;text-align:center;margin-bottom:8px">
+      <button class="btn primary" style="width:100%;justify-content:center;font-size:16px;padding:12px" onclick="startBcLogin()">📷 סרוק את הברקוד שבתחנה שלך</button>
+      <button class="btn nfc-only" style="display:none;width:100%;justify-content:center;font-size:15px;padding:11px;margin-top:6px" onclick="nfcBcLogin()">📶 קרב את מדבקת ה-NFC שלך</button>
+      <div style="font-size:13px;color:var(--txt3);margin-top:5px">כוון את המצלמה אל המדבקה עם השם שלך</div>
+    </div>
+    <div id="l-bc-cam" style="display:none;margin-bottom:8px">
+      <video id="l-bc-video" playsinline muted style="width:100%;border-radius:10px;background:#000"></video>
+      <div id="l-bc-status" style="text-align:center;font-size:15px;font-weight:600;margin-top:6px;min-height:20px"></div>
+      <button class="btn" style="width:100%;justify-content:center;margin-top:6px;font-size:14px" onclick="stopBcLogin()">ביטול</button>
+    </div>
+    <div id="l-switch-user" style="display:none;text-align:center;margin-bottom:8px"><button class="btn" style="font-size:12px;padding:4px 10px" onclick="switchUser()">🔄 לא אתה? החלף משתמש</button></div>
+    <button class="btn primary full" onclick="doLogin()" data-i18n="login_btn">כניסה</button>
+    <div id="l-err" style="color:var(--red-txt);font-size:12px;text-align:center;margin-top:8px;min-height:18px"></div>
+    <div id="emrg-box" class="hidden" style="margin-top:12px;border-top:0.5px solid var(--b);padding-top:12px;text-align:center">
+      <div style="font-size:12px;color:var(--txt3);margin-bottom:8px">🔑 כניסת חירום</div>
+      <input id="l-emergency" type="password" placeholder="קוד חירום" style="font-size:13px;margin-bottom:8px;text-align:center"/>
+      <button class="btn warn full" onclick="emergencyLogin()" style="font-size:12px">כניסה</button>
+    </div>
+  </div>
+</div>
+
+<!-- FACE AUTH SCREEN -->
+<div id="face-auth-screen" class="hidden" style="min-height:100vh;display:flex;align-items:center;justify-content:center;flex-direction:column;gap:1.5rem;padding:1rem;background:var(--bg3)">
+  <div style="text-align:center">
+    <div style="font-size:42px;margin-bottom:8px">✂️</div>
+    <div style="font-size:24px;font-weight:700;color:var(--blue-txt)">TextileOps</div>
+  </div>
+  <div class="login-box" style="max-width:380px;text-align:center">
+    <div class="login-title">אימות זהות</div>
+    <div class="login-sub" id="face-auth-msg">מרכז את פניך במצלמה</div>
+    <div style="position:relative;margin:16px 0;border-radius:var(--rl);overflow:hidden;background:#000;aspect-ratio:4/3;max-height:280px">
+      <video id="face-auth-video" autoplay playsinline muted style="width:100%;height:100%;object-fit:cover;transform:scaleX(-1)"></video>
+      <canvas id="face-auth-canvas" style="position:absolute;top:0;left:0;width:100%;height:100%;transform:scaleX(-1)"></canvas>
+      <div style="position:absolute;inset:0;display:flex;align-items:center;justify-content:center;pointer-events:none">
+        <div style="width:55%;aspect-ratio:1;border:3px solid rgba(255,255,255,0.6);border-radius:50%"></div>
+      </div>
+    </div>
+    <div id="face-auth-status" style="font-size:13px;min-height:20px;margin-bottom:12px;color:var(--txt2)"></div>
+    <button class="btn danger full" onclick="cancelFaceAuth()">ביטול</button>
+  </div>
+</div>
+
+<!-- FACE REGISTER SCREEN -->
+<div id="face-reg-screen" class="hidden" style="min-height:100vh;display:flex;align-items:center;justify-content:center;flex-direction:column;gap:1.5rem;padding:1rem;background:var(--bg3)">
+  <div style="text-align:center">
+    <div style="font-size:42px;margin-bottom:8px">✂️</div>
+    <div style="font-size:24px;font-weight:700;color:var(--blue-txt)">TextileOps</div>
+  </div>
+  <div class="login-box" style="max-width:380px;text-align:center">
+    <div class="login-title" id="face-reg-title">רישום פנים</div>
+    <div class="login-sub">הבט ישר למצלמה לרישום</div>
+    <div style="position:relative;margin:16px 0;border-radius:var(--rl);overflow:hidden;background:#000;aspect-ratio:4/3;max-height:280px">
+      <video id="face-reg-video" autoplay playsinline muted style="width:100%;height:100%;object-fit:cover;transform:scaleX(-1)"></video>
+      <div style="position:absolute;inset:0;display:flex;align-items:center;justify-content:center;pointer-events:none">
+        <div style="width:55%;aspect-ratio:1;border:3px solid rgba(255,255,255,0.6);border-radius:50%"></div>
+      </div>
+    </div>
+    <div id="face-reg-status" style="font-size:13px;min-height:20px;margin-bottom:12px;color:var(--txt2)"></div>
+    <!-- תצוגה מקדימה אחרי כל צילום -->
+    <div id="face-reg-preview-box" style="display:none;margin-bottom:12px">
+      <canvas id="face-reg-preview-canvas" style="width:100%;border-radius:8px;border:2px solid var(--blue)"></canvas>
+      <div style="font-size:13px;color:var(--txt2);margin:6px 0">האם הפנים בתמונה נכונים?</div>
+      <div style="display:flex;gap:8px">
+        <button class="btn full" onclick="faceRegRetake()">🔄 צלם שוב</button>
+        <button class="btn success full" onclick="faceRegConfirm()">✅ נכון</button>
+      </div>
+    </div>
+    <div id="face-reg-capture-box" style="display:flex;gap:8px">
+      <button class="btn full" onclick="cancelFaceReg()">ביטול</button>
+      <button class="btn primary full" id="face-reg-btn" onclick="captureFaceDescriptor()">📸 צלם פנים</button>
+    </div>
+  </div>
+</div>
+
+<!-- APP -->
+<!-- FLOATING MSG MODAL -->
+<div id="msg-modal-overlay" style="display:none;position:fixed;inset:0;background:rgba(0,0,0,.5);z-index:9999;align-items:center;justify-content:center;padding:1rem">
+  <div style="background:var(--card);border-radius:var(--rl);padding:1.25rem;width:100%;max-width:420px;box-shadow:0 8px 32px rgba(0,0,0,.3)">
+    <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:1rem">
+      <div style="font-weight:600;font-size:15px;color:var(--txt)">📩 שלח הודעה למנהל</div>
+      <button onclick="closeMsgModal()" style="background:none;border:none;font-size:20px;cursor:pointer;color:var(--txt2);line-height:1">✕</button>
+    </div>
+    <textarea id="msg-modal-txt" placeholder="כתוב הודעה למנהל... (אופציונלי אם שולח תמונה)" rows="4" style="width:100%;border-radius:var(--r);border:1px solid var(--b2);background:var(--bg2);color:var(--txt);font-size:13px;padding:8px;resize:none;font-family:inherit;box-sizing:border-box"></textarea>
+    <label style="display:flex;align-items:center;gap:8px;cursor:pointer;background:var(--bg2);border:1px dashed var(--b2);border-radius:var(--r);padding:8px 10px;font-size:13px;color:var(--txt2);margin-top:8px">
+      📎 צרף תמונה / סריקה
+      <input type="file" id="msg-modal-img" accept="image/*" capture="environment" style="display:none" onchange="previewMsgModal(this)"/>
+    </label>
+    <div id="msg-modal-preview" style="display:none;position:relative;margin-top:8px">
+      <img id="msg-modal-preview-img" style="max-width:100%;border-radius:var(--r);max-height:160px;object-fit:cover"/>
+      <button onclick="clearMsgModal()" style="position:absolute;top:4px;left:4px;background:rgba(0,0,0,.5);color:#fff;border:none;border-radius:999px;width:22px;height:22px;cursor:pointer;font-size:13px;line-height:1">✕</button>
+    </div>
+    <div style="display:flex;gap:6px;margin-top:10px">
+      <button class="btn success" style="flex:1;justify-content:center" onclick="sendMsgModal()">📤 שלח</button>
+      <button class="btn" style="flex:1;justify-content:center" onclick="closeMsgModal()">ביטול</button>
+    </div>
+    <div id="msg-modal-status" style="font-size:11px;min-height:14px;text-align:center;margin-top:6px"></div>
+  </div>
+</div>
+
+<div id="update-banner" class="hidden" style="background:var(--blue-bg);border-bottom:1.5px solid var(--blue-txt);padding:8px 1rem;display:flex;align-items:center;justify-content:space-between;gap:10px;position:sticky;top:0;z-index:200">
+  <span id="update-banner-txt" style="font-size:13px;font-weight:600;color:var(--blue-txt)">🔄 גרסה חדשה זמינה</span>
+  <button onclick="doAppUpdate()" style="background:var(--blue-txt);color:#fff;border:none;border-radius:var(--r);padding:6px 14px;font-size:13px;font-weight:600;cursor:pointer;font-family:inherit">עדכן עכשיו</button>
+</div>
+
+<div id="app-screen" class="hidden">
+  <div class="topbar">
+    <div class="logo">✂️ <span class="logo-txt">TextileOps</span></div>
+    <div class="nav">
+      <button class="nb active" onclick="goPage('dash')" id="nb-dash">📊 <span data-i18n="nav_dash">בקרה</span></button>
+      <button class="nb" onclick="goPage('att')" id="nb-att">🕐 <span data-i18n="nav_att">נוכחות</span></button>
+      <button class="nb hidden" onclick="goPage('attrep')" id="nb-attrep">📋 <span data-i18n="nav_attrep">דוח נוכחות</span></button>
+      <button class="nb" onclick="goPage('scan')" id="nb-scan">📷 <span data-i18n="nav_scan">סריקה</span></button>
+      <button class="nb" onclick="goPage('tasks')" id="nb-tasks">✅ <span data-i18n="nav_tasks">משימות</span></button>
+      <button class="nb hidden" onclick="openKiosk()" id="nb-kiosk">📺 <span data-i18n="nav_kiosk">מסך תצוגה</span></button>
+      <button class="nb" onclick="goPage('reports')" id="nb-reports">📈 <span data-i18n="nav_reports">דוחות</span></button>
+      <button class="nb" onclick="goPage('alerts')" id="nb-alerts">🔔 <span id="al-cnt" class="cnt hidden">0</span><span data-i18n="nav_alerts">התראות</span></button>
+      <button class="nb hidden" onclick="goPage('admin')" id="nb-admin">⚙️ <span data-i18n="nav_admin">ניהול</span></button>
+      <button class="nb hidden" onclick="goPage('mgrtasks')" id="nb-mgrtasks">👔 <span data-i18n="nav_mgrtasks">ניהול משימות</span></button>
+      <button class="nb hidden" onclick="goPage('taskscan')" id="nb-taskscan">📷 <span data-i18n="nav_taskscan">סורק משימות</span></button>
+      <button class="nb hidden" onclick="goPage('setup')" id="nb-setup">🔗 <span data-i18n="nav_setup">Firebase</span></button>
+      <button class="nb hidden" onclick="goPage('costs')" id="nb-costs">💰 <span data-i18n="nav_costs">עלויות</span></button>
+      <button class="nb hidden" onclick="goPage('expenses')" id="nb-expenses">💸 <span data-i18n="nav_expenses">הוצאות</span></button>
+      <button class="nb hidden" onclick="goPage('cashbox')" id="nb-cashbox">🧾 <span data-i18n="nav_cashbox">קופה</span></button>
+      <button class="nb hidden" onclick="goPage('products')" id="nb-products">👗 <span data-i18n="nav_products">מוצרים</span></button>
+      <button class="nb hidden" onclick="goPage('barcodes')" id="nb-barcodes">🏷️ <span data-i18n="nav_barcodes">ברקודים</span></button>
+      <button class="nb hidden" onclick="goPage('dnotes')" id="nb-dnotes">📄 <span data-i18n="nav_dnotes">תעודות משלוח</span></button>
+    </div>
+    <div style="display:flex;align-items:center;gap:8px">
+      <div class="lang-switcher">
+        <!-- כפתור אחד במקום שני דגלים — הסרגל צפוף אצל עובדים בנייד. מציג את השפה שאליה עוברים -->
+        <button onclick="toggleLang()" class="lang-btn active" id="lb-toggle" title="עברית / العربية">🇸🇦</button>
+      </div>
+      <div style="font-size:12px;text-align:left">
+        <div style="font-weight:600;color:var(--txt)" id="top-name"></div>
+        <div style="color:var(--txt3)" id="top-role"></div>
+      </div>
+      <div id="av-wrap" onclick="_syncDotInfo()"><div class="av" style="width:32px;height:32px;font-size:11px" id="top-av"></div><span id="sync-dot"></span></div>
+      <button class="btn hidden" id="enable-notif-btn" style="padding:5px 9px;font-size:12px;background:var(--amber-bg);color:var(--amber-txt)" onclick="enableMyNotifications()" title="הפעל התראות">🔔</button>
+      <button class="btn" style="padding:5px 9px;font-size:12px" onclick="doLogout()" title="יציאה · خروج"><span class="lo-ico"><svg class="ico" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M9 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h4"/><polyline points="16 17 21 12 16 7"/><line x1="21" x2="9" y1="12" y2="12"/></svg></span><span class="lo-txt" data-i18n="logout">יציאה</span></button>
+    </div>
+  </div>
+
+  <!-- כפתור צף לשליחת הודעה למנהל — מוצג לעובדים בלבד -->
+  <button id="floating-msg-btn" onclick="openMsgModal()" style="display:none;position:fixed;bottom:24px;left:20px;z-index:9000;background:var(--blue-txt);color:#fff;border:none;border-radius:999px;padding:12px 18px;font-size:22px;cursor:pointer;box-shadow:0 4px 16px rgba(0,0,0,.3)" title="שלח הודעה למנהל">📩</button>
+
+  <!-- DASHBOARD -->
+  <div class="page active" id="page-dash">
+    <div class="g4">
+      <div class="card"><div class="mlbl" data-i18n="dash_active">עובדים פעילים</div><div class="mval" id="d-active">—</div><div class="msub" id="d-total-sub"></div></div>
+      <div class="card"><div class="mlbl" data-i18n="dash_tasks">משימות פעילות</div><div class="mval" id="d-tasks">—</div><div class="msub" data-i18n="dash_realtime">בזמן אמת</div></div>
+      <div class="card"><div class="mlbl" data-i18n="dash_done">הושלמו היום</div><div class="mval" id="d-done">—</div><div class="msub" data-i18n="dash_tasks_sub">משימות</div></div>
+      <div class="card"><div class="mlbl" data-i18n="dash_goal">יעד יומי</div><div class="mval" id="d-goal">—</div><div class="pbar"><div class="pfill" id="d-goal-bar" style="width:0%"></div></div></div>
+    </div>
+    <!-- שיפור 5: התראה ויזואלית — עובדים שלא נכנסו -->
+    <div id="d-absent-alert" style="display:none;background:var(--red-bg);border:1px solid var(--red-txt);border-radius:var(--rl);padding:10px 14px;margin-bottom:1rem;font-size:13px;color:var(--red-txt)"></div>
+    <!-- שיפורים 2+3+4 -->
+    <div class="g3" style="margin-bottom:1rem">
+      <div class="card"><div class="mlbl" data-i18n="dash_avg_title">⏱ ממוצע זמן משימה</div><div class="mval" id="d-avg-time">—</div><div class="msub" id="d-avg-sub"></div></div>
+      <div class="card"><div class="mlbl" data-i18n="dash_top_worker">🏆 הכי פרודוקטיבי היום</div><div class="mval" style="font-size:16px" id="d-top-worker">—</div><div class="msub" id="d-top-sub"></div></div>
+      <div class="card"><div class="mlbl" data-i18n="dash_prods_title">📦 מוצרים בייצור</div><div class="mval" id="d-prods-active">—</div><div class="msub" id="d-prods-sub"></div></div>
+    </div>
+    <div class="g2">
+      <div class="card"><div class="sec" data-i18n="dash_depts">מחלקות</div><div id="d-depts"></div></div>
+      <div class="card"><div class="sec" data-i18n="dash_alerts">התראות</div><div id="d-alerts-prev"></div></div>
+    </div>
+    <!-- מוצרים בייצור לפי שלב -->
+    <div class="card" style="margin-top:1rem" id="d-prods-stages-card">
+      <div class="sec">📦 מוצרים בתהליך ייצור</div>
+      <div id="d-prods-stages"></div>
+    </div>
+    <div class="card" style="margin-top:1rem"><div class="sec" data-i18n="dash_recent">פעילות אחרונה</div><div id="d-recent"></div></div>
+  </div>
+
+  <!-- ATTENDANCE -->
+  <div class="page" id="page-att">
+    <div class="g2" style="margin-bottom:1rem">
+      <div class="card" style="display:flex;flex-direction:column;align-items:center;justify-content:center;gap:.5rem;padding:1.5rem;text-align:center">
+        <div style="font-size:28px;font-weight:700;font-variant-numeric:tabular-nums;color:var(--txt);font-family:monospace" id="att-clk">00:00:00</div>
+        <div style="font-size:12px;color:var(--txt2)" id="att-dt"></div>
+        <div class="sep" style="width:100%"></div>
+        <div style="font-size:12px;color:var(--txt2);min-height:18px" id="att-msg"></div>
+        <div style="display:flex;gap:8px">
+          <button class="btn success" onclick="punchIn()">✅ <span data-i18n="att_in">כניסה</span></button>
+          <button class="btn danger" onclick="punchOut()">🚪 <span data-i18n="att_out">יציאה</span></button>
+        </div>
+        <div id="att-bc-box" style="display:none;width:100%">
+          <button class="btn primary" style="width:100%;justify-content:center;font-size:15px;padding:11px" onclick="startBcPunch()">📷 סרוק ברקוד לחתימת יציאה</button>
+          <button class="btn nfc-only" style="display:none;width:100%;justify-content:center;font-size:14px;padding:10px;margin-top:6px" onclick="nfcBcPunch()">📶 חתימת יציאה במדבקת NFC</button>
+          <div id="att-bc-cam" style="display:none;margin-top:6px">
+            <video id="att-bc-video" playsinline muted style="width:100%;border-radius:10px;background:#000"></video>
+            <div id="att-bc-status" style="font-size:15px;font-weight:600;margin-top:6px;min-height:20px"></div>
+            <button class="btn" style="width:100%;justify-content:center;margin-top:6px;font-size:14px" onclick="stopBcPunch()">ביטול</button>
+          </div>
+        </div>
+        <div class="sep" style="width:100%"></div>
+        <div id="att-face-update-box" class="hidden" style="width:100%">
+          <button class="btn warn" style="width:100%;justify-content:center;font-size:13px" onclick="workerUpdateFace()">📸 עדכן פנים — מנהל אישר</button>
+        </div>
+        <button class="btn" style="width:100%;justify-content:center;font-size:13px" onclick="openMsgToMgr()">📩 <span data-i18n="btn_send_msg_mgr">שלח הודעה למנהל</span></button>
+        <div id="msg-to-mgr-box" class="hidden" style="width:100%;display:flex;flex-direction:column;gap:6px">
+          <textarea id="msg-to-mgr-txt" placeholder="כתוב הודעה למנהל... (אופציונלי אם שולח תמונה)" rows="3" style="width:100%;border-radius:var(--r);border:1px solid var(--b2);background:var(--bg2);color:var(--txt);font-size:13px;padding:8px;resize:none;font-family:inherit;box-sizing:border-box"></textarea>
+          <label style="display:flex;align-items:center;gap:8px;cursor:pointer;background:var(--bg2);border:1px dashed var(--b2);border-radius:var(--r);padding:8px 10px;font-size:13px;color:var(--txt2)">
+            📎 צרף תמונה / סריקה
+            <input type="file" id="msg-to-mgr-img" accept="image/*" capture="environment" style="display:none" onchange="previewMgrImg(this)"/>
+          </label>
+          <div id="msg-to-mgr-preview" style="display:none;position:relative">
+            <img id="msg-to-mgr-preview-img" style="max-width:100%;border-radius:var(--r);max-height:160px;object-fit:cover"/>
+            <button onclick="clearMgrImg()" style="position:absolute;top:4px;left:4px;background:rgba(0,0,0,.5);color:#fff;border:none;border-radius:999px;width:22px;height:22px;cursor:pointer;font-size:13px;line-height:1">✕</button>
+          </div>
+          <div style="display:flex;gap:6px">
+            <button class="btn success" style="flex:1;justify-content:center" onclick="sendMsgToMgr()">📤 שלח</button>
+            <button class="btn" style="flex:1;justify-content:center" onclick="closeMsgToMgr()">ביטול</button>
+          </div>
+          <div id="msg-to-mgr-status" style="font-size:11px;min-height:14px;text-align:center"></div>
+        </div>
+      </div>
+      <div class="card">
+        <div class="sec">סיכום</div>
+        <div class="g2" style="gap:8px;margin-bottom:.75rem">
+          <div style="background:var(--bg2);border-radius:var(--r);padding:10px;text-align:center"><div style="font-size:11px;color:var(--txt2)" data-i18n="att_present">נכחו</div><div style="font-size:20px;font-weight:600;color:var(--green-txt)" id="att-in">0</div></div>
+          <div style="background:var(--bg2);border-radius:var(--r);padding:10px;text-align:center"><div style="font-size:11px;color:var(--txt2)" data-i18n="att_absent">נעדרו</div><div style="font-size:20px;font-weight:600;color:var(--red-txt)" id="att-out">0</div></div>
+        </div>
+        <div style="background:var(--bg2);border-radius:var(--r);padding:10px;text-align:center">
+          <div style="font-size:11px;color:var(--txt2)" data-i18n="att_nethours">סה"כ שעות נטו היום</div>
+          <div style="font-size:18px;font-weight:600;color:var(--blue-txt)" id="att-total-net">—</div>
+        </div>
+      </div>
+    </div>
+    <div class="card">
+      <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:.75rem">
+        <div class="sec" style="margin:0" data-i18n="att_list">רשימת עובדים</div>
+        <div style="display:flex;gap:5px">
+          <button class="btn" style="font-size:11px;padding:4px 9px" onclick="fAtt('all')" data-i18n="att_all">הכל</button>
+          <button class="btn" style="font-size:11px;padding:4px 9px" onclick="fAtt('in')" data-i18n="att_working">בעבודה</button>
+          <button class="btn" style="font-size:11px;padding:4px 9px" onclick="fAtt('out')" data-i18n="att_left">יצאו</button>
+        </div>
+      </div>
+      <div id="att-list"></div>
+    </div>
+  </div>
+
+  <!-- SCAN -->
+  <div class="page" id="page-scan">
+    <div class="g2">
+      <div>
+        <div class="card" style="margin-bottom:1rem">
+          <div class="sec" data-i18n="scan_title">סריקת ברקוד משימה</div>
+          <!-- CAMERA SCAN -->
+          <div id="cam-container" style="display:none;margin-bottom:1rem;position:relative">
+            <video id="cam-video" style="width:100%;border-radius:var(--rl);background:#000;max-height:220px;object-fit:cover" autoplay muted playsinline></video>
+            <div style="position:absolute;inset:0;border:3px solid var(--blue-txt);border-radius:var(--rl);pointer-events:none;opacity:.6"></div>
+            <div style="position:absolute;top:50%;left:50%;transform:translate(-50%,-50%);width:60%;height:2px;background:var(--blue-txt);opacity:.8"></div>
+            <button class="btn danger" onclick="stopCam()" style="position:absolute;top:8px;left:8px;padding:4px 10px;font-size:12px">✕ סגור</button>
+            <div id="cam-status" style="position:absolute;bottom:8px;right:0;left:0;text-align:center;font-size:12px;color:#fff;background:rgba(0,0,0,.5);padding:4px">מכוון מצלמה...</div>
+          </div>
+          <div style="display:flex;gap:8px;margin-bottom:1rem">
+            <button class="btn primary full" onclick="startCam()" id="cam-btn" style="font-size:14px;padding:12px">📷 <span data-i18n="scan_cam">סרוק עם מצלמה</span></button>
+            <button class="btn primary nfc-only" onclick="nfcScanTo('bc')" style="display:none;font-size:14px;padding:12px;flex-shrink:0">📶 NFC</button>
+          </div>
+          <div style="text-align:center;font-size:12px;color:var(--txt3);margin-bottom:.75rem">— <span data-i18n="scan_manual">הזן ידנית</span> / סורק USB —</div>
+          <input class="bc-inp" id="bc-inp" maxlength="16" placeholder="הזן 13 או 16 ספרות..." oninput="parseBc(this.value)" onkeydown="if(event.key==='Enter')submitBc()"/>
+          <input id="bc-part" type="number" min="1" max="999" inputmode="numeric" placeholder="🔢 כמות לעובד — ריק = כל מה שנותר" title="לתת לעובד רק חלק מהכמות שבברקוד. היתרה נשארת על אותו ברקוד לסריקה הבאה" style="margin-top:6px;width:100%;font-size:13px;padding:8px;border-radius:6px;border:1px solid var(--brd)"/>
+          <div id="bc-prev" style="margin-top:.75rem;min-height:36px"></div>
+          <div class="field" id="bc-tasktype-wrap" style="margin-top:.75rem;margin-bottom:0">
+            <label style="font-size:12px;color:var(--txt2);margin-bottom:5px;display:block" data-i18n="lbl_task_type">סוג משימה</label>
+            <input id="bc-tasktype" type="text" placeholder="לדוגמה: תפירה, חיתוך, גימור..." data-i18n-ph="ph_task_type" style="font-size:13px"/>
+          </div>
+          <div id="bc-steps-wrap" style="display:none;margin-top:.75rem">
+            <label style="font-size:12px;color:var(--txt2);font-weight:600;display:block;margin-bottom:6px">🔧 בחר שלבי עבודה</label>
+            <div id="bc-steps-list"></div>
+            <div id="bc-expected"></div>
+          </div>
+          <div class="field" style="margin-top:.75rem;margin-bottom:0">
+            <label style="font-size:12px;color:var(--txt2);margin-bottom:5px;display:block" data-i18n="lbl_dept">מחלקה</label>
+            <select id="bc-dept" style="font-size:13px"><option value="">-- בחר מחלקה --</option></select>
+          </div>
+          <div id="bc-batch-queue" style="margin-top:.75rem"></div>
+          <div style="display:flex;gap:8px;margin-top:.75rem">
+            <button class="btn primary full" onclick="submitBc()">▶ <span data-i18n="scan_start">התחל / עבור למשימה</span></button>
+            <button class="btn" onclick="document.getElementById('bc-inp').value='';parseBc('')">✕</button>
+          </div>
+        </div>
+        <div class="card">
+          <div class="sec" data-i18n="bc_struct">מבנה ברקוד</div>
+          <div style="font-size:12px;color:var(--txt2);line-height:2.3">
+            <div><span class="bc-seg bc-c">XX</span> — <span data-i18n="bc_cust">מספר לקוח (2 ספרות)</span></div>
+            <div><span class="bc-seg bc-p">XXXXX</span> — <span data-i18n="bc_prod">מספר מוצר (5 ספרות)</span></div>
+            <div><span class="bc-seg" style="background:var(--amber-bg);color:var(--amber-txt)">X</span> — <span data-i18n="bc_size">מידה (1 ספרה)</span></div>
+            <div><span class="bc-seg bc-q">XXX</span> — <span data-i18n="bc_qty_lbl">כמות (3 ספרות)</span></div>
+            <div><span class="bc-seg bc-col">XX</span> — <span data-i18n="bc_color_code">קוד צבע (2 ספרות)</span></div>
+          </div>
+          <div style="margin-top:.75rem;background:var(--bg2);border-radius:var(--r);padding:9px">
+            <div style="font-size:11px;color:var(--txt3);margin-bottom:5px" data-i18n="bc_example_lbl">דוגמה — לחץ לניסיון:</div>
+            <div style="display:flex;gap:5px;flex-wrap:wrap;cursor:pointer" onclick="tryDemo()">
+              <span class="bc-seg bc-c">07</span><span class="bc-seg bc-p">10042</span><span class="bc-seg" style="background:var(--amber-bg);color:var(--amber-txt)">3</span><span class="bc-seg bc-q">025</span><span class="bc-seg bc-col">03</span>
+              <span style="font-size:11px;color:var(--txt3);align-self:center">= לקוח 07 | מוצר 10042 | מידה 3 | 25 יח' | אדום</span>
+            </div>
+          </div>
+        </div>
+      </div>
+      <div class="card">
+        <div class="sec" data-i18n="scan_active">משימות פעילות עכשיו</div>
+        <div id="scan-active"></div>
+      </div>
+    </div>
+  </div>
+
+  <!-- TASKS -->
+  <div class="page" id="page-tasks">
+    <div id="worker-send-msg-bar" style="display:none;margin-bottom:10px">
+      <button class="btn full" style="font-size:13px;padding:10px;justify-content:center;gap:8px" onclick="workerSendMsg()">📢 שלח הודעה לאחראי / מנהל</button>
+    </div>
+    <div id="worker-notif-bar" style="display:none;margin-bottom:10px">
+      <button class="btn full" style="font-size:13px;padding:10px;justify-content:center;gap:8px;background:var(--green-bg,#e8f5e9);color:var(--green-txt,#2e7d32)" onclick="workerEnableNotif()">🔔 הפעל התראות Push</button>
+    </div>
+    <div class="g4" style="margin-bottom:1rem">
+      <div class="card"><div class="mlbl" data-i18n="tasks_active">פעילות</div><div class="mval" id="tk-act">0</div></div>
+      <div class="card"><div class="mlbl" data-i18n="tasks_done">הושלמו</div><div class="mval" id="tk-done">0</div></div>
+      <div class="card"><div class="mlbl" data-i18n="tasks_avg">ממוצע</div><div class="mval" id="tk-avg">—</div></div>
+      <div class="card"><div class="mlbl" data-i18n="tasks_units">יחידות</div><div class="mval" id="tk-units">0</div></div>
+    </div>
+    <div class="g2">
+      <div><div class="sec">משימות פעילות</div><div id="tk-active-list"></div></div>
+      <div class="card">
+        <div class="sec">היסטוריה</div>
+        <div style="display:flex;gap:6px;flex-wrap:wrap;margin-bottom:8px">
+          <input id="tk-f-name" type="text" placeholder="🔍 שם עובד" style="flex:1;min-width:90px;padding:5px 8px;border-radius:7px;border:1px solid var(--brd);background:var(--card);color:var(--txt);font-size:12px" oninput="_tkHistLimit=20;renderTaskHist()">
+          <input id="tk-f-prod" type="text" placeholder="🔍 מספר מוצר" style="flex:1;min-width:90px;padding:5px 8px;border-radius:7px;border:1px solid var(--brd);background:var(--card);color:var(--txt);font-size:12px" oninput="_tkHistLimit=20;renderTaskHist()">
+          <input id="tk-f-type" type="text" placeholder="🔍 שם משימה" style="flex:1;min-width:90px;padding:5px 8px;border-radius:7px;border:1px solid var(--brd);background:var(--card);color:var(--txt);font-size:12px" oninput="_tkHistLimit=20;renderTaskHist()">
+          <input id="tk-f-date" type="date" style="flex:1;min-width:110px;padding:5px 8px;border-radius:7px;border:1px solid var(--brd);background:var(--card);color:var(--txt);font-size:12px" oninput="_tkHistLimit=20;renderTaskHist()">
+          <button class="btn" style="font-size:11px;padding:4px 10px" onclick="['tk-f-name','tk-f-prod','tk-f-type','tk-f-date'].forEach(id=>document.getElementById(id).value='');_tkHistLimit=20;renderTaskHist()">✕ נקה</button>
+        </div>
+        <div id="tk-hist"></div>
+        <div id="tk-hist-more" style="text-align:center;margin-top:8px"></div>
+      </div>
+    </div>
+    <div class="card" id="worker-personal-report" style="margin-top:1rem">
+      <div class="sec">📊 <span data-i18n="personal_report">דוח אישי</span></div>
+      <div style="display:flex;gap:8px;flex-wrap:wrap;align-items:center;margin-bottom:1rem">
+        <div style="display:flex;align-items:center;gap:4px">
+          <label style="font-size:11px;color:var(--txt2)" data-i18n="from">מ-</label>
+          <input type="date" id="pr-from" style="font-size:12px;width:auto" onchange="buildPersonalReport()"/>
+        </div>
+        <div style="display:flex;align-items:center;gap:4px">
+          <label style="font-size:11px;color:var(--txt2)" data-i18n="to">עד</label>
+          <input type="date" id="pr-to" style="font-size:12px;width:auto" onchange="buildPersonalReport()"/>
+        </div>
+        <button class="btn primary" style="font-size:12px" onclick="setPrRange('week')" data-i18n="this_week">שבוע זה</button>
+        <button class="btn" style="font-size:12px" onclick="setPrRange('month')" data-i18n="this_month">חודש זה</button>
+        <button class="btn" style="font-size:12px" onclick="setPrRange('all')" data-i18n="all_time">הכל</button>
+      </div>
+      <div id="pr-body"></div>
+    </div>
+  </div>
+
+  <!-- REPORTS -->
+  <div class="page" id="page-reports">
+    <div style="display:flex;gap:8px;flex-wrap:wrap;margin-bottom:1rem;align-items:center">
+      <div style="display:flex;align-items:center;gap:4px">
+        <label style="font-size:11px;color:var(--txt2)">מ-</label>
+        <input type="date" id="rf-from" style="font-size:12px;width:auto" onchange="buildRep()"/>
+      </div>
+      <div style="display:flex;align-items:center;gap:4px">
+        <label style="font-size:11px;color:var(--txt2)">עד</label>
+        <input type="date" id="rf-to" style="font-size:12px;width:auto" onchange="buildRep()"/>
+      </div>
+      <span id="rf-prod-note" style="display:none;font-size:11px;color:var(--amber-txt)">📦 מוצר נבחר — מוצגות כל המשימות שלו, בלי קשר לתאריכים</span>
+      <select id="rf-w" style="font-size:12px" onchange="buildRep()"><option value="">כל העובדים</option></select>
+      <select id="rf-c" style="font-size:12px" onchange="buildRep()"><option value="">כל הלקוחות</option></select>
+      <select id="rf-p" style="font-size:12px" onchange="buildRep()"><option value="">כל המוצרים</option></select>
+      <select id="rf-o" style="font-size:12px;display:none" onchange="buildRep()"><option value="">כל ההזמנות</option></select>
+      <button class="btn success" onclick="exportCSV()">⬇ ייצוא CSV</button>
+      <button class="btn" onclick="buildRep()">🔄</button>
+      <button class="btn" onclick="showPrintChoice()">🖨 הדפס</button>
+    </div>
+    <div id="print-choice-panel" class="hidden" style="background:var(--bg);border:1px solid var(--b2);border-radius:var(--rl);padding:1rem;margin-bottom:1rem;display:flex;flex-wrap:wrap;align-items:center;gap:12px">
+      <span style="font-size:13px;font-weight:600">מה להדפיס?</span>
+      <label style="display:flex;align-items:center;gap:6px;font-size:13px;cursor:pointer"><input type="radio" name="print-choice" value="pipe" style="width:auto"/> 🏭 לוח מצב הזמנות</label>
+      <label style="display:flex;align-items:center;gap:6px;font-size:13px;cursor:pointer"><input type="radio" name="print-choice" value="detail" checked style="width:auto"/> פירוט משימות</label>
+      <label style="display:flex;align-items:center;gap:6px;font-size:13px;cursor:pointer"><input type="radio" name="print-choice" value="summary" style="width:auto"/> דוח מרוכז</label>
+      <label style="display:flex;align-items:center;gap:6px;font-size:13px;cursor:pointer"><input type="radio" name="print-choice" value="expprod" style="width:auto"/> 🎯 בפועל מול צפי</label>
+      <label style="display:flex;align-items:center;gap:6px;font-size:13px;cursor:pointer"><input type="radio" name="print-choice" value="stages" style="width:auto"/> דוח ייצור לפי שלב</label>
+      <label style="display:flex;align-items:center;gap:6px;font-size:13px;cursor:pointer"><input type="radio" name="print-choice" value="stepqty" style="width:auto"/> כמות לפי שלב עבודה</label>
+      <label style="display:flex;align-items:center;gap:6px;font-size:13px;cursor:pointer"><input type="radio" name="print-choice" value="profit" style="width:auto"/> 💰 רווח מול יעד</label>
+      <label style="display:flex;align-items:center;gap:6px;font-size:13px;cursor:pointer"><input type="radio" name="print-choice" value="all" style="width:auto"/> הכל</label>
+      <button class="btn primary" onclick="doPrintChoice()">🖨 הדפס</button>
+      <button class="btn" onclick="document.getElementById('print-choice-panel').classList.add('hidden')">ביטול</button>
+    </div>
+    <div class="g4" style="margin-bottom:1rem">
+      <div class="card"><div class="mlbl" data-i18n="rep_total">סה"כ משימות</div><div class="mval" id="rp-tot">0</div></div>
+      <div class="card"><div class="mlbl" data-i18n="rep_time">זמן כולל</div><div class="mval" id="rp-time">0</div></div>
+      <div class="card"><div class="mlbl" data-i18n="rep_units">יחידות</div><div class="mval" id="rp-units">0</div></div>
+      <div class="card"><div class="mlbl" data-i18n="rep_eff">יעילות</div><div class="mval" id="rp-eff">—</div></div>
+    </div>
+    <div class="card">
+      <div class="sec">🏭 לוח מצב הזמנות</div>
+      <div id="rp-pipe-body"></div>
+    </div>
+    <div class="card" style="margin-top:1rem">
+      <div class="sec">👥 דוח מרוכז — שעות לפי עובד</div>
+      <div id="rp-summary-body"></div>
+    </div>
+    <div class="card" style="margin-top:1rem">
+      <div class="sec">🎯 בפועל מול צפי — לפי מוצר</div>
+      <div id="rp-expprod-body"></div>
+    </div>
+    <div class="card" style="margin-top:1rem">
+      <div style="display:flex;align-items:center;justify-content:space-between;gap:8px">
+        <div class="sec" data-i18n="rep_detail" style="margin-bottom:0">פירוט לפי לקוח ומוצר</div>
+        <button class="btn" style="font-size:12px" onclick="const w=document.getElementById('rp-detail-wrap');w.classList.toggle('hidden');this.textContent=w.classList.contains('hidden')?'📋 הצג פירוט':'הסתר פירוט'">📋 הצג פירוט</button>
+      </div>
+      <div id="rp-detail-wrap" class="hidden" style="margin-top:8px">
+      <div class="tbl-wrap"><table><thead><tr><th data-i18n="th_worker">עובד</th><th data-i18n="th_dept">מחלקה</th><th data-i18n="th_task_type">סוג משימה</th><th data-i18n="th_customer">לקוח</th><th data-i18n="th_product">מוצר</th><th>מידה</th><th data-i18n="th_qty">כמות</th><th data-i18n="th_color">צבע</th><th data-i18n="th_start_time">התחלה</th><th data-i18n="th_end_time">סיום</th><th data-i18n="th_duration">משך</th><th data-i18n="th_status">סטטוס</th></tr></thead>
+      <tbody id="rp-body"></tbody></table></div>
+      </div>
+    </div>
+    <div class="card" style="margin-top:1rem">
+      <div class="sec">📦 דוח ייצור לפי שלב</div>
+      <div id="rp-stages-body"></div>
+    </div>
+    <div class="card" style="margin-top:1rem">
+      <div class="sec">🧵 כמות שהושלמה לפי שלב עבודה</div>
+      <div id="rp-stepqty-body"></div>
+    </div>
+    <!-- תמחור שלב ה' — דוחות (מנהל בלבד, דורש נתוני עלות) -->
+    <div class="card hidden" style="margin-top:1rem" id="rp-budget-card">
+      <div class="sec">🎯 מוקצב מול בפועל — לפי תמחור</div>
+      <div id="rp-budget-body"></div>
+    </div>
+    <div class="card hidden" style="margin-top:1rem" id="rp-cut-card">
+      <div class="sec">✂ גזירה — תקציב מול בפועל</div>
+      <div id="rp-cut-body"></div>
+    </div>
+    <div class="card hidden" style="margin-top:1rem" id="rp-profit-card">
+      <div class="sec">💰 רווח בפועל מול יעד — לפי מוצר</div>
+      <div id="rp-profit-body"></div>
+    </div>
+    <div class="card hidden" style="margin-top:1rem" id="rp-real-card">
+      <div style="display:flex;align-items:center;justify-content:space-between;gap:8px">
+        <div class="sec" style="margin-bottom:0">💵 רווח אמיתי — הזמנות שיצאו ללקוח</div>
+        <button class="btn" style="font-size:12px" id="rr-toggle" onclick="rrToggleOpen()">📂 פתח</button>
+      </div>
+      <div id="rp-real-wrap" class="hidden" style="margin-top:8px">
+        <div style="display:flex;flex-wrap:wrap;gap:6px;align-items:center;margin-bottom:8px">
+          <input id="rr-q" placeholder="🔍 לקוח / דגם / שם / מס' הזמנה" style="font-size:12px;width:auto;flex:1;min-width:150px" oninput="rrRender()"/>
+          <label style="font-size:11px;color:var(--txt2)">יצא מ-</label>
+          <input type="date" id="rr-from" style="font-size:12px;width:auto" onchange="rrRender()"/>
+          <label style="font-size:11px;color:var(--txt2)">עד</label>
+          <input type="date" id="rr-to" style="font-size:12px;width:auto" onchange="rrRender()"/>
+          <button class="btn" style="font-size:12px" onclick="rrSelectShown()">✅ בחר את המוצגים</button>
+          <button class="btn" style="font-size:12px" onclick="rrClear()">✖ נקה בחירה</button>
+          <button class="btn" style="font-size:12px" onclick="buildRealProfitReport(true)" title="טען מחדש את כל ההיסטוריה">🔄</button>
+        </div>
+        <div id="rr-sum"></div>
+        <div id="rp-real-body"></div>
+      </div>
+    </div>
+  </div>
+
+  <!-- ALERTS -->
+  <div class="page" id="page-alerts">
+    <div class="g2" style="margin-bottom:1rem">
+      <div class="card">
+        <div class="sec">הגדרות</div>
+        <div class="field"><label data-i18n="al_thresh_label">התראה על משימה ארוכה (דקות)</label><input type="number" id="al-thresh" value="60" min="5" onchange="saveSettings()"/></div>
+        <div class="field"><label data-i18n="al_absent_label">התראה על היעדרות (מספר עובדים)</label><input type="number" id="al-absent" value="5" min="1" onchange="saveSettings()"/></div>
+        <div class="field"><label>⏰ התראה על אי-יציאה — שעת סיום יום</label><input type="time" id="al-endofday" value="15:05" onchange="saveSettings()"/></div>
+        <button class="btn primary" onclick="checkAlerts();renderAlerts()">🔄 רענן</button>
+      </div>
+      <div class="card">
+        <div class="sec">⏱️ עיגול שעות נוכחות</div>
+        <div class="field"><label>שעת התחלת משמרת</label><input type="time" id="st-shift-start" value="06:30" onchange="saveSettings()"/></div>
+        <div class="field"><label>שעת סיום משמרת</label><input type="time" id="st-shift-end" value="15:00" onchange="saveSettings()"/></div>
+        <div class="field"><label>חלון עיגול (דקות) — ±</label><input type="number" id="st-round-min" value="5" min="0" max="30" onchange="saveSettings()"/></div>
+        <div style="font-size:12px;color:var(--txt3);margin-top:4px">כניסה בטווח של ±<span id="st-round-preview">5</span> דק' מ-<span class="st-ss-lbl">06:30</span> תעוגל ל-<span class="st-ss-lbl">06:30</span>. יציאה בטווח ±<span id="st-round-preview2">5</span> דק' מ-<span class="st-se-lbl">15:00</span> תעוגל ל-<span class="st-se-lbl">15:00</span></div>
+      </div>
+      <div class="card">
+        <div class="sec">סיכום</div>
+        <div class="row"><span style="flex:1;font-size:13px" data-i18n="al_active">התראות פעילות</span><span class="badge red" id="al-sum">0</span></div>
+        <div class="row"><span style="flex:1;font-size:13px" data-i18n="al_long">משימות ארוכות</span><span class="badge amber" id="al-long">0</span></div>
+        <div class="row"><span style="flex:1;font-size:13px" data-i18n="al_over_thresh">נעדרים מעל לסף</span><span class="badge red" id="al-abs">0</span></div>
+      </div>
+    </div>
+    <div class="card" style="margin-top:1rem">
+      <div class="sec">📲 התראות Telegram אוטומטיות</div>
+      <div class="g2" style="gap:12px">
+        <div>
+          <div class="field" style="background:var(--green-bg);border-radius:var(--r);padding:9px"><div style="font-size:12px;color:var(--green-txt)">🔒 Token ו-Chat ID שמורים בצד השרת (Cloud Functions) — לא נגישים מהדפדפן. לשינוי: firebase functions:config:set telegram.token / telegram.chatid</div></div>
+          <div class="field" style="margin-top:12px;padding-top:12px;border-top:0.5px solid var(--b)">
+            <label>🏭 IP קבוע של המפעל</label>
+            <input id="factory-ip" type="text" placeholder="188.225.231.120" oninput="saveSettings()" dir="ltr" style="font-family:monospace"/>
+            <div style="font-size:11px;color:var(--txt3);margin-top:4px">רק עובדים עם "חייב WiFi מפעל" יבדקו מול כתובת זו</div>
+          </div>
+          <div id="ipbp-wrap" class="field" style="margin-top:10px;padding:10px 12px;border-radius:var(--r);background:var(--bg2)">
+            <label style="display:block;margin-bottom:6px">🔓 מצב גיבוי — השהיית בדיקת ה-IP</label>
+            <div id="ipbp-status" style="font-size:12px;line-height:1.6;margin-bottom:8px"></div>
+            <div style="display:flex;gap:8px;align-items:flex-end;flex-wrap:wrap">
+              <div style="flex:0 0 82px"><label style="font-size:11px;color:var(--txt3)">שעות</label><input type="number" id="ipbp-h" value="8" min="0" max="72"/></div>
+              <div style="flex:0 0 82px"><label style="font-size:11px;color:var(--txt3)">דקות</label><input type="number" id="ipbp-m" value="0" min="0" max="59"/></div>
+              <button id="ipbp-start" class="btn warn" onclick="startIpBypass()">🔓 הפעל</button>
+              <button id="ipbp-cancel" class="btn success" onclick="cancelIpBypass()" style="display:none">🔒 בטל עכשיו</button>
+            </div>
+            <div style="font-size:11px;color:var(--txt3);margin-top:6px">לשימוש בנפילת אינטרנט/מעבר לקו גיבוי. ה-IP נשאר שמור — בתום הזמן ההגנה חוזרת לבד, בלי להקליד אותו מחדש.</div>
+          </div>
+          <div style="font-size:11px;color:var(--txt3);margin-bottom:12px;line-height:1.6">
+            הבוט: <strong>@TextileOpsAlert_bot</strong> — Token ו-Chat ID כבר מוגדרים
+          </div>
+        </div>
+        <div>
+          <div class="field"><label>מינימום דקות בין התראות</label><input type="number" id="wa-interval" value="60" min="5" oninput="saveSettings()"/></div>
+          <div class="field" style="display:flex;gap:12px">
+            <div style="flex:1"><label>שעת התחלה</label><input type="time" id="wa-from" value="07:00" onchange="saveSettings()"/></div>
+            <div style="flex:1"><label>שעת סיום</label><input type="time" id="wa-to" value="18:00" onchange="saveSettings()"/></div>
+          </div>
+          <div style="display:flex;flex-direction:column;gap:8px;margin-bottom:12px">
+            <label style="display:flex;align-items:center;gap:8px;font-size:13px;cursor:pointer"><input type="checkbox" id="wa-long" checked onchange="saveSettings()" style="width:auto"/> שלח על משימה ארוכה ⏰</label>
+            <label style="display:flex;align-items:center;gap:8px;font-size:13px;cursor:pointer"><input type="checkbox" id="wa-absent" checked onchange="saveSettings()" style="width:auto"/> שלח על עובדים נעדרים 👤</label>
+          </div>
+        </div>
+      </div>
+      <div style="display:flex;align-items:center;gap:12px;flex-wrap:wrap">
+        <label style="display:flex;align-items:center;gap:8px;font-size:14px;font-weight:500;cursor:pointer">
+          <input type="checkbox" id="wa-enabled" onchange="saveSettings()" style="width:auto"/>
+          הפעל שליחה אוטומטית
+        </label>
+        <button class="btn primary" onclick="testWhatsApp()">🧪 שלח הודעת בדיקה</button>
+        <span id="wa-status" style="font-size:12px;color:var(--txt3)"></span>
+      </div>
+
+      <!-- PUSH NOTIFICATIONS -->
+      <div style="margin-top:1rem;padding-top:1rem;border-top:1px solid var(--brd)">
+        <div class="sec" style="margin-bottom:8px">🔔 התראות Push (דפדפן / טלפון)</div>
+        <label style="display:flex;align-items:center;gap:8px;margin-bottom:10px;cursor:pointer;font-size:13px">
+          <input type="checkbox" id="push-enabled" style="width:16px;height:16px"/>
+          הפעל התראות Push
+        </label>
+        <div class="field" style="margin-bottom:8px">
+          <label style="font-size:12px">VAPID Public Key <span style="color:var(--txt3)">(Firebase Console → Project Settings → Cloud Messaging → Web Push certificates)</span></label>
+          <input id="push-vapid" type="text" placeholder="BNt7..." dir="ltr" style="font-family:monospace;font-size:11px"/>
+        </div>
+        <div style="margin-bottom:10px">
+          <div style="font-size:12px;font-weight:600;margin-bottom:6px;color:var(--txt2)">אילו התראות לשלוח ב-Push:</div>
+          <div style="display:grid;grid-template-columns:1fr 1fr;gap:4px">
+            <label style="display:flex;align-items:center;gap:6px;font-size:12px;cursor:pointer"><input type="checkbox" id="push-punch_in" style="width:14px;height:14px"> ✅ כניסה לעבודה</label>
+            <label style="display:flex;align-items:center;gap:6px;font-size:12px;cursor:pointer"><input type="checkbox" id="push-punch_out" style="width:14px;height:14px"> 🚪 יציאה מהעבודה</label>
+            <label style="display:flex;align-items:center;gap:6px;font-size:12px;cursor:pointer"><input type="checkbox" id="push-task_start" style="width:14px;height:14px"> 🔧 התחלת משימה</label>
+            <label style="display:flex;align-items:center;gap:6px;font-size:12px;cursor:pointer"><input type="checkbox" id="push-task_end" style="width:14px;height:14px"> ✅ סיום משימה</label>
+            <label style="display:flex;align-items:center;gap:6px;font-size:12px;cursor:pointer"><input type="checkbox" id="push-task_long" style="width:14px;height:14px"> ⚠️ משימה ארוכה</label>
+            <label style="display:flex;align-items:center;gap:6px;font-size:12px;cursor:pointer"><input type="checkbox" id="push-wifi_out" style="width:14px;height:14px"> 📡 ניתוק WiFi</label>
+          </div>
+        </div>
+        <div style="display:flex;align-items:center;gap:10px;flex-wrap:wrap">
+          <button class="btn primary" onclick="savePushSettings()">💾 שמור הגדרות Push</button>
+          <button class="btn primary" onclick="initFCM()">📱 רשום מכשיר זה</button>
+          <button class="btn" onclick="testPush()">🧪 שלח בדיקת Push</button>
+          <span id="push-status" style="font-size:12px;color:var(--txt3)"></span>
+        </div>
+        <div id="push-devices" style="margin-top:8px;font-size:11px;color:var(--txt3)"></div>
+        <div id="push-devices-list" style="margin-top:8px"></div>
+      </div>
+
+      <div style="margin-top:1rem;padding-top:1rem;border-top:0.5px solid var(--b);display:flex;align-items:center;gap:12px;flex-wrap:wrap">
+        <div>
+          <div style="font-size:13px;font-weight:600;margin-bottom:4px">💾 גיבוי ידני</div>
+          <div style="font-size:11px;color:var(--txt3)">שמירת כל הנתונים ל-Firebase עכשיו</div>
+        </div>
+        <button class="btn success" onclick="manualBackup()">☁️ גבה עכשיו</button>
+        <span id="backup-status" style="font-size:12px;color:var(--txt3)"></span>
+      </div>
+    </div>
+    <div class="card" style="margin-top:1rem"><div class="sec" data-i18n="nav_alerts">התראות</div><div id="alerts-list"></div></div>
+  </div>
+
+  <!-- ADMIN -->
+  <div class="page" id="page-admin">
+    <div class="g2">
+      <div class="card">
+        <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:.75rem">
+          <div class="sec" style="margin:0" data-i18n="admin_workers">עובדים</div>
+          <button class="btn primary" style="font-size:12px;padding:5px 10px" onclick="openModal('add-worker')">+ <span data-i18n="admin_add">הוסף</span></button>
+        </div>
+        <div id="adm-workers"></div>
+      </div>
+      <div class="card">
+        <div class="sec" data-i18n="admin_depts">מחלקות</div>
+        <div id="adm-depts"></div>
+        <div class="sep"></div>
+        <div style="display:flex;gap:8px">
+          <input id="new-dept" type="text" placeholder="שם מחלקה חדשה" style="flex:1;font-size:12px"/>
+          <button class="btn primary" style="padding:6px 12px" onclick="addDept()">+</button>
+        </div>
+      </div>
+    </div>
+    <div class="g2" style="margin-top:1rem">
+      <!-- ניהול לקוחות -->
+      <div class="card">
+        <div class="sec">👤 שמות לקוחות</div>
+        <div style="font-size:11px;color:var(--txt3);margin-bottom:.75rem">קשר בין קוד לקוח (01,02...) לשם</div>
+        <div style="display:flex;gap:6px;margin-bottom:8px">
+          <input type="text" id="cust-code" placeholder="קוד (01)" maxlength="2" style="width:70px;font-size:13px;text-align:center"/>
+          <input type="text" id="cust-name" placeholder="שם לקוח" style="flex:1;font-size:13px"/>
+          <button class="btn primary" onclick="addCustomerName()" style="padding:6px 12px">+</button>
+        </div>
+        <div id="adm-customers"></div>
+      </div>
+      <!-- 📄 פרטי המפעל לתעודת משלוח -->
+      <div class="card">
+        <div class="sec">📄 פרטי העסק — לתעודת משלוח</div>
+        <div style="font-size:11px;color:var(--txt3);margin-bottom:.75rem">מופיעים בראש כל תעודת משלוח שמודפסת</div>
+        <div style="display:grid;grid-template-columns:1fr 1fr;gap:6px">
+          <input type="text" id="co-name" placeholder="שם העסק" style="grid-column:1/-1;font-size:13px"/>
+          <input type="text" id="co-addr" placeholder="רחוב ומספר" style="font-size:13px"/>
+          <input type="text" id="co-city" placeholder="עיר" style="font-size:13px"/>
+          <input type="text" id="co-phone" placeholder="טלפון" style="font-size:13px"/>
+          <input type="text" id="co-taxid" placeholder="ח.פ. / ע.מ." style="font-size:13px"/>
+          <input type="text" id="co-email" placeholder="אימייל (לא חובה)" style="grid-column:1/-1;font-size:13px"/>
+        </div>
+        <div style="margin-top:10px;padding-top:9px;border-top:1px solid var(--brd)">
+          <label style="font-size:12px;font-weight:600">🔢 מספר התעודה הבא</label>
+          <input type="number" id="co-dnstart" min="1" style="width:100%;font-size:13px;margin-top:4px"/>
+          <div id="co-dnlast" style="font-size:11px;color:var(--txt3);margin-top:3px"></div>
+        </div>
+        <div style="margin-top:10px;padding-top:9px;border-top:1px solid var(--brd);display:grid;grid-template-columns:2fr 1fr;gap:8px">
+          <div>
+            <label style="font-size:12px;font-weight:600">🧾 מספר חשבונית העסקה הבאה</label>
+            <input type="number" id="co-invstart" min="1" style="width:100%;font-size:13px;margin-top:4px"/>
+          </div>
+          <div>
+            <label style="font-size:12px;font-weight:600">מע"מ %</label>
+            <input type="number" id="co-vat" min="0" max="50" step="0.1" style="width:100%;font-size:13px;margin-top:4px"/>
+          </div>
+          <div id="co-invlast" style="grid-column:1/-1;font-size:11px;color:var(--txt3)"></div>
+        </div>
+        <div style="margin-top:10px;padding-top:9px;border-top:1px solid var(--brd)">
+          <label style="font-size:12px;font-weight:600">✍ חתימה / חותמת העסק</label>
+          <div style="font-size:11px;color:var(--txt3);margin:2px 0 6px">בכל הדפסה של תעודה, התחשבנות או חשבונית — נשאלים אם להפיק עם חתימה.</div>
+          <div id="co-sig-prev" style="min-height:40px;border:1px dashed var(--brd);border-radius:8px;padding:6px;display:flex;align-items:center;justify-content:center;background:#fff;font-size:11px;color:#888">—</div>
+          <div id="co-sig-btns" style="display:flex;gap:6px;margin-top:6px;flex-wrap:wrap">
+            <button class="btn" style="font-size:12px" onclick="sigDrawOpen()">✍ חתום על המסך</button>
+            <button class="btn" style="font-size:12px" onclick="document.getElementById('co-sig-file').click()">📷 העלה תמונה</button>
+            <button class="btn" style="font-size:12px;color:var(--red-txt)" onclick="sigDelete()">🗑 מחק</button>
+            <input type="file" id="co-sig-file" accept="image/*" style="display:none" onchange="sigUpload(this)"/>
+          </div>
+        </div>
+        <div style="margin-top:12px;padding-top:10px;border-top:1px solid var(--brd)">
+          <div style="font-size:12px;font-weight:700">📦 מחירון חומר אריזה — ₪ ליחידה</div>
+          <div style="font-size:11px;color:var(--txt3);margin:3px 0 7px">המחיר נצרב על התעודה בעת אישור המשלוח — שינוי כאן <b>לא</b> משנה תעודות שכבר יצאו.</div>
+          <div style="display:flex;gap:6px;flex-wrap:wrap">
+            <div style="flex:1;min-width:88px"><label style="font-size:11px;color:var(--txt3)">🧷 קולב</label><input type="number" id="pp-hanger" min="0" step="0.01" style="width:100%;font-size:13px;margin-top:3px"/></div>
+            <div style="flex:1;min-width:88px"><label style="font-size:11px;color:var(--txt3)">🧷 קולב קליפס</label><input type="number" id="pp-clip" min="0" step="0.01" style="width:100%;font-size:13px;margin-top:3px"/></div>
+            <div style="flex:1;min-width:88px"><label style="font-size:11px;color:var(--txt3)">🧷 ניילון</label><input type="number" id="pp-nylon" min="0" step="0.01" style="width:100%;font-size:13px;margin-top:3px"/></div>
+            <div style="flex:1;min-width:88px"><label style="font-size:11px;color:var(--txt3)">📦 ניילון צלופן</label><input type="number" id="pp-cello" min="0" step="0.01" style="width:100%;font-size:13px;margin-top:3px"/></div>
+          </div>
+          <div style="font-size:11px;color:var(--txt3);margin-top:5px">🧷 תלייה = קולב / קולב קליפס + ניילון · 📦 קיפול = ניילון צלופן<br>הקולבים בדרך כלל של הלקוח — הכמות שלהם נשארת ריקה באישור המשלוח, והמחיר כאן משמש רק כשהם שלנו.</div>
+        </div>
+        <button class="btn primary" onclick="saveCompanyInfo()" style="width:100%;margin-top:8px;font-size:13px">💾 שמור פרטי עסק</button>
+      </div>
+      <!-- ניהול צבעים -->
+      <div class="card">
+        <div class="sec">🎨 ניהול צבעים</div>
+        <div style="font-size:11px;color:var(--txt3);margin-bottom:.75rem">קשר בין קוד צבע (01-99) לשם</div>
+        <div style="display:flex;gap:6px;margin-bottom:8px">
+          <input type="text" id="col-code" placeholder="קוד (21)" maxlength="2" style="width:70px;font-size:13px;text-align:center"/>
+          <input type="text" id="col-name" placeholder="שם צבע" style="flex:1;font-size:13px"/>
+          <button class="btn primary" onclick="addCustomColor()" style="padding:6px 12px">+</button>
+        </div>
+        <div id="adm-colors" style="max-height:220px;overflow-y:auto"></div>
+      </div>
+    </div>
+    <!-- מכשירים מחוברים: דופק פר-טאב -->
+    <div class="card" style="margin-top:1rem">
+      <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:.75rem;gap:8px;flex-wrap:wrap">
+        <div class="sec" style="margin:0">📡 מכשירים מחוברים כרגע</div>
+        <div style="display:flex;gap:6px">
+          <button class="btn" style="font-size:12px;padding:5px 10px" onclick="renderTabSessions()">🔄 רענן</button>
+          <button class="btn warn" style="font-size:12px;padding:5px 10px" onclick="cleanTabSessions()">🧹 נקה ישנים</button>
+        </div>
+      </div>
+      <div style="font-size:11px;color:var(--txt3);margin-bottom:.75rem;line-height:1.6">
+        כל טאב פתוח מדווח על עצמו — <b>גם כשהוא ברקע</b>. בניגוד ל-📡 WiFi שמדווח פר עובד ורק כשהמסך גלוי.
+        טאב ישן שנשכח פתוח ומחזיק משימות בזיכרון הוא הסיבה למשימות רפאים — כאן רואים אותו.
+      </div>
+      <div id="tab-sessions"></div>
+    </div>
+  </div>
+
+  <!-- ATTENDANCE REPORT PAGE -->
+  <div class="page" id="page-attrep">
+    <div class="card" style="margin-bottom:1rem">
+      <div class="sec">סינון דוח נוכחות</div>
+      <div style="display:flex;gap:8px;flex-wrap:wrap;align-items:flex-end">
+        <div>
+          <label style="font-size:11px;color:var(--txt2);display:block;margin-bottom:3px">מתאריך</label>
+          <input type="date" id="ar-from" style="font-size:12px"/>
+        </div>
+        <div>
+          <label style="font-size:11px;color:var(--txt2);display:block;margin-bottom:3px">עד תאריך</label>
+          <input type="date" id="ar-to" style="font-size:12px"/>
+        </div>
+        <div>
+          <label style="font-size:11px;color:var(--txt2);display:block;margin-bottom:3px">עובד</label>
+          <select id="ar-worker" style="font-size:12px"><option value="">כל העובדים</option></select>
+        </div>
+        <button class="btn primary" onclick="buildAttRep()">🔍 הצג</button>
+        <button class="btn success" onclick="exportAttCSV()">⬇ ייצוא CSV</button>
+        <button class="btn" onclick="printPage('page-attrep','דוח נוכחות')">🖨 הדפס</button>
+      </div>
+    </div>
+    <div class="g4" style="margin-bottom:1rem">
+      <div class="card"><div class="mlbl">ימי נוכחות</div><div class="mval" id="ar-days">0</div></div>
+      <div class="card"><div class="mlbl">סה"כ שעות נטו</div><div class="mval" id="ar-total">0</div></div>
+      <div class="card"><div class="mlbl">ממוצע יומי</div><div class="mval" id="ar-avg">—</div></div>
+      <div class="card"><div class="mlbl">עובדים בדוח</div><div class="mval" id="ar-workers">0</div></div>
+    </div>
+    <div class="card">
+      <div class="tbl-wrap">
+        <table>
+          <thead><tr><th>עובד</th><th>מחלקה</th><th>תאריך</th><th>יום</th><th>כניסה</th><th>יציאה</th><th>הפסקה</th><th>שעות נטו</th></tr></thead>
+          <tbody id="ar-body"></tbody>
+        </table>
+      </div>
+    </div>
+  </div>
+
+  <!-- MANAGER TASKS PAGE -->
+  <div class="page" id="page-mgrtasks">
+    <!-- נוכחות עובדים -->
+    <div class="card" style="margin-bottom:1rem">
+      <div class="sec">🕐 החתמת נוכחות עובדים</div>
+      <div style="margin-bottom:8px;display:flex;gap:8px;align-items:center">
+        <button class="btn" id="mgr-bulk-toggle" style="font-size:12px;padding:4px 12px" onclick="mgrBulkToggle()">☑ כניסה קבוצתית</button>
+      </div>
+      <div id="mgr-att-list"></div>
+    </div>
+    <div class="g2" style="margin-bottom:1rem">
+      <div class="card">
+        <div class="sec" data-i18n="task_start_sec">▶ התחלת משימה לעובד</div>
+        <div class="field"><label data-i18n="th_worker">עובד</label>
+          <select id="mgr-emp-sel" style="font-size:13px" onchange="onScanEmpChange('mgr')"><option value="">בחר עובד...</option></select>
+        </div>
+        <div class="field"><label data-i18n="lbl_task_barcode12">ברקוד משימה (12 ספרות)</label>
+          <div id="mgr-cam-container" style="display:none;margin-bottom:.75rem;position:relative">
+            <video id="mgr-cam-video" style="width:100%;border-radius:var(--rl);background:#000;max-height:200px;object-fit:cover" autoplay muted playsinline></video>
+            <div style="position:absolute;inset:0;border:3px solid var(--blue-txt);border-radius:var(--rl);pointer-events:none;opacity:.6"></div>
+            <div style="position:absolute;top:50%;left:50%;transform:translate(-50%,-50%);width:60%;height:2px;background:var(--blue-txt);opacity:.8"></div>
+            <button class="btn danger" onclick="mgrStopCam()" style="position:absolute;top:8px;left:8px;padding:4px 10px;font-size:12px">✕ סגור</button>
+            <div id="mgr-cam-status" style="position:absolute;bottom:8px;right:0;left:0;text-align:center;font-size:12px;color:#fff;background:rgba(0,0,0,.5);padding:4px">מכוון מצלמה...</div>
+          </div>
+          <button class="btn primary full" onclick="mgrStartCam()" id="mgr-cam-btn" style="font-size:13px;padding:10px;margin-bottom:8px">📷 סרוק עם מצלמה</button>
+          <button class="btn full nfc-only" onclick="nfcScanTo('mgr')" style="display:none;font-size:13px;padding:10px;margin-bottom:8px">📶 קרא מדבקת NFC (עובד / תחנה / משימה)</button>
+          <input id="mgr-bc-inp" class="bc-inp" maxlength="16" placeholder="או הזן 13 או 16 ספרות ידנית..." oninput="parseMgrBc(this.value)"/>
+          <input id="mgr-part" type="number" min="1" max="999" inputmode="numeric" placeholder="🔢 כמות לעובד — ריק = כל מה שנותר" title="לתת לעובד רק חלק מהכמות שבברקוד. היתרה נשארת על אותו ברקוד לסריקה הבאה" style="margin-top:6px;width:100%;font-size:13px;padding:8px;border-radius:6px;border:1px solid var(--brd)"/>
+        </div><!-- /field barcode -->
+        <div id="mgr-bc-prev" style="margin-bottom:.5rem;min-height:30px"></div>
+        <div id="mgr-batch-queue" style="margin-bottom:.75rem"></div>
+        <div class="field" id="mgr-tasktype-wrap">
+          <label data-i18n="lbl_task_type">סוג משימה</label>
+          <input id="mgr-tasktype" type="text" placeholder="לדוגמה: תפירה, חיתוך, גימור..." data-i18n-ph="ph_task_type" style="font-size:13px"/>
+        </div>
+        <div id="mgr-steps-wrap" style="display:none;margin-bottom:.75rem">
+          <label style="font-size:13px;font-weight:600;display:block;margin-bottom:6px">🔧 בחר שלבי עבודה</label>
+          <div id="mgr-steps-list"></div>
+          <div id="mgr-recs"></div>
+          <div id="mgr-expected"></div>
+        </div>
+        <div class="field">
+          <label data-i18n="lbl_dept">מחלקה</label>
+          <select id="mgr-dept" style="font-size:13px"><option value="">-- בחר מחלקה --</option></select>
+        </div>
+        <button class="btn full" style="margin-bottom:6px;background:#dbeafe;color:#1d4ed8;font-size:13px;padding:10px" onclick="mgrAddToBatch()" data-i18n="btn_add_batch">➕ הוסף לסל (ברקוד נוסף)</button>
+        <button class="btn success full" onclick="mgrStartTask()" data-i18n="btn_start_task">▶ התחל עבודה</button>
+        <div id="mgr-start-msg" style="font-size:12px;margin-top:6px;min-height:16px"></div>
+      </div><!-- /card start-task -->
+      <div class="card">
+        <div class="sec" data-i18n="task_end_sec_lbl">⏹ סיום משימה לעובד</div>
+        <div id="mgr-active-tasks-list"></div>
+      </div>
+    </div>
+    <div class="card">
+      <div class="sec">☕ הגדרת הפסקות לעובדים</div>
+      <div id="mgr-breaks-list"></div>
+    </div>
+  </div>
+
+  <!-- TASK SCAN PAGE (limited access) -->
+  <div class="page" id="page-taskscan">
+    <div class="card" style="max-width:500px;margin:0 auto">
+      <div class="sec" data-i18n="task_start_sec">▶ התחלת משימה לעובד</div>
+      <div class="field"><label data-i18n="th_worker">עובד</label>
+        <div style="display:flex;gap:6px;align-items:center">
+          <select id="ts-emp-sel" style="font-size:13px;flex:1" onchange="onScanEmpChange('ts')"><option value="">בחר עובד...</option></select>
+          <button class="btn primary" onclick="tsStartWorkerCam()" id="ts-emp-cam-btn" style="font-size:13px;padding:8px 12px;flex-shrink:0;display:none" title="סרוק ברקוד עובד" data-i18n="btn_scan_worker">📷 עובד</button>
+        </div>
+        <div id="ts-emp-cam-container" style="display:none;margin-top:8px;position:relative">
+          <video id="ts-emp-cam-video" style="width:100%;border-radius:var(--rl);background:#000;max-height:200px;object-fit:cover" autoplay muted playsinline></video>
+          <div style="position:absolute;inset:0;border:3px solid var(--green);border-radius:var(--rl);pointer-events:none;opacity:.6"></div>
+          <button class="btn danger" onclick="tsStopWorkerCam()" style="position:absolute;top:8px;left:8px;padding:4px 10px;font-size:12px" data-i18n="btn_close">✕ סגור</button>
+          <div id="ts-emp-cam-status" style="position:absolute;bottom:8px;right:0;left:0;text-align:center;font-size:12px;color:#fff;background:rgba(0,0,0,.5);padding:4px" data-i18n="scan_searching_worker">מחפש ברקוד עובד...</div>
+        </div>
+      </div>
+      <div class="field"><label data-i18n="lbl_task_barcode13">ברקוד משימה (13 או 16 ספרות)</label>
+        <div id="ts-cam-container" style="display:none;margin-bottom:.75rem;position:relative">
+          <video id="ts-cam-video" style="width:100%;border-radius:var(--rl);background:#000;max-height:220px;object-fit:cover" autoplay muted playsinline></video>
+          <div style="position:absolute;inset:0;border:3px solid var(--blue-txt);border-radius:var(--rl);pointer-events:none;opacity:.6"></div>
+          <div style="position:absolute;top:50%;left:50%;transform:translate(-50%,-50%);width:60%;height:2px;background:var(--blue-txt);opacity:.8"></div>
+          <button class="btn danger" onclick="tsStopCam()" style="position:absolute;top:8px;left:8px;padding:4px 10px;font-size:12px" data-i18n="btn_close">✕ סגור</button>
+          <div id="ts-cam-status" style="position:absolute;bottom:8px;right:0;left:0;text-align:center;font-size:12px;color:#fff;background:rgba(0,0,0,.5);padding:4px" data-i18n="scan_aiming">מכוון מצלמה...</div>
+        </div>
+        <button class="btn primary full" onclick="tsStartCam()" id="ts-cam-btn" style="font-size:13px;padding:10px;margin-bottom:8px">📷 <span data-i18n="scan_cam_all">סרוק עובד / תחנה / משימה</span></button>
+        <button class="btn full nfc-only" onclick="nfcScanTo('ts')" style="display:none;font-size:13px;padding:10px;margin-bottom:8px">📶 קרא מדבקת NFC (עובד / תחנה / משימה)</button>
+        <input id="ts-bc-inp" class="bc-inp" maxlength="16" placeholder="או הזן 13 או 16 ספרות ידנית..." data-i18n-ph="ts_inp_ph" oninput="tsParseBc(this.value)"/>
+          <input id="ts-part" type="number" min="1" max="999" inputmode="numeric" placeholder="🔢 כמות לעובד — ריק = כל מה שנותר" title="לתת לעובד רק חלק מהכמות שבברקוד. היתרה נשארת על אותו ברקוד לסריקה הבאה" style="margin-top:6px;width:100%;font-size:13px;padding:8px;border-radius:6px;border:1px solid var(--brd)"/>
+      </div>
+      <div id="ts-bc-prev" style="margin-bottom:.5rem;min-height:30px"></div>
+      <div id="ts-batch-queue" style="margin-bottom:.75rem"></div>
+      <div class="field" id="ts-tasktype-wrap">
+        <label data-i18n="lbl_task_type">סוג משימה</label>
+        <input id="ts-tasktype" type="text" placeholder="לדוגמה: תפירה, חיתוך, גימור..." data-i18n-ph="ph_task_type" style="font-size:13px"/>
+      </div>
+      <div id="ts-steps-wrap" style="display:none;margin-bottom:.75rem">
+        <label style="font-size:13px;font-weight:600;display:block;margin-bottom:6px" data-i18n="btn_select_steps">🔧 בחר שלבי עבודה</label>
+        <div id="ts-steps-list"></div>
+        <div id="ts-recs"></div>
+        <div id="ts-expected"></div>
+      </div>
+      <div class="field">
+        <label data-i18n="lbl_dept">מחלקה</label>
+        <select id="ts-dept" style="font-size:13px"><option value="" data-i18n="sel_dept">-- בחר מחלקה --</option></select>
+      </div>
+      <button class="btn full" style="margin-bottom:6px;background:#dbeafe;color:#1d4ed8;font-size:13px;padding:10px" onclick="tsAddToBatch()" data-i18n="btn_add_batch">➕ הוסף לסל (ברקוד נוסף)</button>
+      <button class="btn success full" onclick="tsStartTask()" data-i18n="btn_start_task">▶ התחל עבודה</button>
+      <button class="btn full" style="margin-top:6px;font-size:13px;padding:10px;justify-content:center;gap:8px" onclick="tsSendMsgToWorker()">📢 <span data-i18n="btn_send_msg_worker">שלח הודעה לעובד הנבחר</span></button>
+      <div id="ts-start-msg" style="font-size:12px;margin-top:6px;min-height:16px"></div>
+    </div>
+  </div>
+
+  <!-- SETUP PAGE -->
+  <div class="page" id="page-setup">
+    <div class="card" style="max-width:600px;margin:0 auto">
+      <div class="sec">🔧 הגדרת Firebase — שלב אחת ויש לך אפליקציה אמיתית!</div>
+      <p style="font-size:13px;color:var(--txt2);margin-bottom:1rem;line-height:1.7">
+        כרגע הנתונים נשמרים רק בדפדפן שלך. כדי ש<strong>כל העובדים יראו את אותם נתונים בזמן אמת</strong>, צריך לחבר Firebase (חינמי לחלוטין).
+      </p>
+      <div class="step">
+        <div class="step-num">1</div>
+        <div class="step-body">
+          <div class="step-title">פתח Firebase Console</div>
+          <div class="step-desc">כנס לכתובת: <a href="https://console.firebase.google.com" target="_blank" style="color:var(--blue-txt)">console.firebase.google.com</a> עם חשבון Google שלך</div>
+        </div>
+      </div>
+      <div class="step">
+        <div class="step-num">2</div>
+        <div class="step-body">
+          <div class="step-title">צור פרויקט חדש</div>
+          <div class="step-desc">לחץ "Add project" ← שם הפרויקט: <code>textileops</code> ← המשך עד סיום הקמת הפרויקט</div>
+        </div>
+      </div>
+      <div class="step">
+        <div class="step-num">3</div>
+        <div class="step-body">
+          <div class="step-title">הפעל Firestore</div>
+          <div class="step-desc">בתפריט הצד ← Build ← Firestore Database ← Create database ← בחר "Start in test mode" ← בחר אזור ← Done</div>
+        </div>
+      </div>
+      <div class="step">
+        <div class="step-num">4</div>
+        <div class="step-body">
+          <div class="step-title">קבל את פרטי ה-Config</div>
+          <div class="step-desc">הגדרות פרויקט (⚙) ← General ← "Your apps" ← לחץ על כפתור Web (&lt;/&gt;) ← שם: textileops ← Register app ← העתק את האובייקט <code>firebaseConfig</code></div>
+        </div>
+      </div>
+      <div class="step">
+        <div class="step-num">5</div>
+        <div class="step-body">
+          <div class="step-title">הכנס את ה-Config כאן</div>
+          <div class="step-desc" style="margin-bottom:8px">הדבק את הערכים מ-Firebase:</div>
+          <div class="field"><label>apiKey</label><input id="fb-apikey" type="text" placeholder="AIzaSy..."/></div>
+          <div class="field"><label>projectId</label><input id="fb-projid" type="text" placeholder="textileops-xxxxx"/></div>
+          <div class="field"><label>appId</label><input id="fb-appid" type="text" placeholder="1:xxx:web:xxx"/></div>
+          <button class="btn primary full" onclick="connectFirebase()">🔗 התחבר ל-Firebase</button>
+          <div id="fb-result" style="margin-top:8px;font-size:12px;min-height:18px"></div>
+        </div>
+      </div>
+      <div class="step">
+        <div class="step-num">6</div>
+        <div class="step-body">
+          <div class="step-title">פרוס ל-Netlify (30 שניות)</div>
+          <div class="step-desc">
+            כנס ל <a href="https://netlify.com" target="_blank" style="color:var(--blue-txt)">netlify.com</a> ← הירשם עם Google ← גרור את קובץ ה-HTML לאתר ← קבל כתובת URL ← שלח לכל העובדים!
+          </div>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <!-- COSTS PAGE -->
+  <div class="page" id="page-costs">
+    <div style="display:flex;justify-content:flex-start;margin-bottom:12px">
+      <button class="btn" onclick="printPage('page-costs','דוח עלויות')">🖨 הדפס דוח עלויות</button>
+    </div>
+    <!-- כרטיסי סיכום -->
+    <div class="g4" style="margin-bottom:1rem">
+      <div class="card"><div class="mlbl">עלות ייצור כוללת</div><div class="mval" id="cost-total">—</div><div class="msub">בטווח הנבחר</div><div id="cost-full"></div></div>
+      <div class="card"><div class="mlbl">עלות שכר עובדים</div><div class="mval" id="cost-wages">—</div><div class="msub">בטווח הנבחר</div></div>
+      <div class="card"><div class="mlbl">עלות הוצאות</div><div class="mval" id="cost-overhead">—</div><div class="msub">קבועות + משתנות</div></div>
+      <div class="card"><div class="mlbl">עלות ממוצעת למשימה</div><div class="mval" id="cost-avg">—</div><div class="msub">בטווח הנבחר</div></div>
+    </div>
+
+    <div class="g2" style="margin-bottom:1rem">
+      <!-- פילטר תאריכים -->
+      <div class="card">
+        <div class="sec">📅 טווח תאריכים</div>
+        <div style="display:flex;gap:8px;align-items:center;flex-wrap:wrap">
+          <div class="field" style="margin:0;flex:1"><label>מ-</label><input type="date" id="cost-from" style="font-size:13px"/></div>
+          <div class="field" style="margin:0;flex:1"><label>עד-</label><input type="date" id="cost-to" style="font-size:13px"/></div>
+          <button class="btn primary" onclick="calcCosts()" style="margin-top:18px">חשב</button>
+        </div>
+        <div style="display:flex;gap:6px;margin-top:8px;flex-wrap:wrap">
+          <button class="btn" style="font-size:11px;padding:4px 8px" onclick="setCostRange('today')">היום</button>
+          <button class="btn" style="font-size:11px;padding:4px 8px" onclick="setCostRange('week')">שבוע</button>
+          <button class="btn" style="font-size:11px;padding:4px 8px" onclick="setCostRange('month')">חודש</button>
+        </div>
+      </div>
+      <!-- הגדרות הוצאות -->
+      <div class="card">
+        <div class="sec">⚙️ הוצאות קבועות</div>
+        <div style="display:grid;grid-template-columns:1fr 1fr;gap:8px;margin-bottom:8px">
+          <div class="field" style="margin:0">
+            <label>יומיות (₪/יום)</label>
+            <input type="number" id="cost-fixed" min="0" placeholder="0" style="font-size:13px"/>
+          </div>
+          <div class="field" style="margin:0">
+            <label>חודשיות (₪/חודש)</label>
+            <input type="number" id="cost-fixed-monthly" min="0" placeholder="0" style="font-size:13px"/>
+          </div>
+          <div class="field" style="margin:0">
+            <label title="משמש רק לחישוב התקורה לשעה (ממוצע). בדוח העלויות הקבועות מתחלקות על ימי העבודה בפועל של כל חודש.">ימי עבודה בחודש (ממוצע)</label>
+            <input type="number" id="cost-workdays-month" min="1" max="31" placeholder="22" style="font-size:13px"/>
+          </div>
+          <div class="field" style="margin:0">
+            <label>שנתיות (₪/שנה)</label>
+            <input type="number" id="cost-fixed-annual" min="0" placeholder="0" style="font-size:13px"/>
+          </div>
+          <div class="field" style="margin:0">
+            <label>ימי עבודה בשנה</label>
+            <input type="number" id="cost-workdays-year" min="1" max="365" placeholder="250" style="font-size:13px"/>
+          </div>
+          <div class="field" style="margin:0">
+            <label>מסים (% מההכנסות)</label>
+            <input type="number" id="cost-tax-pct" min="0" max="100" step="0.1" placeholder="0" style="font-size:13px"/>
+          </div>
+          <div class="field" style="margin:0">
+            <label>עמלות בנק (% מההכנסות)</label>
+            <input type="number" id="cost-bank-pct" min="0" max="100" step="0.01" placeholder="0" style="font-size:13px"/>
+          </div>
+          <div style="display:flex;align-items:flex-end;grid-column:1/-1">
+            <button class="btn success full" onclick="saveCostSettings()">שמור</button>
+          </div>
+        </div>
+        <div style="margin-top:.75rem">
+          <div class="sec" style="font-size:12px;margin-bottom:6px">הוצאות משתנות</div>
+          <div style="font-size:11px;color:var(--txt3);margin-bottom:6px">חשבונית שמגיעה אחרי סוף החודש (הובלה וכד') — הזן את <b>תאריך התשלום</b> בשדה התאריך, ובחר את <b>חודש השיוך</b> כדי שתיזקף לחודש שאליו היא שייכת. ריק = לפי התאריך.</div>
+          <div style="display:flex;gap:6px;margin-bottom:6px;flex-wrap:wrap">
+            <input type="date" id="vexp-date" title="תאריך התשלום בפועל" style="flex:1;font-size:12px"/>
+            <input type="month" id="vexp-month" title="חודש שיוך — לאיזה חודש ההוצאה נזקפת. חשבונית הובלה של אוגוסט שמגיעה בספטמבר: בחר כאן את אוגוסט. ריק = לפי תאריך התשלום." style="flex:1;font-size:12px"/>
+            <input type="number" id="vexp-amount" placeholder="סכום ₪" min="0" style="flex:1;font-size:12px"/>
+            <input type="text" id="vexp-desc" placeholder="תיאור (הובלה, אריזה, חומר...)" style="flex:2;font-size:12px"/>
+            <button class="btn primary" onclick="addVarExp()" style="font-size:12px;padding:6px 10px">+ הוסף</button>
+          </div>
+          <div id="vexp-list" style="max-height:120px;overflow-y:auto"></div>
+        </div>
+      </div>
+    </div>
+
+    <!-- טבלאות תוצאות -->
+    <div style="display:flex;gap:8px;margin-bottom:.75rem;flex-wrap:wrap">
+      <button class="btn primary" id="ctab-prod" onclick="showCostTab('prod')">📦 לפי מוצר</button>
+      <button class="btn" id="ctab-cust" onclick="showCostTab('cust')">👤 לפי לקוח</button>
+      <button class="btn" id="ctab-day" onclick="showCostTab('day')">📅 לפי יום</button>
+      <button class="btn" id="ctab-exp" onclick="showCostTab('exp')">🧾 פירוט הוצאות</button>
+      <button class="btn" id="ctab-worker" onclick="showCostTab('worker')">👷 שכר עובדים</button>
+      <button class="btn" id="ctab-payroll" onclick="showCostTab('payroll')" style="background:var(--green);color:#fff">💰 תשלום משכורות</button>
+    </div>
+
+    <div class="card" id="cost-result-card">
+      <div id="cost-result-content" style="text-align:center;color:var(--txt3);padding:2rem">לחץ "חשב" כדי לראות תוצאות</div>
+    </div>
+
+    <!-- הגדרות שכר עובדים -->
+    <div class="card" style="margin-top:1rem">
+      <div class="sec">👷 תעריף יומי לעובד</div>
+      <div style="font-size:11px;color:var(--txt3);margin-bottom:.75rem">הזן שכר יומי לכל עובד — יחולק אוטומטית ל-8 שעות. הסעה וביטוח משמשים לחישוב "שעה עמוסה"</div>
+      <div id="cost-worker-rates"></div>
+      <button class="btn success" onclick="saveCostSettings()" style="margin-top:.75rem;width:100%">💾 שמור הגדרות</button>
+    </div>
+
+    <!-- שעה עמוסה — תמחור שלב ג' -->
+    <div class="card" style="margin-top:1rem">
+      <div class="sec">🕐 שעה עמוסה — הטבות והוצאות נלוות</div>
+      <div style="font-size:11px;color:var(--txt3);margin-bottom:.75rem">העלות האמיתית של שעת עבודה: שכר + הסעה + פיצויים + ימי חג + מתנות + טיול + ביטוח. הסעה וביטוח מוזנים פר-עובד בכרטיס למעלה.</div>
+      <div style="display:grid;grid-template-columns:1fr 1fr;gap:8px;margin-bottom:8px">
+        <div class="field" style="margin:0"><label>פיצויים (% על השכר)</label><input type="number" id="lh-sev" step="0.01" min="0" placeholder="8.33" style="font-size:13px"/></div>
+        <div class="field" style="margin:0"><label>ימי חג בתשלום בשנה</label><input type="number" id="lh-hol" min="0" placeholder="4" style="font-size:13px"/></div>
+        <div class="field" style="margin:0"><label title="לעובד שלא הוזן לו סכום משלו בכרטיס העובד">מתנות חג לעובד (₪/שנה) — כללי</label><input type="number" id="lh-gifts" min="0" placeholder="300" style="font-size:13px"/></div>
+        <div class="field" style="margin:0"><label title="מתחלק שווה בין העובדים שלא הוזן להם סכום משלהם בכרטיס העובד">טיול שנתי — עלות כוללת (₪) — כללי</label><input type="number" id="lh-trip" min="0" placeholder="4000" style="font-size:13px"/></div>
+      </div>
+      <button class="btn success full" onclick="saveLoadedHourSettings()">💾 שמור והצג חישוב</button>
+      <div id="lh-table" style="margin-top:.75rem"></div>
+    </div>
+
+    <!-- תקורה מפעלית — תמחור שלב ג' -->
+    <div class="card" style="margin-top:1rem">
+      <div class="sec">🏭 תקורה מפעלית לשעה</div>
+      <div style="font-size:11px;color:var(--txt3);margin-bottom:.75rem">הוצאות קבועות (מהכרטיס למעלה) + ממוצע משתנות של החודשים האחרונים (לפי הבורר) + מרווח ביטחון — מחולק בסך שעות העבודה החודשיות של כל העובדים. בחר <b>1</b> כדי לחשב רק לפי החודש האחרון.</div>
+      <div style="display:flex;gap:8px;align-items:flex-end;flex-wrap:wrap;margin-bottom:10px">
+        <div class="field" style="margin:0"><label>מרווח ביטחון (%)</label><input type="number" id="lh-buffer" min="0" placeholder="10" style="font-size:13px;width:100px"/></div>
+        <div class="field" style="margin:0"><label>חודשים לממוצע</label><select id="lh-months-win" onchange="saveLoadedHourSettings()" style="font-size:13px;width:140px"><option value="1">1 (חודש אחרון בלבד)</option><option value="2">2 חודשים</option><option value="3">3 חודשים</option></select></div>
+        <button class="btn success" onclick="saveLoadedHourSettings()" style="font-size:12px">💾 שמור</button>
+      </div>
+      <div class="sec" style="font-size:12px;margin-bottom:6px">📝 סה"כ עלויות משתנות לפי חודש</div>
+      <div style="font-size:11px;color:var(--txt3);margin-bottom:6px">הזן ידנית מנתונים אמיתיים (חשמל, מים, מטבח, ניקיון, רו"ח, מיסים...) — או חשב אוטומטית מההוצאות המשתנות שנרשמו</div>
+      <div style="display:flex;gap:6px;flex-wrap:wrap;margin-bottom:6px">
+        <input type="month" id="cm-month" style="font-size:12px"/>
+        <input type="number" id="cm-amount" placeholder='סה"כ ₪' min="0" style="font-size:12px;width:110px"/>
+        <button class="btn primary" onclick="addCostMonth()" style="font-size:12px;padding:6px 10px">+ הוסף 📝</button>
+        <button class="btn" onclick="autoFillCostMonth()" style="font-size:12px;padding:6px 10px" title="סוכם את ההוצאות המשתנות שנרשמו בחודש הנבחר">🤖 חשב מההוצאות הרשומות</button>
+      </div>
+      <div id="cm-list" style="max-height:150px;overflow-y:auto"></div>
+      <div id="overhead-result" style="margin-top:.75rem"></div>
+    </div>
+
+    <!-- התחשבנות חודשית — תמחור שלב ה' -->
+    <div class="card" style="margin-top:1rem">
+      <div class="sec">🧾 התחשבנות חודשית — משוער מול בפועל</div>
+      <div style="font-size:11px;color:var(--txt3);margin-bottom:.5rem">לכל חודש: מה המקדם היה צופה (ממוצע עד 3 חודשים קודמים + מרווח ביטחון) מול מה שיצא בפועל. המקדם מתעדכן אוטומטית ככל שנוספים חודשים.</div>
+      <div id="recon-list"></div>
+    </div>
+  </div>
+
+  <!-- EXPENSES PAGE -->
+  <div class="page" id="page-expenses">
+    <div class="card" style="margin-bottom:12px">
+      <div class="sec" data-i18n="exp_new">➕ הוצאה חדשה</div>
+      <div class="field"><label data-i18n="exp_amount">סכום (₪)</label><input type="number" id="exp-amount" min="0" step="0.01" placeholder="0.00" data-i18n-ph="exp_amount_ph" style="font-size:16px;font-weight:600"/></div>
+      <div class="field"><label data-i18n="exp_desc">פירוט ההוצאה</label><input type="text" id="exp-desc" data-i18n-ph="exp_desc_ph" placeholder="לדוגמה: חוט תפירה, כפתורים..." style="font-size:14px"/></div>
+      <div class="field"><label data-i18n="exp_photo_lbl">צילום מסמך / קבלה (אופציונלי)</label><input type="file" id="exp-photo" accept="image/*" capture="environment" onchange="previewExpensePhoto(this)" style="font-size:13px"/></div>
+      <div id="exp-photo-preview" style="margin-top:6px"></div>
+      <button class="btn primary" onclick="submitExpense()" style="margin-top:12px;width:100%;font-size:15px" data-i18n="exp_submit">📤 שלח הוצאה</button>
+      <div id="exp-msg" style="margin-top:8px;font-size:13px;text-align:center;min-height:20px"></div>
+    </div>
+    <div class="card" style="margin-bottom:12px">
+      <div class="sec" data-i18n="exp_filter">📅 סינון לפי תאריך</div>
+      <div style="display:flex;gap:8px;align-items:flex-end;flex-wrap:wrap">
+        <div class="field" style="margin:0;flex:1"><label data-i18n="exp_from">מ-</label><input type="date" id="exp-from" style="font-size:13px" onchange="renderExpenses()"/></div>
+        <div class="field" style="margin:0;flex:1"><label data-i18n="exp_to">עד-</label><input type="date" id="exp-to" style="font-size:13px" onchange="renderExpenses()"/></div>
+        <button class="btn" style="font-size:12px;padding:6px 12px" onclick="clearExpFilter()" data-i18n="exp_show_all">הכל</button>
+      </div>
+    </div>
+    <div class="card">
+      <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:10px">
+        <div class="sec" id="exp-list-title" style="margin:0"></div>
+        <div id="exp-total-badge" style="font-size:13px;font-weight:600;color:var(--primary)"></div>
+      </div>
+      <div id="exp-list"></div>
+    </div>
+  </div>
+
+  <!-- 🧾 עמוד קופה — מעקב מזומן בלבד, לא הוצאות -->
+  <div class="page" id="page-cashbox">
+    <div class="card" style="margin-bottom:12px">
+      <div style="display:flex;justify-content:space-between;align-items:center;flex-wrap:wrap;gap:8px">
+        <div>
+          <div style="font-size:12px;color:var(--txt3)" data-i18n="cash_balance_lbl">יתרה בקופה</div>
+          <div id="cash-balance" style="font-size:26px;font-weight:800">₪0</div>
+        </div>
+        <div style="text-align:left;font-size:12px;color:var(--txt3);line-height:1.9">
+          <div><span data-i18n="cash_in_total">הוכנס</span>: <b id="cash-in-total" style="color:var(--green-txt)">₪0</b></div>
+          <div><span data-i18n="cash_out_total">נלקח</span>: <b id="cash-out-total" style="color:var(--red-txt)">₪0</b></div>
+        </div>
+      </div>
+      <div style="font-size:11px;color:var(--txt3);margin-top:8px" data-i18n="cash_note">מעקב אחרי המזומן בקופה בלבד — לא נכנס לחישוב הוצאות, תקורה או רווח.</div>
+    </div>
+
+    <!-- הכנסת כסף — מנהל בלבד -->
+    <div class="card hidden" id="cash-in-card" style="margin-bottom:12px">
+      <div class="sec" data-i18n="cash_in_new">➕ הכנסת כסף לקופה (מנהל בלבד)</div>
+      <div class="field"><label data-i18n="cash_amount">סכום (₪)</label><input type="number" id="cash-in-amount" min="0" step="0.01" placeholder="0.00" style="font-size:16px;font-weight:600"/></div>
+      <div class="field"><label data-i18n="cash_in_desc">הערה (אופציונלי)</label><input type="text" id="cash-in-desc" data-i18n-ph="cash_in_desc_ph" placeholder="לדוגמה: הפקדה שבועית" style="font-size:14px"/></div>
+      <button class="btn success" onclick="submitCashIn()" style="margin-top:12px;width:100%;font-size:15px" data-i18n="cash_in_submit">💰 הכנס לקופה</button>
+      <div id="cash-in-msg" style="margin-top:8px;font-size:13px;text-align:center;min-height:20px"></div>
+    </div>
+
+    <!-- לקיחת כסף — כל מי שיש לו גישה -->
+    <div class="card" style="margin-bottom:12px">
+      <div class="sec" data-i18n="cash_out_new">➖ לקיחת כסף מהקופה</div>
+      <div class="field"><label data-i18n="cash_amount">סכום (₪)</label><input type="number" id="cash-out-amount" min="0" step="0.01" placeholder="0.00" style="font-size:16px;font-weight:600"/></div>
+      <div class="field"><label data-i18n="cash_out_desc">על מה הכסף (חובה)</label><input type="text" id="cash-out-desc" data-i18n-ph="cash_out_desc_ph" placeholder="לדוגמה: תשלום להובלה, קניית חוטים..." style="font-size:14px"/></div>
+      <div class="field"><label data-i18n="cash_photo_lbl">צילום קבלה (אופציונלי)</label><input type="file" id="cash-photo" accept="image/*" capture="environment" onchange="previewCashPhoto(this)" style="font-size:13px"/></div>
+      <div id="cash-photo-preview" style="margin-top:6px"></div>
+      <button class="btn primary" onclick="submitCashOut()" style="margin-top:12px;width:100%;font-size:15px" data-i18n="cash_out_submit">📤 רשום לקיחה</button>
+      <div id="cash-out-msg" style="margin-top:8px;font-size:13px;text-align:center;min-height:20px"></div>
+    </div>
+
+    <div class="card" style="margin-bottom:12px">
+      <div class="sec" data-i18n="exp_filter">📅 סינון לפי תאריך</div>
+      <div style="display:flex;gap:8px;align-items:flex-end;flex-wrap:wrap">
+        <div class="field" style="margin:0;flex:1"><label data-i18n="exp_from">מ-</label><input type="date" id="cash-from" style="font-size:13px" onchange="renderCashbox()"/></div>
+        <div class="field" style="margin:0;flex:1"><label data-i18n="exp_to">עד-</label><input type="date" id="cash-to" style="font-size:13px" onchange="renderCashbox()"/></div>
+        <button class="btn" style="font-size:12px;padding:6px 12px" onclick="clearCashFilter()" data-i18n="exp_show_all">הכל</button>
+      </div>
+    </div>
+
+    <div class="card">
+      <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:10px">
+        <div class="sec" id="cash-list-title" style="margin:0"></div>
+        <div id="cash-range-badge" style="font-size:13px;font-weight:600;color:var(--primary)"></div>
+      </div>
+      <div id="cash-list"></div>
+    </div>
+  </div>
+
+  <!-- עמוד מוצרים -->
+  <div class="page" id="page-products">
+    <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:12px;flex-wrap:wrap;gap:8px">
+      <div style="font-size:16px;font-weight:700">👗 מוצרים ודגמים</div>
+      <div style="display:flex;gap:8px;flex-wrap:wrap">
+        <button class="btn pstk-btn" data-dept="cut" onclick="openPackStock('cut')" style="font-size:12px;display:none">✂️ מלאי גזירה</button>
+        <button class="btn pstk-btn" data-dept="sew" onclick="openPackStock('sew')" style="font-size:12px;display:none">🧵 מלאי תפירה</button>
+        <button class="btn pstk-btn" data-dept="pack" onclick="openPackStock('pack')" style="font-size:12px;display:none">📦 מלאי אריזה</button>
+        <button class="btn" onclick="openRaumaOCR()" style="font-size:12px">📄 קרא תעודה</button>
+        <button class="btn primary" onclick="openProductModal()">+ הוסף מוצר</button>
+      </div>
+    </div>
+    <!-- חיפוש -->
+    <div style="display:flex;gap:8px;margin-bottom:12px;flex-wrap:wrap">
+      <input id="prod-search" type="text" placeholder="🔍 חיפוש לפי מספר מוצר / לקוח" style="flex:1;min-width:160px;padding:7px 10px;border-radius:8px;border:1px solid var(--brd);background:var(--card);color:var(--txt);font-size:13px" oninput="renderProducts()">
+    </div>
+    <div id="products-list"></div>
+  </div>
+
+  <!-- דף תעודות משלוח -->
+  <div class="page" id="page-dnotes">
+    <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:12px;flex-wrap:wrap;gap:8px">
+      <div style="font-size:16px;font-weight:700">📄 תעודות משלוח</div>
+      <div id="dn-sum" style="font-size:12px;color:var(--txt3)"></div>
+    </div>
+    <div style="display:flex;gap:8px;margin-bottom:12px;flex-wrap:wrap">
+      <input id="dn-search" type="text" placeholder="🔍 מספר תעודה / לקוח / דגם / מספר מוצר" style="flex:1;min-width:170px;padding:7px 10px;border-radius:8px;border:1px solid var(--brd);background:var(--card);color:var(--txt);font-size:13px" oninput="renderDNotes()">
+      <select id="dn-cust" onchange="renderDNotes()" style="padding:7px 10px;border-radius:8px;border:1px solid var(--brd);background:var(--card);color:var(--txt);font-size:13px"><option value="">כל הלקוחות</option></select>
+      <input id="dn-from" type="date" onchange="renderDNotes()" style="padding:7px 10px;border-radius:8px;border:1px solid var(--brd);background:var(--card);color:var(--txt);font-size:13px">
+      <input id="dn-to" type="date" onchange="renderDNotes()" style="padding:7px 10px;border-radius:8px;border:1px solid var(--brd);background:var(--card);color:var(--txt);font-size:13px">
+      <select id="dn-pay" onchange="renderDNotes()" style="display:none;padding:7px 10px;border-radius:8px;border:1px solid var(--brd);background:var(--card);color:var(--txt);font-size:13px"><option value="">כל המצבים</option><option value="none">⏳ טרם הותחשבנו</option><option value="inv">🧾 בחשבונית — טרם שולם</option><option value="paid">✅ שולם</option></select>
+      <button class="btn" style="font-size:12px" onclick="dnClearFilter()">נקה</button>
+      <button class="btn" style="font-size:12px" onclick="openProformaList()">🧾 חשבוניות עסקה</button>
+      <button class="btn" style="font-size:12px" onclick="openChecksReport()">💳 שיקים</button>
+      <button class="btn pstk-btn" data-dept="pack" style="font-size:12px;display:none" onclick="openPackStock('pack')">📦 מלאי אריזה</button>
+      <button class="btn pstk-btn" data-dept="sew" style="font-size:12px;display:none" onclick="openPackStock('sew')">🧵 מלאי תפירה</button>
+      <button class="btn pstk-btn" data-dept="cut" style="font-size:12px;display:none" onclick="openPackStock('cut')">✂️ מלאי גזירה</button>
+      <button class="btn" style="font-size:12px" title="סמן את התעודות המסומנות ☑ כמחויבות בחשבונית ידנית מהפנקס" onclick="dnManualInvoice()">📒 חשבונית ידנית</button>
+      <button class="btn primary" style="font-size:12px" id="dn-print-btn" onclick="dnPrintDialog()">🖨 הדפסה…</button>
+    </div>
+    <div id="dnotes-list"></div>
+  </div>
+
+  <!-- דף מחולל ברקודים -->
+  <div class="page" id="page-barcodes">
+    <div style="font-size:16px;font-weight:700;margin-bottom:14px">🏷️ מחולל ברקודים למשימות</div>
+    <!-- PDF UPLOAD -->
+    <div class="card" style="margin-bottom:1rem">
+      <div class="sec">📂 טעינת תעודת משלוח PDF</div>
+      <div style="display:flex;gap:8px;align-items:center;flex-wrap:wrap">
+        <button class="btn primary" onclick="bcOpenPDF()" style="font-size:13px">📂 בחר PDF</button>
+        <input type="file" id="bc-pdf-input" accept=".pdf" style="display:none" onchange="bcHandlePDF(this)"/>
+        <div id="bc-pdf-msg" style="font-size:12px;color:var(--txt3);flex:1">תעודות רונן חן ורעומה מזוהות אוטומטית</div>
+      </div>
+    </div>
+    <div class="card" style="margin-bottom:1rem">
+      <div class="sec">פרטי המוצר</div>
+      <!-- טעינה ממוצר קיים -->
+      <div style="margin-bottom:10px;display:flex;gap:8px;align-items:center;flex-wrap:wrap">
+        <select id="bc-prod-select" style="flex:1;min-width:180px;padding:7px 10px;border-radius:8px;border:1px solid var(--brd);background:var(--card);color:var(--txt);font-size:13px">
+          <option value="">📦 טען ממוצר קיים...</option>
+        </select>
+        <button class="btn" style="font-size:13px;padding:7px 14px" onclick="bcLoadFromProduct()">טען ▶</button>
+      </div>
+      <div style="display:grid;grid-template-columns:1fr 1fr;gap:10px;margin-bottom:10px">
+        <div class="field" style="margin:0"><label>לקוח (2 ספרות)</label>
+          <input id="bc-gen-cust" maxlength="2" inputmode="numeric" placeholder="01" style="font-size:14px" oninput="bcSyncOrderSel()"/></div>
+        <div class="field" style="margin:0"><label>מוצר/דגם (5 ספרות)</label>
+          <input id="bc-gen-prod" maxlength="5" inputmode="numeric" placeholder="14415" style="font-size:14px" oninput="bcSyncOrderSel()"/></div>
+      </div>
+      <!-- בורר הזמנה: מוצג רק כשיש כמה רשומות לאותו דגם. בלעדיו המחולל היה מפיק תמיד
+           את מספר ההזמנה של הרשומה החדשה, וערבב 13 ו-16 על אותה הזמנה. -->
+      <div id="bc-gen-order-wrap" style="display:none;margin-bottom:10px">
+        <div style="background:var(--amber-bg);color:var(--amber-txt);font-size:12px;font-weight:700;padding:7px 9px;border-radius:8px;margin-bottom:6px">⚠ יש כמה הזמנות לדגם הזה — בחר לאיזו להפיק ברקודים</div>
+        <select id="bc-gen-order" onchange="bcOrderPicked()" style="width:100%;font-size:13px;padding:8px;border-radius:8px;border:1px solid var(--brd);background:var(--bg);color:var(--txt)"></select>
+      </div>
+      <div id="bc-gen-order-note" style="font-size:12px;color:var(--txt3);margin-bottom:10px"></div>
+      <div style="background:var(--amber-bg);border:1px solid var(--amber-txt);border-radius:8px;padding:10px 12px;margin-bottom:12px;display:flex;align-items:center;justify-content:space-between;gap:10px;flex-wrap:wrap">
+        <div>
+          <div style="font-size:13px;font-weight:700;color:var(--amber-txt)">✂️ ברקוד ספירה / גזירה</div>
+          <div style="font-size:11px;color:var(--txt3);margin-top:2px">כמות פתוחה — לפני שהכמות ידועה</div>
+        </div>
+        <button class="btn" style="font-size:13px;padding:7px 14px;border-color:var(--amber-txt);color:var(--amber-txt)" onclick="bcGenerateOpenQty()">✂️ צור ברקוד</button>
+      </div>
+      <div style="background:var(--green-bg,#dcfce7);border:1px solid var(--green-txt,#16a34a);border-radius:8px;padding:10px 12px;margin-bottom:12px;display:flex;align-items:center;justify-content:space-between;gap:10px;flex-wrap:wrap">
+        <div>
+          <div style="font-size:13px;font-weight:700;color:var(--green-txt,#16a34a)">🚚 ברקוד יצא ללקוח</div>
+          <div style="font-size:11px;color:var(--txt3);margin-top:2px">סריקתו מסמנת "יצא ללקוח" ופותחת עדכון כמות סופית</div>
+        </div>
+        <button class="btn" style="font-size:13px;padding:7px 14px;border-color:var(--green-txt,#16a34a);color:var(--green-txt,#16a34a)" onclick="bcGenerateShip()">🚚 צור ברקוד</button>
+      </div>
+      <div class="sec" style="margin-top:12px">מידות וכמויות</div>
+      <div style="font-size:11px;color:var(--txt3);margin-bottom:8px">כל שורה = ברקוד נפרד. מידה = ספרה אחת (1,2,3...). כמות = עד 999.</div>
+      <div id="bc-gen-rows"></div>
+      <button class="btn" style="width:100%;justify-content:center;margin-top:8px;font-size:13px" onclick="bcAddRow()">+ הוסף מידה/צבע</button>
+    </div>
+    <button class="btn primary" style="width:100%;justify-content:center;font-size:14px;padding:10px" onclick="bcGenerate()">🏷️ צור ברקודים</button>
+    <div id="bc-gen-output" style="margin-top:1rem"></div>
+    <div class="card" style="margin-top:1rem">
+      <div style="font-size:15px;font-weight:700;margin-bottom:10px">👤 ברקודים לעובדים</div>
+      <div style="font-size:12px;color:var(--txt3);margin-bottom:10px">סרוק את הברקוד בסורק משימות במקום להקליד שם עובד</div>
+      <button class="btn primary" style="width:100%;justify-content:center;font-size:14px;padding:10px" onclick="renderWorkerBarcodes()">👤 צור ברקודים לעובדים</button>
+      <div id="worker-bc-output" style="margin-top:1rem"></div>
+    </div>
+    <div class="card" style="margin-top:1rem">
+      <div style="font-size:15px;font-weight:700;margin-bottom:6px">🔐 רק ברקודים מהאפליקציה</div>
+      <div style="font-size:12px;color:var(--txt3);margin-bottom:10px;line-height:1.6">כל מדבקת משימה שהאפליקציה מדפיסה (וגם NFC) מקבלת סימון סודי בתוך ה-QR. כשהאכיפה פעילה, עובד ואחראי יכולים להתחיל משימה רק מסריקה של מדבקה כזו. QR שהוכן מחוץ לאפליקציה, מדבקה ישנה בלי סימון והקלדה ידנית של המספר — מנהל בלבד.</div>
+      <div id="bcsign-box"></div>
+    </div>
+    <div class="card" style="margin-top:1rem">
+      <div style="font-size:15px;font-weight:700;margin-bottom:10px">🏭 תחנות עבודה (מצלמות)</div>
+      <div style="font-size:12px;color:var(--txt3);margin-bottom:10px">עובד סורק את ברקוד התחנה כשהוא מתיישב בעמדה — השיוך למחלקה ולתחנה נעשה אוטומטית ונרשם על המשימות. סריקת תחנה חדשה סוגרת את הקודמת; חתימת יציאה סוגרת הכל. הרשימה נלקחת מהמחלקות והתחנות שבלשונית <b>ניהול</b> — ערוץ DVR נקבע כאן (אותו ערוץ יכול לשמש כמה תחנות)</div>
+      <button class="btn" style="font-size:13px;margin-bottom:10px" onclick="syncStationsFromDepts()">🔄 סנכרן תחנות מלשונית הניהול</button>
+      <button class="btn" style="font-size:13px;margin-bottom:10px" onclick="auditStepsWithoutStation()">🔎 שלבים בלי תחנה</button>
+      <div style="padding:10px;border:1px solid var(--brd);border-radius:8px;margin-bottom:10px">
+        <label style="display:flex;align-items:center;gap:8px;cursor:pointer;font-size:13px;font-weight:600">
+          <input type="checkbox" id="stn-lock" style="width:17px;height:17px" onchange="setStationLock(this.checked)">
+          🔒 אכיפת תחנה: חובת סריקה + שלב נעול לתחנתו
+        </label>
+        <div style="font-size:11px;color:var(--txt3);margin-top:5px;line-height:1.5">
+          בהדלקה: עובד לא יוכל להתחיל משימה בלי לסרוק תחנה, ורק שלבים של התחנה שסרק (או תחנה באותו שם עם מספר אחר) יהיו זמינים.
+          שלב בלי תחנה משויכת ייחסם — הרץ קודם "🔎 שלבים בלי תחנה".
+          אחראי/מנהל יכולים לעקוף באישור. הכיבוי חל מיד על כל המכשירים.
+        </div>
+        <div id="stn-lock-state" style="font-size:12px;font-weight:700;margin-top:6px"></div>
+      </div>
+      <div style="padding:10px;border:1px solid var(--brd);border-radius:8px;margin-bottom:10px">
+        <div style="font-size:13px;font-weight:600;margin-bottom:5px">🔧 מחלקות שבהן תחנה = מכונה (עובד אחד)</div>
+        <div style="font-size:11px;color:var(--txt3);margin-bottom:7px;line-height:1.5">
+          במחלקות המסומנות תחנה היא מכונה פיזית ועליה עובד אחד בלבד. עובד שסורק מכונה תפוסה —
+          <b>הסריקה האחרונה מנצחת</b>: הקודם משוחרר מהתחנה והמשימות הרצות שלו נסגרות (מסירת המכונה = סיום).
+          אחראי/מנהל שסורק לעצמו מכונה תפוסה נשאל קודם אם הוא עובד עליה או רק מחלק עבודה.
+          מחלקות שאינן מסומנות (קבלה, גימור, אריזה) נשארות פתוחות לכמה עובדים יחד.
+        </div>
+        <div id="stn-excl"></div>
+        <button class="btn" style="font-size:12px;margin-top:8px" onclick="auditStationOverlaps()">🔧 בדוק חפיפות עכשיו</button>
+        <div style="font-size:10px;color:var(--txt3);margin-top:4px;line-height:1.45">
+          מוצא עובדים שרשומים כרגע על אותה מכונה ומשחרר את הישנים לפי זמן הסריקה.
+          נחוץ לצמד ששויך לפני שהאכיפה עלתה — סריקה רגילה מתקנת רק מרגע הסריקה והלאה.
+        </div>
+      </div>
+      <div style="padding:10px;border:1px solid var(--brd);border-radius:8px;margin-bottom:10px">
+        <label style="display:flex;align-items:center;gap:8px;cursor:pointer;font-size:13px;font-weight:600">
+          <input type="checkbox" id="so-lock" style="width:17px;height:17px" onchange="setStepOrderLock(this.checked)">
+          🔗 אכיפת סדר: שלב מאחד רק אחרי שקודמיו הסתיימו
+        </label>
+        <div style="font-size:11px;color:var(--txt3);margin-top:5px;line-height:1.5">
+          חל <b>רק</b> על שלבים שסומנו "🔗 מאחד" בכרטיס המוצר, ורק מולם — שלב רגיל אף פעם לא חוסם, וכל ההכנות המקבילות נשארות חופשיות.
+          הבדיקה היא פר ברקוד (מידה+צבע). שלבים שנבחרו באותה סריקה לא חוסמים זה את זה.
+          <b>הרץ קודם "🔎 סדר שלבים בהיסטוריה"</b> כדי לראות כמה היה נחסם.
+        </div>
+        <div id="so-lock-state" style="font-size:12px;font-weight:700;margin-top:6px"></div>
+      </div>
+      <div style="padding:10px;border:1px solid var(--brd);border-radius:8px;margin-bottom:10px">
+        <label style="display:flex;align-items:center;gap:8px;cursor:pointer;font-size:13px;font-weight:600">
+          <input type="checkbox" id="so-strict" style="width:17px;height:17px" onchange="setStepOrderStrict(this.checked)">
+          🔗 חסימה מחמירה: גם שלב שמעולם לא נסרק חוסם
+        </label>
+        <div style="font-size:11px;color:var(--txt3);margin-top:5px;line-height:1.5">
+          בלי זה, שלב 🔗 שלא הסתיים ולו פעם אחת בהזמנה נחשב "שלב שלא סורקים" ואינו חוסם —
+          כך אפשר להתחיל <b>فحص قبل</b> בלי ש-<b>تنظيف</b> בוצע. עם זה, כל שלב 🔗 חייב להסתיים על אותו ברקוד.
+          <b>חל רק על הזמנות שנפתחות מרגע ההדלקה</b> — הזמנה שכבר רצה מסיימת בכללים שלפיהם התחילה,
+          אחרת היא נעצרת מיידית. דורש שאכיפת הסדר למעלה תהיה דלוקה.
+        </div>
+        <div id="so-strict-state" style="font-size:12px;font-weight:700;margin-top:6px"></div>
+      </div>
+      <button class="btn" style="font-size:13px;margin-bottom:10px" onclick="auditStepOrder()">🔎 סדר שלבים בהיסטוריה</button>
+      <button class="btn" style="font-size:13px;margin-bottom:10px" onclick="renderGateLog()">📝 יומן שערים — חסימות ועקיפות</button>
+      <div id="gate-log" style="margin-bottom:10px"></div>
+      <div id="so-audit" style="margin-bottom:10px"></div>
+      <div id="stn-audit" style="margin-bottom:10px"></div>
+      <div id="stn-list"></div>
+      <button class="btn primary" style="width:100%;justify-content:center;font-size:14px;padding:10px;margin-top:10px" onclick="renderStationBarcodes()">🏭 צור ברקודי תחנות</button>
+      <div id="station-bc-output" style="margin-top:1rem"></div>
+    </div>
+  </div>
+
+  <!-- מודל אישור כללי -->
+  <!-- 09/10: מעל כל החלונות (עד 99999) — שאלה מתוך חלון (אריזה ביציאה ללקוח, חתימה, מחיקת שיק) נפתחה מתחתיו -->
+  <div class="overlay hidden" id="cfm-wrap" style="z-index:100000" onclick="if(event.target===this)_cfmClose(false)">
+    <div class="modal" style="max-width:340px;text-align:center" onclick="event.stopPropagation()">
+      <div class="modal-title" id="cfm-title" style="font-size:15px"></div>
+      <div id="cfm-msg" style="font-size:13px;color:var(--txt2);margin:10px 0 18px;line-height:1.7"></div>
+      <div style="display:flex;gap:10px">
+        <button class="btn danger full" id="cfm-cancel" style="font-size:14px" onclick="_cfmClose(false)"></button>
+        <button class="btn success full" id="cfm-ok" style="font-size:14px" onclick="_cfmClose(true)"></button>
+      </div>
+    </div>
+  </div>
+
+  <!-- מודל מוצר — לא נסגר בלחיצה על הרקע (לחיצה בטעות מחקה את כל השלבים שהוזנו); סגירה רק בכפתורים -->
+  <div class="overlay hidden" id="prod-modal-wrap">
+    <div class="modal" style="max-width:600px;max-height:90vh;overflow-y:auto" id="prod-modal-box">
+      <div class="modal-title" id="prod-modal-title">מוצר</div>
+      <div id="prod-modal-body"></div>
+      <div style="display:flex;justify-content:flex-end;gap:8px;margin-top:1rem">
+        <button class="btn" onclick="closeProdModal()">ביטול</button>
+        <button class="btn primary" onclick="saveProduct()">שמור</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- מודל OCR רעומה -->
+  <div class="overlay hidden" id="rauma-ocr-wrap" onclick="if(event.target===this)closeRaumaOCR()">
+    <div class="modal" style="max-width:520px;max-height:92vh;overflow-y:auto">
+      <div class="modal-title">📄 ייבוא תעודת רעומה</div>
+      <div id="rauma-step1">
+        <div style="font-size:13px;color:var(--txt2);margin-bottom:10px">צלם או העלה תמונה של תעודת המשלוח מרעומה</div>
+        <div style="display:flex;gap:8px;flex-wrap:wrap">
+          <button class="btn primary" onclick="document.getElementById('rauma-img-input').click()">📁 בחר תמונה</button>
+          <button class="btn" onclick="document.getElementById('rauma-cam-input').click()">📷 צלם</button>
+        </div>
+        <input id="rauma-img-input" type="file" accept="image/*" class="hidden" onchange="raumaHandleImage(this)">
+        <input id="rauma-cam-input" type="file" accept="image/*" capture="environment" class="hidden" onchange="raumaHandleImage(this)">
+        <div id="rauma-img-preview" style="margin-top:10px"></div>
+      </div>
+      <div id="rauma-step2" class="hidden" style="margin-top:10px">
+        <div id="rauma-status" style="font-size:13px;color:var(--txt2);margin-bottom:10px;padding:8px;background:var(--bg2);border-radius:8px"></div>
+        <div id="rauma-results" class="hidden">
+          <div style="display:grid;grid-template-columns:1fr 1fr;gap:8px;margin-bottom:8px">
+            <div class="field" style="margin:0"><label>מספר מוצר (5 ספרות)</label><input id="rauma-prod" maxlength="5" style="font-size:13px"/></div>
+            <div class="field" style="margin:0"><label>לקוח</label><input id="rauma-cust" value="02" maxlength="2" style="font-size:13px"/></div>
+          </div>
+          <div class="field" style="margin-bottom:10px"><label>שם / דגם מלא</label><input id="rauma-name" style="font-size:13px"/></div>
+          <div class="sec" style="margin-bottom:6px">כמויות לפי מידה וצבע</div>
+          <div id="rauma-qty-rows"></div>
+          <button class="btn" onclick="raumaAddQtyRow()" style="margin-top:6px;font-size:12px;width:100%;justify-content:center">+ הוסף שורה</button>
+        </div>
+      </div>
+      <div style="display:flex;justify-content:flex-end;gap:8px;margin-top:1rem">
+        <button class="btn" onclick="closeRaumaOCR()">ביטול</button>
+        <button class="btn primary hidden" id="rauma-confirm-btn" onclick="raumaConfirm()">✅ צור מוצר</button>
+      </div>
+    </div>
+  </div>
+
+</div><!-- /app -->
+
+<!-- MODAL -->
+<div class="overlay hidden" id="modal-wrap">
+  <div class="modal" id="modal-box">
+    <div class="modal-title" id="modal-title"></div>
+    <div id="modal-body"></div>
+    <div style="display:flex;justify-content:flex-end;gap:8px;margin-top:1rem">
+      <button class="btn" onclick="closeModal()" data-i18n="cancel">ביטול</button>
+      <button class="btn primary" id="modal-ok" onclick="confirmModal()" data-i18n="save">שמור</button>
+    </div>
+  </div>
+</div>
+
+<!-- ZXING BARCODE READER -->
+<script src="https://cdn.jsdelivr.net/npm/jsqr@1.4.0/dist/jsQR.js"></script>
+<!-- QR CODE GENERATOR -->
+<script src="https://cdn.jsdelivr.net/npm/qrcodejs@1.0.0/qrcode.min.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/jsbarcode@3.11.6/dist/JsBarcode.all.min.js"></script>
+
+<!-- FIREBASE SDK -->
+<script type="module">
+import{initializeApp}from'https://www.gstatic.com/firebasejs/10.12.0/firebase-app.js';
+import{getFirestore,collection,doc,getDoc,getDocs,getDocsFromServer,setDoc,onSnapshot,query,where,orderBy,limit,serverTimestamp,deleteDoc,updateDoc,addDoc,runTransaction,deleteField}from'https://www.gstatic.com/firebasejs/10.12.0/firebase-firestore.js';
+import{getAuth,signInAnonymously,signInWithCustomToken,signOut,onAuthStateChanged}from'https://www.gstatic.com/firebasejs/10.12.0/firebase-auth.js';
+import{getMessaging,getToken,onMessage}from'https://www.gstatic.com/firebasejs/10.12.0/firebase-messaging.js';
+import{getFunctions,httpsCallable}from'https://www.gstatic.com/firebasejs/10.12.0/firebase-functions.js';
+window._fb={initializeApp,getFirestore,collection,doc,getDoc,getDocs,getDocsFromServer,setDoc,onSnapshot,query,where,orderBy,limit,serverTimestamp,deleteDoc,updateDoc,addDoc,runTransaction,deleteField,getAuth,signInAnonymously,signInWithCustomToken,signOut,onAuthStateChanged,getMessaging,getToken,onMessage,getFunctions,httpsCallable};
+window._fbReady=true;
+document.dispatchEvent(new Event('fbSDKReady'));
+</script>
+
+<script>
+// ⚠️ נבנה מ-src/js/*.js לפי סדר השמות — לערוך שם ולהריץ node tools/build.js
+//@@JS@@
+</script>
+</body>
+</html>
