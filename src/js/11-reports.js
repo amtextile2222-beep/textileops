@@ -975,9 +975,10 @@ function buildBudgetReport(fl){
     // ⚠️ התעריף הוא של **העובד שביצע**, לא הממוצע שב-stepBud — הצפי במשימה נקבע כך
     // ב-calcTaskExpected, וחישוב אחר כאן היה מייצר "חריגה" מול מספר שהעובדת מעולם לא ראתה.
     const rate=(loadedHourlyRate(t.workerId,_tDay(t))||ctx.avgAll)+ctx.oh;
-    // ⏱ (09/11/2026, החלטת המשתמש) שלב עם דקות שהוזנו ⇒ מוקצב = הדקות × הכמות, תמיד (גם גזירה, גם כשכל
-    // השלבים ידניים) — כמו calcTaskExpected בשרת. רק שלב בלי דקות (רמת קושי) נגזר מהתקציב ומהתעריף.
-    if(mm>0){alloc=mm*units;}
+    // ⏱ (09/11/2026, החלטת המשתמש) שלב עם דקות שהוזנו ⇒ מוקצב = הדקות × הכמות ÷ מקדם העובדת (_rwOf = עלות
+    // השעה שלה+תקורה ÷ הממוצע של המוצר): עובדת בעלות הממוצעת = הדקות שהוזנו, יקרה — פחות, זולה — יותר.
+    // כמו calcTaskExpected בשרת. רק שלב בלי דקות (רמת קושי) נגזר מהתקציב ומהתעריף.
+    if(mm>0){alloc=mm*units/_rwOf(t.workerId,p,isCut);}
     else if(isCut){alloc=0;} // ✂ גזירה בלי דקות — אין צפי (גם בשרת)
     else{
       alloc=rate>0&&pb.totW>0?(pb.autoBudget*(+ctx.weights[stepLevel(st)]||1)/pb.totW*units)/rate*60:0;

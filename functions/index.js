@@ -528,11 +528,19 @@ exports.calcTaskExpected = functions.https.onCall(async (data, context) => {
   // מוצר שעוד לא עבר מיגרציה נושא את השדות במסמך עצמו ⇒ נופלים אליו.
   const prSnap = await db.collection('productPricing').doc(pId).get();
   if (prSnap.exists) p = { ...p, ...prSnap.data() };
-  // ⏱ (09/11/2026) כל השלבים המבוקשים עם דקות שהוזנו ⇒ הצפי = דקות × כמות — בלי מחיר ובלי עלות שעה
+  // ⏱ (09/11/2026, החלטת המשתמש) שלב עם דקות שהוזנו: שוויו בכסף = הדקות × עלות השעה **הממוצעת של המוצר**
+  // (₪20.44 בחלון המוצר), והצפי לעובדת = השווי ÷ עלות השעה שלה (+תקורה). עובדת בעלות הממוצעת מקבלת בדיוק
+  // את הדקות שהוזנו; יקרה — פחות, זולה — יותר. עד היום השווי נלקח מחלק השלב **בתקציב** (המחיר), ולכן
+  // 14775 קיבל 18.2 דק' מול 13.5 שהוזנו. היחסים — appSettings/rateW (המנהל מפרסם, _rateWCalc):
+  // w[עובד] = (תעריף+תקורה)/R, p[מוצר] = [תפירה, גזירה] = ממוצע השלבים/R ⇒ מקדם = p/w. חסר ⇒ 1.
+  // ⚠️ זהה ל-alloc בדוח "מוקצב מול בפועל" (index.html, /_rwOf) — ולשקלול "בפועל" בשורת המחלקה (×_rwOf).
   const ws = (p.workSteps || []).filter(s => s && typeof s === 'object');
   const req = stepNames.map(n => ws.find(s => s.name === n)).filter(Boolean);
+  const rwSnap = await db.collection('appSettings').doc('rateW').get();
+  const rw = (rwSnap.exists && rwSnap.data()) || {};
+  const rwOf = cut => { const a = +((rw.w || {})[workerId]), b = +(((rw.p || {})[pId] || (rw.p || {})[p.id] || [])[cut ? 1 : 0]); return a > 0 && b > 0 ? b / a : 1; };
   const mPer = {}; let mTot = 0;
-  for (const s of req) if (+s.manualMin > 0) { const m = +s.manualMin * qty; mPer[s.name] = Math.round(m * 10) / 10; mTot += m; }
+  for (const s of req) if (+s.manualMin > 0) { const m = +s.manualMin * qty * rwOf(!!s.cut); mPer[s.name] = Math.round(m * 10) / 10; mTot += m; }
   const manualOnly = reason => Object.keys(mPer).length ? { ok: true, perStep: mPer, totalMin: Math.round(mTot * 10) / 10, qty } : { ok: false, reason };
   if (req.length && req.every(s => +s.manualMin > 0)) return manualOnly('no-steps');
   // שלב בלי דקות (רמת קושי) — נגזר מהתקציב ומעלות השעה; בלי תמחור/עלויות ⇒ רק השלבים שיש להם דקות
@@ -586,14 +594,11 @@ exports.calcTaskExpected = functions.https.onCall(async (data, context) => {
   for (const name of stepNames) {
     // ✂ שלב גזירה נמדד מול תקציב הגזירה ולא מול תקציב התפירה. בפועל הגזירה נסרקת
     // בברקוד ספירה ללא כמות, והקריאה נופלת קודם על `!qty` ⇒ הענף הזה יורה רק כשיש כמות.
-    // ⏱ (09/11/2026, החלטת המשתמש) שלב עם דקות שהוזנו ⇒ הצפי **תמיד** = הדקות × הכמות — אותו מספר
-    // שבשורת "מוקצב" ובחלון המוצר. עד היום, כשכל השלבים ידניים, הדקות היו רק משקל לחלוקת התקציב
-    // והצפי הומר לפי עלות העובדת (14775: 18.2 דק' לעובדת מול 13.5 שהוזנו). רק שלב בלי דקות (רמת
-    // קושי בלבד) עדיין נגזר מהתקציב. ⚠️ זהה ל-alloc בדוח "מוקצב מול בפועל" (index.html).
+    // ⏱ שלב עם דקות שהוזנו ⇒ mPer (דקות × כמות × מקדם העובדת, ראה למעלה). רק שלב בלי דקות (רמת קושי) נגזר מהתקציב.
     const cst = cutUsable.find(s => s.name === name);
     if (cst) {
       if (!(+cst.manualMin > 0)) continue;
-      const cmin = +cst.manualMin * qty;
+      const cmin = +cst.manualMin * qty * rwOf(true);
       perStep[name] = Math.round(cmin * 10) / 10;
       total += cmin;
       continue;
@@ -601,7 +606,7 @@ exports.calcTaskExpected = functions.https.onCall(async (data, context) => {
     const st = usable.find(s => s.name === name);
     if (!st) continue;
     let min;
-    if (+st.manualMin > 0) min = +st.manualMin * qty;
+    if (+st.manualMin > 0) min = +st.manualMin * qty * rwOf(false);
     else if (totW > 0) { min = budget * (+weights[+st.level] || 1) / totW * qty / hourCost * 60; }
     else continue;
     perStep[name] = Math.round(min * 10) / 10;
