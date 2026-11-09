@@ -4562,6 +4562,8 @@ function pickRecWorker(prefix,id){
 // השרת מחזיר דקות בלבד. cache פר לקוח+מוצר+עובד+כמות — נשלחים כל השלבים, מוצג לפי המסומנים.
 let _expMap={};
 let _expTimer=null;
+// ⏱ (09/11/2026) יש ממה לחשב צפי: תמחור, **או** דקות שהוזנו לשלבים (הצפי = דקות × כמות, גם בלי מחיר)
+function _hasExpSrc(p){return _isPriced(p)||(p?.workSteps||[]).some(s=>stepManualMin(s)>0);}
 function taskExpectedKey(cust,prod,workerId,qty){return cust+'|'+prod+'|'+workerId+'|'+qty;}
 function fmtExpMin(min){
   if(min>=60)return Math.floor(min/60)+" שע' "+Math.round(min%60)+" דק'";
@@ -4580,7 +4582,7 @@ function updateExpectedTime(prefix){
   const cust=raw.slice(0,2),prod=raw.slice(2,7);
   if(cust!==listEl.dataset.cust||prod!==listEl.dataset.prod){box.innerHTML='';return;}
   const prodObj=findProd(cust,prod);
-  if(!_isPriced(prodObj)){box.innerHTML='';return;} // אין תמחור — אין צפי (priced: בלי המספרים אצל עובדת)
+  if(!_hasExpSrc(prodObj)){box.innerHTML='';return;} // אין תמחור ואין דקות — אין צפי (priced: בלי המספרים אצל עובדת)
   let qty=isTotalBc(raw)?getTotalQty(cust,prod,orderNoOf(raw)):parseInt(raw.slice(8,11))||0;
   const est=!qty&&_estQtyBc(raw)>0;if(est)qty=_estQtyBc(raw);
   if(!qty){box.innerHTML='';return;}
@@ -4591,7 +4593,7 @@ function updateExpectedTime(prefix){
     if(!parts.length){box.innerHTML='';return;}
     const tot=parts.reduce((s,n)=>s+res.perStep[n],0);
     box.innerHTML=`<div style="margin-top:6px;background:var(--blue-bg,#dbeafe);color:var(--blue-txt,#1d4ed8);border-radius:8px;padding:7px 10px;font-size:12px">
-      ⏱ צפי לפי תמחור (${est?'~':''}${qty} יח'${est?' משוער':''}):<b style="font-size:13px">${fmtExpMin(tot)}</b>
+      ⏱ צפי (${est?'~':''}${qty} יח'${est?' משוער':''}):<b style="font-size:13px">${fmtExpMin(tot)}</b>
       ${parts.length>1?`<div style="font-size:11px;margin-top:2px;opacity:.85">${parts.map(n=>esc(n)+': '+fmtExpMin(res.perStep[n])).join(' · ')}</div>`:''}
     </div>`;
   };
@@ -4616,7 +4618,7 @@ async function fetchExpected(cust,prod,workerId,qty){
   const key=taskExpectedKey(cust,prod,workerId,qty);
   if(_expMap[key])return _expMap[key];
   const prodObj=findProd(cust,prod);
-  if(!_isPriced(prodObj)||!workerId||!qty||!S.fbConnected||!window._fbFunctions)return{ok:false};
+  if(!_hasExpSrc(prodObj)||!workerId||!qty||!S.fbConnected||!window._fbFunctions)return{ok:false};
   const allSteps=(prodObj.workSteps||[]).map(s=>stepName(s)).filter(Boolean);
   try{
     const{httpsCallable}=window._fb;
@@ -4632,7 +4634,7 @@ async function recalcActiveExpected(cust,prod){
   if(!S.fbConnected||!window._fbFunctions)return;
   const prodObj=findProd(cust,prod);if(!prodObj)return;
   const affected=S.activeTasks.filter(t=>t.cust===cust&&t.prod===prod);if(!affected.length)return;
-  const hasPricing=_isPriced(prodObj);
+  const hasPricing=_hasExpSrc(prodObj);
   const allSteps=(prodObj.workSteps||[]).map(s=>stepName(s)).filter(Boolean);
   const{httpsCallable}=window._fb;
   const fn=httpsCallable(window._fbFunctions,'calcTaskExpected');
@@ -9533,11 +9535,10 @@ function buildBudgetReport(fl){
     // ⚠️ התעריף הוא של **העובד שביצע**, לא הממוצע שב-stepBud — הצפי במשימה נקבע כך
     // ב-calcTaskExpected, וחישוב אחר כאן היה מייצר "חריגה" מול מספר שהעובדת מעולם לא ראתה.
     const rate=(loadedHourlyRate(t.workerId,_tDay(t))||ctx.avgAll)+ctx.oh;
-    if(isCut){ // ✂ תקציב הגזירה, מחולק בין שלבי ה-✂ לפי הדקות שהוזנו
-      alloc=rate>0?pb.cutStepBud[si].ils*units/rate*60:0;
-    }else if(pb.allManual){ // חלוקה יחסית לפי זמן — ראה splitStepBudget
-      alloc=rate>0?pb.stepBud[si].ils*units/rate*60:0;
-    }else if(mm>0){alloc=mm*units;} // ערבוב ידני+אוטומטי — התנהגות ישנה: דקות×כמות
+    // ⏱ (09/11/2026, החלטת המשתמש) שלב עם דקות שהוזנו ⇒ מוקצב = הדקות × הכמות, תמיד (גם גזירה, גם כשכל
+    // השלבים ידניים) — כמו calcTaskExpected בשרת. רק שלב בלי דקות (רמת קושי) נגזר מהתקציב ומהתעריף.
+    if(mm>0){alloc=mm*units;}
+    else if(isCut){alloc=0;} // ✂ גזירה בלי דקות — אין צפי (גם בשרת)
     else{
       alloc=rate>0&&pb.totW>0?(pb.autoBudget*(+ctx.weights[stepLevel(st)]||1)/pb.totW*units)/rate*60:0;
     }
@@ -20131,7 +20132,8 @@ function renderProductPricing(){
   const headLine=allManual
     ? `חלוקת התקציב לפי חלקו היחסי של כל שלב בזמן · ממוצע עלות שעה עמוסה+תקורה ₪${avgRate.toFixed(2)} (מתוכה תקורה ₪${oh.toFixed(2)}):`
     : `תקצוב זמן לשלב (לפי משקל קושי ÷ עלות שעה עמוסה+תקורה ₪${avgRate.toFixed(2)}, מתוכה תקורה ₪${oh.toFixed(2)}):`;
-  const derivedLine=allManual?`<div style="font-size:12px;color:var(--txt3);margin-top:2px">🧮 צפי מחושב לעובד בעלות שעה ממוצעת: ${derivedMin.toFixed(1)} דק' — עובד יקר יותר יקבל פחות, זול יותר יקבל יותר</div>`:'';
+  // ⏱ (09/11/2026) הצפי לעובדת = הדקות שהוזנו × הכמות (calcTaskExpected) — לא נגזר מהתקציב לפי עלותה
+  const derivedLine=mins.some(m=>m>0)?`<div style="font-size:12px;color:var(--txt3);margin-top:2px">⏱ הצפי לעובדת בסריקה = הדקות שהוזנו × הכמות${allManual?'':' (שלב בלי דקות — לפי משקל הקושי והתקציב)'}</div>`:'';
   // ✂ שורת הגזירה — הכנסה נפרדת ממחיר המכירה, ולכן מוצגת בבלוק משלה ולא מעורבבת בתקציב
   // התפירה. שתי אזהרות ההגדרה כאן הן בדיוק זוג המצבים שמייצר מדידה שקטה ושגויה:
   // מחיר בלי שלבים מסומנים = תקציב שאיש לא נמדד מולו; שלבים בלי מחיר = עבודה בלי הכנסה.

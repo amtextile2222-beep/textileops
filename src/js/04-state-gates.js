@@ -638,6 +638,8 @@ function pickRecWorker(prefix,id){
 // השרת מחזיר דקות בלבד. cache פר לקוח+מוצר+עובד+כמות — נשלחים כל השלבים, מוצג לפי המסומנים.
 let _expMap={};
 let _expTimer=null;
+// ⏱ (09/11/2026) יש ממה לחשב צפי: תמחור, **או** דקות שהוזנו לשלבים (הצפי = דקות × כמות, גם בלי מחיר)
+function _hasExpSrc(p){return _isPriced(p)||(p?.workSteps||[]).some(s=>stepManualMin(s)>0);}
 function taskExpectedKey(cust,prod,workerId,qty){return cust+'|'+prod+'|'+workerId+'|'+qty;}
 function fmtExpMin(min){
   if(min>=60)return Math.floor(min/60)+" שע' "+Math.round(min%60)+" דק'";
@@ -656,7 +658,7 @@ function updateExpectedTime(prefix){
   const cust=raw.slice(0,2),prod=raw.slice(2,7);
   if(cust!==listEl.dataset.cust||prod!==listEl.dataset.prod){box.innerHTML='';return;}
   const prodObj=findProd(cust,prod);
-  if(!_isPriced(prodObj)){box.innerHTML='';return;} // אין תמחור — אין צפי (priced: בלי המספרים אצל עובדת)
+  if(!_hasExpSrc(prodObj)){box.innerHTML='';return;} // אין תמחור ואין דקות — אין צפי (priced: בלי המספרים אצל עובדת)
   let qty=isTotalBc(raw)?getTotalQty(cust,prod,orderNoOf(raw)):parseInt(raw.slice(8,11))||0;
   const est=!qty&&_estQtyBc(raw)>0;if(est)qty=_estQtyBc(raw);
   if(!qty){box.innerHTML='';return;}
@@ -667,7 +669,7 @@ function updateExpectedTime(prefix){
     if(!parts.length){box.innerHTML='';return;}
     const tot=parts.reduce((s,n)=>s+res.perStep[n],0);
     box.innerHTML=`<div style="margin-top:6px;background:var(--blue-bg,#dbeafe);color:var(--blue-txt,#1d4ed8);border-radius:8px;padding:7px 10px;font-size:12px">
-      ⏱ צפי לפי תמחור (${est?'~':''}${qty} יח'${est?' משוער':''}):<b style="font-size:13px">${fmtExpMin(tot)}</b>
+      ⏱ צפי (${est?'~':''}${qty} יח'${est?' משוער':''}):<b style="font-size:13px">${fmtExpMin(tot)}</b>
       ${parts.length>1?`<div style="font-size:11px;margin-top:2px;opacity:.85">${parts.map(n=>esc(n)+': '+fmtExpMin(res.perStep[n])).join(' · ')}</div>`:''}
     </div>`;
   };
@@ -692,7 +694,7 @@ async function fetchExpected(cust,prod,workerId,qty){
   const key=taskExpectedKey(cust,prod,workerId,qty);
   if(_expMap[key])return _expMap[key];
   const prodObj=findProd(cust,prod);
-  if(!_isPriced(prodObj)||!workerId||!qty||!S.fbConnected||!window._fbFunctions)return{ok:false};
+  if(!_hasExpSrc(prodObj)||!workerId||!qty||!S.fbConnected||!window._fbFunctions)return{ok:false};
   const allSteps=(prodObj.workSteps||[]).map(s=>stepName(s)).filter(Boolean);
   try{
     const{httpsCallable}=window._fb;
@@ -708,7 +710,7 @@ async function recalcActiveExpected(cust,prod){
   if(!S.fbConnected||!window._fbFunctions)return;
   const prodObj=findProd(cust,prod);if(!prodObj)return;
   const affected=S.activeTasks.filter(t=>t.cust===cust&&t.prod===prod);if(!affected.length)return;
-  const hasPricing=_isPriced(prodObj);
+  const hasPricing=_hasExpSrc(prodObj);
   const allSteps=(prodObj.workSteps||[]).map(s=>stepName(s)).filter(Boolean);
   const{httpsCallable}=window._fb;
   const fn=httpsCallable(window._fbFunctions,'calcTaskExpected');

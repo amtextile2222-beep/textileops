@@ -528,19 +528,20 @@ exports.calcTaskExpected = functions.https.onCall(async (data, context) => {
   // מוצר שעוד לא עבר מיגרציה נושא את השדות במסמך עצמו ⇒ נופלים אליו.
   const prSnap = await db.collection('productPricing').doc(pId).get();
   if (prSnap.exists) p = { ...p, ...prSnap.data() };
+  // ⏱ (09/11/2026) כל השלבים המבוקשים עם דקות שהוזנו ⇒ הצפי = דקות × כמות — בלי מחיר ובלי עלות שעה
+  const ws = (p.workSteps || []).filter(s => s && typeof s === 'object');
+  const req = stepNames.map(n => ws.find(s => s.name === n)).filter(Boolean);
+  const mPer = {}; let mTot = 0;
+  for (const s of req) if (+s.manualMin > 0) { const m = +s.manualMin * qty; mPer[s.name] = Math.round(m * 10) / 10; mTot += m; }
+  const manualOnly = reason => Object.keys(mPer).length ? { ok: true, perStep: mPer, totalMin: Math.round(mTot * 10) / 10, qty } : { ok: false, reason };
+  if (req.length && req.every(s => +s.manualMin > 0)) return manualOnly('no-steps');
+  // שלב בלי דקות (רמת קושי) — נגזר מהתקציב ומעלות השעה; בלי תמחור/עלויות ⇒ רק השלבים שיש להם דקות
   const price = +p.unitPrice || 0, profit = +p.targetProfitPct || 0, mats = +p.directMaterialsCost || 0;
-  if (!price) return { ok: false, reason: 'no-pricing' };
+  if (!price) return manualOnly('no-pricing');
   const budget = price * (1 - profit / 100) - mats;
-  if (budget <= 0) return { ok: false, reason: 'negative-budget' };
-  // ✂ הגזירה מתומחרת בנפרד: `cutPrice` עם אחוז רווח משלו (`cutProfitPct`), וכשהוא ריק —
-  // נופל לאחוז התפירה, בדיוק כמו cutProfitPctOf בלקוח. חייב להישאר תואם: אחוז שונה כאן
-  // מייצר צפי שהעובדת רואה ושהדוח לא מכיר. ראה gotcha_client_server_formula_drift.
-  const cutPrice = +p.cutPrice || 0;
-  const _cpv = p.cutProfitPct;
-  const cutProfit = (_cpv != null && _cpv !== '' && isFinite(+_cpv)) ? +_cpv : profit;
-  const cutBudget = cutPrice > 0 ? cutPrice * (1 - cutProfit / 100) : 0;
+  if (budget <= 0) return manualOnly('negative-budget');
   const costsSnap = await db.collection('adminSettings').doc('costs').get();
-  if (!costsSnap.exists) return { ok: false, reason: 'no-costs' };
+  if (!costsSnap.exists) return manualOnly('no-costs');
   const costs = costsSnap.data();
   // 💱 (08/11/2026) rateCache = עלות השעה של כל עובד + התקורה **כפי שהלקוח מחשב אותן** (_pubRateCache,
   // נכתב מהמנהל). הנוסחה שכאן למטה התיישנה מול הלקוח: בלי מתנות/טיול לעובד, בלי מסים ועמלות בתקורה,
@@ -568,7 +569,7 @@ exports.calcTaskExpected = functions.https.onCall(async (data, context) => {
     }
   }
   const hourCost = rate + oh;
-  if (!(hourCost > 0)) return { ok: false, reason: 'no-rate' };
+  if (!(hourCost > 0)) return manualOnly('no-rate');
   const weights = costs.difficultyWeights || { 1: 1, 2: 1.5, 3: 2, 4: 2.5, 5: 3.5 };
   // שלב שמיש = יש לו רמת קושי או דקות ידניות (manualMin > 0 = override)
   const priced = (p.workSteps || []).filter(s => s && typeof s === 'object' && (+s.level > 0 || +s.manualMin > 0));
@@ -580,25 +581,19 @@ exports.calcTaskExpected = functions.https.onCall(async (data, context) => {
   const cutUsable = priced.filter(s => !!s.cut);
   // רק שלבים אוטומטיים (קושי בלי override ידני) מתחלקים את התקציב לפי משקל
   const totW = usable.filter(s => +s.level > 0 && !(+s.manualMin > 0)).reduce((s, x) => s + (+weights[+x.level] || 1), 0);
-  // ✂ תקציב הגזירה מתחלק בין שלבי ה-✂ **לפי הדקות שהוזנו** (החלטת המשתמש 30/08)
-  const cutTotMin = cutUsable.reduce((s, x) => s + (+x.manualMin > 0 ? +x.manualMin : 0), 0);
-  // ⚠️ כשכל השלבים המתומחרים ידניים, הדקות שהוזנו הן **משקל יחסי ולא תקן מוחלט**:
-  // כל שלב מקבל `תקציב × (דקותיו ÷ סה"כ הדקות)`, והכסף מומר חזרה לדקות לפי עלות השעה
-  // של **העובד הספציפי** — ולכן עובד יקר מקבל פחות זמן וזול מקבל יותר, בדיוק כמו במסלול
-  // האוטומטי. חייב להישאר תואם ל-splitStepBudget בלקוח; שינוי כאן בלי שינוי שם = דוח
-  // היעילות ישווה "בפועל" מול מוקצב שהעובדת מעולם לא ראתה.
-  // ערבוב ידני+אוטומטי נשאר בהתנהגות הישנה (דקות×כמות) — אין כלל מובן מאליו לשילוב.
-  const allManual = totW === 0;
-  const totManualMin = usable.reduce((s, x) => s + (+x.manualMin > 0 ? +x.manualMin : 0), 0);
   const perStep = {};
   let total = 0;
   for (const name of stepNames) {
     // ✂ שלב גזירה נמדד מול תקציב הגזירה ולא מול תקציב התפירה. בפועל הגזירה נסרקת
     // בברקוד ספירה ללא כמות, והקריאה נופלת קודם על `!qty` ⇒ הענף הזה יורה רק כשיש כמות.
+    // ⏱ (09/11/2026, החלטת המשתמש) שלב עם דקות שהוזנו ⇒ הצפי **תמיד** = הדקות × הכמות — אותו מספר
+    // שבשורת "מוקצב" ובחלון המוצר. עד היום, כשכל השלבים ידניים, הדקות היו רק משקל לחלוקת התקציב
+    // והצפי הומר לפי עלות העובדת (14775: 18.2 דק' לעובדת מול 13.5 שהוזנו). רק שלב בלי דקות (רמת
+    // קושי בלבד) עדיין נגזר מהתקציב. ⚠️ זהה ל-alloc בדוח "מוקצב מול בפועל" (index.html).
     const cst = cutUsable.find(s => s.name === name);
     if (cst) {
-      if (!(cutBudget > 0) || !(cutTotMin > 0) || !(+cst.manualMin > 0)) continue;
-      const cmin = cutBudget * (+cst.manualMin / cutTotMin) * qty / hourCost * 60;
+      if (!(+cst.manualMin > 0)) continue;
+      const cmin = +cst.manualMin * qty;
       perStep[name] = Math.round(cmin * 10) / 10;
       total += cmin;
       continue;
@@ -606,11 +601,7 @@ exports.calcTaskExpected = functions.https.onCall(async (data, context) => {
     const st = usable.find(s => s.name === name);
     if (!st) continue;
     let min;
-    if (+st.manualMin > 0) {
-      min = (allManual && totManualMin > 0 && budget > 0)
-        ? budget * (+st.manualMin / totManualMin) * qty / hourCost * 60
-        : +st.manualMin * qty;
-    }
+    if (+st.manualMin > 0) min = +st.manualMin * qty;
     else if (totW > 0) { min = budget * (+weights[+st.level] || 1) / totW * qty / hourCost * 60; }
     else continue;
     perStep[name] = Math.round(min * 10) / 10;
