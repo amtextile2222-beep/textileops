@@ -7,31 +7,26 @@
 // ואילך ⇒ עריכה/מחיקה של תעודה מתקנת את המלאי לבד. חומר אריזה מובנה — לפי mats בתעודה (own ⇒ מלאי
 // הלקוח); פריט — צריכה ליחידה בכרטיס המוצר (p.cons=[{id,n}]) × יחידות התעודה; item.own ⇒ מלאי הלקוח.
 // appSettings פתוח לכתיבה לכל מחובר — ההרשאה (מנהל/אחראי) נאכפת במסך בלבד.
-// ⚠️ trackPackStock בשרת (דף הלקוח) הוא העתק של pstkCalc למלאי של לקוח אחד — שינוי כאן ⇒ שינוי שם.
+// 🔗 החישוב משותף לשרת (דף הלקוח): stockBalances/stockNeed ב-functions/shared/calc.js
 const PSTK_F='F';
 const PSTK_T={in:'📥 קבלה',out:'📤 הוצאה',count:'🔢 ספירה'};
 const PSTK_BTN={pack:'📦 מלאי אריזה',sew:'🧵 מלאי תפירה',cut:'✂️ מלאי גזירה'};
 const PSTK_UNITS=["יח'",'מטר','גליל','ק"ג'];
 let _pstkDept='pack';
 function canPackStock(){return ['manager','supervisor'].includes(S.user?.role);}
-function _shipMs(s){const t=Date.parse(s?.at||'');return isNaN(t)?(Date.parse((s?.date||'')+'T12:00:00')||0):t;}
+// 🔗 עבר ל-functions/shared/calc.js (משותף לשרת): _shipMs
 function pstkPoolName(pool){return pool===PSTK_F?'🏭 המפעל':'👤 '+(S.customerNames?.[pool]||('לקוח '+pool));}
 const pstkFmt=n=>String(Math.round((+n||0)*100)/100);
 function pstkItems(){return Array.isArray(S.packStock?.items)?S.packStock.items:[];}
-function pstkItem(k){
-  const m=PACK_MATS.find(x=>x.k===k);
-  if(m)return {id:k,name:m.name,dept:'pack',unit:"יח'",builtin:true};
-  return pstkItems().find(x=>x.id===k)||null;
-}
+function pstkItem(k){return stockItemOf(pstkItems(),k);}
 function pstkItemName(k){return pstkItem(k)?.name||k;}
 function pstkUnit(k){const u=pstkItem(k)?.unit||"יח'";return u==="יח'"?'':' '+u;}
 // 📐 פריט לפי מידה (30/10/2026) — תווית שם+מידה / תווית מידה: i.bySize ⇒ יתרה, מינימום ו"נדרש" לכל מידה
 // בנפרד. מפתח = מלאי|פריט|מידה, תנועה נושאת s, וההוצאה בתעודה = הצריכה ליחידה × יחידות **המידה** (שורות
 // התעודה בלי "לא תפור"). תעודה ישנה בלי שורות לא יורדת ממלאי לפי מידה.
-// ⚠️ trackPackStock בשרת — אותו חישוב; שינוי כאן ⇒ שינוי שם.
 const pstkBySize=k=>!!pstkItem(k)?.bySize;
 const PSTK_SIZES=['0','1','2','3','4','5','6','7','8','9'];
-function pstkSizeUnits(rows){const m={};(rows||[]).forEach(r=>{if(isUnsewn(r))return;const q=parseInt(r.qty)||0;if(q>0){const z=String(r.size??'');m[z]=(m[z]||0)+q;}});return m;}
+const pstkSizeUnits=stockSizeUnits;
 // שם להצגה של מפתח (מלאי|פריט[|מידה])
 function pstkKeyName(key){const[,k,z]=String(key).split('|');return pstkItemName(k)+(z!=null?' · מידה '+z:'');}
 // אילו חומרים שייכים למלאי: אריזה מובנית — לשניהם (own נקבע בתעודה); פריט שהלקוח מספק (own) — רק
@@ -40,57 +35,12 @@ function pstkItemsFor(pool,dept){
   const b=dept==='pack'?PACK_MATS.map(m=>pstkItem(m.k)):[];
   return b.concat(pstkItems().filter(i=>i.dept===dept&&(pool===PSTK_F?!i.own:(i.own&&(!i.cust||i.cust===pool)))));
 }
-function pstkCalc(){
-  const moves=((S.packStock||{}).moves||[]).filter(m=>m&&m.pool&&m.k);
-  const mk=m=>m.pool+'|'+m.k+(pstkBySize(m.k)?'|'+(m.s??''):'');
-  const start={};moves.forEach(m=>{const key=mk(m);if(start[key]==null||m.at<start[key])start[key]=+m.at||0;});
-  const ev=moves.map(m=>({at:+m.at||0,key:mk(m),t:m.t,n:+m.n||0}));
-  const its=new Map(pstkItems().map(i=>[i.id,i]));
-  (S.products||[]).forEach(p=>{
-    const cons=(Array.isArray(p.cons)?p.cons:[]).filter(c=>c&&its.has(c.id)&&(+c.n||0)>0);
-    prodShipments(p).forEach(s=>{const at=_shipMs(s),u=+s.total||0,su=cons.some(c=>its.get(c.id).bySize)?pstkSizeUnits(s.rows):null;
-      shipMats(s).forEach(m=>{const key=(m.own?p.cust:PSTK_F)+'|'+m.k;
-        if(start[key]!=null&&at>=start[key])ev.push({at,key,t:'use',n:+m.n||0});});
-      if(u)cons.forEach(c=>{const it=its.get(c.id),base=(it.own?p.cust:PSTK_F)+'|'+c.id;
-        if(it.bySize){Object.entries(su).forEach(([z,q])=>{const key=base+'|'+z;if(start[key]!=null&&at>=start[key])ev.push({at,key,t:'use',n:(+c.n)*q});});return;}
-        if(start[base]!=null&&at>=start[base])ev.push({at,key:base,t:'use',n:(+c.n)*u});});
-    });
-  });
-  // באותו רגע — התנועה הידנית קודם (ספירה שנרשמה לפני היציאה)
-  ev.sort((a,b)=>a.at-b.at||(a.t==='use')-(b.t==='use'));
-  const bal={};
-  ev.forEach(e=>{if(e.t==='count')bal[e.key]=e.n;else bal[e.key]=(bal[e.key]||0)+(e.t==='in'?e.n:-e.n);});
-  Object.keys(bal).forEach(k=>{bal[k]=Math.round(bal[k]*1000)/1000;});
-  return bal;
-}
-// ⚠️ trackPackStock בשרת מחשב את אותו "נדרש" לדף הלקוח (רק חומר שהלקוח מספק) — שינוי כאן ⇒ שינוי שם.
+// 🔗 החישוב עצמו — stockBalances ב-functions/shared/calc.js (אותו קוד מחשב את המלאי בדף הלקוח)
+function pstkCalc(){return stockBalances(S.packStock,S.products);}
 // 📋 נדרש להזמנות פתוחות (25/10/2026): לכל הזמנה פתוחה — יחידות שעוד לא יצאו (כמות, או משוערת) ×
 // הצריכה ליחידה בכרטיס המוצר (p.cons, כולל חומר אריזה מובנה). פתוחה = נשארו יחידות, לא דגם, ולא נסגרה:
 // דחיפה ידנית ל"מוכן ליציאה"/"יצא" (= סגירה בחוסר), או תעודה אחרונה לפני 21 יום. מפתח = מלאי|חומר
-function pstkNeed(){
-  const need={},cnt={},cut=Date.now()-21*864e5;
-  (S.products||[]).forEach(p=>{
-    if(p.isSample)return;
-    const cons=(Array.isArray(p.cons)?p.cons:[]).filter(c=>c&&(+c.n||0)>0);if(!cons.length)return;
-    const sh=prodShipments(p),out=sh.reduce((t,s)=>t+(+s.total||0),0),last=sh.reduce((m,s)=>Math.max(m,_shipMs(s)),0);
-    const ov=p.pipeOverride?.list;
-    if(ov==='ready_ship'||ov==='shipped'||(out>0&&last&&last<cut))return;
-    const rem=Math.max(0,(_prodQty(p)||estQtyOf(p))-out);if(!rem)return;
-    let remSz=null; // 📐 לפי מידה: כמות לכל מידה פחות מה שיצא בה (בלי כמות לפי מידה — לא נספר)
-    cons.forEach(c=>{
-      const it=pstkItem(c.id);if(!it)return;
-      const own=it.builtin?!!c.own:!!it.own,key=(own?p.cust:PSTK_F)+'|'+c.id;
-      if(it.bySize){
-        if(!remSz){remSz={};(p.quantities||[]).forEach(q=>{const z=String(q.size??''),n=parseInt(q.qty)||0;if(n>0)remSz[z]=(remSz[z]||0)+n;});
-          sh.forEach(s=>Object.entries(pstkSizeUnits(s.rows)).forEach(([z,n])=>{if(z in remSz)remSz[z]-=n;}));}
-        Object.entries(remSz).forEach(([z,n])=>{if(n>0){const kz=key+'|'+z;need[kz]=(need[kz]||0)+(+c.n)*n;cnt[kz]=(cnt[kz]||0)+1;}});
-        return;
-      }
-      need[key]=(need[key]||0)+(+c.n)*rem;cnt[key]=(cnt[key]||0)+1;
-    });
-  });
-  return {need,cnt};
-}
+function pstkNeed(){return stockNeed(S.packStock,S.products,Date.now());}
 // חומר שנספר ואין ממנו מספיק להזמנות הפתוחות
 function pstkShortKeys(bal,need){return Object.keys(need).filter(k=>k in bal&&bal[k]<need[k]-0.0001);}
 function pstkLowKeys(bal){

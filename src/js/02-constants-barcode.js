@@ -48,8 +48,7 @@ const todayStr=()=>{const d=new Date();return d.getFullYear()+'-'+pad2(d.getMont
 const esc=s=>String(s??'').replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;');
 // לְברוח מחרוזת שנכנסת כארגומנט JS בתוך onclick='...' — קודם גרש+בקסלאש ל-JS, אח"כ esc ל-HTML. שם עם גרש (ג'מאל) לא ישבור את הקוד.
 const escj=s=>esc(String(s??'').replace(/\\/g,'\\\\').replace(/'/g,"\\'"));
-// ברקוד מלא של משימה (תאימות למשימות ישנות בלי שדה bc)
-const taskBc=t=>t.bc||String(t.cust)+String(t.prod)+String(t.size||'0')+String(t.qty).padStart(3,'0')+String(t.col);
+// 🔗 עבר ל-functions/shared/calc.js (משותף לשרת): taskBc — ברקוד מלא של משימה (תאימות למשימות ישנות בלי שדה bc)
 // ─── אורך הברקוד: 13 (ישן) או 16 (עם מספר הזמנה) ─────────────
 // מבנה: לקוח(2) מוצר(5) מידה(1) כמות(3) צבע(2) [ מספר-הזמנה(3) ]
 // 🔑 מספר ההזמנה נוסף **בסוף** בכוונה: כל ה-slice הקיימים — slice(0,2)/(2,7)/(7,8)/
@@ -57,11 +56,7 @@ const taskBc=t=>t.bc||String(t.cust)+String(t.prod)+String(t.size||'0')+String(t
 // בדיוק כמו קודם, ומקבלת orderNo=0 = "הזמנה מלפני השינוי".
 const BC_LEN_OLD=13,BC_LEN_NEW=16;
 const isBcLen=n=>n===BC_LEN_OLD||n===BC_LEN_NEW;
-// מספר ההזמנה מתוך הברקוד. 0 = ברקוד ישן בלי מספר ⇒ אסור להסיק ממנו כלום.
-function orderNoOf(raw){
-  const s=String(raw||'');
-  return s.length>=BC_LEN_NEW?(parseInt(s.slice(13,16),10)||0):0;
-}
+// 🔗 עבר ל-functions/shared/calc.js (משותף לשרת): orderNoOf — מספר ההזמנה מתוך הברקוד
 // צ'יפ "הזמנה #NNN" לתצוגת מקדימה בשלושת הסורקים. ריק לברקוד ישן — אין מה להציג.
 const bcOrderChip=v=>{
   const n=orderNoOf(v);

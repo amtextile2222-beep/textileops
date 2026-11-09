@@ -13,7 +13,7 @@ let _bcPauseOnStart=[];
 // הזמנה חדשה נכנסת כרשומת מוצר חדשה עם תאריך חדש ⇒ אינה נחסמת מול היסטוריה ישנה.
 // חותמת של רשומת מוצר בודדת. `createdAt` הוא מקור האמת; ה-fallback ל-id קיים כי לרשומות
 // הוותיקות ביותר אין את השדה, וה-id שלהן הוא חותמת זמן.
-function prodStampOf(p){return +p.createdAt||parseInt(String(p.id).replace(/\D/g,''))||0;}
+// 🔗 עבר ל-functions/shared/calc.js (משותף לשרת): prodStampOf
 function prodStampFor(cust,prod){
   let mx=0;
   for(const p of (S.products||[])){

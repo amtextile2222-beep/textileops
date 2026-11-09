@@ -1641,6 +1641,234 @@ document.dispatchEvent(new Event('fbSDKReady'));
 
 <script>
 // ⚠️ נבנה מ-src/js/*.js לפי סדר השמות — לערוך שם ולהריץ node tools/build.js
+// ─── 🔗 חישובים משותפים לאפליקציה ולשרת (09/11/2026) ─────────────────
+// קובץ אחד, שני צרכנים — במקום שני העתקים שצריך לזכור לשנות יחד ("⚠️ זהה ב-trackStates בשרת"):
+//   • האפליקציה: tools/build.js מכניס אותו לראש בלוק ה-<script> ב-index.html ⇒ הכל כאן גלובלי, כמו קודם.
+//   • השרת (functions/index.js): require('./shared/calc') — דף מעקב הלקוח (customerTrack).
+// ⚠️ שינוי כאן = גם `node tools/build.js` + push (אפליקציה) **וגם** פריסת customerTrack (שרת).
+// 🛑 רק JS טהור: בלי S, בלי DOM, בלי window, בלי Firebase — הכל מגיע כפרמטר. סגנון: script רגיל (לא module).
+
+// ─── לוח מצב הזמנות: 8 השלבים (התוויות — PIPE_LISTS באפליקציה, באותו סדר) ───
+const PIPE_IDS=['intake','countcut','ready_sew','sewing','ready_pack','packing','ready_ship','shipped'];
+// תעודה מתאריך לפני זה = יצאה (לא היה סימון יציאה עד אז)
+const PIPE_DEPART_FROM='2026-10-10';
+const PIPE_PARTIAL_FROM='2026-10-20'; // משלוח חלקי נספר רק מתעודה מהתאריך הזה (ראה pipeShipInfo)
+
+// ─── מוצר / הזמנה ───
+function prodStampOf(p){return +p.createdAt||parseInt(String(p.id).replace(/\D/g,''))||0;}
+function _prodQty(p){return (p.quantities||[]).reduce((s,q)=>s+(parseInt(q.qty)||0),0);}
+// 📏 כמות משוערת — לצפי זמן ול"נדרש" במלאי בלבד (ראה CLAUDE.md)
+function estQtyOf(p){return Math.max(0,parseInt(p?.estQty)||0);}
+// מספר ההזמנה מתוך הברקוד (16 ספרות = BC_LEN_NEW). 0 = ברקוד ישן בלי מספר ⇒ אסור להסיק ממנו כלום.
+function orderNoOf(raw){
+  const s=String(raw||'');
+  return s.length>=16?(parseInt(s.slice(13,16),10)||0):0;
+}
+const taskBc=t=>t.bc||String(t.cust)+String(t.prod)+String(t.size||'0')+String(t.qty).padStart(3,'0')+String(t.col);
+// אילו יחידות כוסו = ברקוד+שלב (+splitId). בלי היום — בכוונה (ראה stepDoneKey באפליקציה)
+const coverKey=t=>taskBc(t)+'|'+String(t.taskType||'').trim().toLowerCase()+(t.splitId?'|'+t.splitId:'');
+function stepName(s){return typeof s==='string'?s:(s?.name||'');}
+function stepStation(s){return(s&&typeof s==='object'&&s.station)?s.station:'';}
+
+// מחלקה → משפחת צנרת, לפי מילות מפתח (גם שמות מחלקה ישנים שכבר לא קיימים).
+// ⚠️ גיהוץ/ניקוי/ביקורת נכנסים ל-`pack` בכוונה — במפעל הם מבוצעים ב-`قسم اريزه`.
+function pipeFamOfDept(d){
+  const s=String(d||'').toLowerCase();
+  if(/استقبال|قص|קבל|חית|גזיר/.test(s))return 'recv';
+  if(/خياط|خيط|תפיר/.test(s))return 'sew';
+  if(/اريز|تغليف|كوي|فحص|אריז|גיהו|ניקו|ביקור/.test(s))return 'pack';
+  return '';
+}
+function pipeFamOfStep(s){return pipeFamOfDept(String(stepStation(s)||'').split('::')[0]);}
+
+// ─── משלוחים ───
+const GRADE_U='לא תפור';
+const isUnsewn=r=>(r&&r.grade)===GRADE_U;
+const shUnsewn=sh=>((sh&&sh.rows)||[]).reduce((t,r)=>t+(isUnsewn(r)?(parseInt(r.qty)||0):0),0);
+// כל המשלוחים של רשומה. רשומה מלפני המאגר — משוחזרת כמשלוח בודד מהשדות הישנים, בלי לגעת בנתון
+function prodShipments(p){
+  if(!p)return[];
+  if(Array.isArray(p.shipments)&&p.shipments.length)return p.shipments;
+  if(p.shippedQty!=null)return[{no:parseInt(p.dnNo,10)||0,date:p.dnDate||(p.shippedAt?String(p.shippedAt).slice(0,10):''),at:p.shippedAt||'',rows:Array.isArray(p.shippedRows)?p.shippedRows:[],total:Math.max(0,+p.shippedQty||0)}];
+  return[];
+}
+// חומרי האריזה שנרשמו בתעודה (רק עם כמות)
+function shipMats(s){return (Array.isArray(s?.mats)?s.mats:[]).filter(m=>m&&(+m.n||0)>0);}
+// מועד התעודה מול departedAt (תעודה ששוחזרה/הוקדמה — לפי התאריך שלה)
+const _shipAtMs=s=>{const d=String(s.date||'').slice(0,10);return Date.parse((s.restoredAt||s.backdatedAt)?d:(s.at||d));};
+// מועד התעודה למלאי: at, ובלעדיו צהרי יום התעודה
+function _shipMs(s){const t=Date.parse(s?.at||'');return isNaN(t)?(Date.parse((s?.date||'')+'T12:00:00')||0):t;}
+// תאריך התעודה (רישום "shipped" בלוג, שנכתב בהפקת תעודה)
+function pipeDnDate(p){
+  const s=(p.stageLog||[]).find(e=>e.id==='shipped');
+  if(s?.date)return s.date;
+  return p.shippedAt?String(p.shippedAt).slice(0,10):'';
+}
+// תאריך הכניסה למפעל: מועד הקמת הכרטיס, ובהיעדרו תאריך "קבלת סחורה" מהלוג.
+function pipeEntryDate(p){
+  if(+p.createdAt)return new Date(+p.createdAt).toISOString().slice(0,10);
+  const r=(p.stageLog||[]).find(e=>e.id==='receive');
+  return r?.date||'';
+}
+// תאריך היציאה: סימון היציאה בלוח, ובהיעדרו — תאריך התעודה (הזמנות מלפני PIPE_DEPART_FROM)
+function pipeShipDate(p){
+  return p.departedAt?String(p.departedAt).slice(0,10):pipeDnDate(p);
+}
+// 🚚 הופקה תעודת משלוח ≠ הסחורה יצאה (10/10/2026): תעודה ⇒ "מוכן ליציאה"; "יצא ללקוח" רק אחרי סימון
+// יציאה (`departedAt`). 🚚 משלוח חלקי (20/10/2026): רק היחידות שיצאו (total + ✂ לא תפור) עוברות; היתרה
+// נשארת במצב הייצור. יציאה **פר תעודה**: תעודה שהופקה (at) עד departedAt = יצאה.
+// 🛑 לא חלקי: תעודה אחרונה לפני PIPE_PARTIAL_FROM, או דחיפה ידנית ל"מוכן ליציאה"/הלאה (= סגירה בחוסר)
+function pipeShipInfo(p,qty){
+  const shipped=(p.stageLog||[]).some(e=>e.id==='shipped')||+p.shippedQty>0;
+  const shL=shipped?prodShipments(p):[];
+  const shU=s=>(+s.total||0)+shUnsewn(s);
+  const depT=p.departedAt?Date.parse(p.departedAt):NaN;
+  const shDep=s=>{const d=String(s.date||'').slice(0,10);if(d&&d<PIPE_DEPART_FROM)return true;if(isNaN(depT))return false;
+    return !(_shipAtMs(s)>depT);};
+  const outU=shL.reduce((t,s)=>t+shU(s),0),depU=shL.reduce((t,s)=>t+(shDep(s)?shU(s):0),0);
+  const lastD=shL.reduce((m,s)=>String(s.date||'')>m?String(s.date||''):m,'');
+  const ovShip=!!p.pipeOverride&&PIPE_IDS.indexOf(p.pipeOverride.list)>=PIPE_IDS.indexOf('ready_ship');
+  const partial=shipped&&qty>0&&shL.length>0&&outU<qty&&lastD>=PIPE_PARTIAL_FROM&&!ovShip;
+  const departed=shipped&&!partial&&(shL.length?depU>=outU:(!!p.departedAt||String(pipeDnDate(p)||'9999')<PIPE_DEPART_FROM));
+  return{shL,shipped,partial,departed,outU,depU};
+}
+
+// ─── מצב ההזמנה בלוח (pipeStateOf באפליקציה, trackStates בשרת) ───
+// ⚠️ **המנוע הוא המחלקה שנסרקה (`t.dept`) — לא `stageLog`** (ראה pipeStateOf).
+// tasks = המשימות **של ההזמנה הזו בלבד**; units(t) = יחידות המשימה (taskUnits באפליקציה — כמות "כל
+// הכמות" נקראת מהמוצר בדיעבד). כל צד מוסיף מעל זה את מה שרק הוא מציג (פיצול לעמודות / תאריכים ללקוח).
+function pipeCore(p,tasks,units){
+  const qty=_prodQty(p);
+  const scans={recv:0,sew:0,pack:0,none:0};
+  for(const t of tasks){const f=pipeFamOfDept(t.dept);if(f)scans[f]++;else scans.none++;}
+  // שלבי העבודה מחולקים למשפחות לפי התחנה שלהם
+  const steps={recv:[],sew:[],pack:[],none:[]};
+  for(const s of (p.workSteps||[])){const nm=stepName(s);if(!nm)continue;(steps[pipeFamOfStep(s)||'none']).push(nm);}
+  // כמה יחידות בוצעו בכל שלב — ניכוי ספירה כפולה של אצווה, בדיוק כמו stepDoneMap
+  const seen=new Set(),done={};
+  for(const t of tasks){
+    if(!(t.duration>0))continue;
+    const k=coverKey(t);if(seen.has(k))continue;seen.add(k);
+    const nm=String(t.taskType||'').trim();done[nm]=(done[nm]||0)+units(t);
+  }
+  // ✔ שלב שסומן ידנית כגמור (products.stepMarks) = כל הכמות
+  for(const m of (p.stepMarks||[]))if(m&&m.n)done[m.n]=Math.max(done[m.n]||0,qty);
+  // full/of קובעים את המצב; pct = יחידות שבוצעו מתוך כמות×שלבים (לתצוגת הלקוח)
+  const fam=f=>{const ss=steps[f];if(!ss.length)return null;
+    return{full:ss.filter(nm=>qty>0&&(done[nm]||0)>=qty).length,of:ss.length,
+      pct:qty>0?Math.round(100*ss.reduce((s,nm)=>s+Math.min(done[nm]||0,qty),0)/(qty*ss.length)):0};};
+  const sew=fam('sew'),pack=fam('pack');
+  const sh=pipeShipInfo(p,qty);
+  let id;
+  if(sh.departed)                                id='shipped';
+  else if(sh.shipped&&!sh.partial)               id='ready_ship';
+  else if(pack&&pack.of>0&&pack.full===pack.of)  id='ready_ship';
+  else if(scans.pack>0)                          id='packing';
+  else if(sew&&sew.of>0&&sew.full===sew.of)      id='ready_pack';
+  else if(scans.sew>0)                           id='sewing';
+  else if(qty>0&&scans.recv>0)                   id='ready_sew';
+  else if(scans.recv>0)                          id='countcut';
+  else                                           id='intake';
+  // 📌 דחיפה ידנית של מנהל. **קדימה בלבד**; `shipped` תמיד גובר
+  const nat=id;
+  const ovList=p.pipeOverride&&PIPE_IDS.indexOf(p.pipeOverride.list)>=0?p.pipeOverride.list:null;
+  if(ovList&&nat!=='shipped'&&PIPE_IDS.indexOf(ovList)>PIPE_IDS.indexOf(nat))id=ovList;
+  // ✂️ פיצול (18/10/2026): sewDone = יחידות שסיימו את **כל** שלבי התפירה (השלב הנמוך);
+  // packIn = יחידות שנסרקו באריזה (כולל משימות רצות) — השלב עם הכי הרבה
+  let sewDone=0,packIn=0;
+  if(sew&&qty>0){
+    sewDone=Math.min(...steps.sew.map(nm=>Math.min(done[nm]||0,qty)));
+    const inn={},sn=new Set();
+    for(const t of tasks){if(pipeFamOfDept(t.dept)!=='pack')continue;const k=coverKey(t);if(sn.has(k))continue;sn.add(k);
+      const nm=String(t.taskType||'').trim();inn[nm]=(inn[nm]||0)+units(t);}
+    packIn=Math.min(qty,Math.max(0,...Object.values(inn)));
+  }
+  return{qty,scans,steps,done,sew,pack,...sh,id,nat,ovList,sewDone,packIn};
+}
+
+// ─── 📦 מלאי חומרים (pstkCalc/pstkNeed באפליקציה, trackPackStock בשרת) ───
+// חומרי אריזה מובנים. mode/autoQty/incl/hint — לחלון התעודה באפליקציה
+const PACK_MATS=[
+  {k:'hanger',name:'קולב',      mode:'hang',hint:'רק כשהקולבים שלנו — הלקוח מספק ברוב המקרים'},
+  // 🧷 קולב קליפס (25/10/2026) — למכנסיים וחצאיות. תלייה כמו קולב רגיל, עם מחיר משלו
+  {k:'clip'  ,name:'קולב קליפס',mode:'hang',hint:'מכנסיים וחצאיות — רק כשהקולבים שלנו'},
+  {k:'nylon' ,name:'ניילון',    mode:'hang',hint:'תלייה — לא כל פריט נארז בניילון, כמות ידנית'},
+  {k:'cello' ,name:'ניילון צלופן',mode:'fold',autoQty:true,hint:'קיפול — כל פריט בשק, עוקב אחרי הכמות שיוצאת'},
+  // 📄 נייר A4 (03/11/2026) — בהזמנות בקיפול (לא כל הלקוחות). incl = המחיר כלול בצלופן: בלי מחיר, בלי חיוב
+  // ובלי "אין מחיר" — נרשם בתעודה רק בשביל המלאי
+  {k:'paper' ,name:'נייר A4',   mode:'fold',incl:true,hint:'קיפול — רק בהזמנות שצריך · המחיר כלול בצלופן'}
+];
+// פריט לפי מפתח: חומר מובנה (builtin) או פריט שהמנהל הגדיר (packStock.items). null = נמחק
+function stockItemOf(items,k){
+  const m=PACK_MATS.find(x=>x.k===k);
+  if(m)return {id:k,name:m.name,dept:'pack',unit:"יח'",builtin:true};
+  return (Array.isArray(items)?items:[]).find(x=>x.id===k)||null;
+}
+// יחידות התעודה לפי מידה (בלי "לא תפור") — להוצאה של פריט לפי מידה
+function stockSizeUnits(rows){const m={};(rows||[]).forEach(r=>{if(isUnsewn(r))return;const q=parseInt(r.qty)||0;if(q>0){const z=String(r.size??'');m[z]=(m[z]||0)+q;}});return m;}
+// 🔑 היתרה **מחושבת ולא נשמרת**: תנועות (in/out/count) פחות מה שיצא בתעודות, מהתנועה הראשונה של אותו
+// מלאי+חומר ואילך. מפתח = מלאי|חומר[|מידה]; מלאי = 'F' (המפעל) או קוד לקוח.
+// חומר מובנה — לפי mats בתעודה (own ⇒ מלאי הלקוח); פריט — p.cons × יחידות התעודה; item.own ⇒ מלאי הלקוח.
+function stockBalances(ps,prods){
+  ps=ps||{};const items=Array.isArray(ps.items)?ps.items:[];
+  const itemOf=k=>stockItemOf(items,k),bySz=k=>!!itemOf(k)?.bySize;
+  const moves=(Array.isArray(ps.moves)?ps.moves:[]).filter(m=>m&&m.pool&&m.k);
+  const mk=m=>m.pool+'|'+m.k+(bySz(m.k)?'|'+(m.s??''):'');
+  const start={};moves.forEach(m=>{const key=mk(m);if(start[key]==null||m.at<start[key])start[key]=+m.at||0;});
+  const ev=moves.map(m=>({at:+m.at||0,key:mk(m),t:m.t,n:+m.n||0}));
+  const its=new Map(items.map(i=>[i.id,i]));
+  (prods||[]).forEach(p=>{
+    const cons=(Array.isArray(p.cons)?p.cons:[]).filter(c=>c&&its.has(c.id)&&(+c.n||0)>0);
+    prodShipments(p).forEach(s=>{const at=_shipMs(s),u=+s.total||0,su=cons.some(c=>its.get(c.id).bySize)?stockSizeUnits(s.rows):null;
+      shipMats(s).forEach(m=>{const key=(m.own?p.cust:'F')+'|'+m.k;
+        if(start[key]!=null&&at>=start[key])ev.push({at,key,t:'use',n:+m.n||0});});
+      if(u)cons.forEach(c=>{const it=its.get(c.id),base=(it.own?p.cust:'F')+'|'+c.id;
+        if(it.bySize){Object.entries(su).forEach(([z,q])=>{const key=base+'|'+z;if(start[key]!=null&&at>=start[key])ev.push({at,key,t:'use',n:(+c.n)*q});});return;}
+        if(start[base]!=null&&at>=start[base])ev.push({at,key:base,t:'use',n:(+c.n)*u});});
+    });
+  });
+  // באותו רגע — התנועה הידנית קודם (ספירה שנרשמה לפני היציאה)
+  ev.sort((a,b)=>a.at-b.at||(a.t==='use')-(b.t==='use'));
+  const bal={};
+  ev.forEach(e=>{if(e.t==='count')bal[e.key]=e.n;else bal[e.key]=(bal[e.key]||0)+(e.t==='in'?e.n:-e.n);});
+  Object.keys(bal).forEach(k=>{bal[k]=Math.round(bal[k]*1000)/1000;});
+  return bal;
+}
+// 📋 נדרש להזמנות פתוחות (25/10/2026): לכל הזמנה פתוחה — יחידות שעוד לא יצאו (כמות, או משוערת) ×
+// הצריכה ליחידה בכרטיס המוצר (p.cons, כולל חומר אריזה מובנה). פתוחה = נשארו יחידות, לא דגם, ולא נסגרה:
+// דחיפה ידנית ל"מוכן ליציאה"/"יצא" (= סגירה בחוסר), או תעודה אחרונה לפני 21 יום. מפתח = מלאי|חומר[|מידה]
+function stockNeed(ps,prods,now){
+  const items=Array.isArray((ps||{}).items)?ps.items:[];
+  const need={},cnt={},cut=now-21*864e5;
+  (prods||[]).forEach(p=>{
+    if(p.isSample)return;
+    const cons=(Array.isArray(p.cons)?p.cons:[]).filter(c=>c&&(+c.n||0)>0);if(!cons.length)return;
+    const sh=prodShipments(p),out=sh.reduce((t,s)=>t+(+s.total||0),0),last=sh.reduce((m,s)=>Math.max(m,_shipMs(s)),0);
+    const ov=p.pipeOverride?.list;
+    if(ov==='ready_ship'||ov==='shipped'||(out>0&&last&&last<cut))return;
+    const rem=Math.max(0,(_prodQty(p)||estQtyOf(p))-out);if(!rem)return;
+    let remSz=null; // 📐 לפי מידה: כמות לכל מידה פחות מה שיצא בה (בלי כמות לפי מידה — לא נספר)
+    cons.forEach(c=>{
+      const it=stockItemOf(items,c.id);if(!it)return;
+      const own=it.builtin?!!c.own:!!it.own,key=(own?p.cust:'F')+'|'+c.id;
+      if(it.bySize){
+        if(!remSz){remSz={};(p.quantities||[]).forEach(q=>{const z=String(q.size??''),n=parseInt(q.qty)||0;if(n>0)remSz[z]=(remSz[z]||0)+n;});
+          sh.forEach(s=>Object.entries(stockSizeUnits(s.rows)).forEach(([z,n])=>{if(z in remSz)remSz[z]-=n;}));}
+        Object.entries(remSz).forEach(([z,n])=>{if(n>0){const kz=key+'|'+z;need[kz]=(need[kz]||0)+(+c.n)*n;cnt[kz]=(cnt[kz]||0)+1;}});
+        return;
+      }
+      need[key]=(need[key]||0)+(+c.n)*rem;cnt[key]=(cnt[key]||0)+1;
+    });
+  });
+  return {need,cnt};
+}
+
+// ─── 🔔 שעות שליחת התראות ללקוחות — ברירת מחדל. יום 0=א'…6=ש': א'-ה' 07:00-18:00, ו' 07:00-13:00 ───
+const NOTIFY_DEF_WIN={0:['07:00','18:00'],1:['07:00','18:00'],2:['07:00','18:00'],3:['07:00','18:00'],4:['07:00','18:00'],5:['07:00','13:00']};
+
+if(typeof module==='object'&&module&&module.exports)module.exports={PIPE_IDS,PIPE_DEPART_FROM,PIPE_PARTIAL_FROM,prodStampOf,_prodQty,estQtyOf,
+  orderNoOf,taskBc,coverKey,stepName,stepStation,pipeFamOfDept,pipeFamOfStep,GRADE_U,isUnsewn,shUnsewn,prodShipments,shipMats,_shipAtMs,_shipMs,
+  pipeDnDate,pipeEntryDate,pipeShipDate,pipeShipInfo,pipeCore,PACK_MATS,stockItemOf,stockSizeUnits,stockBalances,stockNeed,NOTIFY_DEF_WIN};
 const LANGS={
   he:{
     login_title:'כניסה למערכת',
@@ -2516,8 +2744,7 @@ const todayStr=()=>{const d=new Date();return d.getFullYear()+'-'+pad2(d.getMont
 const esc=s=>String(s??'').replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;');
 // לְברוח מחרוזת שנכנסת כארגומנט JS בתוך onclick='...' — קודם גרש+בקסלאש ל-JS, אח"כ esc ל-HTML. שם עם גרש (ג'מאל) לא ישבור את הקוד.
 const escj=s=>esc(String(s??'').replace(/\\/g,'\\\\').replace(/'/g,"\\'"));
-// ברקוד מלא של משימה (תאימות למשימות ישנות בלי שדה bc)
-const taskBc=t=>t.bc||String(t.cust)+String(t.prod)+String(t.size||'0')+String(t.qty).padStart(3,'0')+String(t.col);
+// 🔗 עבר ל-functions/shared/calc.js (משותף לשרת): taskBc — ברקוד מלא של משימה (תאימות למשימות ישנות בלי שדה bc)
 // ─── אורך הברקוד: 13 (ישן) או 16 (עם מספר הזמנה) ─────────────
 // מבנה: לקוח(2) מוצר(5) מידה(1) כמות(3) צבע(2) [ מספר-הזמנה(3) ]
 // 🔑 מספר ההזמנה נוסף **בסוף** בכוונה: כל ה-slice הקיימים — slice(0,2)/(2,7)/(7,8)/
@@ -2525,11 +2752,7 @@ const taskBc=t=>t.bc||String(t.cust)+String(t.prod)+String(t.size||'0')+String(t
 // בדיוק כמו קודם, ומקבלת orderNo=0 = "הזמנה מלפני השינוי".
 const BC_LEN_OLD=13,BC_LEN_NEW=16;
 const isBcLen=n=>n===BC_LEN_OLD||n===BC_LEN_NEW;
-// מספר ההזמנה מתוך הברקוד. 0 = ברקוד ישן בלי מספר ⇒ אסור להסיק ממנו כלום.
-function orderNoOf(raw){
-  const s=String(raw||'');
-  return s.length>=BC_LEN_NEW?(parseInt(s.slice(13,16),10)||0):0;
-}
+// 🔗 עבר ל-functions/shared/calc.js (משותף לשרת): orderNoOf — מספר ההזמנה מתוך הברקוד
 // צ'יפ "הזמנה #NNN" לתצוגת מקדימה בשלושת הסורקים. ריק לברקוד ישן — אין מה להציג.
 const bcOrderChip=v=>{
   const n=orderNoOf(v);
@@ -3602,7 +3825,7 @@ function getTotalQty(cust,prod,orderNo){
 // 📏 כמות משוערת (20/10/2026): עד הספירה/גזירה ההזמנה בלי כמות ⇒ אין צפי לשלבים הראשונים.
 // `products.estQty` משמש **רק לצפי זמן** (סריקה, משימות פעילות, זמן לפי מחלקה). המשימה נשמרת עם
 // qty=0 כמו היום, ו-taskUnits/דוחות ממשיכים לקחת את הכמות האמיתית בדיעבד — לא לערבב.
-function estQtyOf(p){return Math.max(0,parseInt(p?.estQty)||0);}
+// 🔗 עבר ל-functions/shared/calc.js (משותף לשרת): estQtyOf
 function _estQtyBc(raw){
   if(!isTotalBc(raw||''))return 0;
   const c=raw.slice(0,2),pr=raw.slice(2,7);
@@ -3633,7 +3856,7 @@ function sumUnitsDedup(tasks){
 // ⚠️ `stamp` = חותמת ההזמנה. **בלעדיו המפתח הוא ברמת הדגם** — וזה מכוון: מסך התצוגה
 // מציג התקדמות ברמת הדגם (החלטה קיימת) וקורא בלי חותמת, הדוח קורא עם חותמת.
 const stepDoneKey=(cust,prod,stepNm,stamp)=>cust+'|'+prod+'|'+String(stepNm||'').trim()+(stamp!=null?'|'+stamp:'');
-const coverKey=t=>taskBc(t)+'|'+String(t.taskType||'').trim().toLowerCase()+(t.splitId?'|'+t.splitId:'');
+// 🔗 עבר ל-functions/shared/calc.js (משותף לשרת): coverKey
 // ⚠️ הכמות האפקטיבית של משימה. ברקוד "כל הכמות" שנסרק **לפני** שהוזנו הכמויות לפי מידה
 // נשמר עם qty=0 — זו ה"כמות הפתוחה" — אבל העבודה בוצעה על ההזמנה כולה. נמדד: 24 משימות,
 // 44 שעות עבודה, ובהן **כל 10 רשומות `عد فتح شغل` במפעל** וכל משפחת הפרישה/חיתוך.
@@ -3761,10 +3984,9 @@ let S={
 const LEVELS={1:{he:'קל',ar:'سهل',en:'Easy'},2:{he:'בינוני',ar:'متوسط',en:'Medium'},3:{he:'מעל בינוני',ar:'فوق المتوسط',en:'Above medium'},4:{he:'קשה',ar:'صعب',en:'Hard'},5:{he:'מורכב',ar:'معقد',en:'Complex'}};
 function levelName(l,lang){return LEVELS[l]?(LEVELS[l][lang||currentLang]||LEVELS[l].he):'';}
 // שלב עבודה: מחרוזת (פורמט ישן) או {name,nameAr,level,station} — תאימות לאחור
-function stepName(s){return typeof s==='string'?s:(s?.name||'');}
+// 🔗 עבר ל-functions/shared/calc.js (משותף לשרת): stepName, stepStation
 function stepDisplay(s){if(typeof s==='string')return s;return(currentLang==='ar'&&s?.nameAr)?s.nameAr:(s?.name||'');}
 function stepLevel(s){return(s&&typeof s==='object'&&s.level)?+s.level:0;}
-function stepStation(s){return(s&&typeof s==='object'&&s.station)?s.station:'';}
 function stepManualMin(s){return(s&&typeof s==='object'&&+s.manualMin>0)?+s.manualMin:0;} // דקות ידניות ליחידה — דורס חישוב אוטומטי
 // ✂ שלב גזירה — נמדד מול `cutPrice` ולא מול מחיר המכירה. הסימון **ידני בכרטיס המוצר**
 // ולא נגזר מהתחנה: ב-19 משימות הגזירה שבהיסטוריה שדה `station` ריק לחלוטין, ולכן זיהוי
@@ -3889,14 +4111,7 @@ const pipeShortLabel=L=>String(L?.label||'').replace(/^\S+\s*/,'');
 // `خياطة` 220 · `תפירה` 141 · `فحص` 76 · `אריזה` 41 · `تغليف` 11 · `كوي تغليف` 1).
 // נמדד 30/08: 13 מתוך 13 שמות המחלקה שנצפו בנתונים מזוהים, ו-100% מסריקות המוצרים החיים.
 // ⚠️ גיהוץ/ניקוי/ביקורת נכנסים ל-`pack` בכוונה — במפעל הם מבוצעים ב-`قسم اريزه`.
-function pipeFamOfDept(d){
-  const s=String(d||'').toLowerCase();
-  if(/استقبال|قص|קבל|חית|גזיר/.test(s))return 'recv';
-  if(/خياط|خيط|תפיר/.test(s))return 'sew';
-  if(/اريز|تغليف|كوي|فحص|אריז|גיהו|ניקו|ביקור/.test(s))return 'pack';
-  return '';
-}
-function pipeFamOfStep(s){return pipeFamOfDept(String(stepStation(s)||'').split('::')[0]);}
+// 🔗 pipeFamOfDept / pipeFamOfStep — בקובץ המשותף functions/shared/calc.js (גם דף הלקוח בשרת)
 // 🔢 (03/11/2026) סדר שלבי העבודה לפי מחלקה: קבלת סחורה ← תפירה (1 ו-2 = אחת) ← אריזה; בתוך מחלקה — הסדר שהוזן.
 // שלב בלי תחנה/מחלקה לא מזוהה נשאר צמוד לשלב שלפניו. מיון יציב — שלב שנשכח ונוסף בסוף עולה למקומו
 function sortStepsByDept(steps){
@@ -3904,78 +4119,23 @@ function sortStepsByDept(steps){
   return steps.map((s,i)=>{const f=pipeFamOfStep(s);if(f in R)prev=R[f];return{s,i,r:prev};}).sort((a,b)=>a.r-b.r||a.i-b.i).map(x=>x.s);
 }
 // מצב הצנרת של רשומת מוצר אחת. `tasks` = כל המשימות **של ההזמנה הזו בלבד** (שויכו ב-taskOrderStamp).
+// 🔗 החישוב עצמו (מצב, שלבים, משלוחים, דחיפה ידנית) — pipeCore בקובץ המשותף functions/shared/calc.js,
+// אותו קוד שמחשב את דף מעקב הלקוח בשרת. כאן רק מה שהלוח מציג: שלבים חסרים לטולטיפ ופיצול לעמודות.
 function pipeStateOf(p,tasks){
-  const qty=_prodQty(p);
-  const scans={recv:0,sew:0,pack:0,none:0};
-  for(const t of tasks){const f=pipeFamOfDept(t.dept);if(f)scans[f]++;else scans.none++;}
-  // שלבי העבודה מחולקים למשפחות לפי התחנה שלהם
-  const steps={recv:[],sew:[],pack:[],none:[]};
-  for(const s of (p.workSteps||[])){const nm=stepName(s);if(!nm)continue;(steps[pipeFamOfStep(s)||'none']).push(nm);}
-  // כמה יחידות בוצעו בכל שלב — ניכוי ספירה כפולה של אצווה, בדיוק כמו stepDoneMap
-  const seen=new Set(),done={};
-  for(const t of tasks){
-    if(!(t.duration>0))continue;
-    const k=coverKey(t);if(seen.has(k))continue;seen.add(k);
-    done[String(t.taskType||'').trim()]=(done[String(t.taskType||'').trim()]||0)+taskUnits(t);
-  }
-  // ✔ שלב שסומן ידנית כגמור (לא כל הברקודים נסרקו) = כל הכמות. ⚠️ זהה ב-trackStates בשרת
-  for(const m of (p.stepMarks||[]))if(m&&m.n)done[m.n]=Math.max(done[m.n]||0,qty);
-  const fam=f=>{const ss=steps[f];if(!ss.length)return null;
-    return{full:ss.filter(nm=>qty>0&&(done[nm]||0)>=qty).length,of:ss.length};};
-  const sew=fam('sew'),pack=fam('pack');
+  const c=pipeCore(p,tasks,taskUnits);
+  const{qty,steps,done,sew,pack,id,nat,shL,shipped,departed,partial,outU,depU}=c;
   // שלבים שלא הגיעו לכמות — לטולטיפ בכרטיס (כדי לראות מי עוצר את ההזמנה)
   // הנמוך ראשון — הוא צוואר הבקבוק שקובע כמה יחידות מוכנות
   const lowOf=f=>steps[f].filter(nm=>!(qty>0&&(done[nm]||0)>=qty)).sort((a,b)=>(done[a]||0)-(done[b]||0)).map(nm=>nm+' '+Math.min(done[nm]||0,qty)+'/'+qty);
   if(sew)sew.low=lowOf('sew');if(pack)pack.low=lowOf('pack');
-  // 🚚 הופקה תעודת משלוח ≠ הסחורה יצאה (10/10/2026): תעודה ⇒ "מוכן ליציאה"; "יצא ללקוח" רק אחרי
-  // סימון יציאה (`departedAt`, כפתור בלוח). תעודה מתאריך לפני PIPE_DEPART_FROM = יצאה (לא היה סימון עד אז).
-  // ⚠️ זהה ב-trackStates בשרת (functions/index.js) — דף המעקב של הלקוח
-  const shipped=(p.stageLog||[]).some(e=>e.id==='shipped')||+p.shippedQty>0;
-  // 🚚 משלוח חלקי (20/10/2026): 14771 — יצאו 2 מתוך 135 והכרטיס כולו עבר ל"מוכן ליציאה". עכשיו רק
-  // היחידות שיצאו (total + ✂ לא תפור, כמו "יתרה להשלמה") עוברות; היתרה נשארת במצב הייצור שלה.
-  // יציאה **פר תעודה**: תעודה שהופקה (at) עד departedAt = יצאה; תעודה מאוחרת יותר = ממתינה לסימון.
-  // ⚠️ זהה ב-trackShipInfo בשרת
-  const shL=shipped?prodShipments(p):[];
-  const shU=s=>(+s.total||0)+shUnsewn(s);
-  const depT=p.departedAt?Date.parse(p.departedAt):NaN;
-  const shDep=s=>{const d=String(s.date||'').slice(0,10);if(d&&d<PIPE_DEPART_FROM)return true;if(isNaN(depT))return false;
-    return !(_shipAtMs(s)>depT);};
-  const outU=shL.reduce((t,s)=>t+shU(s),0),depU=shL.reduce((t,s)=>t+(shDep(s)?shU(s):0),0);
-  // 🛑 לא חלקי: תעודה אחרונה לפני PIPE_PARTIAL_FROM (הזמנות ישנות שנסגרו בחוסר לא חוזרות ללוח),
-  // או שהמנהל דחף ידנית ל"מוכן ליציאה"/הלאה = "סוגרים את ההזמנה בחוסר"
-  const lastD=shL.reduce((m,s)=>String(s.date||'')>m?String(s.date||''):m,'');
-  const ovShip=!!p.pipeOverride&&PIPE_IDX(p.pipeOverride.list)>=PIPE_IDX('ready_ship');
-  const partial=shipped&&qty>0&&shL.length>0&&outU<qty&&lastD>=PIPE_PARTIAL_FROM&&!ovShip;
-  const departed=shipped&&!partial&&(shL.length?depU>=outU:(!!p.departedAt||String(pipeDnDate(p)||'9999')<PIPE_DEPART_FROM));
-  let id;
-  if(departed)                                   id='shipped';
-  else if(shipped&&!partial)                     id='ready_ship';
-  else if(pack&&pack.of>0&&pack.full===pack.of)  id='ready_ship';
-  else if(scans.pack>0)                          id='packing';
-  else if(sew&&sew.of>0&&sew.full===sew.of)      id='ready_pack';
-  else if(scans.sew>0)                           id='sewing';
-  else if(qty>0&&scans.recv>0)                   id='ready_sew';
-  else if(scans.recv>0)                          id='countcut';
-  else                                           id='intake';
-  // 📌 דחיפה ידנית של מנהל. **קדימה בלבד** — אם המצב האמיתי כבר עקף אותה היא נבלעת
-  // מעצמה ולא מחזיקה כרטיס אחורה. `shipped` תמיד גובר.
-  const nat=id;
-  const ov=p.pipeOverride&&PIPE_IDX(p.pipeOverride.list)>=0?p.pipeOverride:null;
-  if(ov&&nat!=='shipped'&&PIPE_IDX(ov.list)>PIPE_IDX(nat))id=ov.list;
+  const ov=c.ovList?p.pipeOverride:null;
   // ✂️ פיצול (18/10/2026): ההזמנה מחולקת בין "בתפירה" / "מוכן לאריזה" / "באריזה" לפי יחידות:
-  //   sewDone = יחידות שסיימו את **כל** שלבי התפירה = השלב הנמוך ביותר (צוואר הבקבוק)
-  //   packIn  = יחידות שנסרקו באריזה (כולל משימות רצות) — השלב עם הכי הרבה
-  //   באריזה = packIn · מוכן לאריזה = max(sewDone,packIn)−packIn · בתפירה = השאר.
+  //   באריזה = packIn · מוכן לאריזה = max(sewDone,packIn)−packIn · בתפירה = השאר (sewDone/packIn — pipeCore).
   // הכרטיס מוצג בכל עמודה שיש בה יחידות (רק כשיותר מאחת). לא בדחיפה ידנית (המנהל קבע את המצב).
-  // ⚠️ זהה ב-trackStates בשרת (split + sewPct)
   let split=null,parts=null;
   if(id===nat&&sew&&qty>0&&['sewing','ready_pack','packing'].includes(nat)){
-    const sewDone=Math.min(...steps.sew.map(nm=>Math.min(done[nm]||0,qty)));
-    const inn={},sn=new Set();
-    for(const t of tasks){if(pipeFamOfDept(t.dept)!=='pack')continue;const k=coverKey(t);if(sn.has(k))continue;sn.add(k);
-      const nm=String(t.taskType||'').trim();inn[nm]=(inn[nm]||0)+taskUnits(t);}
-    const packIn=Math.min(qty,Math.max(0,...Object.values(inn))),reached=Math.max(sewDone,packIn);
-    parts={sewing:qty-reached,ready_pack:reached-packIn,packing:packIn};
+    const reached=Math.max(c.sewDone,c.packIn);
+    parts={sewing:qty-reached,ready_pack:reached-c.packIn,packing:c.packIn};
   }
   // 🚚 משלוח חלקי: היחידות שיצאו יורדות מהעמודה המתקדמת ביותר ועוברות ל"מוכן ליציאה" (תעודה בלי
   // סימון יציאה) / "יצא ללקוח". הזמנה שיצאה כולה בכמה תעודות — חלק יצא וחלק ממתין ⇒ פיצול גם כן.
@@ -3990,28 +4150,9 @@ function pipeStateOf(p,tasks){
     if(nz.length>1)split={...parts,main:parts[id]>0?id:nz[nz.length-1]};
   }
   // outPend = יחידות עם תעודה שעוד לא סומנו "יצא ללקוח" — לכפתור 🚚 בכרטיס
-  return{id,nat,ov:id===ov?.list?ov:null,qty,scans,steps,sew,pack,shipped,departed,partial,outU,outPend:shL.length?outU-depU:0,split,tasks:tasks.length};
+  return{id,nat,ov:id===ov?.list?ov:null,qty,scans:c.scans,steps,sew,pack,shipped,departed,partial,outU,outPend:shL.length?outU-depU:0,split,tasks:tasks.length};
 }
-const PIPE_DEPART_FROM='2026-10-10';
-// מועד התעודה מול departedAt (תעודה ששוחזרה/הוקדמה — לפי התאריך שלה). ⚠️ זהה ב-trackShipInfo בשרת
-const _shipAtMs=s=>{const d=String(s.date||'').slice(0,10);return Date.parse((s.restoredAt||s.backdatedAt)?d:(s.at||d));};
-const PIPE_PARTIAL_FROM='2026-10-20'; // משלוח חלקי נספר רק מתעודה מהתאריך הזה (ראה pipeStateOf)
-// תאריך התעודה (רישום "shipped" בלוג, שנכתב בהפקת תעודה)
-function pipeDnDate(p){
-  const s=(p.stageLog||[]).find(e=>e.id==='shipped');
-  if(s?.date)return s.date;
-  return p.shippedAt?String(p.shippedAt).slice(0,10):'';
-}
-// תאריך הכניסה למפעל: מועד הקמת הכרטיס, ובהיעדרו תאריך "קבלת סחורה" מהלוג.
-function pipeEntryDate(p){
-  if(+p.createdAt)return new Date(+p.createdAt).toISOString().slice(0,10);
-  const r=(p.stageLog||[]).find(e=>e.id==='receive');
-  return r?.date||'';
-}
-// תאריך היציאה: סימון היציאה בלוח, ובהיעדרו — תאריך התעודה (הזמנות מלפני PIPE_DEPART_FROM)
-function pipeShipDate(p){
-  return p.departedAt?String(p.departedAt).slice(0,10):pipeDnDate(p);
-}
+// 🔗 PIPE_DEPART_FROM, PIPE_PARTIAL_FROM, _shipAtMs, pipeDnDate, pipeEntryDate, pipeShipDate — בקובץ המשותף
 
 // ─── שער התחנה: חובת סריקה + נעילת שלב לתחנה ──────────────────────
 // מדיניות (03/08): עובד חייב תחנה סרוקה; שלב מותר רק בתחנה מאותה משפחה;
@@ -6598,7 +6739,7 @@ let _bcPauseOnStart=[];
 // הזמנה חדשה נכנסת כרשומת מוצר חדשה עם תאריך חדש ⇒ אינה נחסמת מול היסטוריה ישנה.
 // חותמת של רשומת מוצר בודדת. `createdAt` הוא מקור האמת; ה-fallback ל-id קיים כי לרשומות
 // הוותיקות ביותר אין את השדה, וה-id שלהן הוא חותמת זמן.
-function prodStampOf(p){return +p.createdAt||parseInt(String(p.id).replace(/\D/g,''))||0;}
+// 🔗 עבר ל-functions/shared/calc.js (משותף לשרת): prodStampOf
 function prodStampFor(cust,prod){
   let mx=0;
   for(const p of (S.products||[])){
@@ -13119,28 +13260,20 @@ function prodMatches(cust,prod){
   const rank=p=>+p.createdAt||parseInt(String(p.id).replace(/\D/g,''))||0;
   return (S.products||[]).filter(p=>p.cust===cust&&p.prod===prod).sort((a,b)=>rank(b)-rank(a));
 }
-function _prodQty(p){return (p.quantities||[]).reduce((s,q)=>s+(parseInt(q.qty)||0),0);}
+// 🔗 עבר ל-functions/shared/calc.js (משותף לשרת): _prodQty
 // 🏷️ סוג הסחורה. לא כל הכמות במידה+צבע יוצאת בהכרח באותה איכות — לכן התעודה
 // הידנית מחזיקה שתי שורות לכל צבע. ברירת המחדל היא סוג א; רשומה ישנה בלי
 // שדה grade נחשבת סוג א, ולכן הפיצ'ר לא משנה שום נתון קיים.
 const GRADE_A='א',GRADE_B='ב';
 // ✂ לא תפור (13/10/2026): יחידה שחוזרת ללקוח בלי תפירה (חסר חלק / חלק פגום). נרשמת בשורות
 // התעודה (נספרת כ"יצא" — יתרה, סגירת ברקוד) אבל **לא ב-total** ⇒ לא בהתחשבנות, לא ב-shippedQty.
-const GRADE_U='לא תפור';
-const isUnsewn=r=>(r&&r.grade)===GRADE_U;
-const shUnsewn=sh=>((sh&&sh.rows)||[]).reduce((t,r)=>t+(isUnsewn(r)?(parseInt(r.qty)||0):0),0);
+// 🔗 עבר ל-functions/shared/calc.js (משותף לשרת): GRADE_U, isUnsewn, shUnsewn
 // ─── 🚚 מאגר משלוחים ─────────────────────────────────────────
 // הזמנה יוצאת ללקוח **בכמה פעימות**: 100 היום, היתרה בשבוע הבא. לכל פעימה תעודה
 // ומספר משלה. לפני זה נשמר משלוח אחד בלבד ⇒ הסריקה השנייה דרסה את הראשונה
 // והמספר הישן נשאר על שתיהן.
 // `shippedQty` נשאר **סכום כל המשלוחים** כדי שדוח הרווח וכל שאר הקוראים לא ישתנו.
-function prodShipments(p){
-  if(!p)return[];
-  if(Array.isArray(p.shipments)&&p.shipments.length)return p.shipments;
-  // רשומה מלפני המאגר — משוחזרת כמשלוח בודד מהשדות הישנים, בלי לגעת בנתון
-  if(p.shippedQty!=null)return[{no:parseInt(p.dnNo,10)||0,date:p.dnDate||(p.shippedAt?String(p.shippedAt).slice(0,10):''),at:p.shippedAt||'',rows:Array.isArray(p.shippedRows)?p.shippedRows:[],total:Math.max(0,+p.shippedQty||0)}];
-  return[];
-}
+// 🔗 עבר ל-functions/shared/calc.js (משותף לשרת): prodShipments
 function shipmentsTotal(p){return prodShipments(p).reduce((t,s)=>t+(+s.total||0),0);}
 // כמה כבר יצא לכל מידה+צבע (שני הסוגים יחד) — הבסיס לחישוב היתרה בסריקה הבאה
 // exclude = משלוח שלא נספר. נדרש בעריכת תעודה: "כבר יצא" חייב להיות **בלי**
@@ -15008,9 +15141,9 @@ function _custLinkRefresh(){const el=document.getElementById('cinfo-link');if(el
 // ─── 🔔 שעות שליחת התראות ללקוחות (23/10/2026) — מנהל בלבד ────────────────
 // adminSettings/custNotifyCfg = {def:{יום:[מ,עד]}, cust:{קוד:{יום:[מ,עד]}}} — יום = 0 (א') … 6 (ש'),
 // יום שחסר = בלי התראות. customerNotify בשרת רץ כל 30 דק' ושולח ללקוח רק בתוך החלון שלו; עדכון
-// שקרה מחוץ לשעות לא הולך לאיבוד — נשלח מאוחד בתחילת החלון הבא. ⚠️ NOTIFY_DEF_WIN זהה לשרת.
+// שקרה מחוץ לשעות לא הולך לאיבוד — נשלח מאוחד בתחילת החלון הבא. NOTIFY_DEF_WIN — בקובץ המשותף.
 let _custNotifyCfg={},_custPushToks={};
-const NOTIFY_DEF_WIN={0:['07:00','18:00'],1:['07:00','18:00'],2:['07:00','18:00'],3:['07:00','18:00'],4:['07:00','18:00'],5:['07:00','13:00']};
+// 🔗 עבר ל-functions/shared/calc.js (משותף לשרת): NOTIFY_DEF_WIN
 const NOTIFY_DAYS=['א׳','ב׳','ג׳','ד׳','ה׳','ו׳','ש׳'];
 const _notifyDefWin=()=>_custNotifyCfg.def||NOTIFY_DEF_WIN;
 function _notifyWinTxt(w){
@@ -18287,16 +18420,7 @@ const PACK_MODES={hang:'🧷 תלייה',fold:'📦 קיפול',mixed:'🧷📦 
 // בקיפול כל פריט נכנס לשק, אבל בתלייה לא כל פריט מקבל ניילון, והקולבים לרוב
 // של הלקוח — ולכן שתי הכמויות האלה ידניות, ומילוי אוטומטי שלהן היה מחייב את
 // הלקוח בשקט על מה שלא סיפקנו.
-const PACK_MATS=[
-  {k:'hanger',name:'קולב',      mode:'hang',hint:'רק כשהקולבים שלנו — הלקוח מספק ברוב המקרים'},
-  // 🧷 קולב קליפס (25/10/2026) — למכנסיים וחצאיות. תלייה כמו קולב רגיל, עם מחיר משלו
-  {k:'clip'  ,name:'קולב קליפס',mode:'hang',hint:'מכנסיים וחצאיות — רק כשהקולבים שלנו'},
-  {k:'nylon' ,name:'ניילון',    mode:'hang',hint:'תלייה — לא כל פריט נארז בניילון, כמות ידנית'},
-  {k:'cello' ,name:'ניילון צלופן',mode:'fold',autoQty:true,hint:'קיפול — כל פריט בשק, עוקב אחרי הכמות שיוצאת'},
-  // 📄 נייר A4 (03/11/2026) — בהזמנות בקיפול (לא כל הלקוחות). incl = המחיר כלול בצלופן: בלי מחיר, בלי חיוב
-  // ובלי "אין מחיר" — נרשם בתעודה רק בשביל המלאי
-  {k:'paper' ,name:'נייר A4',   mode:'fold',incl:true,hint:'קיפול — רק בהזמנות שצריך · המחיר כלול בצלופן'}
-];
+// 🔗 עבר ל-functions/shared/calc.js (משותף לשרת): PACK_MATS
 const PACK_GROUP=k=>PACK_MATS.find(m=>m.k===k)?.mode||'';
 // מצב האריזה נגזר מהחומרים שנרשמו בפועל. שני הצדדים יחד = משלוח מעורב, וזה קורה:
 // חלק מהסחורה יוצא בתלייה וחלק מקופל. עדיף להגיד את זה מאשר לבחור צד שרירותית.
@@ -18313,7 +18437,7 @@ function packPrice(k){return packIncl(k)?0:+((S.settings?.packPrices||{})[k])||0
 // 🔑 הכמות **והמחיר** נצרבים על רשומת המשלוח באישור. זה בכוונה **הפוך** ממחיר
 // העבודה (`dnUnitPrice`), שנקרא מכרטיס המוצר כפי שהוא היום: כאן הכמות מוזנת
 // ידנית בכל משלוח ממילא, ועדכון מחירון לא אמור לשכתב תעודה שכבר נמסרה ללקוח.
-function shipMats(s){return (Array.isArray(s?.mats)?s.mats:[]).filter(m=>m&&(+m.n||0)>0);}
+// 🔗 עבר ל-functions/shared/calc.js (משותף לשרת): shipMats
 function shipPackCost(s){return shipMats(s).reduce((t,m)=>t+(m.own?0:(+m.n||0)*(+m.price||0)),0);}
 // ─── 📦 מלאי חומרים — אריזה / תפירה / גזירה (23/10/2026) ─────────
 // appSettings/packStock = {moves:[{id,at,pool,k,t,n,note,by,byName,edits}], min:{'pool|k':n},
@@ -18324,31 +18448,26 @@ function shipPackCost(s){return shipMats(s).reduce((t,m)=>t+(m.own?0:(+m.n||0)*(
 // ואילך ⇒ עריכה/מחיקה של תעודה מתקנת את המלאי לבד. חומר אריזה מובנה — לפי mats בתעודה (own ⇒ מלאי
 // הלקוח); פריט — צריכה ליחידה בכרטיס המוצר (p.cons=[{id,n}]) × יחידות התעודה; item.own ⇒ מלאי הלקוח.
 // appSettings פתוח לכתיבה לכל מחובר — ההרשאה (מנהל/אחראי) נאכפת במסך בלבד.
-// ⚠️ trackPackStock בשרת (דף הלקוח) הוא העתק של pstkCalc למלאי של לקוח אחד — שינוי כאן ⇒ שינוי שם.
+// 🔗 החישוב משותף לשרת (דף הלקוח): stockBalances/stockNeed ב-functions/shared/calc.js
 const PSTK_F='F';
 const PSTK_T={in:'📥 קבלה',out:'📤 הוצאה',count:'🔢 ספירה'};
 const PSTK_BTN={pack:'📦 מלאי אריזה',sew:'🧵 מלאי תפירה',cut:'✂️ מלאי גזירה'};
 const PSTK_UNITS=["יח'",'מטר','גליל','ק"ג'];
 let _pstkDept='pack';
 function canPackStock(){return ['manager','supervisor'].includes(S.user?.role);}
-function _shipMs(s){const t=Date.parse(s?.at||'');return isNaN(t)?(Date.parse((s?.date||'')+'T12:00:00')||0):t;}
+// 🔗 עבר ל-functions/shared/calc.js (משותף לשרת): _shipMs
 function pstkPoolName(pool){return pool===PSTK_F?'🏭 המפעל':'👤 '+(S.customerNames?.[pool]||('לקוח '+pool));}
 const pstkFmt=n=>String(Math.round((+n||0)*100)/100);
 function pstkItems(){return Array.isArray(S.packStock?.items)?S.packStock.items:[];}
-function pstkItem(k){
-  const m=PACK_MATS.find(x=>x.k===k);
-  if(m)return {id:k,name:m.name,dept:'pack',unit:"יח'",builtin:true};
-  return pstkItems().find(x=>x.id===k)||null;
-}
+function pstkItem(k){return stockItemOf(pstkItems(),k);}
 function pstkItemName(k){return pstkItem(k)?.name||k;}
 function pstkUnit(k){const u=pstkItem(k)?.unit||"יח'";return u==="יח'"?'':' '+u;}
 // 📐 פריט לפי מידה (30/10/2026) — תווית שם+מידה / תווית מידה: i.bySize ⇒ יתרה, מינימום ו"נדרש" לכל מידה
 // בנפרד. מפתח = מלאי|פריט|מידה, תנועה נושאת s, וההוצאה בתעודה = הצריכה ליחידה × יחידות **המידה** (שורות
 // התעודה בלי "לא תפור"). תעודה ישנה בלי שורות לא יורדת ממלאי לפי מידה.
-// ⚠️ trackPackStock בשרת — אותו חישוב; שינוי כאן ⇒ שינוי שם.
 const pstkBySize=k=>!!pstkItem(k)?.bySize;
 const PSTK_SIZES=['0','1','2','3','4','5','6','7','8','9'];
-function pstkSizeUnits(rows){const m={};(rows||[]).forEach(r=>{if(isUnsewn(r))return;const q=parseInt(r.qty)||0;if(q>0){const z=String(r.size??'');m[z]=(m[z]||0)+q;}});return m;}
+const pstkSizeUnits=stockSizeUnits;
 // שם להצגה של מפתח (מלאי|פריט[|מידה])
 function pstkKeyName(key){const[,k,z]=String(key).split('|');return pstkItemName(k)+(z!=null?' · מידה '+z:'');}
 // אילו חומרים שייכים למלאי: אריזה מובנית — לשניהם (own נקבע בתעודה); פריט שהלקוח מספק (own) — רק
@@ -18357,57 +18476,12 @@ function pstkItemsFor(pool,dept){
   const b=dept==='pack'?PACK_MATS.map(m=>pstkItem(m.k)):[];
   return b.concat(pstkItems().filter(i=>i.dept===dept&&(pool===PSTK_F?!i.own:(i.own&&(!i.cust||i.cust===pool)))));
 }
-function pstkCalc(){
-  const moves=((S.packStock||{}).moves||[]).filter(m=>m&&m.pool&&m.k);
-  const mk=m=>m.pool+'|'+m.k+(pstkBySize(m.k)?'|'+(m.s??''):'');
-  const start={};moves.forEach(m=>{const key=mk(m);if(start[key]==null||m.at<start[key])start[key]=+m.at||0;});
-  const ev=moves.map(m=>({at:+m.at||0,key:mk(m),t:m.t,n:+m.n||0}));
-  const its=new Map(pstkItems().map(i=>[i.id,i]));
-  (S.products||[]).forEach(p=>{
-    const cons=(Array.isArray(p.cons)?p.cons:[]).filter(c=>c&&its.has(c.id)&&(+c.n||0)>0);
-    prodShipments(p).forEach(s=>{const at=_shipMs(s),u=+s.total||0,su=cons.some(c=>its.get(c.id).bySize)?pstkSizeUnits(s.rows):null;
-      shipMats(s).forEach(m=>{const key=(m.own?p.cust:PSTK_F)+'|'+m.k;
-        if(start[key]!=null&&at>=start[key])ev.push({at,key,t:'use',n:+m.n||0});});
-      if(u)cons.forEach(c=>{const it=its.get(c.id),base=(it.own?p.cust:PSTK_F)+'|'+c.id;
-        if(it.bySize){Object.entries(su).forEach(([z,q])=>{const key=base+'|'+z;if(start[key]!=null&&at>=start[key])ev.push({at,key,t:'use',n:(+c.n)*q});});return;}
-        if(start[base]!=null&&at>=start[base])ev.push({at,key:base,t:'use',n:(+c.n)*u});});
-    });
-  });
-  // באותו רגע — התנועה הידנית קודם (ספירה שנרשמה לפני היציאה)
-  ev.sort((a,b)=>a.at-b.at||(a.t==='use')-(b.t==='use'));
-  const bal={};
-  ev.forEach(e=>{if(e.t==='count')bal[e.key]=e.n;else bal[e.key]=(bal[e.key]||0)+(e.t==='in'?e.n:-e.n);});
-  Object.keys(bal).forEach(k=>{bal[k]=Math.round(bal[k]*1000)/1000;});
-  return bal;
-}
-// ⚠️ trackPackStock בשרת מחשב את אותו "נדרש" לדף הלקוח (רק חומר שהלקוח מספק) — שינוי כאן ⇒ שינוי שם.
+// 🔗 החישוב עצמו — stockBalances ב-functions/shared/calc.js (אותו קוד מחשב את המלאי בדף הלקוח)
+function pstkCalc(){return stockBalances(S.packStock,S.products);}
 // 📋 נדרש להזמנות פתוחות (25/10/2026): לכל הזמנה פתוחה — יחידות שעוד לא יצאו (כמות, או משוערת) ×
 // הצריכה ליחידה בכרטיס המוצר (p.cons, כולל חומר אריזה מובנה). פתוחה = נשארו יחידות, לא דגם, ולא נסגרה:
 // דחיפה ידנית ל"מוכן ליציאה"/"יצא" (= סגירה בחוסר), או תעודה אחרונה לפני 21 יום. מפתח = מלאי|חומר
-function pstkNeed(){
-  const need={},cnt={},cut=Date.now()-21*864e5;
-  (S.products||[]).forEach(p=>{
-    if(p.isSample)return;
-    const cons=(Array.isArray(p.cons)?p.cons:[]).filter(c=>c&&(+c.n||0)>0);if(!cons.length)return;
-    const sh=prodShipments(p),out=sh.reduce((t,s)=>t+(+s.total||0),0),last=sh.reduce((m,s)=>Math.max(m,_shipMs(s)),0);
-    const ov=p.pipeOverride?.list;
-    if(ov==='ready_ship'||ov==='shipped'||(out>0&&last&&last<cut))return;
-    const rem=Math.max(0,(_prodQty(p)||estQtyOf(p))-out);if(!rem)return;
-    let remSz=null; // 📐 לפי מידה: כמות לכל מידה פחות מה שיצא בה (בלי כמות לפי מידה — לא נספר)
-    cons.forEach(c=>{
-      const it=pstkItem(c.id);if(!it)return;
-      const own=it.builtin?!!c.own:!!it.own,key=(own?p.cust:PSTK_F)+'|'+c.id;
-      if(it.bySize){
-        if(!remSz){remSz={};(p.quantities||[]).forEach(q=>{const z=String(q.size??''),n=parseInt(q.qty)||0;if(n>0)remSz[z]=(remSz[z]||0)+n;});
-          sh.forEach(s=>Object.entries(pstkSizeUnits(s.rows)).forEach(([z,n])=>{if(z in remSz)remSz[z]-=n;}));}
-        Object.entries(remSz).forEach(([z,n])=>{if(n>0){const kz=key+'|'+z;need[kz]=(need[kz]||0)+(+c.n)*n;cnt[kz]=(cnt[kz]||0)+1;}});
-        return;
-      }
-      need[key]=(need[key]||0)+(+c.n)*rem;cnt[key]=(cnt[key]||0)+1;
-    });
-  });
-  return {need,cnt};
-}
+function pstkNeed(){return stockNeed(S.packStock,S.products,Date.now());}
 // חומר שנספר ואין ממנו מספיק להזמנות הפתוחות
 function pstkShortKeys(bal,need){return Object.keys(need).filter(k=>k in bal&&bal[k]<need[k]-0.0001);}
 function pstkLowKeys(bal){

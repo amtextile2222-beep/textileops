@@ -60,10 +60,9 @@ let S={
 const LEVELS={1:{he:'קל',ar:'سهل',en:'Easy'},2:{he:'בינוני',ar:'متوسط',en:'Medium'},3:{he:'מעל בינוני',ar:'فوق المتوسط',en:'Above medium'},4:{he:'קשה',ar:'صعب',en:'Hard'},5:{he:'מורכב',ar:'معقد',en:'Complex'}};
 function levelName(l,lang){return LEVELS[l]?(LEVELS[l][lang||currentLang]||LEVELS[l].he):'';}
 // שלב עבודה: מחרוזת (פורמט ישן) או {name,nameAr,level,station} — תאימות לאחור
-function stepName(s){return typeof s==='string'?s:(s?.name||'');}
+// 🔗 עבר ל-functions/shared/calc.js (משותף לשרת): stepName, stepStation
 function stepDisplay(s){if(typeof s==='string')return s;return(currentLang==='ar'&&s?.nameAr)?s.nameAr:(s?.name||'');}
 function stepLevel(s){return(s&&typeof s==='object'&&s.level)?+s.level:0;}
-function stepStation(s){return(s&&typeof s==='object'&&s.station)?s.station:'';}
 function stepManualMin(s){return(s&&typeof s==='object'&&+s.manualMin>0)?+s.manualMin:0;} // דקות ידניות ליחידה — דורס חישוב אוטומטי
 // ✂ שלב גזירה — נמדד מול `cutPrice` ולא מול מחיר המכירה. הסימון **ידני בכרטיס המוצר**
 // ולא נגזר מהתחנה: ב-19 משימות הגזירה שבהיסטוריה שדה `station` ריק לחלוטין, ולכן זיהוי
@@ -188,14 +187,7 @@ const pipeShortLabel=L=>String(L?.label||'').replace(/^\S+\s*/,'');
 // `خياطة` 220 · `תפירה` 141 · `فحص` 76 · `אריזה` 41 · `تغليف` 11 · `كوي تغليف` 1).
 // נמדד 30/08: 13 מתוך 13 שמות המחלקה שנצפו בנתונים מזוהים, ו-100% מסריקות המוצרים החיים.
 // ⚠️ גיהוץ/ניקוי/ביקורת נכנסים ל-`pack` בכוונה — במפעל הם מבוצעים ב-`قسم اريزه`.
-function pipeFamOfDept(d){
-  const s=String(d||'').toLowerCase();
-  if(/استقبال|قص|קבל|חית|גזיר/.test(s))return 'recv';
-  if(/خياط|خيط|תפיר/.test(s))return 'sew';
-  if(/اريز|تغليف|كوي|فحص|אריז|גיהו|ניקו|ביקור/.test(s))return 'pack';
-  return '';
-}
-function pipeFamOfStep(s){return pipeFamOfDept(String(stepStation(s)||'').split('::')[0]);}
+// 🔗 pipeFamOfDept / pipeFamOfStep — בקובץ המשותף functions/shared/calc.js (גם דף הלקוח בשרת)
 // 🔢 (03/11/2026) סדר שלבי העבודה לפי מחלקה: קבלת סחורה ← תפירה (1 ו-2 = אחת) ← אריזה; בתוך מחלקה — הסדר שהוזן.
 // שלב בלי תחנה/מחלקה לא מזוהה נשאר צמוד לשלב שלפניו. מיון יציב — שלב שנשכח ונוסף בסוף עולה למקומו
 function sortStepsByDept(steps){
@@ -203,78 +195,23 @@ function sortStepsByDept(steps){
   return steps.map((s,i)=>{const f=pipeFamOfStep(s);if(f in R)prev=R[f];return{s,i,r:prev};}).sort((a,b)=>a.r-b.r||a.i-b.i).map(x=>x.s);
 }
 // מצב הצנרת של רשומת מוצר אחת. `tasks` = כל המשימות **של ההזמנה הזו בלבד** (שויכו ב-taskOrderStamp).
+// 🔗 החישוב עצמו (מצב, שלבים, משלוחים, דחיפה ידנית) — pipeCore בקובץ המשותף functions/shared/calc.js,
+// אותו קוד שמחשב את דף מעקב הלקוח בשרת. כאן רק מה שהלוח מציג: שלבים חסרים לטולטיפ ופיצול לעמודות.
 function pipeStateOf(p,tasks){
-  const qty=_prodQty(p);
-  const scans={recv:0,sew:0,pack:0,none:0};
-  for(const t of tasks){const f=pipeFamOfDept(t.dept);if(f)scans[f]++;else scans.none++;}
-  // שלבי העבודה מחולקים למשפחות לפי התחנה שלהם
-  const steps={recv:[],sew:[],pack:[],none:[]};
-  for(const s of (p.workSteps||[])){const nm=stepName(s);if(!nm)continue;(steps[pipeFamOfStep(s)||'none']).push(nm);}
-  // כמה יחידות בוצעו בכל שלב — ניכוי ספירה כפולה של אצווה, בדיוק כמו stepDoneMap
-  const seen=new Set(),done={};
-  for(const t of tasks){
-    if(!(t.duration>0))continue;
-    const k=coverKey(t);if(seen.has(k))continue;seen.add(k);
-    done[String(t.taskType||'').trim()]=(done[String(t.taskType||'').trim()]||0)+taskUnits(t);
-  }
-  // ✔ שלב שסומן ידנית כגמור (לא כל הברקודים נסרקו) = כל הכמות. ⚠️ זהה ב-trackStates בשרת
-  for(const m of (p.stepMarks||[]))if(m&&m.n)done[m.n]=Math.max(done[m.n]||0,qty);
-  const fam=f=>{const ss=steps[f];if(!ss.length)return null;
-    return{full:ss.filter(nm=>qty>0&&(done[nm]||0)>=qty).length,of:ss.length};};
-  const sew=fam('sew'),pack=fam('pack');
+  const c=pipeCore(p,tasks,taskUnits);
+  const{qty,steps,done,sew,pack,id,nat,shL,shipped,departed,partial,outU,depU}=c;
   // שלבים שלא הגיעו לכמות — לטולטיפ בכרטיס (כדי לראות מי עוצר את ההזמנה)
   // הנמוך ראשון — הוא צוואר הבקבוק שקובע כמה יחידות מוכנות
   const lowOf=f=>steps[f].filter(nm=>!(qty>0&&(done[nm]||0)>=qty)).sort((a,b)=>(done[a]||0)-(done[b]||0)).map(nm=>nm+' '+Math.min(done[nm]||0,qty)+'/'+qty);
   if(sew)sew.low=lowOf('sew');if(pack)pack.low=lowOf('pack');
-  // 🚚 הופקה תעודת משלוח ≠ הסחורה יצאה (10/10/2026): תעודה ⇒ "מוכן ליציאה"; "יצא ללקוח" רק אחרי
-  // סימון יציאה (`departedAt`, כפתור בלוח). תעודה מתאריך לפני PIPE_DEPART_FROM = יצאה (לא היה סימון עד אז).
-  // ⚠️ זהה ב-trackStates בשרת (functions/index.js) — דף המעקב של הלקוח
-  const shipped=(p.stageLog||[]).some(e=>e.id==='shipped')||+p.shippedQty>0;
-  // 🚚 משלוח חלקי (20/10/2026): 14771 — יצאו 2 מתוך 135 והכרטיס כולו עבר ל"מוכן ליציאה". עכשיו רק
-  // היחידות שיצאו (total + ✂ לא תפור, כמו "יתרה להשלמה") עוברות; היתרה נשארת במצב הייצור שלה.
-  // יציאה **פר תעודה**: תעודה שהופקה (at) עד departedAt = יצאה; תעודה מאוחרת יותר = ממתינה לסימון.
-  // ⚠️ זהה ב-trackShipInfo בשרת
-  const shL=shipped?prodShipments(p):[];
-  const shU=s=>(+s.total||0)+shUnsewn(s);
-  const depT=p.departedAt?Date.parse(p.departedAt):NaN;
-  const shDep=s=>{const d=String(s.date||'').slice(0,10);if(d&&d<PIPE_DEPART_FROM)return true;if(isNaN(depT))return false;
-    return !(_shipAtMs(s)>depT);};
-  const outU=shL.reduce((t,s)=>t+shU(s),0),depU=shL.reduce((t,s)=>t+(shDep(s)?shU(s):0),0);
-  // 🛑 לא חלקי: תעודה אחרונה לפני PIPE_PARTIAL_FROM (הזמנות ישנות שנסגרו בחוסר לא חוזרות ללוח),
-  // או שהמנהל דחף ידנית ל"מוכן ליציאה"/הלאה = "סוגרים את ההזמנה בחוסר"
-  const lastD=shL.reduce((m,s)=>String(s.date||'')>m?String(s.date||''):m,'');
-  const ovShip=!!p.pipeOverride&&PIPE_IDX(p.pipeOverride.list)>=PIPE_IDX('ready_ship');
-  const partial=shipped&&qty>0&&shL.length>0&&outU<qty&&lastD>=PIPE_PARTIAL_FROM&&!ovShip;
-  const departed=shipped&&!partial&&(shL.length?depU>=outU:(!!p.departedAt||String(pipeDnDate(p)||'9999')<PIPE_DEPART_FROM));
-  let id;
-  if(departed)                                   id='shipped';
-  else if(shipped&&!partial)                     id='ready_ship';
-  else if(pack&&pack.of>0&&pack.full===pack.of)  id='ready_ship';
-  else if(scans.pack>0)                          id='packing';
-  else if(sew&&sew.of>0&&sew.full===sew.of)      id='ready_pack';
-  else if(scans.sew>0)                           id='sewing';
-  else if(qty>0&&scans.recv>0)                   id='ready_sew';
-  else if(scans.recv>0)                          id='countcut';
-  else                                           id='intake';
-  // 📌 דחיפה ידנית של מנהל. **קדימה בלבד** — אם המצב האמיתי כבר עקף אותה היא נבלעת
-  // מעצמה ולא מחזיקה כרטיס אחורה. `shipped` תמיד גובר.
-  const nat=id;
-  const ov=p.pipeOverride&&PIPE_IDX(p.pipeOverride.list)>=0?p.pipeOverride:null;
-  if(ov&&nat!=='shipped'&&PIPE_IDX(ov.list)>PIPE_IDX(nat))id=ov.list;
+  const ov=c.ovList?p.pipeOverride:null;
   // ✂️ פיצול (18/10/2026): ההזמנה מחולקת בין "בתפירה" / "מוכן לאריזה" / "באריזה" לפי יחידות:
-  //   sewDone = יחידות שסיימו את **כל** שלבי התפירה = השלב הנמוך ביותר (צוואר הבקבוק)
-  //   packIn  = יחידות שנסרקו באריזה (כולל משימות רצות) — השלב עם הכי הרבה
-  //   באריזה = packIn · מוכן לאריזה = max(sewDone,packIn)−packIn · בתפירה = השאר.
+  //   באריזה = packIn · מוכן לאריזה = max(sewDone,packIn)−packIn · בתפירה = השאר (sewDone/packIn — pipeCore).
   // הכרטיס מוצג בכל עמודה שיש בה יחידות (רק כשיותר מאחת). לא בדחיפה ידנית (המנהל קבע את המצב).
-  // ⚠️ זהה ב-trackStates בשרת (split + sewPct)
   let split=null,parts=null;
   if(id===nat&&sew&&qty>0&&['sewing','ready_pack','packing'].includes(nat)){
-    const sewDone=Math.min(...steps.sew.map(nm=>Math.min(done[nm]||0,qty)));
-    const inn={},sn=new Set();
-    for(const t of tasks){if(pipeFamOfDept(t.dept)!=='pack')continue;const k=coverKey(t);if(sn.has(k))continue;sn.add(k);
-      const nm=String(t.taskType||'').trim();inn[nm]=(inn[nm]||0)+taskUnits(t);}
-    const packIn=Math.min(qty,Math.max(0,...Object.values(inn))),reached=Math.max(sewDone,packIn);
-    parts={sewing:qty-reached,ready_pack:reached-packIn,packing:packIn};
+    const reached=Math.max(c.sewDone,c.packIn);
+    parts={sewing:qty-reached,ready_pack:reached-c.packIn,packing:c.packIn};
   }
   // 🚚 משלוח חלקי: היחידות שיצאו יורדות מהעמודה המתקדמת ביותר ועוברות ל"מוכן ליציאה" (תעודה בלי
   // סימון יציאה) / "יצא ללקוח". הזמנה שיצאה כולה בכמה תעודות — חלק יצא וחלק ממתין ⇒ פיצול גם כן.
@@ -289,28 +226,9 @@ function pipeStateOf(p,tasks){
     if(nz.length>1)split={...parts,main:parts[id]>0?id:nz[nz.length-1]};
   }
   // outPend = יחידות עם תעודה שעוד לא סומנו "יצא ללקוח" — לכפתור 🚚 בכרטיס
-  return{id,nat,ov:id===ov?.list?ov:null,qty,scans,steps,sew,pack,shipped,departed,partial,outU,outPend:shL.length?outU-depU:0,split,tasks:tasks.length};
+  return{id,nat,ov:id===ov?.list?ov:null,qty,scans:c.scans,steps,sew,pack,shipped,departed,partial,outU,outPend:shL.length?outU-depU:0,split,tasks:tasks.length};
 }
-const PIPE_DEPART_FROM='2026-10-10';
-// מועד התעודה מול departedAt (תעודה ששוחזרה/הוקדמה — לפי התאריך שלה). ⚠️ זהה ב-trackShipInfo בשרת
-const _shipAtMs=s=>{const d=String(s.date||'').slice(0,10);return Date.parse((s.restoredAt||s.backdatedAt)?d:(s.at||d));};
-const PIPE_PARTIAL_FROM='2026-10-20'; // משלוח חלקי נספר רק מתעודה מהתאריך הזה (ראה pipeStateOf)
-// תאריך התעודה (רישום "shipped" בלוג, שנכתב בהפקת תעודה)
-function pipeDnDate(p){
-  const s=(p.stageLog||[]).find(e=>e.id==='shipped');
-  if(s?.date)return s.date;
-  return p.shippedAt?String(p.shippedAt).slice(0,10):'';
-}
-// תאריך הכניסה למפעל: מועד הקמת הכרטיס, ובהיעדרו תאריך "קבלת סחורה" מהלוג.
-function pipeEntryDate(p){
-  if(+p.createdAt)return new Date(+p.createdAt).toISOString().slice(0,10);
-  const r=(p.stageLog||[]).find(e=>e.id==='receive');
-  return r?.date||'';
-}
-// תאריך היציאה: סימון היציאה בלוח, ובהיעדרו — תאריך התעודה (הזמנות מלפני PIPE_DEPART_FROM)
-function pipeShipDate(p){
-  return p.departedAt?String(p.departedAt).slice(0,10):pipeDnDate(p);
-}
+// 🔗 PIPE_DEPART_FROM, PIPE_PARTIAL_FROM, _shipAtMs, pipeDnDate, pipeEntryDate, pipeShipDate — בקובץ המשותף
 
 // ─── שער התחנה: חובת סריקה + נעילת שלב לתחנה ──────────────────────
 // מדיניות (03/08): עובד חייב תחנה סרוקה; שלב מותר רק בתחנה מאותה משפחה;

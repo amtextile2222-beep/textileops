@@ -4,28 +4,20 @@ function prodMatches(cust,prod){
   const rank=p=>+p.createdAt||parseInt(String(p.id).replace(/\D/g,''))||0;
   return (S.products||[]).filter(p=>p.cust===cust&&p.prod===prod).sort((a,b)=>rank(b)-rank(a));
 }
-function _prodQty(p){return (p.quantities||[]).reduce((s,q)=>s+(parseInt(q.qty)||0),0);}
+// 🔗 עבר ל-functions/shared/calc.js (משותף לשרת): _prodQty
 // 🏷️ סוג הסחורה. לא כל הכמות במידה+צבע יוצאת בהכרח באותה איכות — לכן התעודה
 // הידנית מחזיקה שתי שורות לכל צבע. ברירת המחדל היא סוג א; רשומה ישנה בלי
 // שדה grade נחשבת סוג א, ולכן הפיצ'ר לא משנה שום נתון קיים.
 const GRADE_A='א',GRADE_B='ב';
 // ✂ לא תפור (13/10/2026): יחידה שחוזרת ללקוח בלי תפירה (חסר חלק / חלק פגום). נרשמת בשורות
 // התעודה (נספרת כ"יצא" — יתרה, סגירת ברקוד) אבל **לא ב-total** ⇒ לא בהתחשבנות, לא ב-shippedQty.
-const GRADE_U='לא תפור';
-const isUnsewn=r=>(r&&r.grade)===GRADE_U;
-const shUnsewn=sh=>((sh&&sh.rows)||[]).reduce((t,r)=>t+(isUnsewn(r)?(parseInt(r.qty)||0):0),0);
+// 🔗 עבר ל-functions/shared/calc.js (משותף לשרת): GRADE_U, isUnsewn, shUnsewn
 // ─── 🚚 מאגר משלוחים ─────────────────────────────────────────
 // הזמנה יוצאת ללקוח **בכמה פעימות**: 100 היום, היתרה בשבוע הבא. לכל פעימה תעודה
 // ומספר משלה. לפני זה נשמר משלוח אחד בלבד ⇒ הסריקה השנייה דרסה את הראשונה
 // והמספר הישן נשאר על שתיהן.
 // `shippedQty` נשאר **סכום כל המשלוחים** כדי שדוח הרווח וכל שאר הקוראים לא ישתנו.
-function prodShipments(p){
-  if(!p)return[];
-  if(Array.isArray(p.shipments)&&p.shipments.length)return p.shipments;
-  // רשומה מלפני המאגר — משוחזרת כמשלוח בודד מהשדות הישנים, בלי לגעת בנתון
-  if(p.shippedQty!=null)return[{no:parseInt(p.dnNo,10)||0,date:p.dnDate||(p.shippedAt?String(p.shippedAt).slice(0,10):''),at:p.shippedAt||'',rows:Array.isArray(p.shippedRows)?p.shippedRows:[],total:Math.max(0,+p.shippedQty||0)}];
-  return[];
-}
+// 🔗 עבר ל-functions/shared/calc.js (משותף לשרת): prodShipments
 function shipmentsTotal(p){return prodShipments(p).reduce((t,s)=>t+(+s.total||0),0);}
 // כמה כבר יצא לכל מידה+צבע (שני הסוגים יחד) — הבסיס לחישוב היתרה בסריקה הבאה
 // exclude = משלוח שלא נספר. נדרש בעריכת תעודה: "כבר יצא" חייב להיות **בלי**

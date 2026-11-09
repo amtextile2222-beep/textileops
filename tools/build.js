@@ -6,6 +6,7 @@
 //   node tools/build.js --where N — שורה N ב-index.html (משגיאה בקונסול) ⇒ קובץ:שורה ב-src/
 const fs=require('fs'),path=require('path'),vm=require('vm'),os=require('os'),cp=require('child_process');
 const R=path.join(__dirname,'..'),SRC=path.join(R,'src'),OUT=path.join(R,'index.html');
+const SHARED=['functions/shared/calc.js'];
 const CSS_MARK='/*@@CSS@@*/\n',JS_MARK='//@@JS@@\n';
 const rd=f=>fs.readFileSync(f,'utf8').replace(/\r\n/g,'\n');
 const parts=d=>fs.readdirSync(path.join(SRC,d)).filter(f=>/\.(js|css)$/.test(f)).sort()
@@ -14,7 +15,9 @@ function build(){
   const shell=rd(path.join(SRC,'shell.html'));
   const[a,rest]=shell.split(CSS_MARK),[b,c]=(rest||'').split(JS_MARK);
   if(rest===undefined||c===undefined)throw new Error('src/shell.html: חסר סימון '+(rest===undefined?CSS_MARK:JS_MARK));
-  const css=parts('css'),js=parts('js');
+  // 🔗 קבצים משותפים לשרת (functions/shared) — בראש הסקריפט, לפני src/js (רק הגדרות, בלי תלויות)
+  const shared=SHARED.map(f=>{const t=rd(path.join(R,f));if(!t.endsWith('\n'))throw new Error(f+': חסרה שורה ריקה בסוף');return{f,t};});
+  const css=parts('css'),js=shared.concat(parts('js'));
   const out=a+css.map(p=>p.t).join('')+b+js.map(p=>p.t).join('')+c;
   // מפה: שורה ב-index.html ⇒ קובץ מקור
   const map=[];let ln=a.split('\n').length;

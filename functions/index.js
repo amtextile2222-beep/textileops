@@ -4,6 +4,9 @@ const functions = require('firebase-functions/v1');
 const admin = require('firebase-admin');
 const https = require('https');
 const crypto = require('crypto');
+// 🔗 (09/11/2026) חישובי לוח מצב הזמנות, משלוחים ומלאי — משותפים לאפליקציה (tools/build.js מכניס
+// את אותו קובץ ל-index.html). שינוי בו ⇒ build + push **וגם** פריסת customerTrack.
+const calc = require('./shared/calc');
 
 admin.initializeApp();
 const db = admin.firestore();
@@ -1470,131 +1473,38 @@ exports.attendanceCloserNow = functions.https.onRequest(async (req, res) => {
 // משתמש מייל אין לו role ⇒ ה-Rules וכל ה-callables חוסמים אותו; הלקוח לא נוגע במסד בכלל.
 // מוחזרים **רק** שדות תצוגה: מס' הזמנה, שם, כמות, תאריכים, שלב ואחוזים. בלי מחירים/עובדים/ברקודים.
 //
-// ⚠️ חייב להישאר זהה ל-pipeStateOf / taskOrderStamp / taskUnits / coverKey ב-index.html —
-// הלקוח צריך לראות בדיוק את מה שהמנהל רואה ב"לוח מצב הזמנות". שינוי שם ⇒ שינוי כאן.
-const TRACK_LISTS = ['intake', 'countcut', 'ready_sew', 'sewing', 'ready_pack', 'packing', 'ready_ship', 'shipped'];
+// 🔗 (09/11/2026) מצב ההזמנה, המשלוחים והמלאי מחושבים ב-functions/shared/calc.js — **אותו קוד** של
+// "לוח מצב הזמנות" וחלון המלאי באפליקציה, כך שהלקוח רואה בדיוק את מה שהמנהל רואה.
+// כאן נשאר רק מה שייחודי לדף הלקוח: שיוך משימה להזמנה מתוך רשימת המוצרים של הלקוח, תאריכים, אחוזים.
+const TRACK_LISTS = calc.PIPE_IDS;
 const TRACK_SHIP_DAYS = 30;
 const _trackCache = new Map(); // קוד לקוח → {at, body, prods}, 15 דק' — מגן מפני רענון חוזר שקורא שוב את כל ההיסטוריה
 const TRACK_CACHE_MS = 900000; // 💰 (02/11/2026) היה 3 דק': כל בנייה של לקוח 02 קוראת ~6,100 משימות
-function trackFamOfDept(d) {
-  const s = String(d || '').toLowerCase();
-  if (/استقبال|قص|קבל|חית|גזיר/.test(s)) return 'recv';
-  if (/خياط|خيط|תפיר/.test(s)) return 'sew';
-  if (/اريز|تغليف|كوي|فحص|אריז|גיהו|ניקו|ביקור/.test(s)) return 'pack';
-  return '';
-}
-const trackStepName = s => typeof s === 'string' ? s : (s && s.name) || '';
-const trackStepStation = s => (s && typeof s === 'object' && s.station) ? s.station : '';
-const trackStamp = p => +p.createdAt || parseInt(String(p.id).replace(/\D/g, '')) || 0;
-const trackOrderNoOf = raw => { const s = String(raw || ''); return s.length >= 16 ? (parseInt(s.slice(13, 16), 10) || 0) : 0; };
-const trackQty = p => (p.quantities || []).reduce((s, q) => s + (parseInt(q.qty) || 0), 0);
-const trackBc = t => t.bc || String(t.cust) + String(t.prod) + String(t.size || '0') + String(t.qty).padStart(3, '0') + String(t.col);
-const trackCoverKey = t => trackBc(t) + '|' + String(t.taskType || '').trim().toLowerCase() + (t.splitId ? '|' + t.splitId : '');
-// תאריך התעודה. היציאה עצמה — departedAt (סימון בלוח); ראה pipeDnDate/pipeShipDate ב-index.html
-const TRACK_DEPART_FROM = '2026-10-10';
-function trackShipDate(p) {
-  if (p.departedAt) return String(p.departedAt).slice(0, 10);
-  return trackDnDate(p);
-}
-function trackDnDate(p) {
-  const s = (p.stageLog || []).find(e => e.id === 'shipped');
-  if (s && s.date) return s.date;
-  return p.shippedAt ? String(p.shippedAt).slice(0, 10) : '';
-}
-function trackEntryDate(p) {
-  if (+p.createdAt) return new Date(+p.createdAt).toISOString().slice(0, 10);
-  const r = (p.stageLog || []).find(e => e.id === 'receive');
-  return (r && r.date) || '';
-}
-// 🚚 משלוחים — העתק של החישוב ב-pipeStateOf (index.html), כולל prodShipments/shUnsewn. ⚠️ שינוי שם מחייב שינוי כאן.
-// יציאה פר תעודה: הופקה (at) עד departedAt = יצאה. חלקי = יצא פחות מהכמות, מתעודה מ-TRACK_PARTIAL_FROM,
-// ובלי דחיפה ידנית ל"מוכן ליציאה"/הלאה (= סגירה בחוסר)
-const TRACK_PARTIAL_FROM = '2026-10-20';
-function trackShipInfo(p, qty) {
-  const shipped = (p.stageLog || []).some(e => e.id === 'shipped') || +p.shippedQty > 0;
-  let shL = [];
-  if (shipped) {
-    if (Array.isArray(p.shipments) && p.shipments.length) shL = p.shipments;
-    else if (p.shippedQty != null) shL = [{ date: p.dnDate || (p.shippedAt ? String(p.shippedAt).slice(0, 10) : ''), at: p.shippedAt || '', rows: Array.isArray(p.shippedRows) ? p.shippedRows : [], total: Math.max(0, +p.shippedQty || 0) }];
-  }
-  const shU = s => (+s.total || 0) + ((s && s.rows) || []).reduce((t, r) => t + ((r && r.grade) === 'לא תפור' ? (parseInt(r.qty) || 0) : 0), 0);
-  const depT = p.departedAt ? Date.parse(p.departedAt) : NaN;
-  const shDep = s => { const d = String(s.date || '').slice(0, 10); if (d && d < TRACK_DEPART_FROM) return true; if (isNaN(depT)) return false;
-    const a = Date.parse((s.restoredAt || s.backdatedAt) ? d : (s.at || d)); return !(a > depT); };
-  const outU = shL.reduce((t, s) => t + shU(s), 0), depU = shL.reduce((t, s) => t + (shDep(s) ? shU(s) : 0), 0);
-  const lastD = shL.reduce((m, s) => String(s.date || '') > m ? String(s.date || '') : m, '');
-  const ovShip = !!p.pipeOverride && TRACK_LISTS.indexOf(p.pipeOverride.list) >= TRACK_LISTS.indexOf('ready_ship');
-  const partial = shipped && qty > 0 && shL.length > 0 && outU < qty && lastD >= TRACK_PARTIAL_FROM && !ovShip;
-  const departed = shipped && !partial && (shL.length ? depU >= outU : (!!p.departedAt || String(trackDnDate(p) || '9999') < TRACK_DEPART_FROM));
-  return { shipped, partial, departed, outU, depU };
-}
-// 📦 מלאי החומרים שהלקוח סיפק (23/10/2026) — ⚠️ העתק של pstkCalc ב-index.html, רק למלאי של הלקוח הזה:
-// תנועות appSettings/packStock (in/out/count) פחות מה שיצא בתעודות, מהתנועה הראשונה של כל חומר ואילך:
-// חומר אריזה מובנה — mats עם own; פריט שהלקוח מספק (items[].own) — p.cons × יחידות התעודה.
-// מחזיר רק חומר שנספר: [{k, name, unit, dept, n, low}]. low = מתחת למינימום (בלי לחשוף את המינימום).
-// ⚠️ זהה ל-PACK_MATS ב-index.html (מפתחות; השמות כאן בלשון רבים לדף הלקוח)
-const TRACK_MATS = [['hanger', 'קולבים'], ['clip', 'קולבי קליפס'], ['nylon', 'ניילון'], ['cello', 'ניילון צלופן'], ['paper', 'נייר A4']];
+const trackFamOfDept = calc.pipeFamOfDept;
+const trackStamp = calc.prodStampOf;
+const trackOrderNoOf = calc.orderNoOf;
+const trackQty = calc._prodQty;
+const trackCoverKey = calc.coverKey;
+const trackShipDate = calc.pipeShipDate;
+const trackDnDate = calc.pipeDnDate;
+const trackEntryDate = calc.pipeEntryDate;
+const trackShipInfo = calc.pipeShipInfo;
+// 📦 מלאי החומרים שהלקוח סיפק (23/10/2026). 🔗 היתרה וה"נדרש" — stockBalances/stockNeed בקובץ המשותף,
+// אותו חישוב של חלון המלאי באפליקציה (מפתח מלאי|חומר[|מידה]); כאן רק המפתחות של הלקוח הזה.
+// מחזיר רק חומר שנספר: [{k, name, unit, dept, n, low, need}]. low = מתחת למינימום (בלי לחשוף את המינימום).
+// שמות החומרים המובנים בלשון רבים לדף הלקוח (המפתחות — PACK_MATS בקובץ המשותף)
+const TRACK_MAT_NAMES = { hanger: 'קולבים', clip: 'קולבי קליפס', nylon: 'ניילון', cello: 'ניילון צלופן', paper: 'נייר A4' };
 function trackPackStock(cust, prods, ps) {
   const moves = (Array.isArray(ps.moves) ? ps.moves : []).filter(m => m && m.pool === cust && m.k);
   if (!moves.length) return [];
   const own = new Map((Array.isArray(ps.items) ? ps.items : []).filter(i => i && i.own && (!i.cust || i.cust === cust)).map(i => [i.id, i]));
-  // 📐 פריט לפי מידה (i.bySize, 30/10/2026) — מפתח פריט|מידה; ההוצאה לפי יחידות המידה בשורות התעודה (בלי "לא תפור")
-  const bySz = k => !!(own.get(k) || {}).bySize;
-  const mk = m => m.k + (bySz(m.k) ? '|' + (m.s == null ? '' : m.s) : '');
-  const szUnits = rows => { const o = {}; (Array.isArray(rows) ? rows : []).forEach(r => { if (!r || r.grade === 'לא תפור') return; const q = parseInt(r.qty) || 0; if (q > 0) { const z = String(r.size == null ? '' : r.size); o[z] = (o[z] || 0) + q; } }); return o; };
-  const start = {};
-  moves.forEach(m => { const k = mk(m); if (start[k] == null || +m.at < start[k]) start[k] = +m.at || 0; });
-  const ev = moves.map(m => ({ at: +m.at || 0, k: mk(m), t: m.t, n: +m.n || 0 }));
-  const shMs = s => { const t = Date.parse((s && s.at) || ''); return isNaN(t) ? (Date.parse(((s && s.date) || '') + 'T12:00:00') || 0) : t; };
-  prods.forEach(p => {
-    const cons = (Array.isArray(p.cons) ? p.cons : []).filter(c => c && own.has(c.id) && (+c.n || 0) > 0);
-    (Array.isArray(p.shipments) ? p.shipments : []).forEach(s => {
-      const at = shMs(s), u = +(s && s.total) || 0;
-      (Array.isArray(s && s.mats) ? s.mats : []).forEach(m => {
-        if (m && m.own && (+m.n || 0) > 0 && start[m.k] != null && at >= start[m.k]) ev.push({ at, k: m.k, t: 'use', n: +m.n || 0 });
-      });
-      if (u) cons.forEach(c => {
-        if (bySz(c.id)) { Object.entries(szUnits(s && s.rows)).forEach(([z, q]) => { const k = c.id + '|' + z; if (start[k] != null && at >= start[k]) ev.push({ at, k, t: 'use', n: (+c.n) * q }); }); return; }
-        if (start[c.id] != null && at >= start[c.id]) ev.push({ at, k: c.id, t: 'use', n: (+c.n) * u });
-      });
-    });
-  });
-  ev.sort((a, b) => a.at - b.at || (a.t === 'use') - (b.t === 'use'));
-  const bal = {};
-  ev.forEach(e => { if (e.t === 'count') bal[e.k] = e.n; else bal[e.k] = (bal[e.k] || 0) + (e.t === 'in' ? e.n : -e.n); });
-  // 📋 נדרש להזמנות הפתוחות של הלקוח (25/10/2026) — ⚠️ העתק של pstkNeed ב-index.html, רק לחומר שהלקוח
-  // מספק: יחידות שעוד לא יצאו (כמות, או משוערת) × צריכה ליחידה (p.cons; חומר אריזה מובנה — לפי c.own).
-  // פתוחה = לא דגם, לא נדחפה ל"מוכן ליציאה"/"יצא" (סגירה בחוסר), ותעודה אחרונה לא לפני יותר מ-21 יום
-  const need = {}, cutMs = Date.now() - 21 * 86400000;
-  prods.forEach(p => {
-    if (p.isSample) return;
-    const cons = (Array.isArray(p.cons) ? p.cons : []).filter(c => c && (+c.n || 0) > 0);
-    if (!cons.length) return;
-    const shL = Array.isArray(p.shipments) && p.shipments.length ? p.shipments
-      : (p.shippedQty != null ? [{ total: +p.shippedQty || 0, at: p.shippedAt || '', date: p.dnDate || '' }] : []);
-    const out = shL.reduce((t, s) => t + (+(s && s.total) || 0), 0), last = shL.reduce((m, s) => Math.max(m, shMs(s)), 0);
-    const ov = p.pipeOverride && p.pipeOverride.list;
-    if (ov === 'ready_ship' || ov === 'shipped' || (out > 0 && last && last < cutMs)) return;
-    const rem = Math.max(0, (trackQty(p) || Math.max(0, parseInt(p.estQty) || 0)) - out);
-    if (!rem) return;
-    let remSz = null;
-    cons.forEach(c => {
-      const builtin = TRACK_MATS.some(([k]) => k === c.id);
-      if (builtin ? !c.own : !own.has(c.id)) return;
-      if (!builtin && bySz(c.id)) {
-        if (!remSz) {
-          remSz = {}; (p.quantities || []).forEach(q => { const z = String(q.size == null ? '' : q.size), n = parseInt(q.qty) || 0; if (n > 0) remSz[z] = (remSz[z] || 0) + n; });
-          shL.forEach(sh => Object.entries(szUnits(sh && sh.rows)).forEach(([z, n]) => { if (z in remSz) remSz[z] -= n; }));
-        }
-        Object.entries(remSz).forEach(([z, n]) => { if (n > 0) { const k = c.id + '|' + z; need[k] = (need[k] || 0) + (+c.n) * n; } });
-        return;
-      }
-      need[c.id] = (need[c.id] || 0) + (+c.n) * rem;
-    });
-  });
+  const pre = cust + '|', bal = {}, need = {};
+  const all = calc.stockBalances(ps, prods), allNeed = calc.stockNeed(ps, prods, Date.now()).need;
+  for (const k in all) if (k.startsWith(pre)) bal[k.slice(pre.length)] = all[k];
+  for (const k in allNeed) if (k.startsWith(pre)) need[k.slice(pre.length)] = allNeed[k];
   const min = ps.min || {};
   const DEPT_ORD = { cut: 0, sew: 1, pack: 2 };
-  const list = TRACK_MATS.map(([k, name]) => ({ k, name, unit: "יח'", dept: 'pack' }))
+  const list = calc.PACK_MATS.map(m => ({ k: m.k, name: TRACK_MAT_NAMES[m.k] || m.name, unit: "יח'", dept: 'pack' }))
     .concat([...own.values()].flatMap(i => {
       const b = { name: String(i.name || ''), unit: String(i.unit || "יח'"), dept: i.dept || '' };
       if (!i.bySize) return [{ k: i.id, ...b }];
@@ -1636,54 +1546,13 @@ function trackStates(prods, tasks) {
   for (const t of tasks) { const k = t.prod + '|' + orderStamp(t); (byOrder[k] || (byOrder[k] = [])).push(t); }
   return prods.map(p => {
     const ts = byOrder[p.prod + '|' + trackStamp(p)] || [];
-    const qty = trackQty(p);
-    const scans = { recv: 0, sew: 0, pack: 0 };
-    for (const t of ts) { const f = trackFamOfDept(t.dept); if (f) scans[f]++; }
-    const steps = { recv: [], sew: [], pack: [], none: [] };
-    for (const s of (p.workSteps || [])) { const nm = trackStepName(s); if (!nm) continue; steps[trackFamOfDept(String(trackStepStation(s)).split('::')[0]) || 'none'].push(nm); }
-    const seen = new Set(), done = {};
-    for (const t of ts) {
-      if (!(t.duration > 0)) continue;
-      const k = trackCoverKey(t); if (seen.has(k)) continue; seen.add(k);
-      const nm = String(t.taskType || '').trim(); done[nm] = (done[nm] || 0) + units(t);
-    }
-    // ✔ שלב שסומן ידנית כגמור (products.stepMarks) = כל הכמות — כמו pipeStateOf
-    for (const m of (p.stepMarks || [])) if (m && m.n) done[m.n] = Math.max(done[m.n] || 0, qty);
-    // full/of כמו בלוח (קובע את המצב) + pct = יחידות שבוצעו מתוך כמות×שלבים (לתצוגת הלקוח בלבד)
-    const fam = f => {
-      const ss = steps[f]; if (!ss.length) return null;
-      return { full: ss.filter(nm => qty > 0 && (done[nm] || 0) >= qty).length, of: ss.length,
-        pct: qty > 0 ? Math.round(100 * ss.reduce((s, nm) => s + Math.min(done[nm] || 0, qty), 0) / (qty * ss.length)) : 0 };
-    };
-    const sew = fam('sew'), pack = fam('pack');
-    // 🚚 תעודה ⇒ "מוכן למשלוח"; "נשלח" רק אחרי סימון יציאה (תעודה לפני TRACK_DEPART_FROM = יצאה).
-    // משלוח חלקי (20/10/2026) — ההזמנה נשארת במצב הייצור של היתרה; out = יחידות שיצאו
-    const { shipped, partial, departed, depU, outU } = trackShipInfo(p, qty);
-    let id;
-    if (departed) id = 'shipped';
-    else if (shipped && !partial) id = 'ready_ship';
-    else if (pack && pack.of > 0 && pack.full === pack.of) id = 'ready_ship';
-    else if (scans.pack > 0) id = 'packing';
-    else if (sew && sew.of > 0 && sew.full === sew.of) id = 'ready_pack';
-    else if (scans.sew > 0) id = 'sewing';
-    else if (qty > 0 && scans.recv > 0) id = 'ready_sew';
-    else if (scans.recv > 0) id = 'countcut';
-    else id = 'intake';
-    // דחיפה ידנית של מנהל — קדימה בלבד, כמו בלוח
-    const nat = id;
-    const ov = p.pipeOverride && TRACK_LISTS.indexOf(p.pipeOverride.list) >= 0 ? p.pipeOverride.list : null;
-    if (ov && id !== 'shipped' && TRACK_LISTS.indexOf(ov) > TRACK_LISTS.indexOf(id)) id = ov;
-    const st = TRACK_LISTS.indexOf(id);
-    // ✂️ פיצול (18/10/2026): חלק באריזה והתפירה עוד לא הסתיימה ⇒ הלקוח רואה את שני האחוזים. כמו split בלוח
+    // 🔗 מצב, שלבים, משלוחים, דחיפה ידנית ופיצול — pipeCore (functions/shared/calc.js), אותו חישוב של הלוח
+    const c = calc.pipeCore(p, ts, units);
+    const { qty, steps, done, sew, pack, shipped, partial, departed, depU, outU, id, nat } = c;
+    const ov = c.ovList, st = TRACK_LISTS.indexOf(id);
+    // ✂️ פיצול (18/10/2026): חלק באריזה והתפירה עוד לא הסתיימה ⇒ הלקוח רואה את שני האחוזים. כמו split בלוח:
     // יחידות שעוד בתפירה = qty − max(sewDone = השלב הנמוך בתפירה, packIn = השלב הגבוה באריזה כולל רצות)
-    let split = id === 'packing' && nat === 'packing' && !!sew && sew.full < sew.of && qty > 0;
-    if (split) {
-      const sewDone = Math.min(...steps.sew.map(nm => Math.min(done[nm] || 0, qty)));
-      const inn = {}, sn = new Set();
-      for (const t of ts) { if (trackFamOfDept(t.dept) !== 'pack') continue; const k = trackCoverKey(t); if (sn.has(k)) continue; sn.add(k);
-        const nm = String(t.taskType || '').trim(); inn[nm] = (inn[nm] || 0) + units(t); }
-      split = Math.max(sewDone, Math.min(qty, Math.max(0, ...Object.values(inn)))) < qty;
-    }
+    const split = id === 'packing' && nat === 'packing' && !!sew && sew.full < sew.of && qty > 0 && Math.max(c.sewDone, c.packIn) < qty;
     // אחוז בשלב הנוכחי בלבד; שלב שכבר עבר = 100 (חוץ מתפירה בפיצול)
     const sewPct = split ? sew.pct : st > 3 ? 100 : (st === 3 && sew ? sew.pct : null);
     const packPct = st > 5 ? 100 : (st === 5 && pack ? pack.pct : null);
@@ -2029,8 +1898,8 @@ const NOTIFY_STAGES = { 3: 'התחילה תפירה 🧵', 5: 'התחילה אר
 const NOTIFY_LINK = 'https://amtextile2222-beep.github.io/textileops/track.html';
 // שמות השלבים בדף הלקוח (STAGES ב-track.html) — לשורת "חוסר ב…"
 const NOTIFY_STAGE_NAMES = ['קבלת ההזמנה', 'ספירה וגזירה', 'מוכן לתפירה', 'תפירה', 'מוכן לאריזה', 'אריזה', 'מוכן ליציאה', 'יציאה ללקוח'];
-// ⚠️ זהה ל-NOTIFY_DEF_WIN ב-index.html: א'-ה' 07:00-18:00, ו' 07:00-13:00
-const NOTIFY_DEF_WIN = { 0: ['07:00', '18:00'], 1: ['07:00', '18:00'], 2: ['07:00', '18:00'], 3: ['07:00', '18:00'], 4: ['07:00', '18:00'], 5: ['07:00', '13:00'] };
+// 🔗 ברירת המחדל (א'-ה' 07:00-18:00, ו' 07:00-13:00) — בקובץ המשותף, אותה של חלון ההגדרות באפליקציה
+const NOTIFY_DEF_WIN = calc.NOTIFY_DEF_WIN;
 function notifyInWin(win, il) {
   const w = win && win[il.getDay()];
   if (!Array.isArray(w) || w.length < 2) return false;

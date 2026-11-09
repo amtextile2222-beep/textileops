@@ -859,7 +859,7 @@ function getTotalQty(cust,prod,orderNo){
 // 📏 כמות משוערת (20/10/2026): עד הספירה/גזירה ההזמנה בלי כמות ⇒ אין צפי לשלבים הראשונים.
 // `products.estQty` משמש **רק לצפי זמן** (סריקה, משימות פעילות, זמן לפי מחלקה). המשימה נשמרת עם
 // qty=0 כמו היום, ו-taskUnits/דוחות ממשיכים לקחת את הכמות האמיתית בדיעבד — לא לערבב.
-function estQtyOf(p){return Math.max(0,parseInt(p?.estQty)||0);}
+// 🔗 עבר ל-functions/shared/calc.js (משותף לשרת): estQtyOf
 function _estQtyBc(raw){
   if(!isTotalBc(raw||''))return 0;
   const c=raw.slice(0,2),pr=raw.slice(2,7);
@@ -890,7 +890,7 @@ function sumUnitsDedup(tasks){
 // ⚠️ `stamp` = חותמת ההזמנה. **בלעדיו המפתח הוא ברמת הדגם** — וזה מכוון: מסך התצוגה
 // מציג התקדמות ברמת הדגם (החלטה קיימת) וקורא בלי חותמת, הדוח קורא עם חותמת.
 const stepDoneKey=(cust,prod,stepNm,stamp)=>cust+'|'+prod+'|'+String(stepNm||'').trim()+(stamp!=null?'|'+stamp:'');
-const coverKey=t=>taskBc(t)+'|'+String(t.taskType||'').trim().toLowerCase()+(t.splitId?'|'+t.splitId:'');
+// 🔗 עבר ל-functions/shared/calc.js (משותף לשרת): coverKey
 // ⚠️ הכמות האפקטיבית של משימה. ברקוד "כל הכמות" שנסרק **לפני** שהוזנו הכמויות לפי מידה
 // נשמר עם qty=0 — זו ה"כמות הפתוחה" — אבל העבודה בוצעה על ההזמנה כולה. נמדד: 24 משימות,
 // 44 שעות עבודה, ובהן **כל 10 רשומות `عد فتح شغل` במפעל** וכל משפחת הפרישה/חיתוך.
