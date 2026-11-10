@@ -5976,8 +5976,8 @@ async function emergencyLogin(){
 function _bcLoginEligible(u){
   const w=S.workers.find(x=>x.user===u.trim());
   if(!w||w.role==='manager')return null;
-  const hasFace=w.faceAuth&&(w.faceRegistered||w.faceDescriptor||w.faceDescriptors&&Object.keys(w.faceDescriptors).length);
-  if(hasFace)return null;
+  // זיהוי פנים דלוק (גם בלי פנים רשומות) ⇒ לא ברקוד: סיסמה ואז רישום פנים (needFaceRegister בשרת)
+  if(w.faceAuth)return null;
   if(!w.deviceBinding||!(w.deviceRegistered||w.deviceId))return null;
   return w;
 }
@@ -6154,14 +6154,14 @@ async function doLogin(){
   let res;
   try{
     // האימות כולו בצד השרת: סיסמה, השעיה, WiFi מפעל, נעילת מכשיר, נעילת ניסיונות
-    res=await loginCall({user:u,pass:p||undefined,deviceId:devId||undefined});
+    // 🛑 בלי סיסמה — לא שולחים את המפתח בכלל: ה-SDK של callable הופך undefined ל-null,
+    // והשרת קרא את null כסיסמה "null" ⇒ 'wrong' (n/5) במקום לפתוח מצלמה (רהאם 10/11/2026).
+    const payload={user:u};
+    if(p)payload.pass=p;
+    if(devId)payload.deviceId=devId;
+    res=await loginCall(payload);
   }catch(e){
-    if(_loginErrCode(e)==='wrong'){
-      _loginWrongPass();
-      // 🔬 אבחון זמני (10/11/2026, רהאם): מוסיף לשגיאה אם נשלחה סיסמה ואיזו גרסה רצה. להסיר אחרי שהמקרה נסגר.
-      try{const el=document.getElementById('l-err');if(el)el.textContent+=' [b2·pass:'+(p?'yes':'no')+']';}catch(_){}
-      return;
-    }
+    if(_loginErrCode(e)==='wrong'){_loginWrongPass();return;}
     _loginShowErr(e,'call');
     return;
   }

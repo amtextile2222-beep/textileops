@@ -267,7 +267,7 @@ const loginImpl = async (data, context) => {
     }
     await credRef.set({ faceDescriptors: Object.fromEntries(d.registerDescriptors.map((s, i) => [i, s.map(Number)])), faceDescriptor: FieldValue.delete() }, { merge: true });
     await wDoc.ref.set({ faceUpdateAllowed: false, faceRegistered: true, faceDescriptor: FieldValue.delete(), faceDescriptors: FieldValue.delete() }, { merge: true });
-  } else if (d.empBarcode !== undefined) {
+  } else if (d.empBarcode != null) {
     // ── כניסה בסריקת ברקוד העובד (EMP:{id}) — מסלול חלופי לעובד בלי זיהוי פנים ──
     // הברקוד מודבק בתחנה וגלוי לכולם, ולכן הוא *לא* סוד: הוא רק אומר "מי אני".
     // הזיהוי האמיתי = נעילת מכשיר. לכן המסלול פתוח רק לעובד עם deviceBinding
@@ -295,7 +295,8 @@ const loginImpl = async (data, context) => {
       await regFail(credRef, creds);
       throw new functions.https.HttpsError('permission-denied', 'barcode-wrong');
     }
-  } else if (d.pass !== undefined && String(d.pass).length) {
+  } else if (d.pass != null && String(d.pass).length) {
+    // != null: ה-SDK של callable מעביר undefined כ-null — null אינו סיסמה (רהאם 10/11/2026)
     // ── אימות סיסמה ──
     const stored = creds.pass !== undefined ? creds.pass : (w.pass || '');
     const p = String(d.pass);
