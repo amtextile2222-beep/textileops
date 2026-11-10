@@ -402,7 +402,10 @@ async function doLogin(){
   if(loginLocked){document.getElementById('l-err').textContent='חשבון נעול ל-30 שניות עקב ניסיונות כושלים';return;}
   if(await checkVersion()){document.getElementById('l-err').textContent='🔄 יש גרסה חדשה — לחץ "עדכן עכשיו" למעלה ונסה שוב';return;}
   const u=document.getElementById('l-user').value.trim();
-  const p=document.getElementById('l-pass').value.trim();
+  // 🛑 שדה הסיסמה **מוסתר** לעובד עם פנים/ברקוד, אבל הערך שהוקלד בו קודם נשאר. בלי הבדיקה הזו
+  // הוא נשלח לשרת, חזרה 'wrong' (n/5) והמצלמה לא נפתחה אף פעם (רהאם 10/11/2026).
+  const _pw=document.getElementById('l-pass-wrap');
+  const p=(_pw&&_pw.style.display==='none')?'':document.getElementById('l-pass').value.trim();
   if(!u){document.getElementById('l-err').textContent='נא למלא שם משתמש וסיסמה';return;}
   if(!S.fbConnected||!window._fbFunctions){document.getElementById('l-err').textContent='⛔ אין חיבור לשרת — בדוק אינטרנט ונסה שוב';return;}
   document.getElementById('l-err').textContent='מאמת...';
