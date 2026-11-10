@@ -10253,16 +10253,17 @@ async function remindLateTask(ids,btn){
   }catch(e){console.error('remindLateTask error:',e);showToast('❌ '+(e.message||e),'var(--red-txt)',5000);}
   finally{if(btn)setTimeout(()=>{btn.disabled=false;},3000);}
 }
+// מחזירה true רק כשהטוקן נשמר ב-pushSettings; אחרת מחרוזת עם הסיבה (לכפתור 🔔 — לא להציג "הופעלו" על כישלון)
 async function initFCM(){
   try{
-    if(!('Notification' in window)||!('serviceWorker' in navigator))return;
-    if(!window._fbApp||!window._fbFunctions)return;
+    if(!('Notification' in window)||!('serviceWorker' in navigator))return 'הדפדפן לא תומך בהתראות — באייפון: פתח מאייקון האפליקציה במסך הבית';
+    if(!window._fbApp||!window._fbFunctions)return 'אין חיבור לשרת';
     const pushSnap=await fbGet('appSettings','pushSettings');
-    if(!pushSnap?.enabled)return;
+    if(!pushSnap?.enabled)return 'התראות Push כבויות בהגדרות המנהל';
     const vapidKey=pushSnap.vapidKey||'';
-    if(!vapidKey){console.warn('FCM: vapidKey חסר בהגדרות');return;}
+    if(!vapidKey){console.warn('FCM: vapidKey חסר בהגדרות');return 'חסר VAPID key בהגדרות';}
     const perm=Notification.permission==='granted'?'granted':await Notification.requestPermission();
-    if(perm!=='granted')return;
+    if(perm!=='granted')return 'ההרשאה להתראות לא אושרה';
     const swReg=await navigator.serviceWorker.register('/textileops/firebase-messaging-sw.js');
     const{getMessaging,getToken,onMessage}=window._fb;
     const messaging=getMessaging(window._fbApp);
@@ -10283,14 +10284,17 @@ async function initFCM(){
       await fbSetMerge('appSettings','pushSettings',{tokens,lastRegistered:new Date().toISOString()});
       console.log('FCM: טוקן נרשם ✅');
     }
-    // הודעות בזמן שהאפליקציה פתוחה
-    onMessage(messaging,payload=>{
-      const t=payload.notification?.title||'TextileOps';
-      const b=payload.notification?.body||'';
-      playAlertSound();
-      showToast('🔔 '+t+(b?'\n'+b:''),'var(--blue-txt)',5000);
-    });
-  }catch(e){console.error('initFCM error:',e);}
+    // הודעות בזמן שהאפליקציה פתוחה — מאזין אחד בלבד (לחיצה חוזרת על 🔔 הוסיפה עוד אחד ⇒ הודעה כפולה)
+    if(!window._fcmMsgOn){window._fcmMsgOn=true;
+      onMessage(messaging,payload=>{
+        const t=payload.notification?.title||'TextileOps';
+        const b=payload.notification?.body||'';
+        playAlertSound();
+        showToast('🔔 '+t+(b?'\n'+b:''),'var(--blue-txt)',5000);
+      });
+    }
+    return token?true:'הטלפון לא החזיר מזהה התראות (token) — סגור ופתח את האפליקציה ונסה שוב';
+  }catch(e){console.error('initFCM error:',e);return 'שגיאה: '+(e.code||e.message||e);}
 }
 async function sendPush(title,body,alertType){
   try{
@@ -10338,7 +10342,9 @@ async function enableMyNotifications(){
   if(typeof Notification==='undefined'){showToast('הדפדפן לא תומך בהתראות','var(--red-txt)');return;}
   if(Notification.permission==='denied'){showToast('❌ התראות חסומות בדפדפן — פתח הגדרות אתר (אייקון ליד הכתובת) ואפשר התראות','var(--red-txt)',7000);return;}
   showToast('מפעיל התראות...','var(--blue-txt)',2000);
-  if(w.role==='supervisor'){await initFCM();showToast('✅ התראות ניהול הופעלו','var(--green-txt)',3000);}
+  if(w.role==='supervisor'){const r=await initFCM();
+    if(r===true)showToast('✅ התראות ניהול הופעלו','var(--green-txt)',3000);
+    else showToast('❌ ההתראות לא הופעלו — '+r,'var(--red-txt)',7000);}
   else{await initWorkerFCM(w.id);}
 }
 function tgPunch(name,dept,isIn,time,workerId){

@@ -806,6 +806,7 @@ async function pushSupervisors(pushSnap, dept, title, body, openerIds, opts = {}
       }, PUSH_TTL_ALERT));
       reached.add(sups[e.workerId].name || e.workerId);
     } catch (err) {
+      console.warn('pushSupervisors: push נכשל', e.workerId, e.key, err.code || err.message);
       if (DEAD_FCM_CODES.includes(err.code)) {
         // FieldPath — מפתח המכשיר עלול להכיל נקודות
         await pushSnap.ref.update(new admin.firestore.FieldPath('tokens', e.key), FieldValue.delete()).catch(() => {});
@@ -863,20 +864,34 @@ exports.remindLateTask = functions.https.onCall(async (data, context) => {
   const bodyOf = lg => (stepsTxt ? stepsTxt + ' · ' : '') + prodsTxt + ' · ' +
     (expSum > 0 ? rt(lg).exp(Math.round(expSum)) + (lg === 'ar' ? '، ' : ', ') : '') + rt(lg).el(mins);
 
+  const toWorker = token => admin.messaging().send(withTtl({
+    token,
+    notification: { title: rt(workerData.lang).wTitle, body: bodyOf(workerData.lang) },
+    android: { priority: 'high', notification: { sound: 'default', channelId: 'textileops' } },
+    apns: { payload: { aps: { sound: 'default', badge: 1, contentAvailable: true } }, headers: { 'apns-priority': '10', 'apns-push-type': 'alert' } },
+    webpush: { notification: { icon: 'https://amtextile2222-beep.github.io/textileops/icon-192.png', requireInteraction: true, vibrate: [200, 100, 200] } }
+  }, PUSH_TTL_ALERT));
   let worker = false;
   if (workerData.fcmToken) {
     try {
-      await admin.messaging().send(withTtl({
-        token: workerData.fcmToken,
-        notification: { title: rt(workerData.lang).wTitle, body: bodyOf(workerData.lang) },
-        android: { priority: 'high', notification: { sound: 'default', channelId: 'textileops' } },
-        apns: { payload: { aps: { sound: 'default', badge: 1, contentAvailable: true } }, headers: { 'apns-priority': '10', 'apns-push-type': 'alert' } },
-        webpush: { notification: { icon: 'https://amtextile2222-beep.github.io/textileops/icon-192.png', requireInteraction: true, vibrate: [200, 100, 200] } }
-      }, PUSH_TTL_ALERT));
+      await toWorker(workerData.fcmToken);
       worker = true;
     } catch (e) {
       console.warn('remindLateTask: push לעובד נכשל', lead.workerId, e.code || e.message);
       if (DEAD_FCM_CODES.includes(e.code)) await workerSnap.ref.set({ fcmToken: FieldValue.delete() }, { merge: true }).catch(() => {});
+    }
+  }
+  const pushSnap = await db.collection('appSettings').doc('pushSettings').get();
+  // אחראית שהמשימה שלה: הטלפון שלה רשום ב-pushSettings (initFCM) ולא ב-fcmToken — שולחים לשם (מירפת 10/11/2026)
+  if (!worker) {
+    const own = Object.entries((pushSnap.exists && pushSnap.data().tokens) || {})
+      .filter(([, t]) => t && typeof t === 'object' && t.token && t.workerId === lead.workerId);
+    for (const [key, t] of own) {
+      try { await toWorker(t.token); worker = true; }
+      catch (e) {
+        console.warn('remindLateTask: push לאחראית בעלת המשימה נכשל', lead.workerId, key, e.code || e.message);
+        if (DEAD_FCM_CODES.includes(e.code)) await pushSnap.ref.update(new admin.firestore.FieldPath('tokens', key), FieldValue.delete()).catch(() => {});
+      }
     }
   }
   // אחראים: מי שלחץ לא מקבל על עצמו. אחראי שלוחץ — רק לאחראית אחרת שפתחה (אם יש),
@@ -884,10 +899,10 @@ exports.remindLateTask = functions.https.onCall(async (data, context) => {
   const openerIds = [...new Set(tasks.map(t => t.scannedBy).filter(id => id && id !== lead.workerId && id !== context.auth.uid))];
   let sups = [];
   if (role === 'manager' || openerIds.length) {
-    const pushSnap = await db.collection('appSettings').doc('pushSettings').get();
+    // בעלת המשימה לא נחשבת "אחראית המחלקה" על עצמה — אחרת כשהיא היחידה במחלקה רק היא נבחרת
     sups = await pushSupervisors(pushSnap, [...new Set([lead.dept, workerData.dept].filter(Boolean))],
       lg => rt(lg).sTitle(who), bodyOf,
-      openerIds, { exclude: [context.auth.uid], onlyOpeners: role !== 'manager' }
+      openerIds, { exclude: [context.auth.uid, lead.workerId], onlyOpeners: role !== 'manager' }
     ).catch(e => { console.warn('remindLateTask: push לאחראים נכשל', e.message); return []; });
   }
   // אף אחד לא קיבל — משחררים את הנעילה כדי שאפשר יהיה לנסות שוב מיד
