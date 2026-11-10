@@ -15,7 +15,7 @@ async function fbSignInWithToken(token){
 }
 function _loginErrCode(e){
   const m=String((e&&e.message)||'').trim();
-  return['wrong','missing-pass','disabled','locked','ip','time-window','device','device-unknown','face-mismatch','no-face-update','emergency-wrong','no-session','session-expired'].includes(m)?m:'network';
+  return['wrong','missing-pass','disabled','locked','ip','time-window','device','device-unknown','face-mismatch','no-face-update','emergency-wrong','no-session','session-expired','barcode-wrong','barcode-not-allowed','barcode-needs-setup'].includes(m)?m:'network';
 }
 function _loginErrMsg(code){
   return{
