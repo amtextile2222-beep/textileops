@@ -6156,7 +6156,12 @@ async function doLogin(){
     // האימות כולו בצד השרת: סיסמה, השעיה, WiFi מפעל, נעילת מכשיר, נעילת ניסיונות
     res=await loginCall({user:u,pass:p||undefined,deviceId:devId||undefined});
   }catch(e){
-    if(_loginErrCode(e)==='wrong'){_loginWrongPass();return;}
+    if(_loginErrCode(e)==='wrong'){
+      _loginWrongPass();
+      // 🔬 אבחון זמני (10/11/2026, רהאם): מוסיף לשגיאה אם נשלחה סיסמה ואיזו גרסה רצה. להסיר אחרי שהמקרה נסגר.
+      try{const el=document.getElementById('l-err');if(el)el.textContent+=' [b2·pass:'+(p?'yes':'no')+']';}catch(_){}
+      return;
+    }
     _loginShowErr(e,'call');
     return;
   }
