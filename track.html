@@ -87,6 +87,7 @@ h2{font-size:14px;color:var(--txt2);margin:20px 0 8px}
 .stk-sl{margin:6px 0 0;padding:0 18px 0 0;font-weight:400}
 .stk-sl li{margin:2px 0}
 .stk-sl b{font-weight:700}
+.ord-sum{margin-bottom:12px;font-size:13px;padding:10px 12px}
 /* .stkpdf = עיצוב הדף המודפס — גם ב-@media print (#stkpr) וגם בצילום ל-PDF באייפון */
 .stkpdf{color:#000;background:#fff;font-size:13px;padding:12mm;direction:rtl}
 .stkpdf h3{margin:0 0 2px;font-size:18px}.stkpdf .d{color:#555;margin-bottom:10px}
@@ -204,10 +205,10 @@ function card(o){
 // ⇒ חלון השיתוף ⇒ "הדפסה". כמו _dnPdfBlob באפליקציה. navigator.share דורש לחיצה טרייה ⇒ הכנה בלחיצה הראשונה,
 // והכפתור הופך ל"🖨 PDF מוכן — הדפסה" לשיתוף בלחיצה השנייה.
 const _ldJs=(src,ok)=>ok()?Promise.resolve():new Promise((res,rej)=>{const sc=document.createElement('script');sc.src=src;sc.onload=res;sc.onerror=()=>rej(new Error('טעינה נכשלה'));document.head.appendChild(sc);});
-let _stkBlob=null;
-async function stkPdf(html){
-  const b=$('stkp');
-  if(_stkBlob&&b?.dataset.ready){const f=new File([_stkBlob],'shortage.pdf',{type:'application/pdf'});
+const _pdfB={}; // PDF מוכן לכל כפתור (stkp = מלאי, ordp = הזמנות)
+async function stkPdf(html,bid='stkp'){
+  const b=$(bid);let _stkBlob=_pdfB[bid];
+  if(_stkBlob&&b?.dataset.ready){const f=new File([_stkBlob],(bid==='ordp'?'orders':'shortage')+'.pdf',{type:'application/pdf'});
     try{if(navigator.canShare&&navigator.canShare({files:[f]})){await navigator.share({files:[f]});return;}}catch(e){if(e?.name==='AbortError')return;}
     const u=URL.createObjectURL(_stkBlob);location.href=u;return;}
   if(b){b.disabled=true;b.textContent='⏳ מכין…';}
@@ -220,7 +221,7 @@ async function stkPdf(html){
     for(let y=0,pg=0;y<cv.height;y+=pagePx,pg++){const h=Math.min(pagePx,cv.height-y);if(pg&&h<pagePx*0.08)break;
       const c=document.createElement('canvas');c.width=cv.width;c.height=h;const x=c.getContext('2d');x.fillStyle='#fff';x.fillRect(0,0,c.width,h);x.drawImage(cv,0,y,cv.width,h,0,0,cv.width,h);
       if(pg)doc.addPage();doc.addImage(c.toDataURL('image/jpeg',0.92),'JPEG',0,0,210,h*210/cv.width);}
-    _stkBlob=doc.output('blob');
+    _stkBlob=_pdfB[bid]=doc.output('blob');
     if(b){b.disabled=false;b.dataset.ready=1;b.textContent='🖨 PDF מוכן — הדפסה';}
   }catch(e){if(b){b.disabled=false;b.textContent='🖨 הדפסה';}alert('הכנת ה-PDF נכשלה: '+(e?.message||e));}
 }
@@ -431,15 +432,28 @@ async function load(){
       if(IOS){stkPdf(p.innerHTML);return;} // 🍎 באייפון (אפליקציה במסך הבית) window.print לא עושה כלום
       window.print();};
     window._stkPrint=printShort;
+    // ⚠ ריכוז חוסרים בהזמנות בייצור (11/11/2026) — החוסרים הפתוחים (o.short בלי res) מכל הכרטיסים, בראש הרשימה + הדפסה
+    const fmtD=ms=>{const t=new Date(+ms);return String(t.getDate()).padStart(2,'0')+'/'+String(t.getMonth()+1).padStart(2,'0');};
+    const oLbl=o=>(o.name||('דגם '+o.prod))+(o.no?' · הזמנה #'+String(o.no).padStart(3,'0'):'');
+    const ordShort=act.flatMap(o=>(Array.isArray(o.short)?o.short:[]).filter(x=>!x.res).map(x=>({o,x}))).sort((a,b)=>a.x.at-b.x.at);
+    const ordHtml=ordShort.length?`<div class="stk-sum ord-sum"><div class="stk-sh">⚠ ${ordShort.length===1?'חוסר אחד':ordShort.length+' חוסרים'} בהזמנות בייצור<button id="ordp">🖨 הדפסה</button></div><ul class="stk-sl">`+
+      ordShort.map(({o,x})=>`<li><b>${esc(oLbl(o))}</b> — ${esc(STAGES[x.st]||'')}: ${esc(x.txt)} · ${fmtD(x.at)}</li>`).join('')+'</ul></div>':'';
+    window._ordPrint=()=>{let p=$('stkpr');if(!p){p=document.createElement('div');p.id='stkpr';p.className='stkpdf';document.body.appendChild(p);}
+      const dt=new Date().toLocaleString('he-IL',{day:'2-digit',month:'2-digit',year:'numeric',hour:'2-digit',minute:'2-digit'});
+      p.innerHTML=`<h3>ריכוז חוסרים — הזמנות בייצור</h3><div class="d">${esc(d.name||'')} · ${dt}</div><table><tr><th>הזמנה</th><th>שלב</th><th>חוסר</th><th>מאז</th></tr>`+
+        ordShort.map(({o,x})=>`<tr><td>${esc(oLbl(o))}</td><td>${esc(STAGES[x.st]||'')}</td><td class="x">${esc(x.txt)}</td><td>${fmtD(x.at)}</td></tr>`).join('')+'</table>';
+      if(IOS){stkPdf(p.innerHTML,'ordp');return;}
+      window.print();};
     const stkHtml=stk.length?`<h2>📦 החומרים שלכם במפעל</h2><div class="card">${nBad?`<div class="stk-sum"><div class="stk-sh">⚠ ${nBad===1?'חומר אחד':nBad+' חומרים'} — כדאי לשלוח עוד<button id="stkp">🖨 הדפסה</button></div>${shortHtml}</div>`:'<div class="stk-sum ok">✓ יש מספיק מכל החומרים</div>'}${multi
         ?Object.keys(DEPT).map(d=>{const l=stk.filter(s=>(s.dept||'pack')===d);return l.length?`<div class="stk-d">${DEPT[d]}</div>`+stkList(l):'';}).join('')
         :stkList(stk)}<div class="meta" style="margin-top:8px">מתעדכן אוטומטית עם כל משלוח שיוצא אליכם.</div></div>`:'';
     appEl.closest('.wrap')?.classList.toggle('wide',!!stk.length);
     appEl.innerHTML=`<div class="lay${stk.length?' has-stk':''}"><main>`+(!d.orders.length?'<div class="msg">אין כרגע הזמנות פעילות.</div>':
-      (act.length?`<h2>🏭 בייצור (${act.length})</h2>`+act.map(card).join(''):'')+
+      (act.length?`<h2>🏭 בייצור (${act.length})</h2>`+ordHtml+act.map(card).join(''):'')+
       (shp.length?`<h2>✅ נשלחו ב-30 הימים האחרונים (${shp.length})</h2>`+shp.map(card).join(''):''))+
       `</main>${stk.length?'<aside>'+stkHtml+'</aside>':''}</div>`;
     const sp=$('stkp');if(sp)sp.onclick=()=>window._stkPrint&&window._stkPrint();
+    const op=$('ordp');if(op)op.onclick=()=>window._ordPrint&&window._ordPrint();
     loadImgs();
     const t=new Date(d.at);
     const upd=' · עודכן '+t.toLocaleString('he-IL',{day:'2-digit',month:'2-digit',hour:'2-digit',minute:'2-digit'});
