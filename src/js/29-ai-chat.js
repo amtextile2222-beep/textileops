@@ -78,15 +78,18 @@ async function _aiPipeText(){
   const byOrder={},oc={};
   for(const t of [...hist,...(S.activeTasks||[])]){const k=t.cust+'|'+t.prod+'|'+taskOrderStamp(t,oc);(byOrder[k]||(byOrder[k]=[])).push(t);}
   const today=Date.now(),lbl=id=>(PIPE_LISTS[PIPE_IDX(id)]?.label||id).replace(/^\S+\s/,'');
-  const all=(S.products||[]).filter(p=>!p.isSample).map(p=>({p,st:pipeStateOf(p,byOrder[p.cust+'|'+p.prod+'|'+prodStampOf(p)]||[]),entry:pipeEntryDate(p)}));
+  // 👕 דגם ראשון נכלל (11/11/2026) — הוא בלוח ובתעודות (₪SAMPLE_UNIT_PRICE דרך dnUnitPrice); בלעדיו העוזר לא ראה אותו ולא את החוסרים שלו
+  const all=(S.products||[]).map(p=>({p,st:pipeStateOf(p,byOrder[p.cust+'|'+p.prod+'|'+prodStampOf(p)]||[]),entry:pipeEntryDate(p)}));
   const rows=all.filter(r=>r.st.id!=='shipped')
     .sort((a,b)=>String(a.entry||'9999').localeCompare(String(b.entry||'9999')));
   const lines=rows.slice(0,80).map(({p,st,entry})=>{
     const no=parseInt(p.orderNo,10)||0,days=entry?Math.floor((today-new Date(entry).getTime())/864e5):null;
     const where=st.split?Object.entries(st.split).filter(([k,v])=>k!=='main'&&v>0).map(([k,v])=>lbl(k)+' '+v).join(', '):lbl(st.id);
     const low=[...(st.sew?.low||[]),...(st.pack?.low||[])].slice(0,3).join(' · ');
-    return `- ${_aiCust(p.cust)} · מוצר ${p.prod}${no?' · הזמנה #'+no:''}${p.name?' · '+p.name:''} — ${where}`+
-      ` · כמות ${st.qty||('~'+estQtyOf(p)+' משוער')}${entry?' · נכנס '+entry+(days!=null?' ('+days+' ימים)':''):''}${low?' · שלבים חסרים: '+low:''}`;
+    // ⚠ חוסרים פתוחים שנרשמו בלוח (products.shortages, בלי res) — כמו השורה האדומה בכרטיס
+    const sho=shortList(p).filter(x=>!x.res).slice(0,3).map(x=>pipeShortLabel(PIPE_LISTS[x.st]||{})+': '+x.txt).join(' · ');
+    return `- ${_aiCust(p.cust)} · מוצר ${p.prod}${no?' · הזמנה #'+no:''}${p.isSample?' · 👕 דגם ראשון':''}${p.name?' · '+p.name:''} — ${where}`+
+      ` · כמות ${st.qty||('~'+estQtyOf(p)+' משוער')}${entry?' · נכנס '+entry+(days!=null?' ('+days+' ימים)':''):''}${low?' · שלבים חסרים: '+low:''}${sho?' · ⚠ חוסר: '+sho:''}`;
   });
   let txt=`=== לוח מצב הזמנות פתוחות (${rows.length}${rows.length>80?', מוצגות 80 הוותיקות':''}) ===\n`+(lines.join('\n')||'אין');
   // 🚚 (11/11/2026) הזמנות שיצאו ללקוח ב-30 הימים האחרונים — אחרת העוזר לא יודע לענות "כמה נשלחו" (עמודת "יצא ללקוח")
