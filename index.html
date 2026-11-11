@@ -21955,7 +21955,11 @@ function _aiMoneyText(openRows){
         (r.some(x=>x.noPrice)?` (בלי מחיר: ${[...new Set(r.filter(x=>x.noPrice).map(x=>x.p.prod))].join(', ')})`:'');};
     const op=openRows.map(({p,st})=>{const pr=dnUnitPrice(p),q=st.qty||estQtyOf(p),est=!st.qty&&q>0;
       const out=prodShipments(p).reduce((t,s)=>t+(+s.total||0)+shUnsewn(s),0),rem=Math.max(0,q-out);
-      return {p,pr,rem,est,v:pr.missing?0:rem*pr.unit};}).filter(o=>o.rem>0);
+      return {p,pr,rem,est,v:pr.missing?0:rem*pr.unit,last:prodShipments(p).map(s=>String(s.date||'').slice(0,10)).filter(Boolean).pop()||''};});
+    // הזמנה "פתוחה" בלוח שכל הכמות שלה כבר בתעודה (מוכן ליציאה) — 0 בפתוחות כי היא כבר בסכום התעודות.
+    // בלי השורה הזו העוזר הסיק שהיא חסרת מחיר (נצפה 11/11: 00205 #3)
+    const inDn=op.filter(o=>o.rem===0&&o.last).map(o=>{const no=parseInt(o.p.orderNo,10)||0;return `${o.p.prod}${no?' #'+no:''} (תעודה ${o.last})`;});
+    op.splice(0,op.length,...op.filter(o=>o.rem>0));
     const opV=op.reduce((t,o)=>t+o.v,0),noP=op.filter(o=>o.pr.missing);
     const curV=shR.filter(x=>x.date.slice(0,7)===ym).reduce((t,x)=>t+x.work+x.pack,0);
     const lines=op.filter(o=>!o.pr.missing).sort((a,b)=>b.v-a.v).slice(0,30).map(({p,pr,rem,est,v})=>{const no=parseInt(p.orderNo,10)||0;
@@ -21964,6 +21968,7 @@ function _aiMoneyText(openRows){
       `תעודות משלוח לפי תאריך התעודה — ${mon(ym)}\n${mon(pym)}\n`+
       `הזמנות פתוחות במפעל: ${op.length}, יתרה ${op.reduce((t,o)=>t+o.rem,0)} יח', שווי ${ils(opV)}`+
       (noP.length?` (בלי מחיר — לא נספרו: ${noP.map(o=>o.p.prod).join(', ')})`:'')+
+      (inDn.length?`\nהזמנות בלוח שכל הכמות שלהן כבר בתעודת משלוח (מוכן ליציאה) — כבר כלולות בסכום התעודות לפי תאריך התעודה, לא בפתוחות: ${inDn.join(', ')}`:'')+
       `\nצפי ${ym} אם כל הפתוחות ייצאו החודש: ${ils(curV+opV)} (יצא ${ils(curV)} + פתוחות ${ils(opV)})\n`+
       (lines.length?'שווי לפי הזמנה פתוחה:\n'+lines.join('\n'):'');
   }catch(e){console.warn('AI money:',e);return '';}
