@@ -751,15 +751,22 @@ exports.aiChat = functions.https.onCall(async (data, context) => {
       body: JSON.stringify({ message, mode: 'chat' })
     });
     const raw = await res.text();
-    let full = '';
+    let full = '', err = '';
     for (const line of raw.split('\n')) {
       if (!line.startsWith('data:')) continue;
       try {
         const obj = JSON.parse(line.slice(5).trim());
         if (obj.textResponse && obj.type === 'textResponseChunk') full += obj.textResponse;
+        // שגיאת המודל (למשל פרמטר שהמודל לא מקבל) מגיעה כ-chunk מסוג abort עם error — עד 11/11 נבלעה ⇒ "לא התקבלה תשובה"
+        if (obj.error) err = String(obj.error);
       } catch (e) {}
     }
-    return { textResponse: full || 'לא התקבלה תשובה' };
+    if (!full) {
+      const why = err || (!res.ok ? 'HTTP ' + res.status + ' ' + raw.slice(0, 300) : '');
+      if (why) console.warn('aiChat: AnythingLLM error', why);
+      return { textResponse: why ? '⛔ שגיאה משרת ה-AI: ' + why : 'לא התקבלה תשובה' };
+    }
+    return { textResponse: full };
   } catch (e) {
     console.error('aiChat error:', e);
     throw new functions.https.HttpsError('internal', e.message || 'שגיאת AI');
