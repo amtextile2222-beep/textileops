@@ -422,7 +422,7 @@ function openModal(action,id){
             ✅ סיום משימה שלו
           </label>
         </div>
-        ${w?.fcmToken?'<div style="font-size:11px;color:var(--green-txt);margin-top:6px">✅ טלפון רשום לקבלת Push</div>':'<div style="font-size:11px;color:var(--txt3);margin-top:6px">⚪ טלפון לא רשום עדיין</div>'}
+        <div id="mf-push-reg">${_mfPushRegHtml(!!w?.fcmToken)}</div>
       </div>
       <div class="field" id="mf-perms-box" style="display:${wRole==='manager'?'none':'block'}">
         <label>הרשאות גישה</label>
@@ -433,7 +433,17 @@ function openModal(action,id){
           </div>
         </div>
       </div>`;
+    if(w)_mfPushRegCheck(w.id);
   }
+}
+// ✅/⚪ טלפון רשום (11/11/2026): לא רק fcmToken הישן — גם מכשיר ב-pushSettings.tokens עם workerId שלו (כך נרשמים היום)
+function _mfPushRegHtml(ok,n){return ok?`<div style="font-size:11px;color:var(--green-txt);margin-top:6px">✅ טלפון רשום לקבלת Push${n>1?` (${n} מכשירים)`:''}</div>`:'<div style="font-size:11px;color:var(--txt3);margin-top:6px">⚪ טלפון לא רשום עדיין</div>';}
+async function _mfPushRegCheck(id){
+  try{const d=await fbGet('appSettings','pushSettings');
+    const n=Object.values(d?.tokens||{}).filter(t=>t&&t.token&&String(t.workerId)===String(id)).length;
+    const w=S.workers.find(x=>String(x.id)===String(id)),el=document.getElementById('mf-push-reg');
+    if(el)el.innerHTML=_mfPushRegHtml(n>0||!!w?.fcmToken,n);
+  }catch(e){}
 }
 async function allowFaceUpdateByAdmin(id){
   const w=S.workers.find(x=>x.id===id);if(!w)return;

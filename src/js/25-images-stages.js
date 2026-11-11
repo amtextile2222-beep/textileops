@@ -38,7 +38,9 @@ async function fetchProdImgs(id,strict){
 async function saveProdImgs(id,imgs,extra){
   id=String(id);
   let old=1;try{const d=await fbGet('productImages',id);old=+(d&&d.parts)||1;}catch(e){}
-  if(!imgs.length){for(let i=0;i<old;i++){try{await fbDel('productImages',i?id+'__'+i:id);}catch(e){}}return;}
+  if(!imgs.length){for(let i=0;i<old;i++){try{await fbDel('productImages',i?id+'__'+i:id);}catch(e){}}
+    try{await _prodThumb(id,[]);}catch(e){} // 11/11/2026: בלי זה thumbs/{id} נשאר והלקוח ראה תמונה שנמחקה
+    return;}
   const ch=_imgChunks(imgs);
   for(let i=1;i<ch.length;i++)await fbSet('productImages',id+'__'+i,{images:ch[i],part:i,of:id});
   await fbSet('productImages',id,{...(extra||{}),images:ch[0],count:imgs.length,parts:ch.length});
