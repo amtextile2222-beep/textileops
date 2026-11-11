@@ -23,6 +23,7 @@ body{margin:0;background:var(--bg);color:var(--txt);font-family:system-ui,-apple
 .wrap{max-width:720px;margin:0 auto;padding:16px}
 header{display:flex;align-items:center;gap:10px;margin:4px 0 14px}
 header .logo{font-size:28px}
+#asx{margin-inline-start:auto;font-size:14px;font-weight:700;padding:8px 12px;border-radius:10px;border:1px solid var(--brd);background:var(--card);color:var(--txt);cursor:pointer}
 h1{font-size:20px;margin:0}
 .sub{font-size:13px;color:var(--txt3)}
 h2{font-size:14px;color:var(--txt2);margin:20px 0 8px}
@@ -148,6 +149,10 @@ const auth=getAuth(app0);auth.languageCode='he';
 // הראשית (שם האפליקציה 'txops3' כמו ב-initFb ב-index.html ⇒ אותה התחברות שמורה בדפדפן). השרת בודק role=manager
 const AS=(new URLSearchParams(location.search).get('as')||'').trim();
 const mAuth=AS?getAuth(initializeApp(FB_CFG,'txops3')):null;
+// ✕ חזרה לאפליקציה (11/11/2026) — תצוגת מנהל: באייפון (אפליקציה במסך הבית) הדף נפתח באותו חלון בלי כפתור חזרה.
+// סגירת לשונית (מחשב) ⇒ אחרת אחורה בהיסטוריה ⇒ אחרת דף האפליקציה
+if(AS){const h=document.querySelector('header'),b=document.createElement('button');b.id='asx';b.textContent='✕ חזרה לאפליקציה';
+  b.onclick=()=>{try{window.close();}catch(e){}setTimeout(()=>{if(history.length>1)history.back();else location.href='./';},300);};h?.appendChild(b);}
 // ⚠️ השמות והסדר חייבים להתאים ל-TRACK_LISTS ב-functions/index.js (= PIPE_LISTS בלוח מצב הזמנות)
 // השמות = עמודות "לוח מצב הזמנות" (22/10/2026), מוצגים בתג ומתחת לכל קטע בפס
 const STAGES=['ההזמנה התקבלה','ספירה וגזירה','מוכן לתפירה','בתפירה','מוכן לאריזה','באריזה','מוכן ליציאה','יצא ללקוח'];
