@@ -199,3 +199,7 @@ thead th{font-weight:600}
 .step-num{background:var(--blue-txt);color:var(--on-pri)}
 /* הסרגל מתכווץ וגולל במקום לעלות על כפתור השפה */.nav{min-width:0;flex:1 1 auto}
 @media(max-width:600px){.nb{padding:6px 7px}}
+/* 🤖 תשובת AI מעוצבת (Markdown ⇒ _aiMd) */
+.ai-md{line-height:1.55}.ai-md .ai-h{font-weight:700;margin:6px 0 2px}.ai-md ul,.ai-md ol{margin:2px 0;padding-inline-start:18px}.ai-md hr{border:none;border-top:1px solid var(--b);margin:6px 0}
+.ai-md code{background:var(--bg);border-radius:4px;padding:0 3px;font-size:12px}
+.ai-md .ai-tbl{overflow-x:auto;margin:4px 0}.ai-md table{border-collapse:collapse;font-size:12px;width:100%}.ai-md th,.ai-md td{border:1px solid var(--b);padding:3px 6px;text-align:start;vertical-align:top}.ai-md th{background:var(--bg);white-space:nowrap}

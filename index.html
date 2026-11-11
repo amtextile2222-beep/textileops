@@ -218,6 +218,10 @@ thead th{font-weight:600}
 .step-num{background:var(--blue-txt);color:var(--on-pri)}
 /* הסרגל מתכווץ וגולל במקום לעלות על כפתור השפה */.nav{min-width:0;flex:1 1 auto}
 @media(max-width:600px){.nb{padding:6px 7px}}
+/* 🤖 תשובת AI מעוצבת (Markdown ⇒ _aiMd) */
+.ai-md{line-height:1.55}.ai-md .ai-h{font-weight:700;margin:6px 0 2px}.ai-md ul,.ai-md ol{margin:2px 0;padding-inline-start:18px}.ai-md hr{border:none;border-top:1px solid var(--b);margin:6px 0}
+.ai-md code{background:var(--bg);border-radius:4px;padding:0 3px;font-size:12px}
+.ai-md .ai-tbl{overflow-x:auto;margin:4px 0}.ai-md table{border-collapse:collapse;font-size:12px;width:100%}.ai-md th,.ai-md td{border:1px solid var(--b);padding:3px 6px;text-align:start;vertical-align:top}.ai-md th{background:var(--bg);white-space:nowrap}
 </style>
 </head>
 <body>
@@ -394,12 +398,12 @@ thead th{font-weight:600}
   </div>
 
   <!-- 🤖 עוזר AI — מנהל בלבד (src/js/29-ai-chat.js) -->
-  <div id="ai-chat-panel" style="display:none;position:fixed;bottom:20px;left:20px;z-index:9500;width:340px;max-width:95vw;background:var(--bg);border:1px solid var(--b2);border-radius:var(--rl);box-shadow:0 8px 32px rgba(0,0,0,.2);flex-direction:column;overflow:hidden">
+  <div id="ai-chat-panel" style="display:none;position:fixed;bottom:20px;left:20px;z-index:9500;width:420px;max-width:95vw;background:var(--bg);border:1px solid var(--b2);border-radius:var(--rl);box-shadow:0 8px 32px rgba(0,0,0,.2);flex-direction:column;overflow:hidden">
     <div id="ai-chat-header" style="background:var(--blue-bg);padding:10px 14px;display:flex;align-items:center;justify-content:space-between;cursor:move;user-select:none">
       <div style="font-size:14px;font-weight:600;color:var(--blue-txt)">🤖 עוזר AI</div>
       <button onclick="closeAIChat()" style="background:none;border:none;cursor:pointer;font-size:18px;color:var(--blue-txt)">✕</button>
     </div>
-    <div id="ai-chat-msgs" style="height:260px;overflow-y:auto;padding:10px;display:flex;flex-direction:column;gap:8px;font-size:13px"></div>
+    <div id="ai-chat-msgs" style="height:min(420px,55vh);overflow-y:auto;padding:10px;display:flex;flex-direction:column;gap:8px;font-size:13px"></div>
     <div style="padding:8px;border-top:1px solid var(--b);display:flex;gap:6px">
       <input id="ai-chat-input" placeholder="שאל שאלה..." style="flex:1;font-size:13px;padding:7px 10px" onkeydown="if(event.key==='Enter')sendAIMsg()"/>
       <button class="btn primary" onclick="sendAIMsg()" style="padding:7px 12px;font-size:13px">שלח</button>
@@ -21853,10 +21857,42 @@ function openAIChat(){
   }
 }
 function closeAIChat(){const p=document.getElementById('ai-chat-panel');if(p)p.style.display='none';}
+// 📝 תשובת ה-AI מגיעה ב-Markdown (טבלאות, **מודגש**, ### כותרות, רשימות) — ממיר מצומצם.
+// 🔒 קודם esc() לכל הטקסט, ורק אחר כך מוסיפים תגיות משלנו ⇒ שום HTML מהתשובה לא מגיע לדף.
+function _aiInline(s){
+  return s.replace(/`([^`]+)`/g,'<code>$1</code>').replace(/\*\*([^*]+)\*\*/g,'<b>$1</b>').replace(/(^|[^*])\*([^*\s][^*]*)\*/g,'$1<i>$2</i>');
+}
+function _aiMd(text){
+  const L=esc(String(text||'')).split('\n'),out=[];let list=null;
+  const closeList=()=>{if(list){out.push('</'+list+'>');list=null;}};
+  const cells=l=>l.trim().replace(/^\||\|$/g,'').split('|').map(c=>_aiInline(c.trim()));
+  for(let i=0;i<L.length;i++){
+    const l=L[i];
+    // טבלה: שורת כותרת + שורת |---|
+    if(/^\s*\|.*\|\s*$/.test(l)&&/^\s*\|?\s*:?-{2,}/.test(L[i+1]||'')){
+      closeList();
+      const h=cells(l);i++;const rows=[];
+      while(i+1<L.length&&/^\s*\|.*\|\s*$/.test(L[i+1])){i++;rows.push(cells(L[i]));}
+      out.push('<div class="ai-tbl"><table><thead><tr>'+h.map(c=>'<th>'+c+'</th>').join('')+'</tr></thead><tbody>'+
+        rows.map(r=>'<tr>'+r.map(c=>'<td>'+c+'</td>').join('')+'</tr>').join('')+'</tbody></table></div>');
+      continue;
+    }
+    let m;
+    if((m=l.match(/^\s*(#{1,4})\s+(.*)$/))){closeList();out.push('<div class="ai-h">'+_aiInline(m[2])+'</div>');continue;}
+    if(/^\s*(-{3,}|\*{3,})\s*$/.test(l)){closeList();out.push('<hr>');continue;}
+    if((m=l.match(/^\s*[-*•]\s+(.*)$/))){if(list!=='ul'){closeList();out.push('<ul>');list='ul';}out.push('<li>'+_aiInline(m[1])+'</li>');continue;}
+    if((m=l.match(/^\s*\d+[.)]\s+(.*)$/))){if(list!=='ol'){closeList();out.push('<ol>');list='ol';}out.push('<li>'+_aiInline(m[1])+'</li>');continue;}
+    closeList();
+    out.push(l.trim()?'<div>'+_aiInline(l)+'</div>':'<div style="height:6px"></div>');
+  }
+  closeList();
+  return out.join('');
+}
 function _aiAddMsg(text,role){
   const box=document.getElementById('ai-chat-msgs');
   const div=document.createElement('div');
-  div.style.cssText=`padding:8px 10px;border-radius:8px;max-width:90%;word-break:break-word;${role==='user'?'background:var(--blue-bg);color:var(--blue-txt);align-self:flex-end':'background:var(--bg2);color:var(--txt);align-self:flex-start'}`;
+  div.dir='auto';
+  div.style.cssText=`padding:8px 10px;border-radius:8px;max-width:${role==='user'?'90%':'100%'};word-break:break-word;${role==='user'?'background:var(--blue-bg);color:var(--blue-txt);align-self:flex-end':'background:var(--bg2);color:var(--txt);align-self:flex-start'}`;
   div.textContent=text;
   box.appendChild(div);
   box.scrollTop=box.scrollHeight;
@@ -21945,7 +21981,8 @@ async function sendAIMsg(){
     const message='חשוב: ענה תמיד באותה שפה שבה נשאלת השאלה (עברית/ערבית/אנגלית).\n\n'+ctx+'\n\nשאלה: '+q;
     const{httpsCallable}=window._fb;
     const result=await httpsCallable(window._fbFunctions,'aiChat')({message});
-    bubble.textContent=result?.data?.textResponse||'לא התקבלה תשובה';
+    bubble.classList.add('ai-md');
+    bubble.innerHTML=_aiMd(result?.data?.textResponse||'לא התקבלה תשובה');
     document.getElementById('ai-chat-msgs').scrollTop=9999;
   }catch(e){
     console.error('AI error:',e);

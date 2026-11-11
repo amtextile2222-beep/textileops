@@ -194,12 +194,12 @@
   </div>
 
   <!-- 🤖 עוזר AI — מנהל בלבד (src/js/29-ai-chat.js) -->
-  <div id="ai-chat-panel" style="display:none;position:fixed;bottom:20px;left:20px;z-index:9500;width:340px;max-width:95vw;background:var(--bg);border:1px solid var(--b2);border-radius:var(--rl);box-shadow:0 8px 32px rgba(0,0,0,.2);flex-direction:column;overflow:hidden">
+  <div id="ai-chat-panel" style="display:none;position:fixed;bottom:20px;left:20px;z-index:9500;width:420px;max-width:95vw;background:var(--bg);border:1px solid var(--b2);border-radius:var(--rl);box-shadow:0 8px 32px rgba(0,0,0,.2);flex-direction:column;overflow:hidden">
     <div id="ai-chat-header" style="background:var(--blue-bg);padding:10px 14px;display:flex;align-items:center;justify-content:space-between;cursor:move;user-select:none">
       <div style="font-size:14px;font-weight:600;color:var(--blue-txt)">🤖 עוזר AI</div>
       <button onclick="closeAIChat()" style="background:none;border:none;cursor:pointer;font-size:18px;color:var(--blue-txt)">✕</button>
     </div>
-    <div id="ai-chat-msgs" style="height:260px;overflow-y:auto;padding:10px;display:flex;flex-direction:column;gap:8px;font-size:13px"></div>
+    <div id="ai-chat-msgs" style="height:min(420px,55vh);overflow-y:auto;padding:10px;display:flex;flex-direction:column;gap:8px;font-size:13px"></div>
     <div style="padding:8px;border-top:1px solid var(--b);display:flex;gap:6px">
       <input id="ai-chat-input" placeholder="שאל שאלה..." style="flex:1;font-size:13px;padding:7px 10px" onkeydown="if(event.key==='Enter')sendAIMsg()"/>
       <button class="btn primary" onclick="sendAIMsg()" style="padding:7px 12px;font-size:13px">שלח</button>

@@ -26,10 +26,42 @@ function openAIChat(){
   }
 }
 function closeAIChat(){const p=document.getElementById('ai-chat-panel');if(p)p.style.display='none';}
+// 📝 תשובת ה-AI מגיעה ב-Markdown (טבלאות, **מודגש**, ### כותרות, רשימות) — ממיר מצומצם.
+// 🔒 קודם esc() לכל הטקסט, ורק אחר כך מוסיפים תגיות משלנו ⇒ שום HTML מהתשובה לא מגיע לדף.
+function _aiInline(s){
+  return s.replace(/`([^`]+)`/g,'<code>$1</code>').replace(/\*\*([^*]+)\*\*/g,'<b>$1</b>').replace(/(^|[^*])\*([^*\s][^*]*)\*/g,'$1<i>$2</i>');
+}
+function _aiMd(text){
+  const L=esc(String(text||'')).split('\n'),out=[];let list=null;
+  const closeList=()=>{if(list){out.push('</'+list+'>');list=null;}};
+  const cells=l=>l.trim().replace(/^\||\|$/g,'').split('|').map(c=>_aiInline(c.trim()));
+  for(let i=0;i<L.length;i++){
+    const l=L[i];
+    // טבלה: שורת כותרת + שורת |---|
+    if(/^\s*\|.*\|\s*$/.test(l)&&/^\s*\|?\s*:?-{2,}/.test(L[i+1]||'')){
+      closeList();
+      const h=cells(l);i++;const rows=[];
+      while(i+1<L.length&&/^\s*\|.*\|\s*$/.test(L[i+1])){i++;rows.push(cells(L[i]));}
+      out.push('<div class="ai-tbl"><table><thead><tr>'+h.map(c=>'<th>'+c+'</th>').join('')+'</tr></thead><tbody>'+
+        rows.map(r=>'<tr>'+r.map(c=>'<td>'+c+'</td>').join('')+'</tr>').join('')+'</tbody></table></div>');
+      continue;
+    }
+    let m;
+    if((m=l.match(/^\s*(#{1,4})\s+(.*)$/))){closeList();out.push('<div class="ai-h">'+_aiInline(m[2])+'</div>');continue;}
+    if(/^\s*(-{3,}|\*{3,})\s*$/.test(l)){closeList();out.push('<hr>');continue;}
+    if((m=l.match(/^\s*[-*•]\s+(.*)$/))){if(list!=='ul'){closeList();out.push('<ul>');list='ul';}out.push('<li>'+_aiInline(m[1])+'</li>');continue;}
+    if((m=l.match(/^\s*\d+[.)]\s+(.*)$/))){if(list!=='ol'){closeList();out.push('<ol>');list='ol';}out.push('<li>'+_aiInline(m[1])+'</li>');continue;}
+    closeList();
+    out.push(l.trim()?'<div>'+_aiInline(l)+'</div>':'<div style="height:6px"></div>');
+  }
+  closeList();
+  return out.join('');
+}
 function _aiAddMsg(text,role){
   const box=document.getElementById('ai-chat-msgs');
   const div=document.createElement('div');
-  div.style.cssText=`padding:8px 10px;border-radius:8px;max-width:90%;word-break:break-word;${role==='user'?'background:var(--blue-bg);color:var(--blue-txt);align-self:flex-end':'background:var(--bg2);color:var(--txt);align-self:flex-start'}`;
+  div.dir='auto';
+  div.style.cssText=`padding:8px 10px;border-radius:8px;max-width:${role==='user'?'90%':'100%'};word-break:break-word;${role==='user'?'background:var(--blue-bg);color:var(--blue-txt);align-self:flex-end':'background:var(--bg2);color:var(--txt);align-self:flex-start'}`;
   div.textContent=text;
   box.appendChild(div);
   box.scrollTop=box.scrollHeight;
@@ -118,7 +150,8 @@ async function sendAIMsg(){
     const message='חשוב: ענה תמיד באותה שפה שבה נשאלת השאלה (עברית/ערבית/אנגלית).\n\n'+ctx+'\n\nשאלה: '+q;
     const{httpsCallable}=window._fb;
     const result=await httpsCallable(window._fbFunctions,'aiChat')({message});
-    bubble.textContent=result?.data?.textResponse||'לא התקבלה תשובה';
+    bubble.classList.add('ai-md');
+    bubble.innerHTML=_aiMd(result?.data?.textResponse||'לא התקבלה תשובה');
     document.getElementById('ai-chat-msgs').scrollTop=9999;
   }catch(e){
     console.error('AI error:',e);
