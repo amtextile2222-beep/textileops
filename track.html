@@ -82,16 +82,18 @@ h2{font-size:14px;color:var(--txt2);margin:20px 0 8px}
 .stk-sum.ok{background:var(--green-bg);color:var(--green)}
 /* 🖨 ריכוז חוסרים (11/11/2026) — רשימה בראש חלון המלאי + הדפסה (דף נקי: רק #stkpr) */
 .stk-sh{display:flex;align-items:center;gap:8px}
-.stk-sh button{margin-inline-start:auto;font-size:12px;font-weight:700;padding:4px 10px;border-radius:8px;border:0;background:var(--red);color:#fff;cursor:pointer}
+.stk-sh button{margin-inline-start:auto;white-space:nowrap;flex:0 0 auto;font-size:12px;font-weight:700;padding:4px 10px;border-radius:8px;border:0;background:var(--red);color:#fff;cursor:pointer}
 .stk-sl{margin:6px 0 0;padding:0 18px 0 0;font-weight:400}
 .stk-sl li{margin:2px 0}
 .stk-sl b{font-weight:700}
+/* .stkpdf = עיצוב הדף המודפס — גם ב-@media print (#stkpr) וגם בצילום ל-PDF באייפון */
+.stkpdf{color:#000;background:#fff;font-size:13px;padding:12mm;direction:rtl}
+.stkpdf h3{margin:0 0 2px;font-size:18px}.stkpdf .d{color:#555;margin-bottom:10px}
+.stkpdf table{width:100%;border-collapse:collapse}.stkpdf th,.stkpdf td{border:1px solid #999;padding:5px 7px;text-align:right}
+.stkpdf th{background:#eee}.stkpdf td.x{font-weight:700}
 #stkpr{display:none}
-@media print{body>*:not(#stkpr){display:none!important}#stkpr{display:block!important;color:#000;background:#fff;font-size:13px}
-  #stkpr h3{margin:0 0 2px;font-size:18px}#stkpr .d{color:#555;margin-bottom:10px}
-  #stkpr table{width:100%;border-collapse:collapse}#stkpr th,#stkpr td{border:1px solid #999;padding:5px 7px;text-align:right}
-  #stkpr th{background:#eee}#stkpr td.x{font-weight:700}
-  body{background:#fff!important}@page{margin:12mm}}
+@media print{body>*:not(#stkpr){display:none!important}#stkpr{display:block!important}
+  body{background:#fff!important;margin:0!important}@page{margin:0}}
 .lay.has-stk{display:grid;grid-template-columns:minmax(0,1fr) 300px;gap:16px;align-items:start}
 .lay.has-stk aside{position:sticky;top:12px;max-height:calc(100vh - 24px);overflow-y:auto;overscroll-behavior:contain}
 @media (max-width:760px){.lay.has-stk{display:flex;flex-direction:column;gap:0}.lay.has-stk aside{order:-1;position:static;max-height:none;overflow:visible}}
@@ -192,6 +194,30 @@ function card(o){
     ${shHtml}
     ${o.cut?`<button class="cutb" data-cut="${esc(o.cut)}" data-nm="${esc(o.name||('דגם '+o.prod))}">✂️ דוח גזירה <span>‹</span></button>`:''}
   </div>`;
+}
+// 🍎 הדפסה באייפון (11/11/2026): ב-PWA במסך הבית window.print() לא עושה כלום ⇒ צילום (html2canvas) ⇒ PDF (jsPDF)
+// ⇒ חלון השיתוף ⇒ "הדפסה". כמו _dnPdfBlob באפליקציה. navigator.share דורש לחיצה טרייה ⇒ הכנה בלחיצה הראשונה,
+// והכפתור הופך ל"🖨 PDF מוכן — הדפסה" לשיתוף בלחיצה השנייה.
+const _ldJs=(src,ok)=>ok()?Promise.resolve():new Promise((res,rej)=>{const sc=document.createElement('script');sc.src=src;sc.onload=res;sc.onerror=()=>rej(new Error('טעינה נכשלה'));document.head.appendChild(sc);});
+let _stkBlob=null;
+async function stkPdf(html){
+  const b=$('stkp');
+  if(_stkBlob&&b?.dataset.ready){const f=new File([_stkBlob],'shortage.pdf',{type:'application/pdf'});
+    try{if(navigator.canShare&&navigator.canShare({files:[f]})){await navigator.share({files:[f]});return;}}catch(e){if(e?.name==='AbortError')return;}
+    const u=URL.createObjectURL(_stkBlob);location.href=u;return;}
+  if(b){b.disabled=true;b.textContent='⏳ מכין…';}
+  try{
+    await _ldJs('https://cdnjs.cloudflare.com/ajax/libs/html2canvas/1.4.1/html2canvas.min.js',()=>window.html2canvas);
+    await _ldJs('https://cdnjs.cloudflare.com/ajax/libs/jspdf/2.5.1/jspdf.umd.min.js',()=>window.jspdf);
+    const el=document.createElement('div');el.className='stkpdf';el.style.cssText='position:fixed;left:-10000px;top:0;width:794px';el.innerHTML=html;document.body.appendChild(el);
+    let cv;try{cv=await html2canvas(el,{scale:2,backgroundColor:'#ffffff',windowWidth:794});}finally{el.remove();}
+    const doc=new window.jspdf.jsPDF({unit:'mm',format:'a4'}),pagePx=Math.floor(cv.width*297/210);
+    for(let y=0,pg=0;y<cv.height;y+=pagePx,pg++){const h=Math.min(pagePx,cv.height-y);if(pg&&h<pagePx*0.08)break;
+      const c=document.createElement('canvas');c.width=cv.width;c.height=h;const x=c.getContext('2d');x.fillStyle='#fff';x.fillRect(0,0,c.width,h);x.drawImage(cv,0,y,cv.width,h,0,0,cv.width,h);
+      if(pg)doc.addPage();doc.addImage(c.toDataURL('image/jpeg',0.92),'JPEG',0,0,210,h*210/cv.width);}
+    _stkBlob=doc.output('blob');
+    if(b){b.disabled=false;b.dataset.ready=1;b.textContent='🖨 PDF מוכן — הדפסה';}
+  }catch(e){if(b){b.disabled=false;b.textContent='🖨 הדפסה';}alert('הכנת ה-PDF נכשלה: '+(e?.message||e));}
 }
 // ✂️ דוח גזירה (08/11/2026) — אותו דף שמודפס במפעל (cutPrints), נטען מהשרת רק בלחיצה. iframe בלי סקריפטים
 async function openCut(pid,nm){
@@ -393,10 +419,11 @@ async function load(){
       const byNd=miss?nd-n:0,byMn=s.low&&mn>n?mn-n:0,q=Math.max(byNd,byMn,n<0?-n:0);
       return{s,u,nd,n,mn,dept:DEPT[s.dept||'pack']||'',amt:q>0?r2(q)+u:'',why:q>0?(byMn>byNd?'עד המינימום '+r2(mn)+u:''):'מתחת למינימום'};});
     const shortHtml='<ul class="stk-sl">'+shortL.map(x=>`<li>${esc(x.s.name)}: ${x.amt?'<b>חסר '+x.amt+'</b>'+(x.why?' ('+x.why+')':''):x.why}</li>`).join('')+'</ul>';
-    const printShort=()=>{let p=$('stkpr');if(!p){p=document.createElement('div');p.id='stkpr';document.body.appendChild(p);}
+    const printShort=()=>{let p=$('stkpr');if(!p){p=document.createElement('div');p.id='stkpr';p.className='stkpdf';document.body.appendChild(p);}
       const nm=d.name||'',dt=new Date().toLocaleString('he-IL',{day:'2-digit',month:'2-digit',year:'numeric',hour:'2-digit',minute:'2-digit'});
       p.innerHTML=`<h3>ריכוז חוסרים — חומרים לשלוח למפעל</h3><div class="d">${esc(nm)} · ${dt}</div><table><tr>${multi?'<th>מחלקה</th>':''}<th>חומר</th><th>במפעל</th><th>נדרש</th><th>לשלוח</th></tr>`+
-        shortL.map(x=>`<tr>${multi?'<td>'+esc(x.dept.replace(/^\S+\s/,''))+'</td>':''}<td>${esc(x.s.name)}</td><td>${x.n}${x.u}</td><td>${x.nd>0?r2(x.nd)+x.u:'—'}</td><td class="x">${x.amt?x.amt+(x.why?' <small>('+x.why+')</small>':''):x.why}</td></tr>`).join('')+'</table>';
+        shortL.map(x=>`<tr>${multi?'<td>'+esc(x.dept.replace(/^\S+\s/,''))+'</td>':''}<td>${esc(x.s.name)}</td><td><bdi dir="ltr">${x.n}</bdi>${x.u}</td><td>${x.nd>0?r2(x.nd)+x.u:'—'}</td><td class="x">${x.amt?x.amt+(x.why?' <small>('+x.why+')</small>':''):x.why}</td></tr>`).join('')+'</table>';
+      if(IOS){stkPdf(p.innerHTML);return;} // 🍎 באייפון (אפליקציה במסך הבית) window.print לא עושה כלום
       window.print();};
     window._stkPrint=printShort;
     const stkHtml=stk.length?`<h2>📦 החומרים שלכם במפעל</h2><div class="card">${nBad?`<div class="stk-sum"><div class="stk-sh">⚠ ${nBad===1?'חומר אחד':nBad+' חומרים'} — כדאי לשלוח עוד<button id="stkp">🖨 הדפסה</button></div>${shortHtml}</div>`:'<div class="stk-sum ok">✓ יש מספיק מכל החומרים</div>'}${multi
