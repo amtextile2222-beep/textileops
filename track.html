@@ -406,15 +406,16 @@ async function load(){
     // פריט לפי מידה (מפתח פריט|מידה) — טבלה אחת במקום שורה לכל מידה; למעלה — סיכום כמה חומרים כדאי לשלוח
     const r2=x=>Math.round(x*100)/100,unitOf=s=>s.unit&&s.unit!=="יח'"?' '+esc(s.unit):'';
     const stOf=s=>{const nd=Number(s.need)||0,n=Number(s.n)||0,miss=nd>0&&n<nd;return{nd,n,miss,bad:n<0||!!s.low||miss};};
-    // כמה לשלוח (11/11/2026) — אותו חישוב בשורה, בטבלת מידות ובריכוז: הגדול מבין חסר לנדרש · עד המינימום (min) · שלילי
-    const qOf=s=>{const{nd,n,miss}=stOf(s),mn=Number(s.min)||0,byNd=miss?nd-n:0,byMn=s.low&&mn>n?mn-n:0;return{q:Math.max(byNd,byMn,n<0?-n:0),mn,viaMn:byMn>byNd};};
+    // (11/11/2026) שני דברים נפרדים: חסר להזמנות שבמפעל (נדרש−במפעל, או כמות שלילית) · השלמה למינימום (min−במפעל) — לא מערבבים
+    const qOf=s=>{const{nd,n,miss}=stOf(s),mn=Number(s.min)||0;return{nq:miss?nd-n:n<0?-n:0,mq:s.low&&mn>n?mn-n:0,mn};};
+    const qTxt=(s,u,sep)=>{const{nq,mq,mn}=qOf(s),a=[];if(nq>0)a.push(`<b>חסר ${r2(nq)}${u}</b> להזמנות`);if(mq>0)a.push(`<b>${r2(mq)}${u}</b> להשלמת המינימום (${r2(mn)}${u})`);else if(s.low)a.push('מתחת למינימום');return a.join(sep);};
     const stkRow=s=>{const{nd,n,miss,bad}=stOf(s),u=unitOf(s);
       return `<div class="stk${bad?' bad':''}">${stkImg(s)}<div class="stk-n">${esc(s.name)}</div><div class="stk-q">
         <span>במפעל <b style="${bad?'color:var(--red)':''}">${n}</b>${u}</span>${nd>0?`<span>נדרש ${r2(nd)}${u}</span>`:''}
-        ${qOf(s).q>0?`<span class="stk-miss">⚠ חסר ${r2(qOf(s).q)}${u}${qOf(s).viaMn?` (עד המינימום ${r2(qOf(s).mn)}${u})`:''} — כדאי לשלוח עוד</span>`:bad?'<span class="stk-miss">⚠ כדאי לשלוח עוד</span>':nd>0?'<span class="stk-ok">✓ יש מספיק</span>':''}</div></div>`;};
+        ${(qOf(s).nq>0||bad)?`<span class="stk-miss">⚠ ${qTxt(s,u,' · ')}${qOf(s).nq>0?' — כדאי לשלוח עוד':''}</span>`:nd>0?'<span class="stk-ok">✓ יש מספיק</span>':''}</div></div>`;};
     const stkSz=(name,l)=>{const u=unitOf(l[0]),hasNd=l.some(s=>Number(s.need)>0),bad=l.some(s=>stOf(s).bad);
       return `<div class="stk${bad?' bad':''}">${stkImg(l[0])}<div class="stk-n">${esc(name)}</div><table class="stk-t"><tr><th>מידה</th><th>במפעל</th>${hasNd?'<th>נדרש</th><th></th>':''}</tr>${l.map(s=>{const o=stOf(s);
-        return `<tr${o.bad?' class="bad"':''}><td>${esc(s.sz)}</td><td>${o.n}${u}</td>${hasNd?`<td>${o.nd>0?r2(o.nd)+u:'—'}</td><td>${qOf(s).q>0?'חסר '+r2(qOf(s).q):o.bad?'⚠':o.nd>0?'<span class="stk-ok">✓</span>':''}</td>`:''}</tr>`;}).join('')}</table></div>`;};
+        const qq=qOf(s);return `<tr${o.bad?' class="bad"':''}><td>${esc(s.sz)}</td><td>${o.n}${u}</td>${hasNd?`<td>${o.nd>0?r2(o.nd)+u:'—'}</td><td>${[qq.nq>0?'חסר '+r2(qq.nq):'',qq.mq>0?'מינ׳ +'+r2(qq.mq):''].filter(Boolean).join(' · ')||(o.bad?'⚠':o.nd>0?'<span class="stk-ok">✓</span>':'')}</td>`:''}</tr>`;}).join('')}</table></div>`;};
     const stkList=l=>{const out=[],grp={};l.forEach(s=>{const m=String(s.k||'').includes('|')&&/^(.*) · מידה (.*)$/.exec(s.name||'');
         if(!m){out.push(s);return;}const b=String(s.k).split('|')[0];if(!grp[b]){grp[b]={name:m[1],l:[]};out.push(grp[b]);}grp[b].l.push({...s,sz:m[2]});});
       return out.map(x=>x.l?stkSz(x.name,x.l):stkRow(x)).join('');};
@@ -423,13 +424,13 @@ async function load(){
     const nBad=new Set(stk.filter(s=>stOf(s).bad).map(s=>String(s.k||'').split('|')[0])).size; // מידות של אותו פריט = חומר אחד
     // 🖨 ריכוז חוסרים (11/11/2026): כל חומר שחסר — כמה לשלוח, בראש החלון + דף הדפסה. מתחת למינימום בלי "נדרש" ⇒ בלי כמות
     // כמות לשלוח = הגדול מבין: חסר לנדרש · חסר עד המינימום (min — מהשרת מ-11/11) · כמות שלילית
-    const shortL=stk.filter(s=>stOf(s).bad).map(s=>{const{nd,n}=stOf(s),u=unitOf(s),{q,mn,viaMn}=qOf(s);
-      return{s,u,nd,n,mn,dept:DEPT[s.dept||'pack']||'',amt:q>0?r2(q)+u:'',why:q>0?(viaMn?'עד המינימום '+r2(mn)+u:''):'מתחת למינימום'};});
-    const shortHtml='<ul class="stk-sl">'+shortL.map(x=>`<li>${esc(x.s.name)}: ${x.amt?'<b>חסר '+x.amt+'</b>'+(x.why?' ('+x.why+')':''):x.why}</li>`).join('')+'</ul>';
+    const shortL=stk.filter(s=>stOf(s).bad).map(s=>{const{nd,n}=stOf(s),u=unitOf(s),{nq,mq,mn}=qOf(s);
+      return{s,u,nd,n,mn,nq,mq,dept:DEPT[s.dept||'pack']||''};});
+    const shortHtml='<ul class="stk-sl">'+shortL.map(x=>`<li>${esc(x.s.name)}: ${qTxt(x.s,x.u,' · ')}</li>`).join('')+'</ul>';
     const printShort=()=>{let p=$('stkpr');if(!p){p=document.createElement('div');p.id='stkpr';p.className='stkpdf';document.body.appendChild(p);}
       const nm=d.name||'',dt=new Date().toLocaleString('he-IL',{day:'2-digit',month:'2-digit',year:'numeric',hour:'2-digit',minute:'2-digit'});
-      p.innerHTML=`<h3>ריכוז חוסרים — חומרים לשלוח למפעל</h3><div class="d">${esc(nm)} · ${dt}</div><table><tr>${multi?'<th>מחלקה</th>':''}<th>חומר</th><th>במפעל</th><th>נדרש</th><th>לשלוח</th></tr>`+
-        shortL.map(x=>`<tr>${multi?'<td>'+esc(x.dept.replace(/^\S+\s/,''))+'</td>':''}<td>${esc(x.s.name)}</td><td><bdi dir="ltr">${x.n}</bdi>${x.u}</td><td>${x.nd>0?r2(x.nd)+x.u:'—'}</td><td class="x">${x.amt?x.amt+(x.why?' <small>('+x.why+')</small>':''):x.why}</td></tr>`).join('')+'</table>';
+      p.innerHTML=`<h3>ריכוז חוסרים — חומרים לשלוח למפעל</h3><div class="d">${esc(nm)} · ${dt}</div><table><tr>${multi?'<th>מחלקה</th>':''}<th>חומר</th><th>במפעל</th><th>נדרש</th><th>חסר להזמנות</th><th>להשלמת מינימום</th></tr>`+
+        shortL.map(x=>`<tr>${multi?'<td>'+esc(x.dept.replace(/^\S+\s/,''))+'</td>':''}<td>${esc(x.s.name)}</td><td><bdi dir="ltr">${x.n}</bdi>${x.u}</td><td>${x.nd>0?r2(x.nd)+x.u:'—'}</td><td class="x">${x.nq>0?r2(x.nq)+x.u:'—'}</td><td>${x.mq>0?'<b>'+r2(x.mq)+x.u+'</b> <small>(מינימום '+r2(x.mn)+x.u+')</small>':'—'}</td></tr>`).join('')+'</table>';
       if(IOS){stkPdf(p.innerHTML);return;} // 🍎 באייפון (אפליקציה במסך הבית) window.print לא עושה כלום
       window.print();};
     window._stkPrint=printShort;
