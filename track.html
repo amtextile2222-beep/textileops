@@ -80,6 +80,18 @@ h2{font-size:14px;color:var(--txt2);margin:20px 0 8px}
 .stk-t tr.bad td{color:var(--red);font-weight:700}
 .stk-sum{font-size:12px;font-weight:700;padding:6px 8px;border-radius:8px;margin-bottom:4px;background:var(--red-bg);color:var(--red)}
 .stk-sum.ok{background:var(--green-bg);color:var(--green)}
+/* 🖨 ריכוז חוסרים (11/11/2026) — רשימה בראש חלון המלאי + הדפסה (דף נקי: רק #stkpr) */
+.stk-sh{display:flex;align-items:center;gap:8px}
+.stk-sh button{margin-inline-start:auto;font-size:12px;font-weight:700;padding:4px 10px;border-radius:8px;border:0;background:var(--red);color:#fff;cursor:pointer}
+.stk-sl{margin:6px 0 0;padding:0 18px 0 0;font-weight:400}
+.stk-sl li{margin:2px 0}
+.stk-sl b{font-weight:700}
+#stkpr{display:none}
+@media print{body>*:not(#stkpr){display:none!important}#stkpr{display:block!important;color:#000;background:#fff;font-size:13px}
+  #stkpr h3{margin:0 0 2px;font-size:18px}#stkpr .d{color:#555;margin-bottom:10px}
+  #stkpr table{width:100%;border-collapse:collapse}#stkpr th,#stkpr td{border:1px solid #999;padding:5px 7px;text-align:right}
+  #stkpr th{background:#eee}#stkpr td.x{font-weight:700}
+  body{background:#fff!important}@page{margin:12mm}}
 .lay.has-stk{display:grid;grid-template-columns:minmax(0,1fr) 300px;gap:16px;align-items:start}
 .lay.has-stk aside{position:sticky;top:12px;max-height:calc(100vh - 24px);overflow-y:auto;overscroll-behavior:contain}
 @media (max-width:760px){.lay.has-stk{display:flex;flex-direction:column;gap:0}.lay.has-stk aside{order:-1;position:static;max-height:none;overflow:visible}}
@@ -375,7 +387,19 @@ async function load(){
     // 🖼 תמונת החומר (08/11/2026) — img = מועד; המזהה לפי הפריט (בלי מידה)
     const stkImg=s=>s.img&&s.imgId?imgTag(s.imgId,s.img,'sthumb',s.name):'';
     const nBad=new Set(stk.filter(s=>stOf(s).bad).map(s=>String(s.k||'').split('|')[0])).size; // מידות של אותו פריט = חומר אחד
-    const stkHtml=stk.length?`<h2>📦 החומרים שלכם במפעל</h2><div class="card">${nBad?`<div class="stk-sum">⚠ ${nBad===1?'חומר אחד':nBad+' חומרים'} — כדאי לשלוח עוד</div>`:'<div class="stk-sum ok">✓ יש מספיק מכל החומרים</div>'}${multi
+    // 🖨 ריכוז חוסרים (11/11/2026): כל חומר שחסר — כמה לשלוח, בראש החלון + דף הדפסה. מתחת למינימום בלי "נדרש" ⇒ בלי כמות
+    // כמות לשלוח = הגדול מבין: חסר לנדרש · חסר עד המינימום (min — מהשרת מ-11/11) · כמות שלילית
+    const shortL=stk.filter(s=>stOf(s).bad).map(s=>{const{nd,n,miss}=stOf(s),u=unitOf(s),mn=Number(s.min)||0;
+      const byNd=miss?nd-n:0,byMn=s.low&&mn>n?mn-n:0,q=Math.max(byNd,byMn,n<0?-n:0);
+      return{s,u,nd,n,mn,dept:DEPT[s.dept||'pack']||'',amt:q>0?r2(q)+u:'',why:q>0?(byMn>byNd?'עד המינימום '+r2(mn)+u:''):'מתחת למינימום'};});
+    const shortHtml='<ul class="stk-sl">'+shortL.map(x=>`<li>${esc(x.s.name)}: ${x.amt?'<b>חסר '+x.amt+'</b>'+(x.why?' ('+x.why+')':''):x.why}</li>`).join('')+'</ul>';
+    const printShort=()=>{let p=$('stkpr');if(!p){p=document.createElement('div');p.id='stkpr';document.body.appendChild(p);}
+      const nm=d.name||'',dt=new Date().toLocaleString('he-IL',{day:'2-digit',month:'2-digit',year:'numeric',hour:'2-digit',minute:'2-digit'});
+      p.innerHTML=`<h3>ריכוז חוסרים — חומרים לשלוח למפעל</h3><div class="d">${esc(nm)} · ${dt}</div><table><tr>${multi?'<th>מחלקה</th>':''}<th>חומר</th><th>במפעל</th><th>נדרש</th><th>לשלוח</th></tr>`+
+        shortL.map(x=>`<tr>${multi?'<td>'+esc(x.dept.replace(/^\S+\s/,''))+'</td>':''}<td>${esc(x.s.name)}</td><td>${x.n}${x.u}</td><td>${x.nd>0?r2(x.nd)+x.u:'—'}</td><td class="x">${x.amt?x.amt+(x.why?' <small>('+x.why+')</small>':''):x.why}</td></tr>`).join('')+'</table>';
+      window.print();};
+    window._stkPrint=printShort;
+    const stkHtml=stk.length?`<h2>📦 החומרים שלכם במפעל</h2><div class="card">${nBad?`<div class="stk-sum"><div class="stk-sh">⚠ ${nBad===1?'חומר אחד':nBad+' חומרים'} — כדאי לשלוח עוד<button id="stkp">🖨 הדפסה</button></div>${shortHtml}</div>`:'<div class="stk-sum ok">✓ יש מספיק מכל החומרים</div>'}${multi
         ?Object.keys(DEPT).map(d=>{const l=stk.filter(s=>(s.dept||'pack')===d);return l.length?`<div class="stk-d">${DEPT[d]}</div>`+stkList(l):'';}).join('')
         :stkList(stk)}<div class="meta" style="margin-top:8px">מתעדכן אוטומטית עם כל משלוח שיוצא אליכם.</div></div>`:'';
     appEl.closest('.wrap')?.classList.toggle('wide',!!stk.length);
@@ -383,6 +407,7 @@ async function load(){
       (act.length?`<h2>🏭 בייצור (${act.length})</h2>`+act.map(card).join(''):'')+
       (shp.length?`<h2>✅ נשלחו ב-30 הימים האחרונים (${shp.length})</h2>`+shp.map(card).join(''):''))+
       `</main>${stk.length?'<aside>'+stkHtml+'</aside>':''}</div>`;
+    const sp=$('stkp');if(sp)sp.onclick=()=>window._stkPrint&&window._stkPrint();
     loadImgs();
     const t=new Date(d.at);
     const upd=' · עודכן '+t.toLocaleString('he-IL',{day:'2-digit',month:'2-digit',hour:'2-digit',minute:'2-digit'});

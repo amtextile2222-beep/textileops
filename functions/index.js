@@ -1569,9 +1569,10 @@ function trackPackStock(cust, prods, ps) {
     }));
   return list.filter(x => x.k in bal).sort((a, b) => (DEPT_ORD[a.dept] ?? 3) - (DEPT_ORD[b.dept] ?? 3)).map(x => {
     const mn = +min[cust + '|' + x.k] || 0, n = Math.round(bal[x.k] * 100) / 100;
+    // min (11/11/2026) — לריכוז החוסרים בדף: כמה לשלוח עד המינימום
     // 🖼 img = מועד תמונת החומר (packStock.imgs[לקוח|פריט], 08/11/2026) — הדף טוען אותה ב-?img=pk_<לקוח>_<פריט>
     const ib = String(x.k).split('|')[0], img = +((ps.imgs || {})[cust + '|' + ib]) || 0;
-    return { ...x, n, low: mn > 0 && bal[x.k] < mn, need: Math.round((need[x.k] || 0) * 100) / 100, ...(img ? { img, imgId: 'pk_' + cust + '_' + ib } : {}) };
+    return { ...x, n, low: mn > 0 && bal[x.k] < mn, ...(mn > 0 ? { min: mn } : {}), need: Math.round((need[x.k] || 0) * 100) / 100, ...(img ? { img, imgId: 'pk_' + cust + '_' + ib } : {}) };
   });
 }
 // 🖼 {img: מזהה המסמך ב-thumbs, iv: מועד} — products.thumbAt נכתב באפליקציה בשמירת תמונות
