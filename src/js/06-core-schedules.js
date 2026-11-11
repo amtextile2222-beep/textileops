@@ -380,6 +380,9 @@ function applyPerms(w){
   const fb=document.getElementById('floating-msg-btn');
   if(fb)fb.style.display=w.role==='manager'?'none':'flex';
   document.getElementById('enable-notif-btn')?.classList.toggle('hidden',w.role==='manager');
+  // 🤖 עוזר AI — מנהל בלבד (הוחזר 11/11/2026; השרת אוכף את אותו דבר ב-aiChat)
+  document.getElementById('ai-chat-btn')?.classList.toggle('hidden',w.role!=='manager');
+  if(w.role!=='manager')closeAIChat();
   if(w.role==='manager'){
     [...ALL_SUPERVISOR_PAGE_IDS,'admin','setup','costs','products'].forEach(p=>document.getElementById('nb-'+p)?.classList.remove('hidden'));
   } else {

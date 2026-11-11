@@ -387,8 +387,22 @@ thead th{font-weight:600}
         <div style="color:var(--txt3)" id="top-role"></div>
       </div>
       <div id="av-wrap" onclick="_syncDotInfo()"><div class="av" style="width:32px;height:32px;font-size:11px" id="top-av"></div><span id="sync-dot"></span></div>
+      <button class="btn hidden" id="ai-chat-btn" style="padding:5px 9px;font-size:12px;background:var(--blue-bg);color:var(--blue-txt)" onclick="openAIChat()" title="עוזר AI">🤖</button>
       <button class="btn hidden" id="enable-notif-btn" style="padding:5px 9px;font-size:12px;background:var(--amber-bg);color:var(--amber-txt)" onclick="enableMyNotifications()" title="הפעל התראות">🔔</button>
       <button class="btn" style="padding:5px 9px;font-size:12px" onclick="doLogout()" title="יציאה · خروج"><span class="lo-ico"><svg class="ico" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M9 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h4"/><polyline points="16 17 21 12 16 7"/><line x1="21" x2="9" y1="12" y2="12"/></svg></span><span class="lo-txt" data-i18n="logout">יציאה</span></button>
+    </div>
+  </div>
+
+  <!-- 🤖 עוזר AI — מנהל בלבד (src/js/29-ai-chat.js) -->
+  <div id="ai-chat-panel" style="display:none;position:fixed;bottom:20px;left:20px;z-index:9500;width:340px;max-width:95vw;background:var(--bg);border:1px solid var(--b2);border-radius:var(--rl);box-shadow:0 8px 32px rgba(0,0,0,.2);flex-direction:column;overflow:hidden">
+    <div id="ai-chat-header" style="background:var(--blue-bg);padding:10px 14px;display:flex;align-items:center;justify-content:space-between;cursor:move;user-select:none">
+      <div style="font-size:14px;font-weight:600;color:var(--blue-txt)">🤖 עוזר AI</div>
+      <button onclick="closeAIChat()" style="background:none;border:none;cursor:pointer;font-size:18px;color:var(--blue-txt)">✕</button>
+    </div>
+    <div id="ai-chat-msgs" style="height:260px;overflow-y:auto;padding:10px;display:flex;flex-direction:column;gap:8px;font-size:13px"></div>
+    <div style="padding:8px;border-top:1px solid var(--b);display:flex;gap:6px">
+      <input id="ai-chat-input" placeholder="שאל שאלה..." style="flex:1;font-size:13px;padding:7px 10px" onkeydown="if(event.key==='Enter')sendAIMsg()"/>
+      <button class="btn primary" onclick="sendAIMsg()" style="padding:7px 12px;font-size:13px">שלח</button>
     </div>
   </div>
 
@@ -5721,6 +5735,9 @@ function applyPerms(w){
   const fb=document.getElementById('floating-msg-btn');
   if(fb)fb.style.display=w.role==='manager'?'none':'flex';
   document.getElementById('enable-notif-btn')?.classList.toggle('hidden',w.role==='manager');
+  // 🤖 עוזר AI — מנהל בלבד (הוחזר 11/11/2026; השרת אוכף את אותו דבר ב-aiChat)
+  document.getElementById('ai-chat-btn')?.classList.toggle('hidden',w.role!=='manager');
+  if(w.role!=='manager')closeAIChat();
   if(w.role==='manager'){
     [...ALL_SUPERVISOR_PAGE_IDS,'admin','setup','costs','products'].forEach(p=>document.getElementById('nb-'+p)?.classList.remove('hidden'));
   } else {
@@ -21808,6 +21825,91 @@ function decorateIcons(root){
       m.addedNodes.forEach(decorateIcons);}}).observe(document.body,{childList:true,subtree:true});};
   if(document.readyState==='loading')document.addEventListener('DOMContentLoaded',go);else go();
 })();
+// ─── 🤖 עוזר AI — מנהל בלבד (הוחזר 11/11/2026 אחרי הסרה ב-22/10) ───
+// הכפתור בסרגל (ai-chat-btn) מוצג ב-applyPerms רק למנהל. השאלה + תמונת מצב של המפעל נשלחות
+// ל-Cloud Function aiChat, שאוכפת role=manager וקוראת ל-AnythingLLM ב-Railway (כתובת/מפתח ב-functions:config).
+function openAIChat(){
+  if(S.user?.role!=='manager')return;
+  const p=document.getElementById('ai-chat-panel');if(!p)return;
+  p.style.display='flex';
+  document.getElementById('ai-chat-input').focus();
+  const h=document.getElementById('ai-chat-header');
+  if(h&&!h._dragInit){
+    h._dragInit=true;
+    let ox=0,oy=0;
+    h.addEventListener('mousedown',e=>{
+      if(e.target.tagName==='BUTTON')return;
+      ox=e.clientX-p.getBoundingClientRect().left;
+      oy=e.clientY-p.getBoundingClientRect().top;
+      const onMove=e=>{
+        p.style.left=Math.max(0,Math.min(window.innerWidth-p.offsetWidth,e.clientX-ox))+'px';
+        p.style.top=Math.max(0,Math.min(window.innerHeight-p.offsetHeight,e.clientY-oy))+'px';
+        p.style.bottom='auto';
+      };
+      const onUp=()=>{document.removeEventListener('mousemove',onMove);document.removeEventListener('mouseup',onUp);};
+      document.addEventListener('mousemove',onMove);
+      document.addEventListener('mouseup',onUp);
+    });
+  }
+}
+function closeAIChat(){const p=document.getElementById('ai-chat-panel');if(p)p.style.display='none';}
+function _aiAddMsg(text,role){
+  const box=document.getElementById('ai-chat-msgs');
+  const div=document.createElement('div');
+  div.style.cssText=`padding:8px 10px;border-radius:8px;max-width:90%;word-break:break-word;${role==='user'?'background:var(--blue-bg);color:var(--blue-txt);align-self:flex-end':'background:var(--bg2);color:var(--txt);align-self:flex-start'}`;
+  div.textContent=text;
+  box.appendChild(div);
+  box.scrollTop=box.scrollHeight;
+  return div;
+}
+// תמונת מצב של המפעל שנשלחת עם כל שאלה: נוכחות היום, משימות פעילות, שעות ומשימות של 7 ימים
+function _buildAIContext(){
+  const today=todayStr();
+  const present=S.workers.filter(w=>w.checkin&&w.checkin.slice(0,10)===today&&w.role!=='manager');
+  const absent=S.workers.filter(w=>w.role!=='manager'&&(!w.checkin||w.checkin.slice(0,10)!==today));
+  const active=S.activeTasks||[];
+  const weekStr=new Date(Date.now()-7*86400000).toISOString().slice(0,10);
+  const weeklyHours={};
+  (S.attHistory||[]).filter(r=>r.date>=weekStr).forEach(r=>{
+    const w=S.workers.find(x=>x.id===r.workerId);if(!w||w.role==='manager')return;
+    weeklyHours[w.name]=(weeklyHours[w.name]||0)+(r.netMs||0)/3600000;
+  });
+  const weekSummary=Object.entries(weeklyHours).map(([n,h])=>`${n}: ${h.toFixed(1)}ש'`).join(', ')||'אין נתונים';
+  const tasksByWorker={};
+  (S.histTasks||[]).filter(t=>(t.startTime?String(t.startTime).slice(0,10):'')>=weekStr).forEach(t=>{
+    const w=S.workers.find(x=>x.id===t.workerId);if(!w)return;
+    tasksByWorker[w.name]=(tasksByWorker[w.name]||0)+1;
+  });
+  const taskSummary=Object.entries(tasksByWorker).map(([n,c])=>`${n}: ${c} משימות`).join(', ')||'אין נתונים';
+  return`נתוני מפעל TextileOps לתאריך ${today}:
+
+=== היום ===
+נוכחים (${present.length}): ${present.map(w=>w.name+(w.status==='in'?' [בעבודה]':' [יצא]')).join(', ')||'אין'}
+נעדרים (${absent.length}): ${absent.map(w=>w.name).join(', ')||'אין'}
+משימות פעילות (${active.length}): ${active.map(t=>{const w=S.workers.find(x=>x.id===t.workerId);return(w?.name||'?')+' — '+taskBc(t);}).join(', ')||'אין'}
+
+=== 7 ימים אחרונים ===
+שעות עבודה לעובד: ${weekSummary}
+משימות שהושלמו לעובד: ${taskSummary}`;
+}
+async function sendAIMsg(){
+  const input=document.getElementById('ai-chat-input');
+  const q=input.value.trim();
+  if(!q)return;
+  input.value='';
+  _aiAddMsg(q,'user');
+  const bubble=_aiAddMsg('⏳ חושב...','ai');
+  try{
+    const message='חשוב: ענה תמיד באותה שפה שבה נשאלת השאלה (עברית/ערבית/אנגלית).\n\n'+_buildAIContext()+'\n\nשאלה: '+q;
+    const{httpsCallable}=window._fb;
+    const result=await httpsCallable(window._fbFunctions,'aiChat')({message});
+    bubble.textContent=result?.data?.textResponse||'לא התקבלה תשובה';
+    document.getElementById('ai-chat-msgs').scrollTop=9999;
+  }catch(e){
+    console.error('AI error:',e);
+    bubble.textContent='⛔ שגיאת חיבור ל-AI: '+(e.message||'');
+  }
+}
 </script>
 </body>
 </html>

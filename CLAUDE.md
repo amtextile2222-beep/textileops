@@ -7,7 +7,7 @@
 ## ארכיטקטורה — קובץ אחד!
 
 - **הקוד נערך ב-`src/`, והאתר הוא קובץ אחד: `index.html`** (~21,700 שורות, נבנה — 09/11/2026). אין framework.
-  - `src/js/NN-נושא.js` (28 קבצים: 01-lang, 03-cut, 09-scan, 11-reports, 19-costs, 22-delivery-notes...) · `src/css/app.css` · `src/shell.html` (ה-HTML, ה-head וה-module של Firebase).
+  - `src/js/NN-נושא.js` (29 קבצים: 01-lang, 03-cut, 09-scan, 11-reports, 19-costs, 22-delivery-notes...) · `src/css/app.css` · `src/shell.html` (ה-HTML, ה-head וה-module של Firebase).
   - `node tools/build.js` מחבר אותם **לפי סדר השמות** לבלוק `<script>` אחד ב-`index.html` (+ בדיקת תחביר). `--check` = תואם? · `--where N` = שורה N ב-index.html (משגיאה בקונסול) ⇒ קובץ:שורה.
   - 🛑 **לא לערוך את `index.html` ישירות** — הבנייה הבאה דורסת. לחפש ולערוך ב-`src/`.
   - 🛑 **לא לטעון את הקבצים כ-`<script src>` נפרדים:** הקוד מניח סקריפט אחד — `_guardReentrant('confirmShip')` עוטף פונקציות מקבצים מאוחרים, `runDailyReset`/`setLang` רצים בטעינה וקוראים לכל הקוד. בקבצים נפרדים זה נשבר בשקט.
