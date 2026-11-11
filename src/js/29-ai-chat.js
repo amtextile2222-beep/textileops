@@ -95,8 +95,35 @@ async function _aiPipeText(){
   const shLines=sh.slice(0,60).map(({p,st,d})=>{const no=parseInt(p.orderNo,10)||0;
     return `- ${_aiCust(p.cust)} · מוצר ${p.prod}${no?' · הזמנה #'+no:''}${p.name?' · '+p.name:''} — יצא ${d} · ${st.outU||st.qty||0} יח' מתוך ${st.qty||0}`;});
   txt+=`\n\n=== הזמנות שיצאו ללקוח ב-30 הימים האחרונים (${sh.length}${sh.length>60?', מוצגות 60 האחרונות':''}) ===\n`+(shLines.join('\n')||'אין');
-  _aiPipeCache={at:Date.now(),txt};
+  _aiPipeCache={at:Date.now(),txt,money:_aiMoneyText(rows)};
   return txt;
+}
+// 💰 (11/11/2026) הכנסות לעוזר — רק עם הרשאת תמחור (העוזר עצמו מנהל בלבד). אותו חישוב כמו לשונית
+// התעודות והתקורה: _incShipRows (dnUnitPrice × total + חומר אריזה). פתוחות = (כמות − מה שכבר יצא) × מחיר ליחידה.
+// נשלח לפני לוח ההזמנות — הודעה ארוכה נחתכת מהסוף (AI_MSG_MAX), והסכומים חשובים מהרשימות.
+function _aiMoneyText(openRows){
+  if(typeof _canPricing!=='function'||!_canPricing())return '';
+  try{
+    const ils=v=>'₪'+Math.round(v).toLocaleString('he-IL');
+    const ym=todayStr().slice(0,7),pd=new Date(+ym.slice(0,4),+ym.slice(5,7)-2,1),pym=pd.getFullYear()+'-'+pad2(pd.getMonth()+1);
+    const shR=_incShipRows();
+    const mon=m=>{const r=shR.filter(x=>x.date.slice(0,7)===m);
+      return `${m}: ${r.length} תעודות, ${r.reduce((t,x)=>t+(+x.s.total||0),0)} יח', ${ils(r.reduce((t,x)=>t+x.work+x.pack,0))}`+
+        (r.some(x=>x.noPrice)?` (בלי מחיר: ${[...new Set(r.filter(x=>x.noPrice).map(x=>x.p.prod))].join(', ')})`:'');};
+    const op=openRows.map(({p,st})=>{const pr=dnUnitPrice(p),q=st.qty||estQtyOf(p),est=!st.qty&&q>0;
+      const out=prodShipments(p).reduce((t,s)=>t+(+s.total||0)+shUnsewn(s),0),rem=Math.max(0,q-out);
+      return {p,pr,rem,est,v:pr.missing?0:rem*pr.unit};}).filter(o=>o.rem>0);
+    const opV=op.reduce((t,o)=>t+o.v,0),noP=op.filter(o=>o.pr.missing);
+    const curV=shR.filter(x=>x.date.slice(0,7)===ym).reduce((t,x)=>t+x.work+x.pack,0);
+    const lines=op.filter(o=>!o.pr.missing).sort((a,b)=>b.v-a.v).slice(0,30).map(({p,pr,rem,est,v})=>{const no=parseInt(p.orderNo,10)||0;
+      return `- ${_aiCust(p.cust)} · מוצר ${p.prod}${no?' #'+no:''}: ${rem} יח'${est?' (משוער)':''} × ${pr.unit.toFixed(2)} = ${ils(v)}`;});
+    return `=== הכנסות (₪, לפי המחירים בכרטיסי המוצרים — כמו בתעודות המשלוח: עבודה + חומר אריזה) ===\n`+
+      `תעודות משלוח לפי תאריך התעודה — ${mon(ym)}\n${mon(pym)}\n`+
+      `הזמנות פתוחות במפעל: ${op.length}, יתרה ${op.reduce((t,o)=>t+o.rem,0)} יח', שווי ${ils(opV)}`+
+      (noP.length?` (בלי מחיר — לא נספרו: ${noP.map(o=>o.p.prod).join(', ')})`:'')+
+      `\nצפי ${ym} אם כל הפתוחות ייצאו החודש: ${ils(curV+opV)} (יצא ${ils(curV)} + פתוחות ${ils(opV)})\n`+
+      (lines.length?'שווי לפי הזמנה פתוחה:\n'+lines.join('\n'):'');
+  }catch(e){console.warn('AI money:',e);return '';}
 }
 function _aiLateText(){
   const late=(S.activeTasks||[]).filter(t=>+t.expectedMin>0&&(t.elapsed||0)/60>+t.expectedMin)
@@ -153,7 +180,7 @@ async function sendAIMsg(){
   const bubble=_aiAddMsg('⏳ חושב...','ai');
   try{
     let pipe='';try{pipe=await _aiPipeText();}catch(e){console.warn('AI pipe:',e);}
-    const ctx=[_buildAIContext(),_aiLateText(),_aiStockText(),pipe].filter(Boolean).join('\n\n');
+    const ctx=[_buildAIContext(),_aiPipeCache.money||'',_aiLateText(),_aiStockText(),pipe].filter(Boolean).join('\n\n');
     // ✂ (11/11/2026) השאלה גם בראש: השרת חותך את ההודעה (AI_MSG_MAX) — חיתוך יוריד נתונים מהסוף, לא את השאלה
     const head='חשוב: ענה תמיד באותה שפה שבה נשאלת השאלה (עברית/ערבית/אנגלית).\n\nשאלה: '+q+'\n\nנתונים:\n',tail='\n\nשאלה (שוב): '+q;
     const room=AI_MSG_MAX-head.length-tail.length-40;
