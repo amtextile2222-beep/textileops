@@ -21921,8 +21921,8 @@ async function _aiPipeText(){
   const byOrder={},oc={};
   for(const t of [...hist,...(S.activeTasks||[])]){const k=t.cust+'|'+t.prod+'|'+taskOrderStamp(t,oc);(byOrder[k]||(byOrder[k]=[])).push(t);}
   const today=Date.now(),lbl=id=>(PIPE_LISTS[PIPE_IDX(id)]?.label||id).replace(/^\S+\s/,'');
-  const rows=(S.products||[]).filter(p=>!p.isSample).map(p=>({p,st:pipeStateOf(p,byOrder[p.cust+'|'+p.prod+'|'+prodStampOf(p)]||[]),entry:pipeEntryDate(p)}))
-    .filter(r=>r.st.id!=='shipped')
+  const all=(S.products||[]).filter(p=>!p.isSample).map(p=>({p,st:pipeStateOf(p,byOrder[p.cust+'|'+p.prod+'|'+prodStampOf(p)]||[]),entry:pipeEntryDate(p)}));
+  const rows=all.filter(r=>r.st.id!=='shipped')
     .sort((a,b)=>String(a.entry||'9999').localeCompare(String(b.entry||'9999')));
   const lines=rows.slice(0,80).map(({p,st,entry})=>{
     const no=parseInt(p.orderNo,10)||0,days=entry?Math.floor((today-new Date(entry).getTime())/864e5):null;
@@ -21931,7 +21931,13 @@ async function _aiPipeText(){
     return `- ${_aiCust(p.cust)} · מוצר ${p.prod}${no?' · הזמנה #'+no:''}${p.name?' · '+p.name:''} — ${where}`+
       ` · כמות ${st.qty||('~'+estQtyOf(p)+' משוער')}${entry?' · נכנס '+entry+(days!=null?' ('+days+' ימים)':''):''}${low?' · שלבים חסרים: '+low:''}`;
   });
-  const txt=`=== לוח מצב הזמנות פתוחות (${rows.length}${rows.length>80?', מוצגות 80 הוותיקות':''}) ===\n`+(lines.join('\n')||'אין');
+  let txt=`=== לוח מצב הזמנות פתוחות (${rows.length}${rows.length>80?', מוצגות 80 הוותיקות':''}) ===\n`+(lines.join('\n')||'אין');
+  // 🚚 (11/11/2026) הזמנות שיצאו ללקוח ב-30 הימים האחרונים — אחרת העוזר לא יודע לענות "כמה נשלחו" (עמודת "יצא ללקוח")
+  const from=new Date(today-30*864e5).toISOString().slice(0,10);
+  const sh=all.filter(r=>r.st.id==='shipped').map(r=>({...r,d:pipeShipDate(r.p)||''})).filter(r=>r.d>=from).sort((a,b)=>b.d.localeCompare(a.d));
+  const shLines=sh.slice(0,60).map(({p,st,d})=>{const no=parseInt(p.orderNo,10)||0;
+    return `- ${_aiCust(p.cust)} · מוצר ${p.prod}${no?' · הזמנה #'+no:''}${p.name?' · '+p.name:''} — יצא ${d} · ${st.outU||st.qty||0} יח' מתוך ${st.qty||0}`;});
+  txt+=`\n\n=== הזמנות שיצאו ללקוח ב-30 הימים האחרונים (${sh.length}${sh.length>60?', מוצגות 60 האחרונות':''}) ===\n`+(shLines.join('\n')||'אין');
   _aiPipeCache={at:Date.now(),txt};
   return txt;
 }
@@ -21980,6 +21986,7 @@ function _buildAIContext(){
 שעות עבודה לעובד: ${weekSummary}
 משימות שהושלמו לעובד: ${taskSummary}`;
 }
+const AI_MSG_MAX=8000; // = החיתוך ב-aiChat בשרת. להגדיל רק אחרי פריסת שרת עם גבול גבוה יותר
 async function sendAIMsg(){
   const input=document.getElementById('ai-chat-input');
   const q=input.value.trim();
@@ -21990,7 +21997,10 @@ async function sendAIMsg(){
   try{
     let pipe='';try{pipe=await _aiPipeText();}catch(e){console.warn('AI pipe:',e);}
     const ctx=[_buildAIContext(),_aiLateText(),_aiStockText(),pipe].filter(Boolean).join('\n\n');
-    const message='חשוב: ענה תמיד באותה שפה שבה נשאלת השאלה (עברית/ערבית/אנגלית).\n\n'+ctx+'\n\nשאלה: '+q;
+    // ✂ (11/11/2026) השאלה גם בראש: השרת חותך את ההודעה (AI_MSG_MAX) — חיתוך יוריד נתונים מהסוף, לא את השאלה
+    const head='חשוב: ענה תמיד באותה שפה שבה נשאלת השאלה (עברית/ערבית/אנגלית).\n\nשאלה: '+q+'\n\nנתונים:\n',tail='\n\nשאלה (שוב): '+q;
+    const room=AI_MSG_MAX-head.length-tail.length-40;
+    const message=head+(ctx.length>room?ctx.slice(0,Math.max(0,room))+'\n…(נקטע)':ctx)+tail;
     const{httpsCallable}=window._fb;
     const result=await httpsCallable(window._fbFunctions,'aiChat')({message});
     bubble.classList.add('ai-md');
