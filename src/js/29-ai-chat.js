@@ -35,6 +35,46 @@ function _aiAddMsg(text,role){
   box.scrollTop=box.scrollHeight;
   return div;
 }
+// 📊 הרחבה (11/11/2026): לוח מצב הזמנות (pipeStateOf — אותו חישוב כמו הלוח בדוחות), משימות שחרגו מהצפי,
+// ומלאי חומרים חסר/נמוך. הלוח דורש את כל ההיסטוריה (loadHistRange('','')) ⇒ 💰 מטמון 10 דק' כדי לא
+// לקרוא אלפי משימות מ-Firestore בכל שאלה.
+let _aiPipeCache={at:0,txt:''};
+const _aiCust=c=>(S.customerNames?.[c]?S.customerNames[c]+' ('+c+')':'לקוח '+c);
+async function _aiPipeText(){
+  if(_aiPipeCache.txt&&Date.now()-_aiPipeCache.at<600000)return _aiPipeCache.txt;
+  const hist=await loadHistRange('','');
+  const byOrder={},oc={};
+  for(const t of [...hist,...(S.activeTasks||[])]){const k=t.cust+'|'+t.prod+'|'+taskOrderStamp(t,oc);(byOrder[k]||(byOrder[k]=[])).push(t);}
+  const today=Date.now(),lbl=id=>(PIPE_LISTS[PIPE_IDX(id)]?.label||id).replace(/^\S+\s/,'');
+  const rows=(S.products||[]).filter(p=>!p.isSample).map(p=>({p,st:pipeStateOf(p,byOrder[p.cust+'|'+p.prod+'|'+prodStampOf(p)]||[]),entry:pipeEntryDate(p)}))
+    .filter(r=>r.st.id!=='shipped')
+    .sort((a,b)=>String(a.entry||'9999').localeCompare(String(b.entry||'9999')));
+  const lines=rows.slice(0,80).map(({p,st,entry})=>{
+    const no=parseInt(p.orderNo,10)||0,days=entry?Math.floor((today-new Date(entry).getTime())/864e5):null;
+    const where=st.split?Object.entries(st.split).filter(([k,v])=>k!=='main'&&v>0).map(([k,v])=>lbl(k)+' '+v).join(', '):lbl(st.id);
+    const low=[...(st.sew?.low||[]),...(st.pack?.low||[])].slice(0,3).join(' · ');
+    return `- ${_aiCust(p.cust)} · מוצר ${p.prod}${no?' · הזמנה #'+no:''}${p.name?' · '+p.name:''} — ${where}`+
+      ` · כמות ${st.qty||('~'+estQtyOf(p)+' משוער')}${entry?' · נכנס '+entry+(days!=null?' ('+days+' ימים)':''):''}${low?' · שלבים חסרים: '+low:''}`;
+  });
+  const txt=`=== לוח מצב הזמנות פתוחות (${rows.length}${rows.length>80?', מוצגות 80 הוותיקות':''}) ===\n`+(lines.join('\n')||'אין');
+  _aiPipeCache={at:Date.now(),txt};
+  return txt;
+}
+function _aiLateText(){
+  const late=(S.activeTasks||[]).filter(t=>+t.expectedMin>0&&(t.elapsed||0)/60>+t.expectedMin)
+    .map(t=>`- ${t.workerName||'?'} · ${t.taskType||''} · ${_aiCust(t.cust)} מוצר ${t.prod} — ${Math.round((t.elapsed||0)/60)} דק' מתוך צפי ${Math.round(+t.expectedMin)}${t.paused?' (מושהית)':''}`);
+  return `=== משימות פעילות שחרגו מהצפי (${late.length}) ===\n`+(late.join('\n')||'אין');
+}
+function _aiStockText(){
+  try{
+    const bal=pstkCalc(),{need}=pstkNeed(),min=(S.packStock||{}).min||{};
+    const keys=[...new Set([...pstkShortKeys(bal,need),...pstkLowKeys(bal)])];
+    const lines=keys.map(k=>{const[pool,mk]=k.split('|');
+      return `- ${pstkKeyName(k)} (${pool===PSTK_F?'מלאי המפעל':'מלאי '+_aiCust(pool)}): יש ${pstkFmt(bal[k])}${pstkUnit(mk)}`+
+        (need[k]?`, נדרש להזמנות פתוחות ${pstkFmt(need[k])}`:'')+(+min[k]?`, מינימום ${min[k]}`:'');});
+    return `=== מלאי חומרים חסר או מתחת למינימום (${lines.length}) ===\n`+(lines.join('\n')||'אין');
+  }catch(e){return '';}
+}
 // תמונת מצב של המפעל שנשלחת עם כל שאלה: נוכחות היום, משימות פעילות, שעות ומשימות של 7 ימים
 function _buildAIContext(){
   const today=todayStr();
@@ -73,7 +113,9 @@ async function sendAIMsg(){
   _aiAddMsg(q,'user');
   const bubble=_aiAddMsg('⏳ חושב...','ai');
   try{
-    const message='חשוב: ענה תמיד באותה שפה שבה נשאלת השאלה (עברית/ערבית/אנגלית).\n\n'+_buildAIContext()+'\n\nשאלה: '+q;
+    let pipe='';try{pipe=await _aiPipeText();}catch(e){console.warn('AI pipe:',e);}
+    const ctx=[_buildAIContext(),_aiLateText(),_aiStockText(),pipe].filter(Boolean).join('\n\n');
+    const message='חשוב: ענה תמיד באותה שפה שבה נשאלת השאלה (עברית/ערבית/אנגלית).\n\n'+ctx+'\n\nשאלה: '+q;
     const{httpsCallable}=window._fb;
     const result=await httpsCallable(window._fbFunctions,'aiChat')({message});
     bubble.textContent=result?.data?.textResponse||'לא התקבלה תשובה';
