@@ -183,7 +183,7 @@ function card(o){
   // ⚠ חוסרים (25/10/2026): פתוחים צובעים את השלב שלהם באדום; שלב שעבר — ירוק, הנוכחי — כחול
   const sh=Array.isArray(o.short)?o.short:[],openSt=new Set(sh.filter(x=>!x.res).map(x=>x.st));
   const segCls=i=>openSt.has(i)?'bad':!(i<=o.stage&&!(sp&&i===4))?'':(i<o.stage||done)?'ok':'on';
-  const segs=STAGES.map((s,i)=>`<span class="${segCls(i)}${i===o.stage?' cur':''}" "><i></i><em>${esc(s)}</em>${o.dates&&o.dates[i]?`<small>${esc(fmtDM(o.dates[i]))}</small>`:''}</span>`).join('');
+  const segs=STAGES.map((s,i)=>`<span class="${segCls(i)}${i===o.stage?' cur':''}"><i></i><em>${esc(s)}</em>${o.dates&&o.dates[i]?`<small>${esc(fmtDM(o.dates[i]))}</small>`:''}</span>`).join('');
   const dm=ms=>{const d=new Date(+ms);return String(d.getDate()).padStart(2,'0')+'/'+String(d.getMonth()+1).padStart(2,'0');}; // תאריך מקומי
   const shHtml=sh.slice().sort((a,b)=>(!!a.res-!!b.res)||(b.at-a.at)).map(x=>x.res
     ?`<div class="short res">✓ ${esc(STAGES[x.st]||'')}: ${esc(x.txt)} · ${dm(x.at)} · נפתר ${dm(x.res)}</div>`
@@ -245,13 +245,16 @@ async function openCut(pid,nm){
   }catch(e){const c=$('cutc');if(c)c.textContent='⚠️ לא ניתן לטעון את הדוח כרגע. נסו שוב בעוד רגע.';}
 }
 appEl.addEventListener('click',e=>{const b=e.target.closest('.cutb');if(b)openCut(b.dataset.cut,b.dataset.nm);
-  const im=e.target.closest('img[data-img][src]');if(im)bigImg(im.src,im.alt);});
+  const im=e.target.closest('img[data-img][src]');if(im&&IMG_OK.test(im.src))bigImg(im.src,im.alt);});
 // 🖼 תמונות (08/11/2026) — דגם בכרטיס, חומר במלאי. נטענות מהשרת (?img=) פעם אחת לכל מועד (v) ונשמרות בזיכרון,
 // כך שהרענון כל דקה לא טוען שוב. לחיצה = הגדלה
 const imgMem=new Map(),imgBusy=new Set();
+// 🔒 (12/11/2026) התמונה מגיעה מ-thumbs — אוסף שעובדים כותבים אליו. מתקבלת רק תמונת data: תקינה, ובכל מקום
+// שהיא נכנסת ל-HTML היא עוברת esc (ערך עם מירכאות היה סוגר את src ומוסיף onerror = הרצת קוד בדף)
+const IMG_OK=/^data:image\/(jpeg|png|webp|gif);base64,[A-Za-z0-9+\/=]+$/;
 function imgTag(id,v,cls,alt){
   if(!id||!v)return '';const k=id+'@'+v,src=imgMem.get(k);
-  return `<img class="${cls}" data-img="${esc(id)}" data-v="${esc(v)}" alt="${esc(alt||'')}"${src?` src="${src}"`:' style="visibility:hidden"'}>`;
+  return `<img class="${cls}" data-img="${esc(id)}" data-v="${esc(v)}" alt="${esc(alt||'')}"${src?` src="${esc(src)}"`:' style="visibility:hidden"'}>`;
 }
 async function loadImgs(){
   const u=(AS?mAuth:auth).currentUser;if(!u)return;
@@ -260,14 +263,14 @@ async function loadImgs(){
     if(imgMem.has(k)){el.src=imgMem.get(k);el.style.visibility='';continue;}
     if(imgBusy.has(k))continue;imgBusy.add(k);
     try{const r=await fetch(URL_FN+'?img='+encodeURIComponent(id)+'&v='+encodeURIComponent(v)+(AS?'&cust='+encodeURIComponent(AS):''),{headers:{Authorization:'Bearer '+await u.getIdToken(),'X-Dev':devId()}});
-      if(r.ok){const j=await r.json();if(j.img){imgMem.set(k,j.img);appEl.querySelectorAll('img[data-img]').forEach(x=>{if(x.dataset.img===id&&x.dataset.v===v){x.src=j.img;x.style.visibility='';}});}}
+      if(r.ok){const j=await r.json();if(j.img&&IMG_OK.test(j.img)){imgMem.set(k,j.img);appEl.querySelectorAll('img[data-img]').forEach(x=>{if(x.dataset.img===id&&x.dataset.v===v){x.src=j.img;x.style.visibility='';}});}}
       else if(r.status===404)appEl.querySelectorAll('img[data-img]').forEach(x=>{if(x.dataset.img===id)x.remove();});
     }catch(e){}finally{imgBusy.delete(k);}
   }
 }
 function bigImg(src,alt){
   $('imgm')?.remove();const m=document.createElement('div');m.id='imgm';m.className='cutm';
-  m.innerHTML=`<div class="imgm-b"><img src="${src}" alt="${esc(alt)}"><div>${esc(alt)}</div></div>`;
+  m.innerHTML=`<div class="imgm-b"><img src="${esc(src)}" alt="${esc(alt)}"><div>${esc(alt)}</div></div>`;
   m.onclick=()=>m.remove();document.body.appendChild(m);
 }
 const outBtn=()=>'<button id="out">התנתקות</button>';

@@ -481,7 +481,7 @@ async function workerUpdateFace(){
   document.getElementById('face-reg-title').textContent='עדכון פנים — '+esc(w.name);
   document.getElementById('face-reg-status').textContent='טוען מודלי זיהוי...';
   btn.disabled=true;
-  document.querySelector('#face-reg-screen .btn:not(.primary)').style.display='none';
+  _faceRegCancelShow(false);_faceRegBoxes(); // עדכון פנים שהמנהל אישר — בלי "ביטול" (לפי id; ראה _faceRegCancelShow)
   document.getElementById('app-screen').classList.add('hidden');
   document.getElementById('face-reg-screen').classList.remove('hidden');
   const ok=await loadFaceModels();
@@ -536,7 +536,7 @@ async function _workerFaceRegDone(){
   if(_faceRegStream){_faceRegStream.getTracks().forEach(t=>t.stop());_faceRegStream=null;}
   document.getElementById('face-reg-screen').classList.add('hidden');
   document.getElementById('app-screen').classList.remove('hidden');
-  document.querySelector('#face-reg-screen .btn:not(.primary)').style.display='';
+  _faceRegCancelShow(true);
   document.getElementById('face-reg-btn').textContent='📸 צלם דגימה 1/5';
   document.getElementById('face-reg-btn').onclick=captureFaceDescriptor;
   alert('✅ פנים עודכנו בהצלחה!');

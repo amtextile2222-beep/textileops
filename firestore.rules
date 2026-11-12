@@ -93,9 +93,25 @@ service cloud.firestore {
     // הגדרות אפליקציה: קריאה לכולם (עובדים צריכים shiftEnd/factoryIP/לקוחות/צבעים);
     // telegramSettings כתיבה למנהל בלבד — factoryIP/shiftEnd הם ערכי אכיפה
     // שפונקציות login/wifiMonitor/attendanceCloser מסתמכות עליהם
+    // 🔒 (12/11/2026) עד היום כל מחובר כתב לכל מסמך חוץ מ-telegramSettings — עובדת יכלה לרשום את עצמה
+    // ב-pushSettings כמנהל (ולקבל את כל ההתראות), לשנות מלאי, מחלקות ושמות לקוחות. עכשיו לפי מסמך:
+    // · נעילות/רישומים שכל מכשיר כותב בטרנזקציה (דוח יומי, התראות, מונה תעודות) — כל מחובר
+    // · מלאי, לקוחות, צבעים, מחלקות, ביטולי תעודות, מונה חשבוניות — אחראי, או מי שמורשה לתמחור/תעודות
+    // · pushSettings — אחראי רושם/מעדכן **מכשיר אחד** בלבד (initFCM); הגדרות והסרה — מנהל
+    // · כל השאר (telegramSettings, rateW, breakDefault, company, packPrices, מסמך חדש) — מנהל בלבד
+    // ⚠️ מסמך חדש ב-appSettings שעובד/אחראי צריך לכתוב — להוסיף כאן, אחרת הכתיבה נדחית.
+    function pushTokenOnly() {
+      return request.resource.data.diff(resource.data).affectedKeys().hasOnly(['tokens', 'lastRegistered'])
+        && request.resource.data.tokens is map
+        && request.resource.data.tokens.diff(resource.data.get('tokens', {})).removedKeys().size() == 0
+        && request.resource.data.tokens.diff(resource.data.get('tokens', {})).affectedKeys().size() <= 1;
+    }
     match /appSettings/{docId} {
       allow read: if hasRole();
-      allow create, update: if isMgr() || (hasRole() && docId != 'telegramSettings');
+      allow create, update: if isMgr()
+        || (hasRole() && docId in ['dailyReport', 'endOfDayAlert', 'punchOutAlert', 'tgAlertLog', 'deliveryNote'])
+        || ((isSup() || canPricing()) && docId in ['packStock', 'customerNames', 'customerInfo', 'customColors', 'depts', 'deliveryVoids', 'proformaInvoice']);
+      allow update: if isSup() && docId == 'pushSettings' && pushTokenOnly();
       // מחיקת מסמך הגדרות (לקוחות/מחלקות/צבעים) משבשת את כולם — האפליקציה לא מוחקת אף אחד
       allow delete: if isMgr();
     }
@@ -187,6 +203,43 @@ service cloud.firestore {
       allow update, delete: if isMgr();
     }
 
+    // ── 🔒 (12/11/2026) אוספים שיצאו מה-catch-all ──────────────────────────────────────────
+    // 🖼 תמונות לדף הלקוח (דגם / חומר). כל מי ששומר תמונות מוצר כותב לכאן, ולכן הכתיבה נשארת פתוחה —
+    // אבל רק תמונת data: תקינה. הערך מוצג בדף הלקוח ובתצוגת המנהל; מחרוזת אחרת הייתה מוזרקת ל-HTML.
+    match /thumbs/{id} {
+      allow read, delete: if hasRole();
+      allow create, update: if hasRole()
+        && request.resource.data.img is string
+        && request.resource.data.img.matches('data:image/(jpeg|png|webp|gif);base64,[A-Za-z0-9+/=]+');
+    }
+    // נעילות ורישומי התראות של השרת בלבד (longTaskMonitor / remindLateTask / wifiMonitor, Admin SDK)
+    match /taskAlerts/{id} { allow read, write: if false; }
+    match /wifiAlerts/{id} { allow read, write: if false; }
+    // 📡 IP שהעובד מדווח: כל אחד את שלו; אחראי/מנהל — גם של אחרים (החתמה קבוצתית / יציאה מהניהול)
+    match /workerWifi/{id} {
+      allow read, write: if isMgr() || isSup() || (hasRole() && request.auth.uid == id);
+    }
+    // 📢 הודעת מנהל/אחראי לעובד (מסמך אחד לעובד). העובד קורא את שלו ומסמן "נקרא" בלבד
+    match /workerMessages/{id} {
+      allow read: if isMgr() || isSup() || (hasRole() && request.auth.uid == id);
+      allow write: if isMgr() || isSup();
+      allow create: if hasRole() && request.auth.uid == id
+        && request.resource.data.keys().hasOnly(['ts', 'read']);
+      allow update: if hasRole() && request.auth.uid == id
+        && request.resource.data.diff(resource.data).affectedKeys().hasOnly(['ts', 'read']);
+    }
+    // 📨 הודעת עובד למנהל: כל אחד שולח בשמו; קוראים ומסמנים — מנהל/אחראי
+    match /mgrInbox/{id} {
+      allow create: if hasRole() && request.resource.data.fromId == request.auth.uid;
+      allow read, update, delete: if isMgr() || isSup();
+    }
+    // 🚪 יומן השערים: כל מכשיר רושם אירוע; קריאה — מנהל/אחראי; שינוי ומחיקה — מנהל (יומן לא נערך בדיעבד)
+    match /gateOverrides/{id} {
+      allow create: if hasRole();
+      allow read: if isMgr() || isSup();
+      allow update, delete: if isMgr();
+    }
+
     // שאר האוספים — כל משתמש מחובר עם role
     // (stationLog נשאר כאן בכוונה — עובדים כותבים רשומות שיוך לתחנה)
     // ⚠️ כל אוסף שמקבל חוקים משלו חייב להופיע כאן ברשימת ההחרגה — Rules מאשרים
@@ -208,7 +261,14 @@ service cloud.firestore {
         && collection != 'checkImages'
         // עד 25/09/2026 חסר כאן — וחוק הקופה הייעודי (לקיחה בלבד, על שמך) לא נאכף בפועל
         && collection != 'cashbox'
-        && collection != 'voiceMsgs';
+        && collection != 'voiceMsgs'
+        && collection != 'thumbs'
+        && collection != 'taskAlerts'
+        && collection != 'wifiAlerts'
+        && collection != 'workerWifi'
+        && collection != 'workerMessages'
+        && collection != 'mgrInbox'
+        && collection != 'gateOverrides';
     }
   }
 }

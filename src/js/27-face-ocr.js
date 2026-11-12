@@ -193,9 +193,10 @@ async function _startFaceFirstRegister(){
   document.getElementById('face-reg-btn').textContent='📸 צלם פנים';
   document.getElementById('face-reg-btn').disabled=true;
   document.getElementById('face-reg-screen').classList.remove('hidden');
-  // הסתר כפתור ביטול — חייב לרשום פנים
-  const cancelBtn=document.querySelector('#face-reg-screen .btn:not(.primary)');
-  if(cancelBtn)cancelBtn.style.display='none';
+  // 🛑 (12/11/2026) "ביטול" נשאר גלוי, ובמצב הזה הוא **יוצא מהחשבון** (cancelFaceReg ⇒ doLogout): בלי פנים לא נכנסים.
+  // עד היום הסלקטור '.btn:not(.primary)' תפס את "🔄 צלם שוב" (הכפתור הראשון במסך) והסתיר אותו, "ביטול" נשאר
+  // גלוי ופתח את האפליקציה — והטוקן כבר הונפק אחרי הסיסמה, כך שהעובד נכנס בלי לרשום פנים (MM).
+  _faceRegCancelShow(true);_faceRegBoxes();
   const ok=await loadFaceModels();
   if(!ok){document.getElementById('face-reg-status').textContent='שגיאה בטעינת מודלים';return;}
   try{
@@ -279,8 +280,7 @@ async function _captureAndLogin(){
       },'image/jpeg',0.8);
     }catch(e){}
     document.getElementById('face-reg-screen').classList.add('hidden');
-    const cancelBtn=document.querySelector('#face-reg-screen .btn:not(.primary)');
-    if(cancelBtn)cancelBtn.style.display='';
+    _faceRegCancelShow(true);
     document.getElementById('face-reg-btn').textContent='📸 צלם דגימה 1/5';
     document.getElementById('face-reg-btn').onclick=captureFaceDescriptor;
     S._pendingUser=null;
@@ -531,14 +531,29 @@ async function faceRegConfirm(){
   renderAdmin();
 }
 
+// כפתור "ביטול" במסך רישום הפנים — לפי id. הסלקטור הישן ('#face-reg-screen .btn:not(.primary)') תפס את "🔄 צלם שוב"
+function _faceRegCancelShow(on){const b=document.getElementById('face-reg-cancel');if(b)b.style.display=on?'':'none';
+  // מנקה הסתרה שהסלקטור הישן השאיר על "צלם שוב"
+  const r=document.querySelector('#face-reg-preview-box .btn');if(r)r.style.display='';}
+// מצב התחלתי של המסך: שורת הצילום גלויה, התצוגה המקדימה סגורה
+function _faceRegBoxes(){window._pendingDescriptor=null;
+  const p=document.getElementById('face-reg-preview-box'),c=document.getElementById('face-reg-capture-box');
+  if(p)p.style.display='none';if(c)c.style.display='flex';}
 function cancelFaceReg(){
   if(_faceRegStream){_faceRegStream.getTracks().forEach(t=>t.stop());_faceRegStream=null;}
+  // רישום בכניסה (S._pendingUser: רישום ראשון אחרי סיסמה / רישום מחדש שהמנהל אישר) — העובד עוד לא בתוך האפליקציה
+  const atLogin=!!S._pendingUser||!S.user;
   _faceRegWorkerId=null;
   _faceRegSamples=[];_faceRegSnaps=[];
+  window._faceRegWorkerMode=false;
   const btn=document.getElementById('face-reg-btn');
   btn.textContent='📸 צלם דגימה 1/5';
   btn.onclick=captureFaceDescriptor;
+  _faceRegCancelShow(true);_faceRegBoxes();
   document.getElementById('face-reg-screen').classList.add('hidden');
+  // 🛑 ביטול בלי פנים = יציאה מהחשבון (signOut), לא כניסה: אחרי הסיסמה כבר יש טוקן, ופתיחת האפליקציה כאן
+  // הייתה מכניסה עובד שהמנהל חייב בזיהוי פנים בלי שרשם אותן
+  if(atLogin){S._pendingUser=null;doLogout();return;}
   document.getElementById('app-screen').classList.remove('hidden');
 }
 

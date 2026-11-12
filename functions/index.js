@@ -101,9 +101,36 @@ async function sendTelegramDocument(token, chatId, filename, buffer, caption) {
 // פלט הצלחה: {token, worker, needFaceRegister?} | {needFace:true, name, faceUpdateAllowed}
 // קודי שגיאה (ב-message): wrong | disabled | locked | ip | device | device-unknown | face-mismatch | no-face-update | emergency-wrong
 //                          | barcode-wrong | barcode-not-allowed | barcode-needs-setup
-async function regFail(credRef, creds) {
-  try { await credRef.set({ failCount: (creds.failCount || 0) + 1, lastFail: Date.now() }, { merge: true }); } catch (e) {}
+// 🔒 (12/11/2026) ניסיון הזדהות נספר **לפני** הבדיקה, בטרנזקציה. עד היום הכישלון נרשם אחרי הבדיקה ובלי
+// טרנזקציה: מאות בקשות במקביל קראו כולן failCount=0, נבדקו כולן, והנעילה (5 ניסיונות) לא עצרה אף אחת.
+// עכשיו כל בקשה תופסת מקום במונה לפני שהסוד נבדק ⇒ לכל היותר 5 בדיקות בחלון, גם במקביל.
+// הצלחה מאפסת (failCount: 0 בסוף login); שלב ביניים שהצליח (סיסמה נכונה ⇒ needFace) מחזיר את המקום (unclaimAttempt).
+// מחזיר את מספר הניסיון (1..5). נעול ⇒ זורק 'locked'.
+const LOGIN_MAX_FAILS = 5;
+async function claimAttempt(credRef, lockMs) {
+  const r = await db.runTransaction(async tx => {
+    const s = await tx.get(credRef);
+    const c = s.exists ? s.data() : {};
+    let fc = c.failCount || 0;
+    const now = Date.now();
+    if (fc >= LOGIN_MAX_FAILS) {
+      if (now - (c.lastFail || 0) < lockMs) return 0;
+      fc = 0; // חלון הנעילה עבר — מתחילים לספור מחדש (בלי זה כל טעות בודדת הייתה נועלת שוב מיד)
+    }
+    tx.set(credRef, { failCount: fc + 1, lastFail: now }, { merge: true });
+    return fc + 1;
+  });
+  if (!r) throw new functions.https.HttpsError('resource-exhausted', 'locked');
+  return r;
 }
+function unclaimAttempt(credRef) {
+  return credRef.set({ failCount: FieldValue.increment(-1) }, { merge: true }).catch(() => {});
+}
+// תבנית פנים תקינה = 128 מספרים סופיים (face-api). אורך אחר נדחה: euclidean משווה לפי הקצר מבין השניים,
+// ולכן וקטור של 64 הקטין את המרחק פי ~1.4 והסף 0.6 עבר בקלות (12/11/2026)
+const FACE_DIM = 128;
+const validDescriptor = a => Array.isArray(a) && a.length === FACE_DIM && a.every(x => typeof x === 'number' && Number.isFinite(x));
+const validSamples = a => Array.isArray(a) && a.length > 0 && a.length <= 10 && a.every(validDescriptor);
 function sanitizeWorker(w) {
   const out = { ...w };
   delete out.pass; delete out.faceDescriptor; delete out.faceDescriptors; delete out.deviceId;
@@ -154,11 +181,11 @@ const loginImpl = async (data, context) => {
     const emRef = db.collection('credentials').doc('_emergency');
     const emSnap = await emRef.get();
     const em = emSnap.exists ? emSnap.data() : {};
-    if ((em.failCount || 0) >= 5 && Date.now() - (em.lastFail || 0) < 10 * 60 * 1000) {
+    if ((em.failCount || 0) >= LOGIN_MAX_FAILS && Date.now() - (em.lastFail || 0) < 10 * 60 * 1000) {
       throw new functions.https.HttpsError('resource-exhausted', 'locked');
     }
+    await claimAttempt(emRef, 10 * 60 * 1000);
     if (!cfgHash || hashPass(String(d.emergencyCode)) !== cfgHash) {
-      await regFail(emRef, em);
       await tg('🚨 TextileOps — קוד חירום שגוי!\n🕐 שעה: ' + ilTime() + '\nמישהו הזין קוד חירום לא נכון. ייתכן ניסיון פריצה!');
       throw new functions.https.HttpsError('permission-denied', 'emergency-wrong');
     }
@@ -197,15 +224,16 @@ const loginImpl = async (data, context) => {
   }
 
   // ── נעילה זמנית אחרי 5 כשלונות (חלון 60 שנ') ──
-  if ((creds.failCount || 0) >= 5) {
-    if (Date.now() - (creds.lastFail || 0) < 60 * 1000) {
-      throw new functions.https.HttpsError('resource-exhausted', 'locked');
-    }
-    // חלון הנעילה עבר — איפוס המונה. בלי זה המונה נשאר גבוה לתמיד
-    // וכל כישלון בודד חדש (טעות הקלדה אחת) נועל שוב מיד — מלכודת בלי יציאה.
-    creds.failCount = 0;
-    try { await credRef.set({ failCount: 0 }, { merge: true }); } catch (e) {}
+  // בדיקה מוקדמת וזולה; הספירה עצמה (והאיפוס אחרי שהחלון עבר) — ב-claimAttempt, בטרנזקציה
+  const LOCK_MS = 60 * 1000;
+  if ((creds.failCount || 0) >= LOGIN_MAX_FAILS && Date.now() - (creds.lastFail || 0) < LOCK_MS) {
+    throw new functions.https.HttpsError('resource-exhausted', 'locked');
   }
+  // כישלון הזדהות: הניסיון כבר נספר ב-claimAttempt. בניסיון החמישי (= נעילה) — התראה אחת למנהל
+  const failAuth = async (n, code) => {
+    if (n >= LOGIN_MAX_FAILS) await tg('🔒 TextileOps — חשבון ננעל לדקה אחרי ' + LOGIN_MAX_FAILS + ' ניסיונות כניסה כושלים\n👤 עובד: ' + (w.name || user) + '\n🌐 IP: ' + (callerIp(context) || '?') + '\n🕐 שעה: ' + ilTime());
+    throw new functions.https.HttpsError('permission-denied', code);
+  };
   if (w.disabled) throw new functions.https.HttpsError('permission-denied', 'disabled');
 
   // ── בדיקת רשת המפעל (IP בצד שרת — לא ניתן לעקיפה מהלקוח) ──
@@ -248,23 +276,22 @@ const loginImpl = async (data, context) => {
   if (Array.isArray(d.faceDescriptor) && d.faceDescriptor.length >= 64) {
     // ── אימות פנים בצד שרת ──
     if (!hasFace) throw new functions.https.HttpsError('failed-precondition', 'wrong');
+    const n = await claimAttempt(credRef, LOCK_MS);
+    // 🔒 רק וקטור מלא (128) מול תבניות באותו אורך — ראה validDescriptor
     const live = d.faceDescriptor.map(Number);
-    const dist = Math.min(...storedDescriptors(faceSrc).map(s => euclidean(live, s)));
-    if (!(dist < 0.6)) {
-      await regFail(credRef, creds);
-      throw new functions.https.HttpsError('permission-denied', 'face-mismatch');
-    }
+    const stored = storedDescriptors(faceSrc).filter(s => s.length === FACE_DIM);
+    const dist = validDescriptor(live) && stored.length ? Math.min(...stored.map(s => euclidean(live, s))) : NaN;
+    if (!(dist < 0.6)) await failAuth(n, 'face-mismatch');
   } else if (Array.isArray(d.registerDescriptors) && d.registerDescriptors.length) {
     // ── רישום פנים מחדש בכניסה — רק אם המנהל אישר מראש ──
     if (!w.faceUpdateAllowed) throw new functions.https.HttpsError('permission-denied', 'no-face-update');
+    if (!validSamples(d.registerDescriptors)) throw new functions.https.HttpsError('invalid-argument', 'wrong');
     // 🔒 אישור המנהל לבדו אינו הזדהות: בלי סיסמה, כל מי שידע את שם המשתמש של עובד מאושר
     // היה רושם את פניו שלו ונכנס בשמו (נסגר 25/09/2026). אותה בדיקה כמו במסלול הסיסמה למטה.
+    const n = await claimAttempt(credRef, LOCK_MS);
     const rp = String(d.pass || '');
     const rStored = creds.pass !== undefined ? creds.pass : (w.pass || '');
-    if (!rp || !(rStored === hashPass(rp) || (rStored && !String(rStored).startsWith('$h:') && rStored === rp))) {
-      await regFail(credRef, creds);
-      throw new functions.https.HttpsError('permission-denied', 'wrong');
-    }
+    if (!rp || !(rStored === hashPass(rp) || (rStored && !String(rStored).startsWith('$h:') && rStored === rp))) await failAuth(n, 'wrong');
     await credRef.set({ faceDescriptors: Object.fromEntries(d.registerDescriptors.map((s, i) => [i, s.map(Number)])), faceDescriptor: FieldValue.delete() }, { merge: true });
     await wDoc.ref.set({ faceUpdateAllowed: false, faceRegistered: true, faceDescriptor: FieldValue.delete(), faceDescriptors: FieldValue.delete() }, { merge: true });
   } else if (d.empBarcode != null) {
@@ -291,25 +318,22 @@ const loginImpl = async (data, context) => {
       throw new functions.https.HttpsError('permission-denied', 'device');
     }
     // הברקוד חייב להתאים בדיוק לעובד שהוזן/נשמר בשם המשתמש
-    if (String(d.empBarcode).trim() !== 'EMP:' + w.id) {
-      await regFail(credRef, creds);
-      throw new functions.https.HttpsError('permission-denied', 'barcode-wrong');
-    }
+    const n = await claimAttempt(credRef, LOCK_MS);
+    if (String(d.empBarcode).trim() !== 'EMP:' + w.id) await failAuth(n, 'barcode-wrong');
   } else if (d.pass != null && String(d.pass).length) {
     // != null: ה-SDK של callable מעביר undefined כ-null — null אינו סיסמה (רהאם 10/11/2026)
     // ── אימות סיסמה ──
     const stored = creds.pass !== undefined ? creds.pass : (w.pass || '');
     const p = String(d.pass);
+    const n = await claimAttempt(credRef, LOCK_MS);
     if (stored === hashPass(p)) { /* ok */ }
     else if (stored && !String(stored).startsWith('$h:') && stored === p) {
       // סיסמה ישנה בטקסט רגיל — שדרוג ל-hash
       await credRef.set({ pass: hashPass(p) }, { merge: true });
-    } else {
-      await regFail(credRef, creds);
-      throw new functions.https.HttpsError('permission-denied', 'wrong');
-    }
+    } else await failAuth(n, 'wrong');
     // עובד עם פנים רשומות — סיסמה לבדה לא מספיקה, נדרש זיהוי פנים
-    if (w.faceAuth && hasFace) return { needFace: true, name: w.name, faceUpdateAllowed: !!w.faceUpdateAllowed };
+    // (הסיסמה נכונה ⇒ הניסיון שנספר מוחזר; שלב הפנים ייספר בנפרד)
+    if (w.faceAuth && hasFace) { await unclaimAttempt(credRef); return { needFace: true, name: w.name, faceUpdateAllowed: !!w.faceUpdateAllowed }; }
     if (w.faceAuth && !hasFace) needFaceRegister = true;
   } else {
     // אין סיסמה — אם יש זיהוי פנים רשום, הלקוח יפתח מצלמה
@@ -396,6 +420,16 @@ exports.resumeSession = functions.https.onCall(async (data, context) => {
   // ── שער 2: השעיה ──
   if (w.disabled) throw new functions.https.HttpsError('permission-denied', 'disabled');
 
+  // ── שער 2.5: זיהוי פנים דלוק ועדיין אין תבנית (12/11/2026) ──
+  // login מנפיק טוקן אחרי הסיסמה ורק אז הלקוח פותח את מסך רישום הפנים (needFaceRegister). מי שרענן את
+  // הדף במסך הזה שוחזר לכאן ונכנס בלי פנים. בלי תבנית אין שחזור — כניסה מלאה, שמחייבת את הרישום.
+  if (w.faceAuth && w.role !== 'manager') {
+    const fc = await db.collection('credentials').doc(w.id).get();
+    if (!storedDescriptors(fc.exists ? fc.data() : null).length && !storedDescriptors(w).length) {
+      throw new functions.https.HttpsError('permission-denied', 'no-session');
+    }
+  }
+
   // ── שער 3: רשת המפעל ──
   if (w.requireFactoryIP) {
     const tgSet = await db.collection('appSettings').doc('telegramSettings').get();
@@ -466,7 +500,17 @@ exports.updateCredentials = functions.https.onCall(async (data, context) => {
   if (d.action === 'registerFace') {
     if (role !== 'manager' && context.auth.uid !== targetId) throw new functions.https.HttpsError('permission-denied', 'אין הרשאה');
     const samples = d.descriptors;
-    if (!Array.isArray(samples) || !samples.length || !samples.every(s => Array.isArray(s))) throw new functions.https.HttpsError('invalid-argument', 'דגימות חסרות');
+    if (!validSamples(samples)) throw new functions.https.HttpsError('invalid-argument', 'דגימות חסרות');
+    // 🔒 (12/11/2026) עובד רושם לעצמו פנים רק ב: (א) רישום ראשון — זיהוי פנים דלוק ואין עדיין תבנית
+    // (needFaceRegister אחרי כניסה בסיסמה), או (ב) המנהל אישר עדכון (faceUpdateAllowed). עד היום כל מחובר
+    // החליף לעצמו את התבנית מתי שרצה — למשל לפנים של חברה, שתחתים במקומו.
+    if (role !== 'manager') {
+      const [wS, cS] = await Promise.all([db.collection('workers').doc(targetId).get(), db.collection('credentials').doc(targetId).get()]);
+      const tw = wS.exists ? wS.data() : null, tc = cS.exists ? cS.data() : {};
+      if (!tw) throw new functions.https.HttpsError('permission-denied', 'אין הרשאה');
+      const has = storedDescriptors(tc).length > 0 || storedDescriptors(tw).length > 0;
+      if (!tw.faceUpdateAllowed && !(tw.faceAuth && !has)) throw new functions.https.HttpsError('permission-denied', 'no-face-update');
+    }
     await db.collection('credentials').doc(targetId).set({ faceDescriptors: Object.fromEntries(samples.map((s, i) => [i, s.map(Number)])), faceDescriptor: FieldValue.delete() }, { merge: true });
     await db.collection('workers').doc(targetId).set({ faceRegistered: true, faceUpdateAllowed: false, faceDescriptor: FieldValue.delete(), faceDescriptors: FieldValue.delete() }, { merge: true });
     return { ok: true };
@@ -1663,6 +1707,7 @@ const trackEmailEnt = x => typeof x === 'string' ? { e: x.toLowerCase(), at: 0, 
 // רשומה מלפני הוספת המייל מחדש (at < ent.at) לא נחשבת — הוספה מחדש מאפסת גם את המכשירים.
 // השרת כותב רק רשומות חדשות/שינוי מצב, ו-seen לכל היותר פעם ב-15 דק' (09/11/2026, היה 6 שעות; כדי לא לרענן את חלון המנהל בכל טעינה).
 const TRACK_DEV_RE = /^[A-Za-z0-9-]{8,64}$/;
+const TRACK_IMG_RE = /^data:image\/(jpeg|png|webp|gif);base64,[A-Za-z0-9+/=]+$/;
 async function trackDeviceGate(email, cust, ent, devId, req) {
   if (!TRACK_DEV_RE.test(devId)) return ent.max ? 'pending' : 'ok'; // דף ישן בלי מזהה — חוסם רק כשיש הגבלה
   const ref = db.doc('adminSettings/custDevices');
@@ -1886,7 +1931,8 @@ exports.customerTrack = functions.runWith({ memory: '1GB' }).https.onRequest(asy
         if (!own) { res.status(404).json({ error: 'none' }); return; }
       }
       const t = (await db.doc('thumbs/' + imgId).get()).data();
-      if (!t || !t.img) { res.status(404).json({ error: 'none' }); return; }
+      // 🔒 (12/11/2026) thumbs נכתב מהלקוח — מחזירים רק תמונת data: תקינה (ערך אחר היה מוזרק ל-HTML של הדף)
+      if (!t || !t.img || !TRACK_IMG_RE.test(String(t.img))) { res.status(404).json({ error: 'none' }); return; }
       res.set('Cache-Control', 'private, max-age=604800');
       res.json({ img: String(t.img), at: +t.at || 0 }); return;
     }
@@ -2084,5 +2130,29 @@ exports.voiceCleanup = functions.pubsub.schedule('15 3 * * *').timeZone('Asia/Je
   if (old.empty) return null;
   const b = db.batch(); old.forEach(x => b.delete(x.ref)); await b.commit();
   console.log('voiceCleanup: deleted', old.size);
+  return null;
+});
+
+// 🔒 ניתוק session בהשעיה / שינוי תפקיד / מחיקת עובד (12/11/2026).
+// disabled, התפקיד, חלון הגישה וה-IP נבדקים רק ב-login וב-resumeSession; ה-Rules רואים רק את ה-role
+// שבטוקן, וטוקן שכבר הונפק ממשיך להתרענן לבד. לכן עובדת שהושעתה (או מי שהעתיק את ה-session שלה)
+// המשיכה לקרוא ולכתוב במסד בלי הגבלת זמן. ביטול ה-refresh tokens עוצר את הרענון: הגישה נגמרת
+// כשהטוקן הנוכחי פג (עד שעה), וכניסה מחדש עוברת את כל השערים של login.
+// שינוי תפקיד: הטוקן הישן נושא את התפקיד הישן ⇒ מבוטל; שחזור/כניסה מנפיקים טוקן עם התפקיד החדש.
+exports.sessionGuard = functions.firestore.document('workers/{id}').onWrite(async (change, context) => {
+  const b = change.before.exists ? change.before.data() : null;
+  const a = change.after.exists ? change.after.data() : null;
+  const why = !a ? 'deleted'
+    : (a.disabled && !(b && b.disabled)) ? 'disabled'
+    : (b && (a.role || 'worker') !== (b.role || 'worker')) ? 'role'
+    : '';
+  if (!why) return null;
+  try {
+    await admin.auth().revokeRefreshTokens(context.params.id);
+    console.log('sessionGuard: revoked', context.params.id, why);
+  } catch (e) {
+    // עובד שמעולם לא נכנס — אין לו משתמש ב-Auth ואין מה לבטל
+    if (e.code !== 'auth/user-not-found') console.error('sessionGuard:', context.params.id, why, e.code || e.message);
+  }
   return null;
 });
