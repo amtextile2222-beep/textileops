@@ -65,23 +65,27 @@ function tgCfg() {
   return { token: cfgVal('telegram', 'token', 'TELEGRAM_TOKEN'), chatId: cfgVal('telegram', 'chatid', 'TELEGRAM_CHATID') };
 }
 
-// שולח הודעה לטלגרם
-function sendTelegram(token, chatId, text) {
-  return new Promise((resolve, reject) => {
-    const body = JSON.stringify({ chat_id: chatId, text, parse_mode: 'HTML' });
-    const req = https.request({
-      hostname: 'api.telegram.org',
-      path: `/bot${token}/sendMessage`,
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json', 'Content-Length': Buffer.byteLength(body) }
-    }, res => {
-      res.on('data', () => {});
-      res.on('end', resolve);
+// שולח הודעה לטלגרם. מחזיר true רק אם טלגרם אישר (ok).
+// 🛑 (12/11/2026) עד היום התשובה לא נבדקה בכלל. ההודעות נשלחות כ-HTML (כמה מהן עם <b>), וטלגרם דוחה את **כל**
+// ההודעה כשיש בטקסט < או & שאינם תג תקין — שם עובד/לקוח כמו "H&M", הודעה חופשית מהאפליקציה (tgSend).
+// ההתראה פשוט נעלמה, בלי שום סימן. עכשיו: נדחתה בגלל הפענוח ⇒ נשלחת שוב כטקסט רגיל (התגים, אם יש,
+// יופיעו כמו שהם — עדיף על הודעה שלא הגיעה); כל כישלון אחר נרשם ביומן. 4096 = אורך ההודעה המרבי בטלגרם.
+async function sendTelegram(token, chatId, text) {
+  const txt = String(text == null ? '' : text).slice(0, 4096);
+  const post = async extra => {
+    const res = await fetch(`https://api.telegram.org/bot${token}/sendMessage`, {
+      method: 'POST', headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ chat_id: chatId, text: txt, ...extra })
     });
-    req.on('error', reject);
-    req.write(body);
-    req.end();
-  });
+    return res.json().catch(() => ({ ok: false, error_code: res.status, description: 'HTTP ' + res.status }));
+  };
+  let j = await post({ parse_mode: 'HTML' });
+  if (!j.ok && j.error_code === 400 && /parse entities/i.test(String(j.description || ''))) {
+    console.warn('sendTelegram: HTML נדחה, נשלח כטקסט רגיל —', j.description);
+    j = await post({});
+  }
+  if (!j.ok) console.error('sendTelegram failed:', j.error_code, j.description);
+  return !!j.ok;
 }
 
 // שולח קובץ (CSV) לטלגרם כמסמך. מחזיר true רק אם Telegram אישר ok — משמש את הארכוב
@@ -746,8 +750,7 @@ exports.tgSend = functions.https.onCall(async (data, context) => {
     if (kind === 'message') {
       const text = String(data.text || '').slice(0, 4000);
       if (!text) throw new functions.https.HttpsError('invalid-argument', 'טקסט ריק');
-      await sendTelegram(token, chatId, text);
-      return { ok: true };
+      return { ok: await sendTelegram(token, chatId, text) };
     }
     if (kind === 'photo' || kind === 'document') {
       const b64 = String(data.dataB64 || '');
