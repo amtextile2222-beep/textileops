@@ -66,6 +66,7 @@ let _h2cP=null;
 function _loadH2C(){
   if(window.html2canvas)return Promise.resolve();
   return _h2cP=_h2cP||new Promise((ok,no)=>{const sc=document.createElement('script');
+    sc.integrity='sha384-ZZ1pncU3bQe8y31yfZdMFdSpttDoPmOZg2wguVK9almUodir1PghgT0eY7Mrty8H';sc.crossOrigin='anonymous';
     sc.src='https://cdnjs.cloudflare.com/ajax/libs/html2canvas/1.4.1/html2canvas.min.js';
     sc.onload=ok;sc.onerror=()=>{_h2cP=null;no(new Error('html2canvas לא נטען'));};document.head.appendChild(sc);});
 }

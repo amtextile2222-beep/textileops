@@ -204,7 +204,7 @@ function card(o){
 // 🍎 הדפסה באייפון (11/11/2026): ב-PWA במסך הבית window.print() לא עושה כלום ⇒ צילום (html2canvas) ⇒ PDF (jsPDF)
 // ⇒ חלון השיתוף ⇒ "הדפסה". כמו _dnPdfBlob באפליקציה. navigator.share דורש לחיצה טרייה ⇒ הכנה בלחיצה הראשונה,
 // והכפתור הופך ל"🖨 PDF מוכן — הדפסה" לשיתוף בלחיצה השנייה.
-const _ldJs=(src,ok)=>ok()?Promise.resolve():new Promise((res,rej)=>{const sc=document.createElement('script');sc.src=src;sc.onload=res;sc.onerror=()=>rej(new Error('טעינה נכשלה'));document.head.appendChild(sc);});
+const _ldJs=(src,ok,sri)=>ok()?Promise.resolve():new Promise((res,rej)=>{const sc=document.createElement('script');if(sri){sc.integrity=sri;sc.crossOrigin='anonymous';}sc.src=src;sc.onload=res;sc.onerror=()=>rej(new Error('טעינה נכשלה'));document.head.appendChild(sc);});
 const _pdfB={}; // PDF מוכן לכל כפתור (stkp = מלאי, ordp = הזמנות)
 async function stkPdf(html,bid='stkp'){
   const b=$(bid);let _stkBlob=_pdfB[bid];
@@ -213,8 +213,8 @@ async function stkPdf(html,bid='stkp'){
     const u=URL.createObjectURL(_stkBlob);location.href=u;return;}
   if(b){b.disabled=true;b.textContent='⏳ מכין…';}
   try{
-    await _ldJs('https://cdnjs.cloudflare.com/ajax/libs/html2canvas/1.4.1/html2canvas.min.js',()=>window.html2canvas);
-    await _ldJs('https://cdnjs.cloudflare.com/ajax/libs/jspdf/2.5.1/jspdf.umd.min.js',()=>window.jspdf);
+    await _ldJs('https://cdnjs.cloudflare.com/ajax/libs/html2canvas/1.4.1/html2canvas.min.js',()=>window.html2canvas,'sha384-ZZ1pncU3bQe8y31yfZdMFdSpttDoPmOZg2wguVK9almUodir1PghgT0eY7Mrty8H');
+    await _ldJs('https://cdnjs.cloudflare.com/ajax/libs/jspdf/2.5.1/jspdf.umd.min.js',()=>window.jspdf,'sha384-JcnsjUPPylna1s1fvi1u12X5qjY5OL56iySh75FdtrwhO/SWXgMjoVqcKyIIWOLk');
     const el=document.createElement('div');el.className='stkpdf';el.style.cssText='position:fixed;left:-10000px;top:0;width:794px';el.innerHTML=html;document.body.appendChild(el);
     let cv;try{cv=await html2canvas(el,{scale:2,backgroundColor:'#ffffff',windowWidth:794});}finally{el.remove();}
     const doc=new window.jspdf.jsPDF({unit:'mm',format:'a4'}),pagePx=Math.floor(cv.width*297/210);

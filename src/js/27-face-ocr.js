@@ -21,9 +21,10 @@ async function sendFaceRegPhotos(workerName,snaps){
 
 // ⚡ (04/11/2026) ספריות כבדות (זיהוי פנים 650KB, יצירת/קריאת PDF ~670KB) נטענות רק כשצריך —
 // קודם הן נטענו בכל פתיחה, וזיהוי הפנים בראש הדף חסם את ציור המסך כולו עד שירד
-const _LIBS={faceapi:['https://cdn.jsdelivr.net/npm/face-api.js@0.22.2/dist/face-api.min.js?v=20260617',()=>window.faceapi],jspdf:['https://cdn.jsdelivr.net/npm/jspdf@2.5.1/dist/jspdf.umd.min.js',()=>window.jspdf],pdfjs:['https://cdn.jsdelivr.net/npm/pdfjs-dist@3.11.174/build/pdf.min.js',()=>window.pdfjsLib]},_libP={};
-function _lib(k){const[u,ok]=_LIBS[k];if(ok())return Promise.resolve();
-  return _libP[k]||(_libP[k]=new Promise((res,rej)=>{const sc=document.createElement('script');sc.src=u;
+const _LIBS={faceapi:['https://cdn.jsdelivr.net/npm/face-api.js@0.22.2/dist/face-api.min.js?v=20260617',()=>window.faceapi,'sha384-gzn2n++arkvyhdNLmUf1s6F5NZ8iAbZ7FhIt+Zw7Jlf1n/vNTmZ3+cYr7S4ogyco'],jspdf:['https://cdn.jsdelivr.net/npm/jspdf@2.5.1/dist/jspdf.umd.min.js',()=>window.jspdf,'sha384-JcnsjUPPylna1s1fvi1u12X5qjY5OL56iySh75FdtrwhO/SWXgMjoVqcKyIIWOLk'],pdfjs:['https://cdn.jsdelivr.net/npm/pdfjs-dist@3.11.174/build/pdf.min.js',()=>window.pdfjsLib,'sha384-/1qUCSGwTur9vjf/z9lmu/eCUYbpOTgSjmpbMQZ1/CtX2v/WcAIKqRv+U1DUCG6e']},_libP={};
+// 🔒 האיבר השלישי = חתימת integrity (sha384) — קובץ שהוחלף ב-CDN לא ירוץ. שדרוג גרסה ⇒ לחשב חתימה חדשה
+function _lib(k){const[u,ok,sri]=_LIBS[k];if(ok())return Promise.resolve();
+  return _libP[k]||(_libP[k]=new Promise((res,rej)=>{const sc=document.createElement('script');if(sri){sc.integrity=sri;sc.crossOrigin='anonymous';}sc.src=u;
     sc.onload=()=>ok()?res():(_libP[k]=null,rej(new Error(k+' לא נטען')));sc.onerror=()=>{_libP[k]=null;sc.remove();rej(new Error(k+' לא נטען — בדוק חיבור ונסה שוב'));};document.head.appendChild(sc);}));}
 async function loadFaceModels(){
   if(_faceModelsLoaded)return true;

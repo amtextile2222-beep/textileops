@@ -13,6 +13,28 @@ const db = admin.firestore();
 const FieldValue = admin.firestore.FieldValue;
 
 function hashPass(p) { return '$h:' + crypto.createHash('sha256').update(String(p), 'utf8').digest('hex'); }
+// 🔒 (12/11/2026) סיסמאות עובדים: scrypt עם salt אקראי לכל סיסמה — '$s:<salt>:<hash>' (hex).
+// עד היום SHA-256 בלי salt: מי שהשיג את אוסף credentials (גיבוי, ייצוא) פענח סיסמאות קצרות בשניות מטבלה מוכנה.
+// ישנות ('$h:' / טקסט רגיל) ממשיכות להתקבל ומשודרגות בכניסה המוצלחת הבאה (passOk ⇒ up). hashPass נשאר
+// לקוד החירום בלבד — ה-hash שלו יושב ב-functions:config ולא משתנה מכאן.
+function hashPassS(p) {
+  const salt = crypto.randomBytes(16);
+  return '$s:' + salt.toString('hex') + ':' + crypto.scryptSync(String(p), salt, 32).toString('hex');
+}
+// {ok, up}: ok = הסיסמה נכונה; up = שמורה בפורמט ישן ⇒ לשמור מחדש עם hashPassS
+function passOk(stored, p) {
+  stored = String(stored == null ? '' : stored); p = String(p == null ? '' : p);
+  if (!stored || !p) return { ok: false };
+  if (stored.startsWith('$s:')) {
+    try {
+      const [, sh, hh] = stored.split(':');
+      const want = Buffer.from(hh, 'hex'), got = crypto.scryptSync(p, Buffer.from(sh, 'hex'), want.length || 32);
+      return { ok: want.length > 0 && crypto.timingSafeEqual(want, got) };
+    } catch (e) { return { ok: false }; }
+  }
+  if (stored.startsWith('$h:')) return { ok: stored === hashPass(p), up: true };
+  return { ok: stored === p, up: true };
+}
 function ilTime() { return new Date().toLocaleTimeString('he-IL', { hour: '2-digit', minute: '2-digit', timeZone: 'Asia/Jerusalem' }); }
 function ilTimeOfIso(iso) { try { const d = new Date(iso); if (isNaN(d)) return ''; return d.toLocaleTimeString('he-IL', { hour: '2-digit', minute: '2-digit', timeZone: 'Asia/Jerusalem' }); } catch (e) { return ''; } }
 function callerRole(context) { return (context.auth && context.auth.token && context.auth.token.role) || ''; }
@@ -212,7 +234,17 @@ const loginImpl = async (data, context) => {
   const creds = credSnap.exists ? credSnap.data() : {};
 
   // ── התראת כשל זיהוי פנים (לא מחזירה טוקן; נשלחת אחרי 3 כשלונות) ──
+  // 🔒 (12/11/2026) הקריאה פתוחה בלי התחברות (מסך הכניסה) ⇒ התראה אחת לדקה לעובד, ורק לעובד שזיהוי
+  // פנים דלוק אצלו. בלי זה כל מי שיודע שם משתמש הציף את הטלגרם של המנהל בתמונות (עד 9MB כל אחת).
   if (d.faceFailAlert) {
+    if (!w.faceAuth) return { ok: true };
+    const okSend = await db.runTransaction(async tx => {
+      const c = (await tx.get(credRef)).data() || {};
+      if (Date.now() - (c.lastFaceAlert || 0) < 60 * 1000) return false;
+      tx.set(credRef, { lastFaceAlert: Date.now() }, { merge: true });
+      return true;
+    });
+    if (!okSend) return { ok: true, throttled: true };
     const caption = '⚠️ TextileOps — זיהוי פנים נכשל\n👤 עובד: ' + (w.name || user) + '\n🕐 שעה: ' + ilTime() + '\nהעובד ניסה להיכנס 3 פעמים ולא זוהה.\nבדוק ואשר כניסה ידנית אם נדרש.';
     const b64 = String(d.photoB64 || '');
     if (b64 && b64.length < 9000000 && tgToken && tgChatId) {
@@ -295,7 +327,9 @@ const loginImpl = async (data, context) => {
     const n = await claimAttempt(credRef, LOCK_MS);
     const rp = String(d.pass || '');
     const rStored = creds.pass !== undefined ? creds.pass : (w.pass || '');
-    if (!rp || !(rStored === hashPass(rp) || (rStored && !String(rStored).startsWith('$h:') && rStored === rp))) await failAuth(n, 'wrong');
+    const rChk = passOk(rStored, rp);
+    if (!rChk.ok) await failAuth(n, 'wrong');
+    if (rChk.up) await credRef.set({ pass: hashPassS(rp) }, { merge: true });
     await credRef.set({ faceDescriptors: Object.fromEntries(d.registerDescriptors.map((s, i) => [i, s.map(Number)])), faceDescriptor: FieldValue.delete() }, { merge: true });
     await wDoc.ref.set({ faceUpdateAllowed: false, faceRegistered: true, faceDescriptor: FieldValue.delete(), faceDescriptors: FieldValue.delete() }, { merge: true });
   } else if (d.empBarcode != null) {
@@ -330,11 +364,10 @@ const loginImpl = async (data, context) => {
     const stored = creds.pass !== undefined ? creds.pass : (w.pass || '');
     const p = String(d.pass);
     const n = await claimAttempt(credRef, LOCK_MS);
-    if (stored === hashPass(p)) { /* ok */ }
-    else if (stored && !String(stored).startsWith('$h:') && stored === p) {
-      // סיסמה ישנה בטקסט רגיל — שדרוג ל-hash
-      await credRef.set({ pass: hashPass(p) }, { merge: true });
-    } else await failAuth(n, 'wrong');
+    const chk = passOk(stored, p);
+    if (!chk.ok) await failAuth(n, 'wrong');
+    // סיסמה בפורמט ישן (SHA-256 בלי salt / טקסט רגיל) — שדרוג ל-scrypt עם salt
+    if (chk.up) await credRef.set({ pass: hashPassS(p) }, { merge: true });
     // עובד עם פנים רשומות — סיסמה לבדה לא מספיקה, נדרש זיהוי פנים
     // (הסיסמה נכונה ⇒ הניסיון שנספר מוחזר; שלב הפנים ייספר בנפרד)
     if (w.faceAuth && hasFace) { await unclaimAttempt(credRef); return { needFace: true, name: w.name, faceUpdateAllowed: !!w.faceUpdateAllowed }; }
@@ -492,7 +525,7 @@ exports.updateCredentials = functions.https.onCall(async (data, context) => {
     if (role !== 'manager') throw new functions.https.HttpsError('permission-denied', 'מנהל בלבד');
     const p = String(d.newPass || '').trim();
     if (!p) throw new functions.https.HttpsError('invalid-argument', 'סיסמה ריקה');
-    await db.collection('credentials').doc(targetId).set({ pass: hashPass(p) }, { merge: true });
+    await db.collection('credentials').doc(targetId).set({ pass: hashPassS(p) }, { merge: true });
     return { ok: true };
   }
   if (d.action === 'resetDevice') {
@@ -668,7 +701,8 @@ exports.calcTaskExpected = functions.https.onCall(async (data, context) => {
 // שליחת Push Notification
 exports.sendPush = functions.https.onCall(async (data, context) => {
   if (!callerRole(context)) throw new functions.https.HttpsError('unauthenticated', 'יש להתחבר תחילה');
-  const { title, body, alertType } = data;
+  const { title, body, alertType } = data || {};
+  if (!title && !body) return { sent: false, reason: 'empty' };
   try {
     const settingsSnap = await db.collection('appSettings').doc('pushSettings').get();
     if (!settingsSnap.exists) return { sent: false, reason: 'no settings' };
@@ -719,7 +753,8 @@ exports.sendPush = functions.https.onCall(async (data, context) => {
 // שליחת Push לעובד ספציפי
 exports.sendPushToWorker = functions.https.onCall(async (data, context) => {
   if (!callerRole(context)) throw new functions.https.HttpsError('unauthenticated', 'יש להתחבר תחילה');
-  const { workerId, title, body } = data;
+  const { workerId, title, body } = data || {};
+  if (!workerId || typeof workerId !== 'string' || workerId.includes('/')) return { sent: false, reason: 'worker not found' };
   try {
     const workerSnap = await db.collection('workers').doc(workerId).get();
     if (!workerSnap.exists) return { sent: false, reason: 'worker not found' };
@@ -1768,10 +1803,13 @@ async function trackLogSignIn(tok, email, cust, req) {
   try {
     const ref = db.doc('adminSettings/custTrackLog');
     const rec = { cust, email, at: Date.now(), dev: trackDevice(req.get('user-agent')), ip: callerIp({ rawRequest: req }), ok: !!cust };
+    let quiet = false;
     const isNew = await db.runTransaction(async tx => {
       const s = await tx.get(ref);
       const ent = (s.data() || {}).entries || {};
       if (ent[key]) return false;
+      // 🔒 מייל לא מורשה שנכנס שוב ושוב (session חדש בכל פעם) — נרשם ביומן, אבל טלגרם פעם בשעה למייל
+      quiet = !cust && Object.values(ent).some(x => x && !x.ok && x.email === email && rec.at - (x.at || 0) < 3600000);
       const upd = { ['entries.' + key]: rec };
       const old = Object.keys(ent).sort((a, b) => (ent[a].at || 0) - (ent[b].at || 0));
       for (const k of old.slice(0, Math.max(0, old.length - 299))) upd['entries.' + k] = FieldValue.delete();
@@ -1779,7 +1817,7 @@ async function trackLogSignIn(tok, email, cust, req) {
       return true;
     });
     _trackSeen.add(key);
-    if (!isNew) return;
+    if (!isNew || quiet) return;
     const { token: tgT, chatId: tgC } = tgCfg();
     if (!tgT || !tgC) return;
     const nm = cust ? (((await db.doc('appSettings/customerNames').get()).data() || {})[cust] || cust) : '';
