@@ -5760,6 +5760,9 @@ function applyPerms(w){
 
 // ─── LOGIN ──────────────────────────────────────────────────
 let loginAttempts=0;let loginLocked=false;let loginLockTimer=null;
+// ⏱ הנעילה המקומית = הנעילה בשרת (login: 5 ניסיונות ⇒ דקה). עד 12/11/2026 המסך אמר 30 שניות והשתחרר אחרי 30,
+// בזמן שהשרת המשיך לדחות עוד חצי דקה
+const LOGIN_LOCK_MS=60000;
 // כניסת חירום — למנהלים בלבד, מוגן ב-hash
 const _EMRG_H='$h:f434da0ecb3e3968e92503d17e29177511eb65394ff0d232f51a5f33a6ce9613';
 // ─── שלב 2 אבטחה: כל האימות עובר דרך Cloud Function login ───
@@ -5831,10 +5834,10 @@ function _loginWrongPass(){
   loginAttempts++;
   if(loginAttempts>=5){
     loginLocked=true;
-    document.getElementById('l-err').textContent='יותר מדי ניסיונות — חשבון נעול ל-30 שניות';
+    document.getElementById('l-err').textContent='יותר מדי ניסיונות — חשבון נעול לדקה';
     document.getElementById('l-user').disabled=true;
     document.getElementById('l-pass').disabled=true;
-    loginLockTimer=setTimeout(()=>{loginLocked=false;loginAttempts=0;document.getElementById('l-user').disabled=false;document.getElementById('l-pass').disabled=false;document.getElementById('l-err').textContent='';},30000);
+    loginLockTimer=setTimeout(()=>{loginLocked=false;loginAttempts=0;document.getElementById('l-user').disabled=false;document.getElementById('l-pass').disabled=false;document.getElementById('l-err').textContent='';},LOGIN_LOCK_MS);
   } else {
     document.getElementById('l-err').textContent='שם משתמש או סיסמה שגויים ('+loginAttempts+'/5)';
   }
@@ -6063,7 +6066,7 @@ async function startBcLogin(){
   if(!u){document.getElementById('l-err').textContent='נא למלא שם משתמש';return;}
   if(_bcLoginStream)return; // כבר פתוח
   // אותן חסימות כמו doLogin — לא לפתוח מצלמה על גרסה ישנה או חשבון נעול
-  if(loginLocked){document.getElementById('l-err').textContent='חשבון נעול ל-30 שניות עקב ניסיונות כושלים';return;}
+  if(loginLocked){document.getElementById('l-err').textContent='חשבון נעול לדקה עקב ניסיונות כושלים';return;}
   if(await checkVersion()){document.getElementById('l-err').textContent='🔄 יש גרסה חדשה — לחץ "עדכן עכשיו" למעלה ונסה שוב';return;}
   const video=document.getElementById('l-bc-video');
   const status=document.getElementById('l-bc-status');
@@ -6104,7 +6107,7 @@ async function nfcBcLogin(){
   const u=document.getElementById('l-user').value.trim();
   const err=document.getElementById('l-err');
   if(!u){err.textContent='נא למלא שם משתמש';return;}
-  if(loginLocked){err.textContent='חשבון נעול ל-30 שניות עקב ניסיונות כושלים';return;}
+  if(loginLocked){err.textContent='חשבון נעול לדקה עקב ניסיונות כושלים';return;}
   if(await checkVersion()){err.textContent='🔄 יש גרסה חדשה — לחץ "עדכן עכשיו" למעלה ונסה שוב';return;}
   err.textContent='';
   nfcRead(async txt=>{
@@ -6159,7 +6162,7 @@ function _autoBcLogin(u){
   },500);
 }
 async function doLogin(){
-  if(loginLocked){document.getElementById('l-err').textContent='חשבון נעול ל-30 שניות עקב ניסיונות כושלים';return;}
+  if(loginLocked){document.getElementById('l-err').textContent='חשבון נעול לדקה עקב ניסיונות כושלים';return;}
   if(await checkVersion()){document.getElementById('l-err').textContent='🔄 יש גרסה חדשה — לחץ "עדכן עכשיו" למעלה ונסה שוב';return;}
   const u=document.getElementById('l-user').value.trim();
   // 🛑 שדה הסיסמה **מוסתר** לעובד עם פנים/ברקוד, אבל הערך שהוקלד בו קודם נשאר. בלי הבדיקה הזו

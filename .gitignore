@@ -13,3 +13,6 @@ read-pdf.mjs
 HANDOFF.md
 TextileOps_סיכום_*.md
 backup_*.json
+
+# יומני אמולטור / פריסה
+*-debug.log
