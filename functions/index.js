@@ -1169,6 +1169,25 @@ exports.longTaskMonitor = functions.pubsub.schedule('every 5 minutes').onRun(asy
   return null;
 });
 
+// 📡 דיווח IP למנטר ה-WiFi (13/11/2026). השרת רושם את הכתובת שממנה הגיעה הבקשה (callerIp),
+// לא כתובת שהטלפון טוען — קודם הטלפון כתב בעצמו ל-workerWifi (ipify) ועובד יכול היה לזייף.
+// עובד — רק את עצמו; אחראי/מנהל — גם עובד אחר (החתמה מהמכשיר שלו). קריאה אחת + כתיבה אחת.
+exports.wifiPing = functions.https.onCall(async (data, context) => {
+  const role = callerRole(context);
+  if (!role) throw new functions.https.HttpsError('unauthenticated', 'login');
+  const uid = context.auth.uid;
+  const wid = String((data && data.wid) || uid);
+  if (wid !== uid && role !== 'manager' && role !== 'supervisor') throw new functions.https.HttpsError('permission-denied', 'self');
+  const ws = await db.collection('workers').doc(wid).get();
+  if (!ws.exists) return { ok: false, reason: 'nf' };
+  const w = ws.data();
+  if (!w.requireFactoryIP) return { ok: false, reason: 'off' };
+  const ip = callerIp(context);
+  if (!ip) return { ok: false, reason: 'noip' };
+  await db.collection('workerWifi').doc(wid).set({ ip, lastSeen: Date.now(), name: w.name || '', dept: w.dept || '' });
+  return { ok: true };
+});
+
 // בדיקת WiFi כל 5 דקות
 exports.wifiMonitor = functions.pubsub.schedule('every 5 minutes').onRun(async () => {
   try {

@@ -297,7 +297,7 @@ async function autoPunchIn(){
   w.checkin=w.sessions[0].in;
   saveLS(); // שמור מקומי תחילה — לא תלוי ב-Firebase
   try{if(S.fbConnected)await fbSet('workers',w.id,attFields(w));}catch(e){}
-  if(w.requireFactoryIP&&S.fbConnected){try{const r=await fetch('https://api.ipify.org?format=json');const ip=(await r.json()).ip||'';await fbSet('workerWifi',w.id,{ip,lastSeen:Date.now(),name:w.name,dept:w.dept});}catch(e){}}
+  if(w.requireFactoryIP)_wifiPing(w.id);
   tgPunch(w.name,w.dept,true,now,w.id);
   const autoResumed=await resumeWorkerTasksOnPunchIn(w.id,now);
   if(autoResumed)showToast('▶ '+autoResumed+' '+(LANGS[currentLang].tasks_resumed_msg||'משימות חודשו אוטומטית'),'var(--green-txt)',5000);
@@ -347,7 +347,7 @@ async function punchIn(){
       return;
     }
   }
-  if(w.requireFactoryIP&&S.fbConnected){try{const r=await fetch('https://api.ipify.org?format=json');const ip=(await r.json()).ip||'';await fbSet('workerWifi',w.id,{ip,lastSeen:Date.now(),name:w.name,dept:w.dept});}catch(e){}}
+  if(w.requireFactoryIP)_wifiPing(w.id);
   tgPunch(w.name,w.dept,true,now,w.id);
   const resumedCount=await resumeWorkerTasksOnPunchIn(w.id,now);
   saveLS();renderAtt();

@@ -91,7 +91,7 @@ const EMU = (process.env.FIRESTORE_EMULATOR_HOST || '127.0.0.1:8080').split(':')
     await ok(nm + ': נעילת punchOutAlert', setDoc(D(db, 'appSettings/punchOutAlert'), { date: '2026-11-12' }, { merge: true }));
     await ok(nm + ': נעילת endOfDayAlert', setDoc(D(db, 'appSettings/endOfDayAlert'), { date: '2026-11-12' }, { merge: true }));
     await ok(nm + ': מונה תעודות משלוח', runTransaction(db, async tx => { const r = D(db, 'appSettings/deliveryNote'); const s = await tx.get(r); tx.set(r, { last: (s.data().last || 0) + 1 }, { merge: true }); }));
-    await ok(nm + ': דיווח IP שלו', setDoc(D(db, 'workerWifi/' + uid), { ip: '1.1.1.1', lastSeen: 1 }, { merge: true }));
+    await no(nm + ': כתיבת IP שלו (רק השרת)', setDoc(D(db, 'workerWifi/' + uid), { ip: '1.1.1.1', lastSeen: 1 }, { merge: true }));
     await ok(nm + ': קריאת ה-IP שלו', getDoc(D(db, 'workerWifi/' + uid)));
     await ok(nm + ': מחיקת ה-IP שלו (יציאה)', deleteDoc(D(db, 'workerWifi/' + uid)));
     await ok(nm + ': הודעה למנהל', addDoc(collection(db, 'mgrInbox'), { fromId: uid, fromName: nm, msg: 'm', ts: 1, read: false }));
@@ -164,7 +164,7 @@ const EMU = (process.env.FIRESTORE_EMULATOR_HOST || '127.0.0.1:8080').split(':')
   await ok('אחראי: יומן השערים', getDocs(collection(sup, 'gateOverrides')));
   await ok('אחראי: רישום ביומן השערים', setDoc(D(sup, 'gateOverrides/e_s1'), { id: 'e', kind: 'k' }, { merge: true }));
   await ok('אחראי: הודעה לעובד', setDoc(D(sup, 'workerMessages/w1'), { msg: 'yo', from: 'sup', ts: 2, read: false }, { merge: true }));
-  await ok('אחראי: IP של עובד (החתמה קבוצתית)', setDoc(D(sup, 'workerWifi/w1'), { ip: '1.1.1.1', lastSeen: 1 }, { merge: true }));
+  await no('אחראי: כתיבת IP של עובד (רק השרת)', setDoc(D(sup, 'workerWifi/w1'), { ip: '1.1.1.1', lastSeen: 1 }, { merge: true }));
   await ok('אחראי: מחיקת IP של עובד (יציאה)', deleteDoc(D(sup, 'workerWifi/w1')));
   await ok('אחראי: מחיקת היסטוריית משימה', deleteDoc(D(sup, 'histTasks/h1')));
   await ok('אחראי: תמחור', getDoc(D(sup, 'productPricing/p1')));
@@ -193,6 +193,7 @@ const EMU = (process.env.FIRESTORE_EMULATOR_HOST || '127.0.0.1:8080').split(':')
   await ok('מנהל: adminSettings', setDoc(D(mgr, 'adminSettings/costs'), { rateCache: {} }, { merge: true }));
   await ok('מנהל: קריאת כל adminSettings', getDocs(collection(mgr, 'adminSettings')));
   await ok('מנהל: IP של עובד', getDoc(D(mgr, 'workerWifi/h1')));
+  await no('מנהל: כתיבת IP של עובד (רק השרת)', setDoc(D(mgr, 'workerWifi/h1'), { ip: '1.1.1.1', lastSeen: 1 }, { merge: true }));
   await ok('מנהל: יומן השערים + מחיקה', Promise.all([getDocs(collection(mgr, 'gateOverrides')), deleteDoc(D(mgr, 'gateOverrides/g1'))]));
   await ok('מנהל: תיבת המנהל', getDocs(query(collection(mgr, 'mgrInbox'), where('read', '==', false))));
   await ok('מנהל: הודעה לעובד', setDoc(D(mgr, 'workerMessages/h1'), { msg: 'a', from: 'm', ts: 3, read: false }, { merge: true }));

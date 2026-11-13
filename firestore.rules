@@ -220,9 +220,11 @@ service cloud.firestore {
     // נעילות ורישומי התראות של השרת בלבד (longTaskMonitor / remindLateTask / wifiMonitor, Admin SDK)
     match /taskAlerts/{id} { allow read, write: if false; }
     match /wifiAlerts/{id} { allow read, write: if false; }
-    // 📡 IP שהעובד מדווח: כל אחד את שלו; אחראי/מנהל — גם של אחרים (החתמה קבוצתית / יציאה מהניהול)
+    // 📡 IP של עובד בפנים (מנטר ה-WiFi). מ-13/11/2026 נכתב רק בשרת (wifiPing — הכתובת מהבקשה, לא מהטלפון).
+    // ללקוח: קריאה ומחיקה בלבד — כל אחד את שלו; אחראי/מנהל — גם של אחרים (יציאה מהניהול)
     match /workerWifi/{id} {
-      allow read, write: if isMgr() || isSup() || (hasRole() && request.auth.uid == id);
+      allow read, delete: if isMgr() || isSup() || (hasRole() && request.auth.uid == id);
+      allow create, update: if false;
     }
     // 📢 הודעת מנהל/אחראי לעובד (מסמך אחד לעובד). העובד קורא את שלו ומסמן "נקרא" בלבד
     match /workerMessages/{id} {
