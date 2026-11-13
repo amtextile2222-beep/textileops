@@ -1,10 +1,20 @@
 // ─── LOCAL STORAGE ──────────────────────────────────────────
+// 💾 (13/11/2026) עד היום נשמר כאן עותק של **כל** הנתונים (עובדים, משימות, היסטוריה, מוצרים, נוכחות, עלויות
+// ושכר, לקוחות) והוצג בפתיחה עד שהשרת ענה. שלוש בעיות: (1) כשהשמירה נכשלה בשקט (מכסה) העותק נתקע — נראה
+// הבזק של 103 מוצרים / 20 עובדים מלפני חודשים; (2) השכר נשאר בדפדפן גם אחרי יציאה; (3) runDailyReset רץ
+// בבוקר על רשימת העובדים מהעותק — עותק תקוע יכול לכתוב לאתמול נוכחות של יום ישן (נבדק 13/11: 0 מקרים ב-1,590).
+// עכשיו Firestore שומר את הנתונים במכשיר בעצמו (_initDb) ⇒ כאן רק מה שצריך **לפני** הכניסה, כשאין עדיין גישה לשרת:
+// _lsHints — רמזי מסך הכניסה (מי עם פנים / ברקוד / מנהל לחירום בלי רשת), ⚠️ **לא** ב-S.workers: autoPunchIn
+// ו-waitForWorker היו תופסים את הרשומה המקוצרת ככרטיס עובד וכותבים ממנה. + מונה משימות, צבעים, מה נשלח לטלגרם.
+const _LS_HINT_KEYS=['id','user','name','role','dept','faceAuth','faceRegistered','deviceBinding','deviceRegistered'];
+let _lsHints=[];
+function _hintsOf(ws){return (ws||[]).filter(w=>w&&w.user).map(w=>{const o={};_LS_HINT_KEYS.forEach(k=>{if(w[k]!==undefined)o[k]=w[k];});return o;});}
+// מקור לרמזי מסך הכניסה: העובדים החיים אם נטענו, אחרת הרמזים השמורים
+function _loginWorkers(){return (S.workers&&S.workers.length)?S.workers:_lsHints;}
 function saveLS(){
   try{
-    const d={workers:S.workers,depts:S.depts,deptStations:S.deptStations,activeTasks:S.activeTasks.map(t=>({...t,startTime:t.startTime instanceof Date?t.startTime.toISOString():t.startTime})),histTasks:S.histTasks.map(t=>({...t,startTime:t.startTime instanceof Date?t.startTime.toISOString():t.startTime,endTime:t.endTime instanceof Date?t.endTime.toISOString():t.endTime})),settings:S.settings,nextTId:S.nextTId,attHistory:S.attHistory,costs:S.costs,customerNames:S.customerNames,customerInfo:S.customerInfo,customColors:S.customColors,
-      // ⚠️ בלי התמונות. איתן המטמון שקל 17 MB מול מכסה של ~5 MB, setItem נכשל,
-      // ה-catch בלע את השגיאה — ו**שום דבר לא נשמר**. כל פתיחה הורידה הכל מהרשת.
-      products:S.products.map(p=>{const q={...p};delete q.images;q.imgCount=prodImgCount(p);return q;}),
+    if(S.workers&&S.workers.length)_lsHints=_hintsOf(S.workers);
+    const d={hints:_lsHints,nextTId:S.nextTId,customColors:S.customColors,
       tgSentAlerts:S.tgSentAlerts,tgAbsentSig:S.tgAbsentSig};
     localStorage.setItem('txops_v3',JSON.stringify(d));
   }catch(e){}
@@ -14,24 +24,15 @@ function loadLS(){
     const raw=localStorage.getItem('txops_v3');
     if(!raw)return;
     const d=JSON.parse(raw);
-    // עובדי דמו ישנים (מגרסאות קודמות) שנשמרו ב-localStorage — לא לטעון אותם
+    // עובדי דמו ישנים (מגרסאות קודמות) — לא לטעון אותם
     const DEMO_USERS=['riva','moha','ester','yosef','ahmad','sara','david'];
-    if(d.workers)S.workers=d.workers.filter(w=>!DEMO_USERS.includes(w.user));
-    if(d.depts)S.depts=d.depts;
-    if(d.deptStations)S.deptStations=d.deptStations;
-    if(d.deptStageMap)S.deptStageMap=d.deptStageMap;
-    if(d.activeTasks)S.activeTasks=d.activeTasks.map(t=>({...t,startTime:new Date(t.startTime),elapsed:0}));
-    if(d.histTasks)S.histTasks=d.histTasks.map(t=>({...t,startTime:new Date(t.startTime),endTime:t.endTime?new Date(t.endTime):null}));
-    if(d.settings)S.settings={...S.settings,...d.settings};
+    // עותק בפורמט הישן (workers מלא) ⇒ גוזרים ממנו רמזים בלבד, ושאר השדות (שכר, נוכחות...) נמחקים מיד למטה
+    _lsHints=_hintsOf(d.hints||d.workers).filter(w=>!DEMO_USERS.includes(w.user));
     if(d.nextTId)S.nextTId=d.nextTId;
-    if(d.attHistory)S.attHistory=d.attHistory;
-    if(d.costs)S.costs={...S.costs,...d.costs};
-    if(d.customerNames)S.customerNames=d.customerNames;
-    if(d.customerInfo)S.customerInfo=d.customerInfo;
     if(d.customColors){S.customColors=d.customColors;Object.assign(COLORS,d.customColors);}
-    if(d.products)S.products=d.products;
     if(d.tgSentAlerts)S.tgSentAlerts=d.tgSentAlerts;
     if(d.tgAbsentSig)S.tgAbsentSig=d.tgAbsentSig;
+    if(d.workers||d.costs||d.products||d.attHistory)saveLS(); // דורס את העותק הישן בגרסה המצומצמת
   }catch(e){}
 }
 loadLS();

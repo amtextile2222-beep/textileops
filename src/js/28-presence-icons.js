@@ -30,8 +30,9 @@ async function tabBeat(force){
   _tabBeatLast=Date.now();
   // מה שהטאב הזה מחזיק *בזיכרון שלו*, לא מה שיש בשרת — זה בדיוק מה שטאב רפאים כותב בחזרה
   const act=S.activeTasks||[];
-  let oldHeld=0;
-  try{oldHeld=act.filter(t=>_isStaleTask(t)).length;}catch(e){}
+  let oldHeld=0,oldIds=[];
+  // oldIds — כדי שהפאנל יבחין בין "טאב תקוע שמחזיק משימה שכבר נסגרה" לבין משימה ישנה שבאמת פתוחה בשרת
+  try{const st=act.filter(t=>_isStaleTask(t));oldHeld=st.length;oldIds=st.slice(0,50).map(t=>String(t.id));}catch(e){}
   try{
     await fbSet('tabSessions',tabId(),{
       tabId:tabId(),
@@ -40,7 +41,7 @@ async function tabBeat(force){
       verStale:!!_appVerStale,
       hidden,kiosk:/[?&#]kiosk=1\b/.test(location.href),
       device:_tabDevice(),
-      held:act.length,oldHeld,
+      held:act.length,oldHeld,oldIds,
       openedAt:_tabOpenedAt,lastSeen:srvNow().getTime()
     });
   }catch(e){}
@@ -99,7 +100,7 @@ async function _checkMultiTab(){
       const up=Math.round((now-(r.openedAt||now))/60000);
       return '   • '+(r.device||'?')+' — דופק לפני '+(ago<1?"פחות מדקה":ago+" דק'")
         +' · פתוח '+(up<1?"פחות מדקה":up+" דק'")+' · מחזיק '+(r.held||0)+' משימות'
-        +(r.oldHeld?' ⚠ '+r.oldHeld+' נשכחו':'');
+        +((g=>g?' ⚠ '+g+' נשכחו':'')(Array.isArray(r.oldIds)?r.oldIds.filter(id=>!(S.activeTasks||[]).some(t=>String(t.id)===String(id))).length:(r.oldHeld||0)));
     };
     await sendTelegram(
       '📑 TextileOps — יותר מטאב אחד לאותו עובד\n'+
@@ -136,7 +137,15 @@ async function renderTabSessions(){
     const dupNames=rows.filter(r=>dup[r.workerId]>1).reduce((m,r)=>{m[r.workerName]=dup[r.workerId];return m;},{});
     const vers={};rows.forEach(r=>{const v=r.ver||'?';vers[v]=(vers[v]||0)+1;});
     const verList=Object.entries(vers).sort((a,b)=>b[1]-a[1]);
-    const risk=rows.filter(r=>r.oldHeld>0);
+    // 👻 (13/11/2026) "נשכחו" = משימה ישנה שהטאב מחזיק **ושכבר לא קיימת בשרת** (= רפאים שהוא עלול לכתוב בחזרה).
+    // עד היום כל משימה מושהית מעל יומיים סומנה — אחרי חג/סופ"ש כל הטאבים התקינים נצבעו באדום עם אותן משימות.
+    // משימות ישנות שבאמת פתוחות בשרת — שורה נפרדת (לטיפול בניהול משימות), לא "טאב תקוע".
+    // דיווח מגרסה ישנה (בלי oldIds) — כמו קודם.
+    const srvIds=new Set((S.activeTasks||[]).map(t=>String(t.id)));
+    const ghostOf=r=>Array.isArray(r.oldIds)?r.oldIds.filter(id=>!srvIds.has(String(id))).length:(r.oldHeld||0);
+    rows.forEach(r=>{r.ghost=ghostOf(r);});
+    const risk=rows.filter(r=>r.ghost>0);
+    let srvStale=0;try{srvStale=(S.activeTasks||[]).filter(t=>_isStaleTask(t)).length;}catch(e){}
     const head=box(risk.length?'amber-bg':'green-bg',risk.length?'amber-txt':'green-txt',
       `📡 <b>${rows.length}</b> טאבים · <b>${live.length}</b> חיים כרגע · <b>${perWorker.size}</b> עובדים`+
       `<div style="margin-top:4px">גרסאות: ${verList.map(([v,n])=>`<code>${esc(v)}</code> ×${n}`).join(' · ')}`+
@@ -144,20 +153,21 @@ async function renderTabSessions(){
       (Object.keys(dupNames).length?`<div style="margin-top:4px">⚠ יותר מטאב אחד: ${Object.entries(dupNames).map(([n,c])=>esc(n)+' ×'+c).join(' · ')}</div>`:''));
     const warn=risk.length?box('red-bg','red-txt',
       `⛔ <b>${risk.length} טאבים מחזיקים משימות שנשכחו פתוחות</b> (מעל ${STALE_TASK_DAYS} ימים). זה המקור למשימות רפאים — סגור אותם:`+
-      `<div style="margin-top:4px">${risk.map(r=>esc(r.workerName||'?')+' — '+r.oldHeld+' משימות · '+esc(r.device||'')).join('<br>')}</div>`):'';
-    el.innerHTML=head+warn+`<div style="max-height:320px;overflow:auto;margin-top:6px">${rows.map(r=>{
+      `<div style="margin-top:4px">${risk.map(r=>esc(r.workerName||'?')+' — '+r.ghost+' משימות · '+esc(r.device||'')).join('<br>')}</div>`):'';
+    const srvNote=srvStale?box('bg2','txt2',`⏸ <b>${srvStale}</b> משימות מושהות מעל ${STALE_TASK_DAYS} ימים קיימות בשרת (אחרי חג/סופ"ש זה צפוי — מתחדשות בסריקה). אם נשכחו — סגור בניהול משימות. זה לא טאב תקוע.`):'';
+    el.innerHTML=head+warn+srvNote+`<div style="max-height:320px;overflow:auto;margin-top:6px">${rows.map(r=>{
       const ago=Math.round((now-(r.lastSeen||0))/60000);
       const up=Math.round((now-(r.openedAt||now))/3600000);
       const isLive=now-(r.lastSeen||0)<TAB_LIVE_MS;
       const me=r.tabId===tabId();
-      return `<div style="padding:6px 8px;border-bottom:1px solid var(--brd);font-size:12px${r.oldHeld>0?';background:var(--red-bg)':''}">
+      return `<div style="padding:6px 8px;border-bottom:1px solid var(--brd);font-size:12px${r.ghost>0?';background:var(--red-bg)':''}">
         <span style="font-weight:700">${isLive?'🟢':'🟡'} ${esc(r.workerName||'?')}</span>
         <span style="color:var(--txt3)"> · ${esc(r.role||'')} · ${esc(r.device||'')}${r.kiosk?' · 📺 מסך תצוגה':''}${me?' · <b>הטאב הזה</b>':''}</span>
         ${r.hidden?'<span class="badge gray" style="font-size:10px">ברקע</span>':''}
         ${r.verStale?'<span class="badge red" style="font-size:10px">גרסה ישנה</span>':''}
         <div style="margin-top:2px;color:var(--txt2)">
           דיווח לפני ${ago===0?'פחות מדקה':ago+" דק'"} · פתוח ${up<1?'פחות משעה':up+" שע'"} ·
-          מחזיק ${r.held||0} משימות${r.oldHeld>0?` <span style="color:var(--red-txt);font-weight:700">(${r.oldHeld} נשכחו!)</span>`:''} ·
+          מחזיק ${r.held||0} משימות${r.ghost>0?` <span style="color:var(--red-txt);font-weight:700">(${r.ghost} נשכחו!)</span>`:''} ·
           <code>${esc(r.ver||'?')}</code>
         </div>
       </div>`;}).join('')}</div>`;

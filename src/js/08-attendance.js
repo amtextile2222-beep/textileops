@@ -187,7 +187,11 @@ function clearMsgModal(){
   document.getElementById('msg-modal-preview').style.display='none';
   document.getElementById('msg-modal-preview-img').src='';
 }
+// 🔒 (13/11/2026) הכפתור ננעל מהלחיצה עד שהשליחה נגמרת (והחלון נסגר אחרי הצלחה) — לחיצה כפולה שלחה את
+// ההודעה פעמיים לטלגרם (MM, 12/11 16:01). כישלון ⇒ משחררים כדי שאפשר יהיה לנסות שוב.
+function _msgLock(id,on){const b=document.getElementById(id);if(b){b.disabled=on;b.style.opacity=on?'.5':'';}}
 async function sendMsgModal(){
+  if(document.getElementById('msg-modal-send')?.disabled)return;
   const txt=document.getElementById('msg-modal-txt').value.trim();
   const imgFile=document.getElementById('msg-modal-img').files[0];
   const st=document.getElementById('msg-modal-status');
@@ -196,6 +200,7 @@ async function sendMsgModal(){
   const now=new Date().toLocaleTimeString('he-IL',{hour:'2-digit',minute:'2-digit'});
   const caption='💬 הודעה מעובד\n👤 '+w.name+' ('+w.dept+')\n🕐 שעה: '+now+(txt?'\n\n'+txt:'');
   st.style.color='var(--txt2)';st.textContent='שולח...';
+  _msgLock('msg-modal-send',true);
   let ok=false;
   try{
     if(imgFile){
@@ -204,8 +209,8 @@ async function sendMsgModal(){
       ok=await tgCall({kind:'photo',dataB64:b64,caption});
     }else{ok=await sendTelegram(caption);}
   }catch(e){ok=false;}
-  if(ok){st.style.color='var(--green-txt)';st.textContent='✅ ההודעה נשלחה למנהל';setTimeout(closeMsgModal,2000);}
-  else{st.style.color='var(--red-txt)';st.textContent='שגיאה בשליחה';}
+  if(ok){st.style.color='var(--green-txt)';st.textContent='✅ ההודעה נשלחה למנהל';setTimeout(()=>{closeMsgModal();_msgLock('msg-modal-send',false);},2000);}
+  else{st.style.color='var(--red-txt)';st.textContent='שגיאה בשליחה';_msgLock('msg-modal-send',false);}
 }
 function openMsgToMgr(){
   document.getElementById('msg-to-mgr-box').classList.remove('hidden');
@@ -230,6 +235,7 @@ function clearMgrImg(){
   document.getElementById('msg-to-mgr-preview-img').src='';
 }
 async function sendMsgToMgr(){
+  if(document.getElementById('msg-to-mgr-send')?.disabled)return;
   const txt=document.getElementById('msg-to-mgr-txt').value.trim();
   const imgFile=document.getElementById('msg-to-mgr-img').files[0];
   const st=document.getElementById('msg-to-mgr-status');
@@ -238,6 +244,7 @@ async function sendMsgToMgr(){
   const now=new Date().toLocaleTimeString('he-IL',{hour:'2-digit',minute:'2-digit'});
   const caption='💬 הודעה מעובד\n👤 '+w.name+' ('+w.dept+')\n🕐 שעה: '+now+(txt?'\n\n'+txt:'');
   st.style.color='var(--txt2)';st.textContent='שולח...';
+  _msgLock('msg-to-mgr-send',true);
   let ok=false;
   try{
     if(imgFile){
@@ -249,19 +256,21 @@ async function sendMsgToMgr(){
     }
   }catch(e){ok=false;}
   if(ok){st.style.color='var(--green-txt)';st.textContent='✅ ההודעה נשלחה למנהל';
-    setTimeout(closeMsgToMgr,2000);
-  }else{st.style.color='var(--red-txt)';st.textContent='שגיאה בשליחה — בדוק הגדרות טלגרם';}
+    setTimeout(()=>{closeMsgToMgr();_msgLock('msg-to-mgr-send',false);},2000);
+  }else{st.style.color='var(--red-txt)';st.textContent='שגיאה בשליחה — בדוק הגדרות טלגרם';_msgLock('msg-to-mgr-send',false);}
 }
 
 // המתנה עד שהעובד קיים ב-S.workers (הנתונים מ-Firebase מגיעים כמה שניות אחרי login)
+// 💾 (13/11/2026) עם המטמון המקומי של Firestore הרשימה הראשונה יכולה להיות מאתמול (sessions ישנים) ⇒ מחכים
+// לנתוני שרת (_workersReady). בלי רשת — אחרי ה-timeout לוקחים מה שיש (כמו קודם).
 async function waitForWorker(id,timeoutMs=15000){
   const t0=Date.now();
   while(Date.now()-t0<timeoutMs){
     const w=S.workers.find(x=>x.id===id);
-    if(w)return w;
+    if(w&&(_workersReady||!db||!S.fbConnected))return w;
     await new Promise(r=>setTimeout(r,300));
   }
-  return null;
+  return S.workers.find(x=>x.id===id)||null;
 }
 // המתנה ל-snapshot הראשון מהשרת של activeTasks. בניגוד ל-waitForWorker, כאן אי אפשר
 // להסתפק ב-S.workers: הוא נטען מיידית מ-localStorage ולכן חוזר לפני שהמשימות הגיעו.

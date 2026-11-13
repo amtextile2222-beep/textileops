@@ -142,7 +142,7 @@
       <button onclick="clearMsgModal()" style="position:absolute;top:4px;left:4px;background:rgba(0,0,0,.5);color:#fff;border:none;border-radius:999px;width:22px;height:22px;cursor:pointer;font-size:13px;line-height:1">✕</button>
     </div>
     <div style="display:flex;gap:6px;margin-top:10px">
-      <button class="btn success" style="flex:1;justify-content:center" onclick="sendMsgModal()">📤 שלח</button>
+      <button class="btn success" style="flex:1;justify-content:center" id="msg-modal-send" onclick="sendMsgModal()">📤 שלח</button>
       <button class="btn" style="flex:1;justify-content:center" onclick="closeMsgModal()">ביטול</button>
     </div>
     <div id="msg-modal-status" style="font-size:11px;min-height:14px;text-align:center;margin-top:6px"></div>
@@ -274,7 +274,7 @@
             <button onclick="clearMgrImg()" style="position:absolute;top:4px;left:4px;background:rgba(0,0,0,.5);color:#fff;border:none;border-radius:999px;width:22px;height:22px;cursor:pointer;font-size:13px;line-height:1">✕</button>
           </div>
           <div style="display:flex;gap:6px">
-            <button class="btn success" style="flex:1;justify-content:center" onclick="sendMsgToMgr()">📤 שלח</button>
+            <button class="btn success" style="flex:1;justify-content:center" id="msg-to-mgr-send" onclick="sendMsgToMgr()">📤 שלח</button>
             <button class="btn" style="flex:1;justify-content:center" onclick="closeMsgToMgr()">ביטול</button>
           </div>
           <div id="msg-to-mgr-status" style="font-size:11px;min-height:14px;text-align:center"></div>

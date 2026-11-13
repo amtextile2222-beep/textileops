@@ -225,7 +225,7 @@ async function emergencyLogin(){
     const c=_loginErrCode(e);
     if(c==='network'&&hashPass(code)===_EMRG_H){
       // אין קשר לשרת — כניסת חירום מקומית (נתונים מקומיים בלבד, בלי Firestore)
-      const mgr=S.workers.find(w=>w.role==='manager')||S.workers[0];
+      const _lw=_loginWorkers(),mgr=_lw.find(w=>w.role==='manager')||_lw[0];
       if(!mgr){document.getElementById('l-err').textContent='אין חיבור לשרת ואין נתונים מקומיים';return;}
       document.getElementById('l-emergency').value='';
       finishLogin({...mgr,role:'manager'},false);
@@ -238,7 +238,7 @@ async function emergencyLogin(){
 // כשיר לכניסה בסריקת ברקוד: אין לו זיהוי פנים, יש נעילת מכשיר, והמכשיר כבר נרשם.
 // רמז מקומי מה-cache בלבד — השרת אוכף את אותם תנאים בעצמו (ראה exports.login).
 function _bcLoginEligible(u){
-  const w=S.workers.find(x=>x.user===u.trim());
+  const w=_loginWorkers().find(x=>x.user===u.trim());
   if(!w||w.role==='manager')return null;
   // זיהוי פנים דלוק (גם בלי פנים רשומות) ⇒ לא ברקוד: סיסמה ואז רישום פנים (needFaceRegister בשרת)
   if(w.faceAuth)return null;
@@ -247,7 +247,7 @@ function _bcLoginEligible(u){
 }
 function onUserInput(u){
   // רמז מקומי בלבד (מה-cache): לעובד עם פנים רשומות מוסתר שדה הסיסמה. ההכרעה האמיתית בשרת.
-  const w=S.workers.find(x=>x.user===u.trim()&&x.faceAuth&&(x.faceRegistered||x.faceDescriptor||x.faceDescriptors&&Object.keys(x.faceDescriptors).length));
+  const w=_loginWorkers().find(x=>x.user===u.trim()&&x.faceAuth&&(x.faceRegistered||x.faceDescriptor||x.faceDescriptors&&Object.keys(x.faceDescriptors).length));
   const bcw=w?null:_bcLoginEligible(u);
   document.getElementById('l-pass-wrap').style.display=(w||bcw)?'none':'';
   document.getElementById('l-face-hint').style.display=w?'block':'none';
@@ -258,7 +258,7 @@ function onUserInput(u){
 // טעינה מוקדמת בעליית הדף אם יש בכלל עובדים עם זיהוי פנים (מה-cache המקומי) — במקום להטעין כשהעובד כבר עומד מול המצלמה
 // + "זכור אותי": השם האחרון ממולא מראש; לעובד עם פנים רשומות הכניסה מתחילה לבד (אפס הקלדה)
 window.addEventListener('load',()=>{setTimeout(()=>{
-  if((S.workers||[]).some(x=>x.faceAuth))loadFaceModels();
+  if(_loginWorkers().some(x=>x.faceAuth))loadFaceModels();
   _startAutoLogin();
 },1500);});
 // מושהית כל עוד שחזור ה-session רץ: אחרת המצלמה נדלקת לרגע מתחת לאוברליי
@@ -287,7 +287,7 @@ function switchUser(){
 // כניסה אוטומטית רק כשהשם השמור שייך לעובד עם פנים רשומות (לפי ה-cache) — מחכה לחיבור לשרת ואז doLogin.
 // בטוח מהבית: השרת ממילא אוכף Wi-Fi מפעל/חלון גישה לעובדים; כשל בבדיקות = נשאר מסך כניסה רגיל.
 function _autoFaceLogin(u){
-  const w=S.workers.find(x=>x.user===u&&x.faceAuth&&(x.faceRegistered||x.faceDescriptor||x.faceDescriptors&&Object.keys(x.faceDescriptors).length));
+  const w=_loginWorkers().find(x=>x.user===u&&x.faceAuth&&(x.faceRegistered||x.faceDescriptor||x.faceDescriptors&&Object.keys(x.faceDescriptors).length));
   if(!w)return;
   let tries=0;
   const t=setInterval(()=>{
