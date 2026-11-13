@@ -9448,9 +9448,9 @@ async function stepMark(pid,nm,on){
   buildStepQtyReport(document.getElementById('rf-c')?.value||'',document.getElementById('rf-p')?.value||'');
   await buildPipelineReport();
 }
-// 📅 (13/11/2026, בקשת המשתמש) רק מוצרים עם פעילות ב-70 הימים האחרונים; יותר — בבורר "מ-" בכרטיס.
+// 📅 (13/11/2026, בקשת המשתמש) רק מוצרים עם פעילות ב-14 הימים האחרונים (שבועיים); יותר — בבורר "מ-" בכרטיס.
 // פעילות = השלב האחרון שסומן או תאריך פתיחת המוצר (המאוחר מביניהם). ריק = הכל.
-const STAGE_REP_DAYS=70;
+const STAGE_REP_DAYS=14;
 let _stgFrom=null; // null ⇒ טרם אותחל ⇒ היום פחות STAGE_REP_DAYS
 function stageRepFrom(v){_stgFrom=v||'';buildStageReport();}
 function _ymd(ms){const d=new Date(ms);return d.getFullYear()+'-'+pad2(d.getMonth()+1)+'-'+pad2(d.getDate());}
