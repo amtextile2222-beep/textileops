@@ -35,7 +35,16 @@ function _otpAsk(msg){
     setTimeout(()=>inp.focus(),50);
   });
 }
+// תיאור קצר של המכשיר לרשימת המכשירים של המנהל ("iPhone · Safari · אפליקציה") — תצוגה בלבד
+function _devLabel(){
+  const u=navigator.userAgent||'';
+  const os=/iPhone/.test(u)?'iPhone':/iPad/.test(u)||(/Macintosh/.test(u)&&navigator.maxTouchPoints>1)?'iPad':/Android/.test(u)?((u.match(/Android[^;]*;\s*([^;)]+?)(?:\s+Build|\))/)||[])[1]||'Android'):/Windows/.test(u)?'מחשב Windows':/Macintosh/.test(u)?'Mac':/Linux/.test(u)?'Linux':'מכשיר';
+  const br=/SamsungBrowser/.test(u)?'Samsung':/Edg\//.test(u)?'Edge':/OPR\//.test(u)?'Opera':/Firefox|FxiOS/.test(u)?'Firefox':/Chrome|CriOS/.test(u)?'Chrome':/Safari/.test(u)?'Safari':'';
+  const app=(window.matchMedia&&matchMedia('(display-mode: standalone)').matches)||navigator.standalone?'אפליקציה':'';
+  return[os,br,app].filter(Boolean).join(' · ');
+}
 async function _otpFlow(fn,payload){
+  payload={...payload,devLabel:_devLabel()};
   let msg='נשלח קוד בן 6 ספרות לטלגרם שלך.<br>הזן אותו כדי לאשר את המכשיר הזה (פעם אחת).';
   for(let i=0;i<8;i++){
     const code=await _otpAsk(msg);

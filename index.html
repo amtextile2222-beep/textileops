@@ -5861,7 +5861,16 @@ function _otpAsk(msg){
     setTimeout(()=>inp.focus(),50);
   });
 }
+// תיאור קצר של המכשיר לרשימת המכשירים של המנהל ("iPhone · Safari · אפליקציה") — תצוגה בלבד
+function _devLabel(){
+  const u=navigator.userAgent||'';
+  const os=/iPhone/.test(u)?'iPhone':/iPad/.test(u)||(/Macintosh/.test(u)&&navigator.maxTouchPoints>1)?'iPad':/Android/.test(u)?((u.match(/Android[^;]*;\s*([^;)]+?)(?:\s+Build|\))/)||[])[1]||'Android'):/Windows/.test(u)?'מחשב Windows':/Macintosh/.test(u)?'Mac':/Linux/.test(u)?'Linux':'מכשיר';
+  const br=/SamsungBrowser/.test(u)?'Samsung':/Edg\//.test(u)?'Edge':/OPR\//.test(u)?'Opera':/Firefox|FxiOS/.test(u)?'Firefox':/Chrome|CriOS/.test(u)?'Chrome':/Safari/.test(u)?'Safari':'';
+  const app=(window.matchMedia&&matchMedia('(display-mode: standalone)').matches)||navigator.standalone?'אפליקציה':'';
+  return[os,br,app].filter(Boolean).join(' · ');
+}
 async function _otpFlow(fn,payload){
+  payload={...payload,devLabel:_devLabel()};
   let msg='נשלח קוד בן 6 ספרות לטלגרם שלך.<br>הזן אותו כדי לאשר את המכשיר הזה (פעם אחת).';
   for(let i=0;i<8;i++){
     const code=await _otpAsk(msg);
@@ -12692,7 +12701,7 @@ function renderAdmin(){
       ${w.disabled?`<span title="גישה מושעית" style="font-size:16px">🚫</span>`:''}
       ${(w.stationGateMode||w.stepOrderGateMode)?`<span title="אכיפה מוגדרת ידנית — ${w.stationGateMode==='enforce'?'🔒 חל':w.stationGateMode==='override'?'🔒 פטור':'🔒 לפי תפקיד'} · ${w.stepOrderGateMode==='enforce'?'🔗 חל':w.stepOrderGateMode==='override'?'🔗 פטור':'🔗 לפי תפקיד'}" style="font-size:16px">${(w.stationGateMode==='enforce'||w.stepOrderGateMode==='enforce')?'🔒':'🔓'}</span>`:''}
       ${w.deviceBinding?`<span title="${(w.deviceRegistered||w.deviceId)?'מכשיר רשום ונעול':'נעילת מכשיר — טרם נרשם'}" style="font-size:16px">${(w.deviceRegistered||w.deviceId)?'📱🔒':'📱⚪'}</span>`:''}
-      ${w.role==='manager'&&S.user&&S.user.role==='manager'?`<button class="btn warn" style="font-size:11px;padding:4px 8px" title="נתק את כל המכשירים המוכרים של המנהל — בכניסה הבאה מכל מכשיר יידרש קוד בטלגרם" onclick="resetMgrDevices('${w.id}')">🔐🔄</button>`:''}
+      ${w.role==='manager'&&S.user&&S.user.role==='manager'?`<button class="btn warn" style="font-size:11px;padding:4px 8px" title="מכשירים מאושרים לכניסת המנהל — צפייה וביטול" onclick="openMgrDevices('${w.id}')">📱🔐</button>`:''}
       ${w.deviceBinding&&(w.deviceRegistered||w.deviceId)?`<button class="btn warn" style="font-size:11px;padding:4px 8px" title="אפס מכשיר — יאפשר כניסה ממכשיר חדש" onclick="resetDeviceBinding('${w.id}')">🔄</button>`:''}
       ${w.faceAuth?`<span title="${(w.faceRegistered||w.faceDescriptor||w.faceDescriptors&&Object.keys(w.faceDescriptors).length)?'זיהוי פנים פעיל':'זיהוי פנים — פנים לא רשומים'}" style="font-size:16px">${(w.faceRegistered||w.faceDescriptor||w.faceDescriptors&&Object.keys(w.faceDescriptors).length)?'🟢':'🟡'}</span>`:''}
       ${w.faceAuth?`<button class="btn ${w.faceUpdateAllowed?'success':''}\" style="font-size:11px;padding:4px 8px" title="${w.faceUpdateAllowed?'עדכון פנים מאושר — לחץ לביטול':'אפשר לעובד לעדכן פנים מהטלפון'}" onclick="toggleFaceUpdate('${w.id}')">${w.faceUpdateAllowed?'📸✅':'📸'}</button>`:''}
@@ -13115,14 +13124,48 @@ async function resetDeviceBinding(id){
     showToast('✅ מכשיר '+w.name+' אופס — יכול להיכנס ממכשיר חדש');
   }catch(e){alert('שגיאה באיפוס מכשיר: '+e.message);}
 }
-// 🔐 ניתוק כל המכשירים המוכרים של מנהל (13/11/2026) — אחרי חשד שהסיסמה דלפה / טלפון שאבד
+// 📱🔐 מכשירים מאושרים לכניסת מנהל (13/11/2026). הרשימה ב-credentials (חסום ללקוח) ⇒ דרך updateCredentials.
+// 🗑 = ביטול מכשיר אחד (טלפון שאבד); "נתק הכל" = חשד שהסיסמה דלפה. בכניסה הבאה מהמכשיר — קוד בטלגרם.
+const _mdCall=p=>window._fb.httpsCallable(window._fbFunctions,'updateCredentials')(p).then(r=>(r&&r.data)||{});
+const _mdFmt=t=>t?new Date(t).toLocaleString('he-IL',{day:'2-digit',month:'2-digit',year:'2-digit',hour:'2-digit',minute:'2-digit'}):'—';
+async function openMgrDevices(id){
+  const w=S.workers.find(x=>x.id===id);if(!w)return;
+  document.getElementById('md-ov')?.remove();
+  const o=document.createElement('div');o.id='md-ov';
+  o.style.cssText='position:fixed;inset:0;background:rgba(0,0,0,.5);z-index:9999;display:flex;align-items:center;justify-content:center;padding:16px';
+  o.onclick=e=>{if(e.target===o)o.remove();};
+  o.innerHTML=`<div style="background:var(--bg2,#fff);color:var(--txt,#111);border-radius:14px;padding:18px;max-width:520px;width:100%;max-height:85vh;overflow:auto;direction:rtl">
+    <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:6px"><b style="font-size:16px">📱🔐 מכשירים מאושרים — ${w.name}</b><button class="btn" style="padding:2px 10px" onclick="document.getElementById('md-ov').remove()">✕</button></div>
+    <div style="font-size:12px;color:var(--txt3);margin-bottom:10px">כניסה כמנהל מכל מכשיר אחר דורשת קוד מהטלגרם. מכשיר שמבוטל — יבקש קוד בכניסה הבאה.</div>
+    <div id="md-list" style="font-size:13px">טוען...</div>
+    <button class="btn warn" style="width:100%;margin-top:12px" onclick="resetMgrDevices('${id}')">🔄 נתק את כל המכשירים</button></div>`;
+  document.body.appendChild(o);
+  _mdLoad(id);
+}
+async function _mdLoad(id){
+  const el=document.getElementById('md-list');if(!el)return;
+  try{
+    const r=await _mdCall({action:'listMgrDevices',targetId:id,deviceId:await getDeviceId()});
+    const l=r.list||[];
+    el.innerHTML=l.length?l.map(d=>`<div style="display:flex;gap:8px;align-items:center;border:1px solid var(--bdr,#ddd);border-radius:10px;padding:8px 10px;margin-bottom:6px${d.cur?';background:rgba(0,128,0,.07)':''}">
+      <div style="flex:1;min-width:0"><div style="font-weight:600">${d.label||'מכשיר (אושר לפני שנשמר שם)'}${d.cur?' <span style="color:green;font-size:11px">· המכשיר הזה</span>':''}</div>
+      <div style="font-size:11px;color:var(--txt3);line-height:1.6">אושר: ${_mdFmt(d.at)} · ${d.via||''}<br>נראה לאחרונה: ${_mdFmt(d.last)} · IP ${d.lastIp||'?'}</div></div>
+      <button class="btn warn" style="padding:4px 10px" title="בטל את המכשיר" onclick="removeMgrDevice('${id}','${d.k}',${d.cur?1:0})">🗑</button></div>`).join(''):'<div style="color:var(--txt3)">אין מכשירים מאושרים — הכניסה הבאה מכל מכשיר תבקש קוד.</div>';
+  }catch(e){el.textContent='שגיאה בטעינה: '+e.message;}
+}
+async function removeMgrDevice(id,k,cur){
+  if(!confirm(cur?'לבטל את המכשיר הזה?\nהחיבור הנוכחי נשאר, אבל בכניסה הבאה ממנו יידרש קוד מהטלגרם.':'לבטל את המכשיר?\nכניסה ממנו תדרוש שוב קוד מהטלגרם.'))return;
+  try{await _mdCall({action:'removeMgrDevice',targetId:id,devKey:k});showToast('✅ המכשיר בוטל');_mdLoad(id);}
+  catch(e){alert('שגיאה: '+e.message);}
+}
+// 🔄 ניתוק כל המכשירים — אחרי חשד שהסיסמה דלפה
 async function resetMgrDevices(id){
   const w=S.workers.find(x=>x.id===id);if(!w)return;
   if(!confirm('לנתק את כל המכשירים המוכרים של '+w.name+'?\nבכניסה הבאה מכל מכשיר (גם מהמחשב הזה) יידרש קוד מהטלגרם.\nמומלץ גם להחליף סיסמה.'))return;
   try{
-    const{httpsCallable}=window._fb;
-    await httpsCallable(window._fbFunctions,'updateCredentials')({action:'resetMgrDevices',targetId:id});
+    await _mdCall({action:'resetMgrDevices',targetId:id});
     showToast('✅ המכשירים של '+w.name+' נותקו — בכניסה הבאה יידרש קוד בטלגרם');
+    _mdLoad(id);
   }catch(e){alert('שגיאה: '+e.message);}
 }
 async function toggleFaceUpdate(id){

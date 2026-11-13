@@ -72,6 +72,26 @@ const lastCode = () => { const m = /<code>(\d{6})<\/code>/.exec(sent[sent.length
   await fns.updateCredentials.run({ action: 'resetMgrDevices', targetId: 'm1' }, { auth: { uid: 'm1', token: { role: 'manager' } } });
   r = await login({ user: 'boss', pass: 'pw', deviceId: 'A' });
   t('אחרי ניתוק — מכשיר A שוב needOtp', r.needOtp);
+  // 📱 רשימה וביטול מכשיר אחד
+  const mctx = { auth: { uid: 'm1', token: { role: 'manager' } } };
+  r = await login({ user: 'boss', pass: 'pw', deviceId: 'A', devLabel: 'iPhone · Safari <b>' });
+  r = await login({ user: 'boss', pass: 'pw', deviceId: 'A', otp: lastCode(), devLabel: 'iPhone · Safari <b>' });
+  t('אישור עם שם מכשיר', !!r.token && /📱 iPhone · Safari b/.test(sent[sent.length - 1]));
+  r = await login({ user: 'boss', pass: 'pw', deviceId: 'E' });
+  r = await login({ user: 'boss', pass: 'pw', deviceId: 'E', otp: lastCode() });
+  let lst = (await fns.updateCredentials.run({ action: 'listMgrDevices', targetId: 'm1', deviceId: 'A' }, mctx)).list;
+  t('רשימה: 2 מכשירים, A מסומן כנוכחי עם שם', lst.length === 2 && lst.some(x => x.cur && x.label === 'iPhone · Safari b'));
+  t('רשימה לא חושפת את ה-UUID', !JSON.stringify(lst).includes('"A"') && lst.every(x => /^[0-9a-f]{32}$/.test(x.k)));
+  t('עובד לא יכול לראות רשימה', (await err(fns.updateCredentials.run({ action: 'listMgrDevices', targetId: 'm1' }, { auth: { uid: 'w1', token: { role: 'worker' } } }))) !== '');
+  const kE = lst.find(x => !x.cur).k;
+  await fns.updateCredentials.run({ action: 'removeMgrDevice', targetId: 'm1', devKey: kE }, mctx);
+  r = await login({ user: 'boss', pass: 'pw', deviceId: 'E' });
+  t('מכשיר שבוטל ⇒ needOtp', r.needOtp);
+  r = await login({ user: 'boss', pass: 'pw', deviceId: 'A' });
+  t('המכשיר השני לא נפגע', !!r.token);
+  lst = (await fns.updateCredentials.run({ action: 'listMgrDevices', targetId: 'm1' }, mctx)).list;
+  t('נראה לאחרונה מתעדכן', lst.length === 1 && lst[0].last >= lst[0].at);
+  t('מפתח לא תקין נדחה', (await err(fns.updateCredentials.run({ action: 'removeMgrDevice', targetId: 'm1', devKey: 'x' }, mctx))) !== '');
   // טלגרם נופל
   tgDown = true;
   t('טלגרם לא זמין ⇒ otp-send', (await err(login({ user: 'boss', pass: 'pw', deviceId: 'D' }))) === 'otp-send');

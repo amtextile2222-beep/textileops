@@ -128,14 +128,22 @@ async function sendTelegramDocument(token, chatId, filename, buffer, caption) {
 // מחזיר null = מותר · {needOtp:true} = הלקוח שולח שוב את אותה בקשה עם otp.
 // טלגרם לא זמין ⇒ נחסם (otp-send), לא fail-open. מכשיר מוכר = UUID ב-localStorage (txops_device_uuid).
 const OTP_TTL_MS = 5 * 60 * 1000, OTP_RESEND_MS = 60 * 1000, OTP_MAX_TRIES = 5;
+// מפתח המכשיר ברשימה = hash של ה-UUID (המזהה עצמו לא נשמר ולא חוזר ללקוח)
+const mgrDevKey = dev => crypto.createHash('sha256').update(String(dev)).digest('hex').slice(0, 32);
+// שם המכשיר שהלקוח מתאר (_devLabel: "iPhone · Safari") — תצוגה בלבד, לא אמצעי זיהוי
+const devLabelOf = d => String((d && d.devLabel) || '').replace(/[<>&"]/g, '').slice(0, 60);
 async function mgrDeviceGate(uid, name, d, context, via) {
   const dev = String(d.deviceId || '');
   if (!dev) throw new functions.https.HttpsError('failed-precondition', 'device-unknown');
-  const dk = crypto.createHash('sha256').update(dev).digest('hex').slice(0, 32); // מפתח שדה בטוח
+  const dk = mgrDevKey(dev);
   const ref = db.collection('credentials').doc(uid);
   const c = (await ref.get()).data() || {};
-  if ((c.mgrDevices || {})[dk]) return null;
   const now = Date.now(), o = c.mgrOtp || null, ip = callerIp(context) || '?';
+  if ((c.mgrDevices || {})[dk]) {
+    // מכשיר מוכר — רק "נראה לאחרונה" לרשימת המכשירים בכרטיס המנהל
+    await ref.set({ mgrDevices: { [dk]: { last: now, lastIp: ip } } }, { merge: true }).catch(() => {});
+    return null;
+  }
   const { token: tgToken, chatId: tgChatId } = tgCfg();
   if (d.otp != null && String(d.otp).trim()) {
     if (!o || o.dev !== dk || now > o.exp || (o.tries || 0) >= OTP_MAX_TRIES) throw new functions.https.HttpsError('permission-denied', 'otp-expired');
@@ -143,15 +151,16 @@ async function mgrDeviceGate(uid, name, d, context, via) {
       await ref.set({ mgrOtp: { ...o, tries: (o.tries || 0) + 1 } }, { merge: true });
       throw new functions.https.HttpsError('permission-denied', 'otp-wrong');
     }
-    await ref.set({ mgrDevices: { [dk]: { at: now, ip, via } }, mgrOtp: FieldValue.delete() }, { merge: true });
-    if (tgToken && tgChatId) await sendTelegram(tgToken, tgChatId, '✅ TextileOps — מכשיר חדש אושר לכניסת מנהל\n👤 ' + name + '\n🔑 דרך: ' + via + '\n🌐 IP: ' + ip + '\n🕐 שעה: ' + ilTime()).catch(() => {});
+    const label = devLabelOf(d);
+    await ref.set({ mgrDevices: { [dk]: { at: now, ip, via, label, last: now, lastIp: ip } }, mgrOtp: FieldValue.delete() }, { merge: true });
+    if (tgToken && tgChatId) await sendTelegram(tgToken, tgChatId, '✅ TextileOps — מכשיר חדש אושר לכניסת מנהל\n👤 ' + name + (label ? '\n📱 ' + label : '') + '\n🔑 דרך: ' + via + '\n🌐 IP: ' + ip + '\n🕐 שעה: ' + ilTime()).catch(() => {});
     return null;
   }
   if (o && o.dev === dk && now < o.exp && now - (o.sent || 0) < OTP_RESEND_MS && (o.tries || 0) < OTP_MAX_TRIES) return { needOtp: true };
   if (!tgToken || !tgChatId) throw new functions.https.HttpsError('unavailable', 'otp-send');
   const code = String(crypto.randomInt(0, 1000000)).padStart(6, '0');
   await ref.set({ mgrOtp: { h: hashPass(uid + ':' + code), dev: dk, exp: now + OTP_TTL_MS, sent: now, tries: 0 } }, { merge: true });
-  const ok = await sendTelegram(tgToken, tgChatId, '🔐 TextileOps — קוד כניסה למנהל ממכשיר חדש\n\n<code>' + code + '</code>\n\n👤 ' + name + '\n🔑 דרך: ' + via + '\n🌐 IP: ' + ip + '\n🕐 שעה: ' + ilTime() + '\n⏱ בתוקף 5 דקות\n⚠️ אם זה לא אתה — מישהו יודע את הסיסמה (או קוד החירום)! החלף מיד.').catch(() => false);
+  const ok = await sendTelegram(tgToken, tgChatId, '🔐 TextileOps — קוד כניסה למנהל ממכשיר חדש\n\n<code>' + code + '</code>\n\n👤 ' + name + (devLabelOf(d) ? '\n📱 ' + devLabelOf(d) : '') + '\n🔑 דרך: ' + via + '\n🌐 IP: ' + ip + '\n🕐 שעה: ' + ilTime() + '\n⏱ בתוקף 5 דקות\n⚠️ אם זה לא אתה — מישהו יודע את הסיסמה (או קוד החירום)! החלף מיד.').catch(() => false);
   if (!ok) { await ref.set({ mgrOtp: FieldValue.delete() }, { merge: true }); throw new functions.https.HttpsError('unavailable', 'otp-send'); }
   return { needOtp: true };
 }
@@ -575,6 +584,23 @@ exports.updateCredentials = functions.https.onCall(async (data, context) => {
     if (role !== 'manager') throw new functions.https.HttpsError('permission-denied', 'מנהל בלבד');
     await db.collection('credentials').doc(targetId).set({ deviceId: FieldValue.delete() }, { merge: true });
     await db.collection('workers').doc(targetId).set({ deviceRegistered: false }, { merge: true });
+    return { ok: true };
+  }
+  if (d.action === 'listMgrDevices') {
+    // 📱 רשימת המכשירים המאושרים של מנהל (credentials חסום ללקוח — רק דרך כאן, בלי ה-UUID עצמו)
+    if (role !== 'manager') throw new functions.https.HttpsError('permission-denied', 'מנהל בלבד');
+    const c = (await db.collection('credentials').doc(targetId).get()).data() || {};
+    const cur = d.deviceId ? mgrDevKey(d.deviceId) : '';
+    const list = Object.entries(c.mgrDevices || {}).map(([k, v]) => ({ k, label: v.label || '', at: v.at || 0, ip: v.ip || '', via: v.via || '', last: v.last || v.at || 0, lastIp: v.lastIp || v.ip || '', cur: k === cur }))
+      .sort((a, b) => b.last - a.last);
+    return { ok: true, list };
+  }
+  if (d.action === 'removeMgrDevice') {
+    // 🗑 ביטול מכשיר אחד — בכניסה הבאה ממנו יידרש שוב קוד בטלגרם
+    if (role !== 'manager') throw new functions.https.HttpsError('permission-denied', 'מנהל בלבד');
+    const k = String(d.devKey || '');
+    if (!/^[0-9a-f]{32}$/.test(k)) throw new functions.https.HttpsError('invalid-argument', 'מכשיר לא תקין');
+    await db.collection('credentials').doc(targetId).set({ mgrDevices: { [k]: FieldValue.delete() } }, { merge: true });
     return { ok: true };
   }
   if (d.action === 'resetMgrDevices') {
