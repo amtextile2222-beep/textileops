@@ -775,11 +775,26 @@ async function stepMark(pid,nm,on){
   buildStepQtyReport(document.getElementById('rf-c')?.value||'',document.getElementById('rf-p')?.value||'');
   await buildPipelineReport();
 }
+// 📅 (13/11/2026, בקשת המשתמש) רק מוצרים עם פעילות ב-70 הימים האחרונים; יותר — בבורר "מ-" בכרטיס.
+// פעילות = השלב האחרון שסומן או תאריך פתיחת המוצר (המאוחר מביניהם). ריק = הכל.
+const STAGE_REP_DAYS=70;
+let _stgFrom=null; // null ⇒ טרם אותחל ⇒ היום פחות STAGE_REP_DAYS
+function stageRepFrom(v){_stgFrom=v||'';buildStageReport();}
+function _ymd(ms){const d=new Date(ms);return d.getFullYear()+'-'+pad2(d.getMonth()+1)+'-'+pad2(d.getDate());}
 function buildStageReport(){
   const T=LANGS[currentLang];
   const el=document.getElementById('rp-stages-body');if(!el)return;
-  const prods=S.products||[];
-  if(!prods.length){el.innerHTML='<div style="color:var(--txt3);font-size:13px;padding:8px">אין מוצרים</div>';return;}
+  if(_stgFrom===null)_stgFrom=_ymd(Date.now()-STAGE_REP_DAYS*864e5);
+  const actOf=p=>{let a=prodStampOf(p)?_ymd(prodStampOf(p)):'';(p.stageLog||[]).forEach(e=>{const d=String(e.date||'').slice(0,10);if(d>a)a=d;});return a;};
+  const all=S.products||[];
+  const prods=_stgFrom?all.filter(p=>actOf(p)>=_stgFrom):all;
+  const hidden=all.length-prods.length;
+  const bar=`<div style="display:flex;align-items:center;gap:8px;flex-wrap:wrap;margin-bottom:8px;font-size:12px;color:var(--txt2)">
+    📅 פעילות מ-<input type="date" value="${_stgFrom||''}" onchange="stageRepFrom(this.value)" style="width:auto;padding:4px 6px;font-size:12px">
+    ${hidden?`<span style="color:var(--txt3)">(${hidden} מוצרים ישנים יותר מוסתרים)</span>`:''}
+    ${_stgFrom?`<button class="btn" style="padding:3px 8px;font-size:11px" onclick="stageRepFrom('')">הצג הכל</button>`:`<button class="btn" style="padding:3px 8px;font-size:11px" onclick="_stgFrom=null;buildStageReport()">${STAGE_REP_DAYS} יום אחרונים</button>`}
+  </div>`;
+  if(!prods.length){el.innerHTML=bar+'<div style="color:var(--txt3);font-size:13px;padding:8px">אין מוצרים בטווח</div>';return;}
   // לכל מוצר — מצא את השלב האחרון שהושלם
   const rows=prods.map(p=>{
     const log=p.stageLog||[];
@@ -809,7 +824,7 @@ function buildStageReport(){
       <td><span class="badge ${isDone?'green':doneStages>0?'blue':'red'}">${isDone?T.completed:doneStages>0?T.status_in_progress:T.status_not_started}</span></td>
     </tr>`};
   }).sort((a,b)=>a.grp-b.grp||b.curIdx-a.curIdx||b.pct-a.pct).map(r=>r.html).join('');
-  el.innerHTML=`<div class="tbl-wrap"><table>
+  el.innerHTML=bar+`<div class="tbl-wrap"><table>
     <thead><tr><th>לקוח / מוצר</th><th>שם</th><th>שלב נוכחי</th><th>תאריך</th><th>התקדמות</th><th>סטטוס</th></tr></thead>
     <tbody>${rows}</tbody>
   </table></div>`;
@@ -818,11 +833,15 @@ function buildStageReport(){
 // כי התקדמות ייצור מצטברת ולא אמורה "להיעלם" כשמסננים לטווח קצר.
 async function buildStepQtyReport(cf,pf){
   const el=document.getElementById('rp-stepqty-body');if(!el)return;
+  // 🎯 (13/11/2026, בקשת המשתמש) רק המוצר שנבחר בבורר "כל המוצרים" בראש הדף. עד היום הוצגו כל המוצרים,
+  // וכל הצגה קראה את **כל** היסטוריית המשימות (~12,600 מסמכים, שוב כל 30 שנ' כשהלשונית פתוחה).
+  // עכשיו רק משימות המוצר (loadHistProd — שאילתה על prod).
+  if(!pf){el.innerHTML='<div style="color:var(--txt3);font-size:13px;padding:8px">בחר מוצר בבורר "כל המוצרים" בראש הדף כדי לראות כמה הושלם בכל שלב.</div>';return;}
   // מכבד את בוררי לקוח/מוצר של לשונית הדוחות (טווח תאריכים במכוון לא — התקדמות מצטברת)
   const prods=S.products.filter(p=>(p.workSteps||[]).some(s=>stepName(s))&&(!cf||p.cust===cf)&&(!pf||p.prod===pf));
   if(!prods.length){el.innerHTML='<div style="color:var(--txt3);font-size:13px;padding:8px">אין מוצרים עם שלבי עבודה מוגדרים</div>';return;}
   el.innerHTML='<div style="color:var(--txt3);font-size:12px;padding:.5rem 0">⏳ טוען…</div>';
-  const hist=await loadHistRange('','');
+  const hist=await loadHistProd(pf);
   const dm=stepDoneMap(hist),isMgr=S.user?.role==='manager';
   const cards=prods.map(p=>{
     const steps=(p.workSteps||[]).map(s=>stepName(s)).filter(Boolean);
