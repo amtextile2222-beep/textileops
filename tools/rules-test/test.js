@@ -48,6 +48,9 @@ const EMU = (process.env.FIRESTORE_EMULATOR_HOST || '127.0.0.1:8080').split(':')
       await s('histTasks/h1', { workerId: 'w1', endTime: '2026-11-01T10:00:00.000Z' });
       await s('attHistory/w1_2026-11-01', { workerId: 'w1', date: '2026-11-01' });
       await s('products/p1', { cust: '01', prod: '00001', priced: true });
+      await s('cashbox/cb1', { id: 'cb1', type: 'in', workerId: 'm1', amount: 100, ts: 1 });
+      await s('workers/w3', { name: 'wcb', role: 'worker', user: 'w3', permissions: ['att', 'scan', 'cashbox'] });
+      await s('workers/s2', { name: 'sup2', role: 'supervisor', user: 's2', permissions: ['att', 'scan', 'tasks'] });
       await s('productPricing/p1', { unitPrice: 10 });
       await s('adminSettings/costs', { workerRates: {} });
       await s('credentials/w1', { pass: 'x' });
@@ -209,6 +212,20 @@ const EMU = (process.env.FIRESTORE_EMULATOR_HOST || '127.0.0.1:8080').split(':')
     await no(nm + ': mgrInbox', addDoc(collection(db, 'mgrInbox'), { fromId: 'c1', msg: 'x' }));
     await no(nm + ': products', getDocs(collection(db, 'products')));
   }
+
+  // ═══ 🧾 קופה לפי הרשאה (13/11/2026) ═══
+  const wcb = ctx('w3', 'worker'), sup2 = ctx('s2', 'supervisor');
+  await ok('עובד בלי permissions (ברירת מחדל): קריאת קופה', getDocs(collection(wrk, 'cashbox')));
+  await ok('עובד עם הרשאת קופה: קריאת קופה', getDocs(collection(wcb, 'cashbox')));
+  await ok('עובד עם הרשאת קופה: לקיחה', setDoc(D(wcb, 'cashbox/c_w3'), { id: 'c', type: 'out', workerId: 'w3', amount: 5 }));
+  await no('עובד בלי הרשאת קופה: קריאת קופה', getDocs(collection(wdn, 'cashbox')));
+  await no('עובד בלי הרשאת קופה: קריאת תנועה', getDoc(D(wdn, 'cashbox/cb1')));
+  await no('עובד בלי הרשאת קופה: לקיחה', setDoc(D(wdn, 'cashbox/c_w2'), { id: 'c', type: 'out', workerId: 'w2', amount: 5 }));
+  await ok('אחראי בלי permissions: קריאת קופה', getDocs(collection(sup, 'cashbox')));
+  await no('אחראי עם הרשאות בלי קופה: קריאת קופה', getDocs(collection(sup2, 'cashbox')));
+  await ok('מנהל: קריאת קופה', getDocs(collection(mgr, 'cashbox')));
+  await ok('מנהל: הפקדה', setDoc(D(mgr, 'cashbox/in2'), { id: 'in2', type: 'in', workerId: 'm1', amount: 50 }));
+  await no('עובד עם הרשאת קופה: הפקדה', setDoc(D(wcb, 'cashbox/in3'), { id: 'in3', type: 'in', workerId: 'w3', amount: 50 }));
 
   await env.cleanup();
   console.log('\n══ ' + pass + ' עברו · ' + fails.length + ' נכשלו ══');

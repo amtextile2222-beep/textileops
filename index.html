@@ -5120,6 +5120,7 @@ function startDataListeners(){
     listenFb();
   }else _liveReviveAll();
   _startPricingListener();
+  _startCashboxListener();
   _syncWatchStart();_syncDot();
   // הגדרות רגישות (עלויות) — קריאה מותרת רק למנהל ב-Rules
   if(!_adminListenerStarted&&S.user?.role==='manager'&&db){
@@ -5351,12 +5352,28 @@ function listenFb(){
     S.workerExpenses.sort((a,b)=>b.ts-a.ts);
     renderExpenses();
   });
+}
+// 🧾 קופה (13/11/2026): נטענת רק למי שרואה את לשונית הקופה. עד היום כל טלפון — גם של עובדת עם נוכחות+סריקה
+// בלבד — הוריד את כל תנועות הקופה בכל פתיחה (עלות + פרטיות). ⚠️ חייב להישאר זהה ל-canCashbox ב-firestore.rules:
+// מנהל · permissions מפורש שכולל 'cashbox' · בלי permissions = ברירת המחדל של התפקיד (כוללת קופה, כמו applyPerms).
+function _canCashbox(){
+  const u=S.user;if(!u)return false;
+  if(u.role==='manager')return true;
+  const w=(S.workers||[]).find(x=>x.id===u.id)||u;
+  return Array.isArray(w.permissions)?w.permissions.includes('cashbox'):true;
+}
+// נקרא בכל כניסה (startDataListeners) — לא מ-listenFb שרץ פעם אחת לטאב: אחרת מנהל שנכנס אחרי עובדת באותו טאב לא היה מקבל קופה
+function _startCashboxListener(){
+  if(!db)return;
+  if(!_canCashbox()){S.cashbox=[];return;}
+  const st=_liveReg.cashbox;if(st&&st.unsub)return;
+  const{collection}=window._fb;
   _live('cashbox',()=>collection(db,'cashbox'),snap=>{
     S.cashbox=[];
     snap.forEach(d=>{if(d.data().id)S.cashbox.push(d.data());});
     S.cashbox.sort((a,b)=>b.ts-a.ts);
     try{renderCashbox();}catch(e){}
-  });
+  },null,_canCashbox);
 }
 
 async function fbSet(col,id,data){
