@@ -5153,7 +5153,9 @@ function listenFb(){
     // אם הנתונים מגיעים מה-cache המקומי — לא לאפס, רק לרנדר
     // (cache עלול להכיל sessions מאתמול ולגרום לאיפוס שגוי)
     if(snap.metadata.fromCache){renderAll();return;}
-    _workersReady=true;
+    // ⚠️ (13/11/2026) _workersReady נדלק רק **אחרי** הניקוי למטה. waitForWorker מחכה לו, ו-autoPunchIn שרץ
+    // בזמן שהניקוי עוד ממתין ל-getDoc היה מוסיף כניסה של היום — ואז הניקוי מאפס sessions=[]/status=out
+    // על אותו אובייקט וכותב לשרת ⇒ ההחתמה נמחקת. (עד היום waitForWorker לקח את העותק המקומי מיד וזה לא קרה.)
     // נקה sessions ישנות שלא אופסו כי Firebase נטען אחרי checkDailyReset
     const today=todayStr();
     const {getDoc,doc:fsDoc}=window._fb;
@@ -5194,7 +5196,7 @@ function listenFb(){
         fbSet('workers',w.id,{...attFields(w),currentStation:null,stationLogId:null});
       }
     });
-    Promise.all(cleanupPromises).then(()=>renderAll());
+    Promise.all(cleanupPromises).then(()=>{_workersReady=true;renderAll();});
   },{includeMetadataChanges:true});
   // active tasks
   // active tasks
