@@ -157,17 +157,17 @@ function listenVoice(){
   _vcSince=Date.now();_vcIn=[];_vcOut=[];_vcOther=[];_vcBoot=false;
   if(_vcMgr()){
     // מנהל: מאזין אחד לכל השיחות של 3 הימים האחרונים ⇒ מתחלק ל"התקבלו" / "נשלחו" / "בין אחרים"
-    _live('voiceAll',()=>query(collection(db,'voiceMsgs'),where('at','>=',Date.now()-3*864e5)),snap=>{
-      if(!S.user)return; // עדכון שהגיע אחרי יציאה
+    _live('voiceAll',()=>query(collection(db,'voiceMsgs'),where('at','>=',Math.floor((Date.now()-3*864e5)/36e5)*36e5)),snap=>{
+      if(!S.user||_metaSkip('voiceAll',snap))return; // עדכון שהגיע אחרי יציאה
       const all=_vcSort(snap.docs),me=S.user.id;
       _vcIn=all.filter(m=>(m.to||[]).includes(me));_vcOut=all.filter(m=>m.from===me);
       _vcOther=all.filter(m=>m.from!==me&&!(m.to||[]).includes(me));
       _vcOnSnap(snap);_vcFab();_vcRender();
-    });
+    },{includeMetadataChanges:true}); // 💾 _vcOnSnap מחכה לנתוני שרת (_vcBoot) — ראה _metaSkip
   }else{
     _live('voiceIn',()=>query(collection(db,'voiceMsgs'),where('to','array-contains',S.user.id)),snap=>{
-      if(!S.user)return;_vcIn=_vcSort(snap.docs);_vcOnSnap(snap);_vcFab();_vcRender();
-    });
+      if(!S.user||_metaSkip('voiceIn',snap))return;_vcIn=_vcSort(snap.docs);_vcOnSnap(snap);_vcFab();_vcRender();
+    },{includeMetadataChanges:true});
     _live('voiceOut',()=>query(collection(db,'voiceMsgs'),where('from','==',S.user.id)),snap=>{if(!S.user)return;_vcOut=_vcSort(snap.docs);_vcRender();});
   }
   _vcFab();

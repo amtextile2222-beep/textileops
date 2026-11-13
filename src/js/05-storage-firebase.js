@@ -72,7 +72,7 @@ async function initFb(){
   if(!fbConfig)throw new Error('אין Firebase Config');
   const{initializeApp,getFirestore,getFunctions}=window._fb;
   const app=initializeApp(fbConfig,'txops3');
-  db=getFirestore(app);
+  db=_initDb(app);
   window._fbApp=app;
   window._fbFunctions=getFunctions(app);
   // שלב 2 אבטחה: אין יותר התחברות אנונימית — טוקן אמיתי (עם role) מתקבל
@@ -83,6 +83,48 @@ async function initFb(){
   // הספיקה להקליד. אם אין session הוא יוצא מיד ולא עושה כלום.
   _restoreSession();
   _watchAuthLoss();
+}
+
+// 💾 מטמון מקומי של Firestore (13/11/2026). עד היום (מטמון בזיכרון) כל פתיחה, רענון, טאב שאייפון הרג
+// ו"גרסה חדשה זמינה" קראו מהשרת את **כל** המסמכים של כל המאזינים מחדש — וזה רוב חשבון ה-Firestore.
+// עכשיו המסמכים נשמרים בטלפון (IndexedDB) ובפתיחה חוזרת השרת שולח רק מה שהשתנה.
+// ⚠️ זה חוסך רק כשהמאזין חוזר תוך ~30 דק' מהניתוק (אחרי זה גוגל גובה כמו שאילתה חדשה) ⇒ הפתיחה
+// הראשונה בבוקר עולה כמו קודם; החיסכון — ברענונים במהלך היום ובגל הרענונים אחרי דחיפה.
+// ⚠️ שאילתה עם ערך שמשתנה בכל פתיחה (Date.now()) היא שאילתה חדשה כל פעם ⇒ אין חיסכון. לכן חיתוכי
+// הזמן במאזינים מעוגלים (histTasks — לחצות, voiceAll — לשעה). מאזין חדש עם תאריך — לעגל גם אותו.
+// ⚠️ נתוני מטמון מגיעים קודם (fromCache) — החלטות (ניקוי בוקר, התראות, זומבים) רק מנתוני שרת.
+// מאזין שמחכה ל-fromCache=false חייב includeMetadataChanges: אם בשרת לא השתנה כלום מאז, ההודעה
+// היחידה היא שינוי metadata — ובלעדיו הוא לא מגיע לעולם (ראה _metaSkip).
+// כיבוי בטלפון אחד לבדיקה: localStorage.txops_nocache='1' ⇒ מטמון בזיכרון כמו קודם.
+let _dbPersist=false;
+function _initDb(app){
+  const{getFirestore,initializeFirestore,persistentLocalCache,persistentMultipleTabManager}=window._fb;
+  let off=false;try{off=localStorage.getItem('txops_nocache')==='1';}catch(e){}
+  if(!off&&initializeFirestore&&persistentLocalCache){
+    // בכשל IndexedDB (גלישה פרטית, אייפון ישן) ה-SDK עצמו נופל למטמון בזיכרון; ה-catch — למקרה שזרק
+    try{const d=initializeFirestore(app,{localCache:persistentLocalCache({tabManager:persistentMultipleTabManager()})});_dbPersist=true;return d;}
+    catch(e){console.warn('💾 מטמון מקומי לא הופעל:',e&&e.message);}
+  }
+  return getFirestore(app);
+}
+// יציאה ⇒ מוחקים את המטמון מהמכשיר (אצל מנהל יש בו עלויות ושכר; בטלפון משותף — נתונים של אחר)
+// ומרעננים את הדף (אחרי מחיקה אי אפשר להמשיך עם אותו מופע Firestore). כתיבות פתוחות — עד 3 שנ'.
+async function _dbWipeAndReload(){
+  if(!_dbPersist||!db){return false;}
+  const{terminate,clearIndexedDbPersistence,waitForPendingWrites}=window._fb;
+  try{await Promise.race([waitForPendingWrites(db),new Promise(r=>setTimeout(r,3000))]);}catch(e){}
+  try{await terminate(db);}catch(e){}
+  try{await clearIndexedDbPersistence(db);}catch(e){console.warn('💾 מחיקת המטמון נכשלה (טאב אחר פתוח?):',e&&e.message);}
+  _pwSet.clear();
+  location.reload();
+  return true;
+}
+// עם includeMetadataChanges מגיעות גם הודעות בלי שום שינוי במסמכים (כתיבה שאושרה בשרת וכו').
+// מדלגים עליהן — חוץ מהמעבר מטמון ⇒ שרת, שבשבילו ביקשנו אותן.
+const _metaFC={};
+function _metaSkip(name,snap){
+  const fc=snap.metadata.fromCache,same=_metaFC[name]===fc;_metaFC[name]=fc;
+  return same&&snap.docChanges().length===0;
 }
 
 // ─── 📡 חיבורים חיים עמידים + מצב סנכרון (25/09/2026) ─────────────────────────
@@ -319,7 +361,7 @@ function listenFb(){
   const{collection,onSnapshot,query,orderBy,where}=window._fb;
   // workers
   _live('workers',()=>collection(db,'workers'),snap=>{
-    if(snap.empty)return;
+    if(snap.empty||_metaSkip('workers',snap))return;
     S.workers=snap.docs.map(d=>({id:d.id,...d.data()}));
     migrateBreaks(!snap.metadata.fromCache);
     if(typeof _vcFab==='function')_vcFab(); // 🎙 המנהל שינה voiceMode — הכפתור מופיע/נעלם מיד
@@ -368,10 +410,11 @@ function listenFb(){
       }
     });
     Promise.all(cleanupPromises).then(()=>renderAll());
-  });
+  },{includeMetadataChanges:true});
   // active tasks
   // active tasks
   _live('activeTasks',()=>collection(db,'activeTasks'),snap=>{
+    if(_metaSkip('activeTasks',snap))return;
     S.activeTasks=snap.docs.map(d=>{const dd=d.data();return{...dd,id:d.id,startTime:dd.startTime?.toDate?dd.startTime.toDate():new Date(dd.startTime),elapsed:0};});
     // סגור משימות שנשארו פתוחות מימים קודמים — רק מנתוני שרת, לא cache
     if(!snap.metadata.fromCache){
@@ -410,10 +453,11 @@ function listenFb(){
       _activeTasksReady=true;
     }
     renderAll();
-  });
+  },{includeMetadataChanges:true});
   // hist tasks — חלון חי של HIST_WINDOW_DAYS ימים אחרונים בלבד (זמן אמת נשמר לחלון הזה).
   // היסטוריה ישנה יותר נשלפת לפי דרישה בדוחות (loadHistRange) — מוזיל דרמטית קריאות Firestore.
-  const _histCutoff=new Date(Date.now()-HIST_WINDOW_DAYS*86400000).toISOString();
+  // 💾 מעוגל לחצות — אותה שאילתה כל היום ⇒ המטמון המקומי חוסך (Date.now() היה שאילתה חדשה בכל פתיחה)
+  const _histCutoff=(()=>{const d=new Date(Date.now()-HIST_WINDOW_DAYS*86400000);d.setHours(0,0,0,0);return d.toISOString();})();
   _live('histTasks',()=>query(collection(db,'histTasks'),where('endTime','>=',_histCutoff),orderBy('endTime','desc')),snap=>{
     S.histTasks=snap.docs.map(d=>{const dd=d.data();return{...dd,id:d.id,startTime:dd.startTime?.toDate?dd.startTime.toDate():new Date(dd.startTime),endTime:dd.endTime?.toDate?dd.endTime.toDate():new Date(dd.endTime)};});
     renderAll();

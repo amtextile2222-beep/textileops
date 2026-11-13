@@ -1650,11 +1650,11 @@ thead th{font-weight:600}
 <!-- FIREBASE SDK -->
 <script type="module">
 import{initializeApp}from'https://www.gstatic.com/firebasejs/10.12.0/firebase-app.js';
-import{getFirestore,collection,doc,getDoc,getDocs,getDocsFromServer,setDoc,onSnapshot,query,where,orderBy,limit,serverTimestamp,deleteDoc,updateDoc,addDoc,runTransaction,deleteField}from'https://www.gstatic.com/firebasejs/10.12.0/firebase-firestore.js';
+import{getFirestore,initializeFirestore,persistentLocalCache,persistentMultipleTabManager,terminate,clearIndexedDbPersistence,waitForPendingWrites,collection,doc,getDoc,getDocs,getDocsFromServer,setDoc,onSnapshot,query,where,orderBy,limit,serverTimestamp,deleteDoc,updateDoc,addDoc,runTransaction,deleteField}from'https://www.gstatic.com/firebasejs/10.12.0/firebase-firestore.js';
 import{getAuth,signInAnonymously,signInWithCustomToken,signOut,onAuthStateChanged}from'https://www.gstatic.com/firebasejs/10.12.0/firebase-auth.js';
 import{getMessaging,getToken,onMessage}from'https://www.gstatic.com/firebasejs/10.12.0/firebase-messaging.js';
 import{getFunctions,httpsCallable}from'https://www.gstatic.com/firebasejs/10.12.0/firebase-functions.js';
-window._fb={initializeApp,getFirestore,collection,doc,getDoc,getDocs,getDocsFromServer,setDoc,onSnapshot,query,where,orderBy,limit,serverTimestamp,deleteDoc,updateDoc,addDoc,runTransaction,deleteField,getAuth,signInAnonymously,signInWithCustomToken,signOut,onAuthStateChanged,getMessaging,getToken,onMessage,getFunctions,httpsCallable};
+window._fb={initializeApp,getFirestore,initializeFirestore,persistentLocalCache,persistentMultipleTabManager,terminate,clearIndexedDbPersistence,waitForPendingWrites,collection,doc,getDoc,getDocs,getDocsFromServer,setDoc,onSnapshot,query,where,orderBy,limit,serverTimestamp,deleteDoc,updateDoc,addDoc,runTransaction,deleteField,getAuth,signInAnonymously,signInWithCustomToken,signOut,onAuthStateChanged,getMessaging,getToken,onMessage,getFunctions,httpsCallable};
 window._fbReady=true;
 document.dispatchEvent(new Event('fbSDKReady'));
 </script>
@@ -4856,7 +4856,7 @@ async function initFb(){
   if(!fbConfig)throw new Error('אין Firebase Config');
   const{initializeApp,getFirestore,getFunctions}=window._fb;
   const app=initializeApp(fbConfig,'txops3');
-  db=getFirestore(app);
+  db=_initDb(app);
   window._fbApp=app;
   window._fbFunctions=getFunctions(app);
   // שלב 2 אבטחה: אין יותר התחברות אנונימית — טוקן אמיתי (עם role) מתקבל
@@ -4867,6 +4867,48 @@ async function initFb(){
   // הספיקה להקליד. אם אין session הוא יוצא מיד ולא עושה כלום.
   _restoreSession();
   _watchAuthLoss();
+}
+
+// 💾 מטמון מקומי של Firestore (13/11/2026). עד היום (מטמון בזיכרון) כל פתיחה, רענון, טאב שאייפון הרג
+// ו"גרסה חדשה זמינה" קראו מהשרת את **כל** המסמכים של כל המאזינים מחדש — וזה רוב חשבון ה-Firestore.
+// עכשיו המסמכים נשמרים בטלפון (IndexedDB) ובפתיחה חוזרת השרת שולח רק מה שהשתנה.
+// ⚠️ זה חוסך רק כשהמאזין חוזר תוך ~30 דק' מהניתוק (אחרי זה גוגל גובה כמו שאילתה חדשה) ⇒ הפתיחה
+// הראשונה בבוקר עולה כמו קודם; החיסכון — ברענונים במהלך היום ובגל הרענונים אחרי דחיפה.
+// ⚠️ שאילתה עם ערך שמשתנה בכל פתיחה (Date.now()) היא שאילתה חדשה כל פעם ⇒ אין חיסכון. לכן חיתוכי
+// הזמן במאזינים מעוגלים (histTasks — לחצות, voiceAll — לשעה). מאזין חדש עם תאריך — לעגל גם אותו.
+// ⚠️ נתוני מטמון מגיעים קודם (fromCache) — החלטות (ניקוי בוקר, התראות, זומבים) רק מנתוני שרת.
+// מאזין שמחכה ל-fromCache=false חייב includeMetadataChanges: אם בשרת לא השתנה כלום מאז, ההודעה
+// היחידה היא שינוי metadata — ובלעדיו הוא לא מגיע לעולם (ראה _metaSkip).
+// כיבוי בטלפון אחד לבדיקה: localStorage.txops_nocache='1' ⇒ מטמון בזיכרון כמו קודם.
+let _dbPersist=false;
+function _initDb(app){
+  const{getFirestore,initializeFirestore,persistentLocalCache,persistentMultipleTabManager}=window._fb;
+  let off=false;try{off=localStorage.getItem('txops_nocache')==='1';}catch(e){}
+  if(!off&&initializeFirestore&&persistentLocalCache){
+    // בכשל IndexedDB (גלישה פרטית, אייפון ישן) ה-SDK עצמו נופל למטמון בזיכרון; ה-catch — למקרה שזרק
+    try{const d=initializeFirestore(app,{localCache:persistentLocalCache({tabManager:persistentMultipleTabManager()})});_dbPersist=true;return d;}
+    catch(e){console.warn('💾 מטמון מקומי לא הופעל:',e&&e.message);}
+  }
+  return getFirestore(app);
+}
+// יציאה ⇒ מוחקים את המטמון מהמכשיר (אצל מנהל יש בו עלויות ושכר; בטלפון משותף — נתונים של אחר)
+// ומרעננים את הדף (אחרי מחיקה אי אפשר להמשיך עם אותו מופע Firestore). כתיבות פתוחות — עד 3 שנ'.
+async function _dbWipeAndReload(){
+  if(!_dbPersist||!db){return false;}
+  const{terminate,clearIndexedDbPersistence,waitForPendingWrites}=window._fb;
+  try{await Promise.race([waitForPendingWrites(db),new Promise(r=>setTimeout(r,3000))]);}catch(e){}
+  try{await terminate(db);}catch(e){}
+  try{await clearIndexedDbPersistence(db);}catch(e){console.warn('💾 מחיקת המטמון נכשלה (טאב אחר פתוח?):',e&&e.message);}
+  _pwSet.clear();
+  location.reload();
+  return true;
+}
+// עם includeMetadataChanges מגיעות גם הודעות בלי שום שינוי במסמכים (כתיבה שאושרה בשרת וכו').
+// מדלגים עליהן — חוץ מהמעבר מטמון ⇒ שרת, שבשבילו ביקשנו אותן.
+const _metaFC={};
+function _metaSkip(name,snap){
+  const fc=snap.metadata.fromCache,same=_metaFC[name]===fc;_metaFC[name]=fc;
+  return same&&snap.docChanges().length===0;
 }
 
 // ─── 📡 חיבורים חיים עמידים + מצב סנכרון (25/09/2026) ─────────────────────────
@@ -5103,7 +5145,7 @@ function listenFb(){
   const{collection,onSnapshot,query,orderBy,where}=window._fb;
   // workers
   _live('workers',()=>collection(db,'workers'),snap=>{
-    if(snap.empty)return;
+    if(snap.empty||_metaSkip('workers',snap))return;
     S.workers=snap.docs.map(d=>({id:d.id,...d.data()}));
     migrateBreaks(!snap.metadata.fromCache);
     if(typeof _vcFab==='function')_vcFab(); // 🎙 המנהל שינה voiceMode — הכפתור מופיע/נעלם מיד
@@ -5152,10 +5194,11 @@ function listenFb(){
       }
     });
     Promise.all(cleanupPromises).then(()=>renderAll());
-  });
+  },{includeMetadataChanges:true});
   // active tasks
   // active tasks
   _live('activeTasks',()=>collection(db,'activeTasks'),snap=>{
+    if(_metaSkip('activeTasks',snap))return;
     S.activeTasks=snap.docs.map(d=>{const dd=d.data();return{...dd,id:d.id,startTime:dd.startTime?.toDate?dd.startTime.toDate():new Date(dd.startTime),elapsed:0};});
     // סגור משימות שנשארו פתוחות מימים קודמים — רק מנתוני שרת, לא cache
     if(!snap.metadata.fromCache){
@@ -5194,10 +5237,11 @@ function listenFb(){
       _activeTasksReady=true;
     }
     renderAll();
-  });
+  },{includeMetadataChanges:true});
   // hist tasks — חלון חי של HIST_WINDOW_DAYS ימים אחרונים בלבד (זמן אמת נשמר לחלון הזה).
   // היסטוריה ישנה יותר נשלפת לפי דרישה בדוחות (loadHistRange) — מוזיל דרמטית קריאות Firestore.
-  const _histCutoff=new Date(Date.now()-HIST_WINDOW_DAYS*86400000).toISOString();
+  // 💾 מעוגל לחצות — אותה שאילתה כל היום ⇒ המטמון המקומי חוסך (Date.now() היה שאילתה חדשה בכל פתיחה)
+  const _histCutoff=(()=>{const d=new Date(Date.now()-HIST_WINDOW_DAYS*86400000);d.setHours(0,0,0,0);return d.toISOString();})();
   _live('histTasks',()=>query(collection(db,'histTasks'),where('endTime','>=',_histCutoff),orderBy('endTime','desc')),snap=>{
     S.histTasks=snap.docs.map(d=>{const dd=d.data();return{...dd,id:d.id,startTime:dd.startTime?.toDate?dd.startTime.toDate():new Date(dd.startTime),endTime:dd.endTime?.toDate?dd.endTime.toDate():new Date(dd.endTime)};});
     renderAll();
@@ -5927,7 +5971,7 @@ function _watchAuthLoss(){
     setTimeout(()=>{
       if(auth.currentUser||!S.user||_restoreBusy)return;
       _restoreDone=true;              // יציאה מכוונת — לא לנסות לשחזר אחריה
-      doLogout();
+      doLogout(true);
       const el=document.getElementById('l-err');
       if(el)el.textContent='⚠ החיבור נסגר בחלון אחר — נא להיכנס מחדש';
     },1500);
@@ -6216,7 +6260,7 @@ async function doLogin(){
     _loginShowErr(e,'finish');
   }
 }
-function doLogout(){
+function doLogout(noWipe){
   // בלי signOut ה-session של Firebase שורד את היציאה, והשחזור בטעינה הבאה
   // היה מחזיר את העובדת פנימה — כלומר אי אפשר היה לצאת בכלל.
   try{const{getAuth,signOut}=window._fb;signOut(getAuth(window._fbApp)).catch(()=>{});}catch(e){}
@@ -6237,6 +6281,9 @@ function doLogout(){
   // השם הזכור נשאר ממולא גם אחרי התנתקות — בלי כניסה אוטומטית (התנתקות = בחירה מפורשת לצאת)
   const _lu=localStorage.getItem('txops_last_user')||'';
   if(_lu){document.getElementById('l-user').value=_lu;onUserInput(_lu);document.getElementById('l-switch-user').style.display='';}
+  // 💾 מוחקים את המטמון המקומי של Firestore מהמכשיר ומרעננים (הדף חוזר למסך הכניסה, השם הזכור נשאר)
+  // noWipe = החיבור נסגר בטאב אחר (_watchAuthLoss): משאירים את ההודעה על המסך; הטאב שיצא מוחק
+  if(!noWipe&&typeof _dbWipeAndReload==='function')_dbWipeAndReload();
 }
 
 
@@ -12012,17 +12059,17 @@ function listenVoice(){
   _vcSince=Date.now();_vcIn=[];_vcOut=[];_vcOther=[];_vcBoot=false;
   if(_vcMgr()){
     // מנהל: מאזין אחד לכל השיחות של 3 הימים האחרונים ⇒ מתחלק ל"התקבלו" / "נשלחו" / "בין אחרים"
-    _live('voiceAll',()=>query(collection(db,'voiceMsgs'),where('at','>=',Date.now()-3*864e5)),snap=>{
-      if(!S.user)return; // עדכון שהגיע אחרי יציאה
+    _live('voiceAll',()=>query(collection(db,'voiceMsgs'),where('at','>=',Math.floor((Date.now()-3*864e5)/36e5)*36e5)),snap=>{
+      if(!S.user||_metaSkip('voiceAll',snap))return; // עדכון שהגיע אחרי יציאה
       const all=_vcSort(snap.docs),me=S.user.id;
       _vcIn=all.filter(m=>(m.to||[]).includes(me));_vcOut=all.filter(m=>m.from===me);
       _vcOther=all.filter(m=>m.from!==me&&!(m.to||[]).includes(me));
       _vcOnSnap(snap);_vcFab();_vcRender();
-    });
+    },{includeMetadataChanges:true}); // 💾 _vcOnSnap מחכה לנתוני שרת (_vcBoot) — ראה _metaSkip
   }else{
     _live('voiceIn',()=>query(collection(db,'voiceMsgs'),where('to','array-contains',S.user.id)),snap=>{
-      if(!S.user)return;_vcIn=_vcSort(snap.docs);_vcOnSnap(snap);_vcFab();_vcRender();
-    });
+      if(!S.user||_metaSkip('voiceIn',snap))return;_vcIn=_vcSort(snap.docs);_vcOnSnap(snap);_vcFab();_vcRender();
+    },{includeMetadataChanges:true});
     _live('voiceOut',()=>query(collection(db,'voiceMsgs'),where('from','==',S.user.id)),snap=>{if(!S.user)return;_vcOut=_vcSort(snap.docs);_vcRender();});
   }
   _vcFab();

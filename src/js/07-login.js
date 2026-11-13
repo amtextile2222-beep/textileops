@@ -165,7 +165,7 @@ function _watchAuthLoss(){
     setTimeout(()=>{
       if(auth.currentUser||!S.user||_restoreBusy)return;
       _restoreDone=true;              // יציאה מכוונת — לא לנסות לשחזר אחריה
-      doLogout();
+      doLogout(true);
       const el=document.getElementById('l-err');
       if(el)el.textContent='⚠ החיבור נסגר בחלון אחר — נא להיכנס מחדש';
     },1500);
@@ -454,7 +454,7 @@ async function doLogin(){
     _loginShowErr(e,'finish');
   }
 }
-function doLogout(){
+function doLogout(noWipe){
   // בלי signOut ה-session של Firebase שורד את היציאה, והשחזור בטעינה הבאה
   // היה מחזיר את העובדת פנימה — כלומר אי אפשר היה לצאת בכלל.
   try{const{getAuth,signOut}=window._fb;signOut(getAuth(window._fbApp)).catch(()=>{});}catch(e){}
@@ -475,6 +475,9 @@ function doLogout(){
   // השם הזכור נשאר ממולא גם אחרי התנתקות — בלי כניסה אוטומטית (התנתקות = בחירה מפורשת לצאת)
   const _lu=localStorage.getItem('txops_last_user')||'';
   if(_lu){document.getElementById('l-user').value=_lu;onUserInput(_lu);document.getElementById('l-switch-user').style.display='';}
+  // 💾 מוחקים את המטמון המקומי של Firestore מהמכשיר ומרעננים (הדף חוזר למסך הכניסה, השם הזכור נשאר)
+  // noWipe = החיבור נסגר בטאב אחר (_watchAuthLoss): משאירים את ההודעה על המסך; הטאב שיצא מוחק
+  if(!noWipe&&typeof _dbWipeAndReload==='function')_dbWipeAndReload();
 }
 
 
