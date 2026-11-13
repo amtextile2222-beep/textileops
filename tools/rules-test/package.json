@@ -3,7 +3,8 @@
   "private": true,
   "type": "commonjs",
   "scripts": {
-    "test": "cd ../.. && firebase emulators:exec --only firestore --project demo-test \"node tools/rules-test/test.js\""
+    "test": "cd ../.. && firebase emulators:exec --only firestore --project demo-test \"node tools/rules-test/test.js\"",
+    "otp": "cd ../.. && firebase emulators:exec --only firestore --project demo-test \"node tools/rules-test/otp-test.js\""
   },
   "dependencies": {
     "@firebase/rules-unit-testing": "^4.0.1",

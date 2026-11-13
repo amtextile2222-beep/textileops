@@ -10,7 +10,52 @@ async function loginCall(payload){
   const{httpsCallable}=window._fb;
   const fn=httpsCallable(window._fbFunctions,'login');
   const res=await fn(payload);
-  return(res&&res.data)||{};
+  const r=(res&&res.data)||{};
+  // 🔐 מנהל ממכשיר שהשרת לא מכיר ⇒ קוד בטלגרם; שולחים שוב את אותה בקשה עם otp (כל מסלולי הכניסה)
+  return r.needOtp?_otpFlow(fn,payload):r;
+}
+// ─── 🔐 קוד חד-פעמי בטלגרם למכשיר מנהל חדש (13/11/2026) ───
+// השרת (mgrDeviceGate) מחזיר needOtp ושולח קוד; אחרי קוד נכון המכשיר נרשם ולא יישאל שוב.
+// ביטול ⇒ שגיאה 'otp-cancel' (לולאת הפנים נעצרת ולא פותחת את החלון שוב ושוב).
+function _otpAsk(msg){
+  return new Promise(res=>{
+    document.getElementById('otp-ov')?.remove();
+    const o=document.createElement('div');o.id='otp-ov';
+    o.style.cssText='position:fixed;inset:0;background:rgba(0,0,0,.55);z-index:99999;display:flex;align-items:center;justify-content:center;padding:16px';
+    o.innerHTML=`<div style="background:var(--bg2,#fff);color:var(--txt,#111);border-radius:14px;padding:20px;max-width:340px;width:100%;text-align:center;direction:rtl;box-shadow:0 8px 30px rgba(0,0,0,.3)">
+      <div style="font-size:32px">🔐</div><div style="font-weight:700;font-size:16px;margin:6px 0">כניסת מנהל ממכשיר חדש</div>
+      <div id="otp-msg" style="font-size:13px;margin-bottom:12px;line-height:1.5">${msg}</div>
+      <input id="otp-in" inputmode="numeric" autocomplete="one-time-code" maxlength="6" placeholder="------" style="font-size:26px;letter-spacing:8px;text-align:center;width:100%;padding:8px;box-sizing:border-box;direction:ltr"/>
+      <div style="display:flex;gap:8px;margin-top:14px"><button class="btn btn-primary" id="otp-ok" style="flex:1">אישור</button><button class="btn" id="otp-no" style="flex:1">ביטול</button></div></div>`;
+    document.body.appendChild(o);
+    const inp=o.querySelector('#otp-in'),done=v=>{o.remove();res(v);};
+    o.querySelector('#otp-ok').onclick=()=>done(inp.value.replace(/\D/g,''));
+    o.querySelector('#otp-no').onclick=()=>done(null);
+    inp.onkeydown=e=>{if(e.key==='Enter')done(inp.value.replace(/\D/g,''));};
+    setTimeout(()=>inp.focus(),50);
+  });
+}
+async function _otpFlow(fn,payload){
+  let msg='נשלח קוד בן 6 ספרות לטלגרם שלך.<br>הזן אותו כדי לאשר את המכשיר הזה (פעם אחת).';
+  for(let i=0;i<8;i++){
+    const code=await _otpAsk(msg);
+    if(!code)throw new Error('otp-cancel');
+    try{
+      const r=((await fn({...payload,otp:code}))||{}).data||{};
+      if(!r.needOtp)return r;
+      msg='נשלח קוד חדש לטלגרם';
+    }catch(e){
+      const c=_loginErrCode(e);
+      if(c==='otp-wrong'){msg='⛔ קוד שגוי — נסה שוב';continue;}
+      if(c==='otp-expired'){ // פג / יותר מדי ניסיונות ⇒ קוד חדש (השרת מאמת שוב את הסיסמה/הפנים)
+        const r=((await fn(payload))||{}).data||{};
+        if(!r.needOtp)return r;
+        msg='⏱ הקוד פג — נשלח קוד חדש לטלגרם';continue;
+      }
+      throw e;
+    }
+  }
+  throw new Error('otp-cancel');
 }
 async function fbSignInWithToken(token){
   const{getAuth,signInWithCustomToken}=window._fb;
@@ -18,7 +63,7 @@ async function fbSignInWithToken(token){
 }
 function _loginErrCode(e){
   const m=String((e&&e.message)||'').trim();
-  return['wrong','missing-pass','disabled','locked','ip','time-window','device','device-unknown','face-mismatch','no-face-update','emergency-wrong','no-session','session-expired','barcode-wrong','barcode-not-allowed','barcode-needs-setup'].includes(m)?m:'network';
+  return['wrong','missing-pass','disabled','locked','ip','time-window','device','device-unknown','face-mismatch','no-face-update','emergency-wrong','no-session','session-expired','barcode-wrong','barcode-not-allowed','barcode-needs-setup','otp-wrong','otp-expired','otp-send','otp-cancel'].includes(m)?m:'network';
 }
 function _loginErrMsg(code){
   return{
@@ -37,7 +82,11 @@ function _loginErrMsg(code){
     'session-expired':'⏰ החיבור פג — נא להיכנס מחדש',
     'barcode-wrong':'⛔ הברקוד שסרקת שייך לעובד אחר — סרוק את הברקוד שבתחנה שלך',
     'barcode-not-allowed':'⛔ כניסה בברקוד לא מופעלת עבורך — פנה למנהל',
-    'barcode-needs-setup':'הכניסה הראשונה במכשיר הזה חייבת להיות עם סיסמה — הזן סיסמה פעם אחת, ומהפעם הבאה תיכנס בסריקה'
+    'barcode-needs-setup':'הכניסה הראשונה במכשיר הזה חייבת להיות עם סיסמה — הזן סיסמה פעם אחת, ומהפעם הבאה תיכנס בסריקה',
+    'otp-wrong':'⛔ קוד הטלגרם שגוי',
+    'otp-expired':'⏱ קוד הטלגרם פג — נסה להיכנס שוב',
+    'otp-send':'⛔ לא ניתן לשלוח קוד לטלגרם — נסה שוב, או היכנס מהמכשיר הרגיל שלך',
+    'otp-cancel':'הכניסה בוטלה — נדרש קוד מהטלגרם'
   }[code]||'שגיאת חיבור לשרת — נסה שוב';
 }
 // ─── מה *באמת* נכשל בכניסה ─────────────────────────────────────────────────
@@ -216,7 +265,8 @@ async function emergencyLogin(){
   if(!code)return;
   document.getElementById('l-err').textContent='בודק...';
   try{
-    const res=await loginCall({emergencyCode:code});
+    const _dv=await getDeviceId();
+    const res=await loginCall(_dv?{emergencyCode:code,deviceId:_dv}:{emergencyCode:code});
     await fbSignInWithToken(res.token);
     document.getElementById('l-emergency').value='';
     finishLogin(res.worker,false);

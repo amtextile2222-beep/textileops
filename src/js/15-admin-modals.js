@@ -41,6 +41,7 @@ function renderAdmin(){
       ${w.disabled?`<span title="גישה מושעית" style="font-size:16px">🚫</span>`:''}
       ${(w.stationGateMode||w.stepOrderGateMode)?`<span title="אכיפה מוגדרת ידנית — ${w.stationGateMode==='enforce'?'🔒 חל':w.stationGateMode==='override'?'🔒 פטור':'🔒 לפי תפקיד'} · ${w.stepOrderGateMode==='enforce'?'🔗 חל':w.stepOrderGateMode==='override'?'🔗 פטור':'🔗 לפי תפקיד'}" style="font-size:16px">${(w.stationGateMode==='enforce'||w.stepOrderGateMode==='enforce')?'🔒':'🔓'}</span>`:''}
       ${w.deviceBinding?`<span title="${(w.deviceRegistered||w.deviceId)?'מכשיר רשום ונעול':'נעילת מכשיר — טרם נרשם'}" style="font-size:16px">${(w.deviceRegistered||w.deviceId)?'📱🔒':'📱⚪'}</span>`:''}
+      ${w.role==='manager'&&S.user&&S.user.role==='manager'?`<button class="btn warn" style="font-size:11px;padding:4px 8px" title="נתק את כל המכשירים המוכרים של המנהל — בכניסה הבאה מכל מכשיר יידרש קוד בטלגרם" onclick="resetMgrDevices('${w.id}')">🔐🔄</button>`:''}
       ${w.deviceBinding&&(w.deviceRegistered||w.deviceId)?`<button class="btn warn" style="font-size:11px;padding:4px 8px" title="אפס מכשיר — יאפשר כניסה ממכשיר חדש" onclick="resetDeviceBinding('${w.id}')">🔄</button>`:''}
       ${w.faceAuth?`<span title="${(w.faceRegistered||w.faceDescriptor||w.faceDescriptors&&Object.keys(w.faceDescriptors).length)?'זיהוי פנים פעיל':'זיהוי פנים — פנים לא רשומים'}" style="font-size:16px">${(w.faceRegistered||w.faceDescriptor||w.faceDescriptors&&Object.keys(w.faceDescriptors).length)?'🟢':'🟡'}</span>`:''}
       ${w.faceAuth?`<button class="btn ${w.faceUpdateAllowed?'success':''}\" style="font-size:11px;padding:4px 8px" title="${w.faceUpdateAllowed?'עדכון פנים מאושר — לחץ לביטול':'אפשר לעובד לעדכן פנים מהטלפון'}" onclick="toggleFaceUpdate('${w.id}')">${w.faceUpdateAllowed?'📸✅':'📸'}</button>`:''}
@@ -462,6 +463,16 @@ async function resetDeviceBinding(id){
     saveLS();renderAdmin();
     showToast('✅ מכשיר '+w.name+' אופס — יכול להיכנס ממכשיר חדש');
   }catch(e){alert('שגיאה באיפוס מכשיר: '+e.message);}
+}
+// 🔐 ניתוק כל המכשירים המוכרים של מנהל (13/11/2026) — אחרי חשד שהסיסמה דלפה / טלפון שאבד
+async function resetMgrDevices(id){
+  const w=S.workers.find(x=>x.id===id);if(!w)return;
+  if(!confirm('לנתק את כל המכשירים המוכרים של '+w.name+'?\nבכניסה הבאה מכל מכשיר (גם מהמחשב הזה) יידרש קוד מהטלגרם.\nמומלץ גם להחליף סיסמה.'))return;
+  try{
+    const{httpsCallable}=window._fb;
+    await httpsCallable(window._fbFunctions,'updateCredentials')({action:'resetMgrDevices',targetId:id});
+    showToast('✅ המכשירים של '+w.name+' נותקו — בכניסה הבאה יידרש קוד בטלגרם');
+  }catch(e){alert('שגיאה: '+e.message);}
 }
 async function toggleFaceUpdate(id){
   const w=S.workers.find(x=>x.id===id);if(!w)return;

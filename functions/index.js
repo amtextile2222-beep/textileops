@@ -122,11 +122,46 @@ async function sendTelegramDocument(token, chatId, filename, buffer, caption) {
   return !!j.ok;
 }
 
+// ─── 🔐 מכשיר מנהל חדש ⇒ קוד חד-פעמי בטלגרם (13/11/2026, החלטת המשתמש) ───
+// סיסמת המנהל / פנים / קוד החירום לבדם כבר לא מספיקים ממכשיר שהשרת לא מכיר: נשלח קוד בן 6 ספרות
+// לטלגרם (הצ'אט של המנהל בלבד), והמכשיר נרשם ב-credentials.mgrDevices רק אחרי הקוד הנכון.
+// מחזיר null = מותר · {needOtp:true} = הלקוח שולח שוב את אותה בקשה עם otp.
+// טלגרם לא זמין ⇒ נחסם (otp-send), לא fail-open. מכשיר מוכר = UUID ב-localStorage (txops_device_uuid).
+const OTP_TTL_MS = 5 * 60 * 1000, OTP_RESEND_MS = 60 * 1000, OTP_MAX_TRIES = 5;
+async function mgrDeviceGate(uid, name, d, context, via) {
+  const dev = String(d.deviceId || '');
+  if (!dev) throw new functions.https.HttpsError('failed-precondition', 'device-unknown');
+  const dk = crypto.createHash('sha256').update(dev).digest('hex').slice(0, 32); // מפתח שדה בטוח
+  const ref = db.collection('credentials').doc(uid);
+  const c = (await ref.get()).data() || {};
+  if ((c.mgrDevices || {})[dk]) return null;
+  const now = Date.now(), o = c.mgrOtp || null, ip = callerIp(context) || '?';
+  const { token: tgToken, chatId: tgChatId } = tgCfg();
+  if (d.otp != null && String(d.otp).trim()) {
+    if (!o || o.dev !== dk || now > o.exp || (o.tries || 0) >= OTP_MAX_TRIES) throw new functions.https.HttpsError('permission-denied', 'otp-expired');
+    if (hashPass(uid + ':' + String(d.otp).trim()) !== o.h) {
+      await ref.set({ mgrOtp: { ...o, tries: (o.tries || 0) + 1 } }, { merge: true });
+      throw new functions.https.HttpsError('permission-denied', 'otp-wrong');
+    }
+    await ref.set({ mgrDevices: { [dk]: { at: now, ip, via } }, mgrOtp: FieldValue.delete() }, { merge: true });
+    if (tgToken && tgChatId) await sendTelegram(tgToken, tgChatId, '✅ TextileOps — מכשיר חדש אושר לכניסת מנהל\n👤 ' + name + '\n🔑 דרך: ' + via + '\n🌐 IP: ' + ip + '\n🕐 שעה: ' + ilTime()).catch(() => {});
+    return null;
+  }
+  if (o && o.dev === dk && now < o.exp && now - (o.sent || 0) < OTP_RESEND_MS && (o.tries || 0) < OTP_MAX_TRIES) return { needOtp: true };
+  if (!tgToken || !tgChatId) throw new functions.https.HttpsError('unavailable', 'otp-send');
+  const code = String(crypto.randomInt(0, 1000000)).padStart(6, '0');
+  await ref.set({ mgrOtp: { h: hashPass(uid + ':' + code), dev: dk, exp: now + OTP_TTL_MS, sent: now, tries: 0 } }, { merge: true });
+  const ok = await sendTelegram(tgToken, tgChatId, '🔐 TextileOps — קוד כניסה למנהל ממכשיר חדש\n\n<code>' + code + '</code>\n\n👤 ' + name + '\n🔑 דרך: ' + via + '\n🌐 IP: ' + ip + '\n🕐 שעה: ' + ilTime() + '\n⏱ בתוקף 5 דקות\n⚠️ אם זה לא אתה — מישהו יודע את הסיסמה (או קוד החירום)! החלף מיד.').catch(() => false);
+  if (!ok) { await ref.set({ mgrOtp: FieldValue.delete() }, { merge: true }); throw new functions.https.HttpsError('unavailable', 'otp-send'); }
+  return { needOtp: true };
+}
+
 // ─── LOGIN — אימות בצד שרת + Custom Token עם role claim (שלב 2 אבטחה) ───
 // קלט: {user, pass?} | {user, faceDescriptor?} | {user, registerDescriptors?} | {user, empBarcode?} | {emergencyCode} | {user, faceFailAlert, photoB64?}
 // פלט הצלחה: {token, worker, needFaceRegister?} | {needFace:true, name, faceUpdateAllowed}
 // קודי שגיאה (ב-message): wrong | disabled | locked | ip | device | device-unknown | face-mismatch | no-face-update | emergency-wrong
 //                          | barcode-wrong | barcode-not-allowed | barcode-needs-setup
+//                          | otp-wrong | otp-expired | otp-send   (+ פלט {needOtp:true} — מנהל ממכשיר חדש)
 // 🔒 (12/11/2026) ניסיון הזדהות נספר **לפני** הבדיקה, בטרנזקציה. עד היום הכישלון נרשם אחרי הבדיקה ובלי
 // טרנזקציה: מאות בקשות במקביל קראו כולן failCount=0, נבדקו כולן, והנעילה (5 ניסיונות) לא עצרה אף אחת.
 // עכשיו כל בקשה תופסת מקום במונה לפני שהסוד נבדק ⇒ לכל היותר 5 בדיקות בחלון, גם במקביל.
@@ -218,6 +253,8 @@ const loginImpl = async (data, context) => {
     await emRef.set({ failCount: 0 }, { merge: true });
     const mq = await db.collection('workers').where('role', '==', 'manager').limit(1).get();
     const mgr = mq.empty ? { id: 'emergency', name: 'מנהל חירום', role: 'manager' } : { id: mq.docs[0].id, ...mq.docs[0].data() };
+    // 🔐 גם קוד החירום — רק ממכשיר מוכר של המנהל, או עם קוד בטלגרם
+    if (!mq.empty) { const g = await mgrDeviceGate(mgr.id, mgr.name || 'מנהל', d, context, 'קוד חירום'); if (g) return g; }
     const token = await admin.auth().createCustomToken(mgr.id, { role: 'manager', sat: Date.now() });
     await tg('✅ TextileOps — כניסת חירום בוצעה\n🕐 שעה: ' + ilTime() + '\nנכנס דרך קוד חירום כמנהל.');
     return { token, worker: sanitizeWorker({ ...mgr, role: 'manager' }) };
@@ -391,6 +428,12 @@ const loginImpl = async (data, context) => {
     }
   }
 
+  // ── 🔐 מנהל ממכשיר לא מוכר — קוד חד-פעמי בטלגרם (mgrDeviceGate) ──
+  if ((w.role || 'worker') === 'manager') {
+    const g = await mgrDeviceGate(w.id, w.name || user, d, context, Array.isArray(d.faceDescriptor) ? 'זיהוי פנים' : 'סיסמה');
+    if (g) { await unclaimAttempt(credRef); return g; }
+  }
+
   await credRef.set({ failCount: 0 }, { merge: true });
   const role = w.role || 'worker';
   const token = await admin.auth().createCustomToken(w.id, { role, sat: Date.now() });
@@ -532,6 +575,12 @@ exports.updateCredentials = functions.https.onCall(async (data, context) => {
     if (role !== 'manager') throw new functions.https.HttpsError('permission-denied', 'מנהל בלבד');
     await db.collection('credentials').doc(targetId).set({ deviceId: FieldValue.delete() }, { merge: true });
     await db.collection('workers').doc(targetId).set({ deviceRegistered: false }, { merge: true });
+    return { ok: true };
+  }
+  if (d.action === 'resetMgrDevices') {
+    // 🔐 ניתוק כל המכשירים המוכרים של המנהל — בכניסה הבאה מכל מכשיר יידרש קוד בטלגרם
+    if (role !== 'manager') throw new functions.https.HttpsError('permission-denied', 'מנהל בלבד');
+    await db.collection('credentials').doc(targetId).set({ mgrDevices: FieldValue.delete(), mgrOtp: FieldValue.delete() }, { merge: true });
     return { ok: true };
   }
   if (d.action === 'registerFace') {
