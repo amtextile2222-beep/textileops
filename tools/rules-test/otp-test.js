@@ -125,6 +125,46 @@ const lastCode = () => { const m = /<code>(\d{6})<\/code>/.exec(sent[sent.length
   e6 = await errD(login({ user: 'wk', pass: 'pw', deviceId: 'Z' }));
   t('רשומה ישנה ⇒ עדיין נעול (~40 שנ\')', e6.m === 'locked' && e6.d.leftMs > 30000 && e6.d.leftMs <= 40000);
   await cw().set({ failCount: 0, lockLevel: 0, lockUntil: 0 }, { merge: true });
+  // 📱🔐 (14/11/2026) עובד עם נעילת מכשיר — מכשיר ראשון רק עם קוד מהמנהל
+  await db.doc('workers/w2').set({ user: 'nw', role: 'worker', name: 'New', deviceBinding: true });
+  await db.doc('credentials/w2').set({ pass: 'pw' });
+  const cw2 = () => db.doc('credentials/w2');
+  r = await login({ user: 'nw', pass: 'pw', deviceId: 'P1', devLabel: 'Galaxy' });
+  t('עובד חדש ⇒ needOtp + devApprove, בלי טוקן', r.needOtp && r.devApprove && !r.token);
+  t('טלגרם למנהל: בקשת רישום עם שם וקוד', /מבקש לרשום מכשיר/.test(sent[sent.length - 1]) && /New/.test(sent[sent.length - 1]) && !!lastCode());
+  t('המכשיר עוד לא נרשם', !(await cw2().get()).data().deviceId);
+  t('failCount לא עלה', !((await cw2().get()).data().failCount > 0));
+  const wc = lastCode();
+  t('סיסמה שגויה + קוד ⇒ wrong', (await err(login({ user: 'nw', pass: 'x', deviceId: 'P1', otp: wc }))) === 'wrong');
+  t('קוד שגוי ⇒ otp-wrong', (await err(login({ user: 'nw', pass: 'pw', deviceId: 'P1', otp: wc === '000000' ? '111111' : '000000' }))) === 'otp-wrong');
+  t('הקוד מטלפון אחר ⇒ otp-expired', (await err(login({ user: 'nw', pass: 'pw', deviceId: 'P2', otp: wc }))) === 'otp-expired');
+  t('קוד המנהל לא עובד לעובד', (await err(login({ user: 'nw', pass: 'pw', deviceId: 'P1', otp: c1 === wc ? '123456' : c1 }))) !== '');
+  await cw2().set({ failCount: 0 }, { merge: true });
+  r = await login({ user: 'nw', pass: 'pw', deviceId: 'P1', otp: wc });
+  t('קוד נכון ⇒ טוקן ומכשיר נרשם', !!r.token && (await cw2().get()).data().deviceId === 'P1' && (await db.doc('workers/w2').get()).data().deviceRegistered === true);
+  t('טלגרם: מכשיר עובד נרשם', /מכשיר עובד נרשם/.test(sent[sent.length - 1]));
+  r = await login({ user: 'nw', pass: 'pw', deviceId: 'P1' });
+  t('כניסה חוזרת מאותו טלפון ⇒ בלי קוד', !!r.token && !r.needOtp);
+  t('טלפון אחר ⇒ device (לא קוד)', (await err(login({ user: 'nw', pass: 'pw', deviceId: 'P2' }))) === 'device');
+  // איפוס מכשיר ע"י המנהל ⇒ שוב קוד
+  await fns.updateCredentials.run({ action: 'resetDevice', targetId: 'w2' }, mctx);
+  r = await login({ user: 'nw', pass: 'pw', deviceId: 'P2' });
+  t('אחרי איפוס ⇒ שוב needOtp', r.needOtp && r.devApprove);
+  tgDown = true; await cw2().set({ devOtp: admin.firestore.FieldValue.delete() }, { merge: true });
+  t('טלגרם לא זמין ⇒ otp-send', (await err(login({ user: 'nw', pass: 'pw', deviceId: 'P3' }))) === 'otp-send');
+  tgDown = false;
+  // רישום פנים (faceUpdateAllowed) ממכשיר לא רשום — הקוד לפני שמירת הפנים, והבקשה החוזרת עוברת
+  await fns.updateCredentials.run({ action: 'resetDevice', targetId: 'w2' }, mctx);
+  await db.doc('workers/w2').set({ faceAuth: true, faceUpdateAllowed: true }, { merge: true });
+  await cw2().set({ devOtp: admin.firestore.FieldValue.delete(), failCount: 0 }, { merge: true });
+  const fv = Array.from({ length: 128 }, (_, i) => i / 1000);
+  r = await login({ user: 'nw', pass: 'pw', deviceId: 'P4', registerDescriptors: [fv] });
+  t('רישום פנים ממכשיר חדש ⇒ needOtp, פנים לא נשמרו', r.needOtp && !(await cw2().get()).data().faceDescriptors && (await db.doc('workers/w2').get()).data().faceUpdateAllowed === true);
+  r = await login({ user: 'nw', pass: 'pw', deviceId: 'P4', registerDescriptors: [fv], otp: lastCode() });
+  t('קוד נכון ⇒ טוקן, פנים נשמרו, מכשיר נרשם', !!r.token && !!(await cw2().get()).data().faceDescriptors && (await cw2().get()).data().deviceId === 'P4');
+  // עובד בלי נעילת מכשיר — בלי שינוי
+  r = await login({ user: 'wk', pass: 'pw', deviceId: 'Q' });
+  t('עובד בלי נעילת מכשיר ⇒ בלי קוד', !!r.token && !r.needOtp);
   console.log(`\n══ ${pass} עברו · ${fail} נכשלו ══`);
   process.exit(fail ? 1 : 0);
 })().catch(e => { console.error(e); process.exit(1); });

@@ -6061,21 +6061,21 @@ async function loginCall(payload){
   const res=await fn(payload);
   const r=(res&&res.data)||{};
   // 🔐 מנהל ממכשיר שהשרת לא מכיר ⇒ קוד בטלגרם; שולחים שוב את אותה בקשה עם otp (כל מסלולי הכניסה)
-  return r.needOtp?_otpFlow(fn,payload):r;
+  return r.needOtp?_otpFlow(fn,payload,!!r.devApprove):r;
 }
 // ─── 🔐 קוד חד-פעמי בטלגרם למכשיר מנהל חדש (13/11/2026) ───
 // השרת (mgrDeviceGate) מחזיר needOtp ושולח קוד; אחרי קוד נכון המכשיר נרשם ולא יישאל שוב.
 // ביטול ⇒ שגיאה 'otp-cancel' (לולאת הפנים נעצרת ולא פותחת את החלון שוב ושוב).
-function _otpAsk(msg){
+function _otpAsk(msg,X){
   return new Promise(res=>{
     document.getElementById('otp-ov')?.remove();
     const o=document.createElement('div');o.id='otp-ov';
     o.style.cssText='position:fixed;inset:0;background:rgba(0,0,0,.55);z-index:99999;display:flex;align-items:center;justify-content:center;padding:16px';
     o.innerHTML=`<div style="background:var(--bg2,#fff);color:var(--txt,#111);border-radius:14px;padding:20px;max-width:340px;width:100%;text-align:center;direction:rtl;box-shadow:0 8px 30px rgba(0,0,0,.3)">
-      <div style="font-size:32px">🔐</div><div style="font-weight:700;font-size:16px;margin:6px 0">כניסת מנהל ממכשיר חדש</div>
+      <div style="font-size:32px">🔐</div><div style="font-weight:700;font-size:16px;margin:6px 0">${X.title}</div>
       <div id="otp-msg" style="font-size:13px;margin-bottom:12px;line-height:1.5">${msg}</div>
       <input id="otp-in" inputmode="numeric" autocomplete="one-time-code" maxlength="6" placeholder="------" style="font-size:26px;letter-spacing:8px;text-align:center;width:100%;padding:8px;box-sizing:border-box;direction:ltr"/>
-      <div style="display:flex;gap:8px;margin-top:14px"><button class="btn btn-primary" id="otp-ok" style="flex:1">אישור</button><button class="btn" id="otp-no" style="flex:1">ביטול</button></div></div>`;
+      <div style="display:flex;gap:8px;margin-top:14px"><button class="btn btn-primary" id="otp-ok" style="flex:1">${X.ok}</button><button class="btn" id="otp-no" style="flex:1">${X.no}</button></div></div>`;
     document.body.appendChild(o);
     const inp=o.querySelector('#otp-in'),done=v=>{o.remove();res(v);};
     o.querySelector('#otp-ok').onclick=()=>done(inp.value.replace(/\D/g,''));
@@ -6092,23 +6092,31 @@ function _devLabel(){
   const app=(window.matchMedia&&matchMedia('(display-mode: standalone)').matches)||navigator.standalone?'אפליקציה':'';
   return[os,br,app].filter(Boolean).join(' · ');
 }
-async function _otpFlow(fn,payload){
+// 📱🔐 (14/11/2026) dev = עובד שהמכשיר שלו עוד לא רשום (workerDeviceGate) — הקוד נשלח לטלגרם של **המנהל**,
+// שמוסר אותו פנים מול פנים. עברית/ערבית לפי השפה הזכורה במכשיר (מסך הכניסה).
+const _OTP_TX={
+  mgr:{he:{title:'כניסת מנהל ממכשיר חדש',sent:'נשלח קוד בן 6 ספרות לטלגרם שלך.<br>הזן אותו כדי לאשר את המכשיר הזה (פעם אחת).',resent:'נשלח קוד חדש לטלגרם',wrong:'⛔ קוד שגוי — נסה שוב',expired:'⏱ הקוד פג — נשלח קוד חדש לטלגרם',ok:'אישור',no:'ביטול'}},
+  dev:{he:{title:'📱 רישום טלפון חדש',sent:'זו הכניסה הראשונה מהטלפון הזה.<br>נשלח קוד בן 6 ספרות <b>למנהל</b> — בקש ממנו את הקוד והזן אותו כאן (פעם אחת בלבד).',resent:'נשלח קוד חדש למנהל',wrong:'⛔ קוד שגוי — נסה שוב',expired:'⏱ הקוד פג — נשלח קוד חדש למנהל',ok:'אישור',no:'ביטול'},
+       ar:{title:'📱 تسجيل هاتف جديد',sent:'هذا أول دخول من هذا الهاتف.<br>تم إرسال رمز من 6 أرقام <b>إلى المدير</b> — اطلب منه الرمز وأدخله هنا (مرة واحدة فقط).',resent:'تم إرسال رمز جديد إلى المدير',wrong:'⛔ رمز خاطئ — حاول مرة أخرى',expired:'⏱ انتهت صلاحية الرمز — تم إرسال رمز جديد إلى المدير',ok:'تأكيد',no:'إلغاء'}}
+};
+async function _otpFlow(fn,payload,dev){
   payload={...payload,devLabel:_devLabel()};
-  let msg='נשלח קוד בן 6 ספרות לטלגרם שלך.<br>הזן אותו כדי לאשר את המכשיר הזה (פעם אחת).';
+  const G=dev?_OTP_TX.dev:_OTP_TX.mgr,X=(typeof currentLang!=='undefined'&&G[currentLang])||G.he;
+  let msg=X.sent;
   for(let i=0;i<8;i++){
-    const code=await _otpAsk(msg);
+    const code=await _otpAsk(msg,X);
     if(!code)throw new Error('otp-cancel');
     try{
       const r=((await fn({...payload,otp:code}))||{}).data||{};
       if(!r.needOtp)return r;
-      msg='נשלח קוד חדש לטלגרם';
+      msg=X.resent;
     }catch(e){
       const c=_loginErrCode(e);
-      if(c==='otp-wrong'){msg='⛔ קוד שגוי — נסה שוב';continue;}
+      if(c==='otp-wrong'){msg=X.wrong;continue;}
       if(c==='otp-expired'){ // פג / יותר מדי ניסיונות ⇒ קוד חדש (השרת מאמת שוב את הסיסמה/הפנים)
         const r=((await fn(payload))||{}).data||{};
         if(!r.needOtp)return r;
-        msg='⏱ הקוד פג — נשלח קוד חדש לטלגרם';continue;
+        msg=X.expired;continue;
       }
       throw e;
     }

@@ -164,6 +164,41 @@ async function mgrDeviceGate(uid, name, d, context, via) {
   if (!ok) { await ref.set({ mgrOtp: FieldValue.delete() }, { merge: true }); throw new functions.https.HttpsError('unavailable', 'otp-send'); }
   return { needOtp: true };
 }
+// ─── 📱🔐 רישום מכשיר ראשון של עובד — באישור המנהל (14/11/2026) ───
+// עד היום המכשיר הראשון שנכנס עם הסיסמה נרשם אוטומטית ⇒ מי שידע סיסמה של עובד חדש (או אחרי איפוס
+// מכשיר) "תפס" את החשבון לטלפון שלו. עכשיו: הקוד נשלח לטלגרם של המנהל, המנהל מוסר אותו לעובד פנים
+// מול פנים, ורק אחרי קוד נכון deviceId נשמר. אותם קבועים כמו mgrDeviceGate (5 דק', 5 ניסיונות, קוד חדש אחרי דקה).
+// מחזיר null = נרשם (אפשר להמשיך להנפקת טוקן) | {needOtp, devApprove} = ממתין לקוד.
+async function workerDeviceGate(w, credRef, d, context, via) {
+  const dev = String(d.deviceId || '');
+  const dk = mgrDevKey(dev);
+  const c = (await credRef.get()).data() || {};
+  if (c.deviceId) { // נרשם בינתיים (בקשה מקבילה) — ההחלטה נשארת של ההשוואה הרגילה
+    if (c.deviceId === dev) return null;
+    throw new functions.https.HttpsError('permission-denied', 'device');
+  }
+  const now = Date.now(), o = c.devOtp || null, ip = callerIp(context) || '?';
+  const { token: tgToken, chatId: tgChatId } = tgCfg();
+  const label = devLabelOf(d);
+  if (d.otp != null && String(d.otp).trim()) {
+    if (!o || o.dev !== dk || now > o.exp || (o.tries || 0) >= OTP_MAX_TRIES) throw new functions.https.HttpsError('permission-denied', 'otp-expired');
+    if (hashPass(w.id + ':dev:' + String(d.otp).trim()) !== o.h) {
+      await credRef.set({ devOtp: { ...o, tries: (o.tries || 0) + 1 } }, { merge: true });
+      throw new functions.https.HttpsError('permission-denied', 'otp-wrong');
+    }
+    await credRef.set({ deviceId: dev, devOtp: FieldValue.delete() }, { merge: true });
+    await db.collection('workers').doc(w.id).set({ deviceRegistered: true }, { merge: true });
+    if (tgToken && tgChatId) await sendTelegram(tgToken, tgChatId, '✅ TextileOps — מכשיר עובד נרשם\n👤 ' + (w.name || '') + (label ? '\n📱 ' + label : '') + '\n🔑 דרך: ' + via + '\n🌐 IP: ' + ip + '\n🕐 ' + ilTime()).catch(() => {});
+    return null;
+  }
+  if (o && o.dev === dk && now < o.exp && now - (o.sent || 0) < OTP_RESEND_MS && (o.tries || 0) < OTP_MAX_TRIES) return { needOtp: true, devApprove: true };
+  if (!tgToken || !tgChatId) throw new functions.https.HttpsError('unavailable', 'otp-send');
+  const code = String(crypto.randomInt(0, 1000000)).padStart(6, '0');
+  await credRef.set({ devOtp: { h: hashPass(w.id + ':dev:' + code), dev: dk, exp: now + OTP_TTL_MS, sent: now, tries: 0 } }, { merge: true });
+  const ok = await sendTelegram(tgToken, tgChatId, '📱🔐 TextileOps — עובד מבקש לרשום מכשיר חדש\n\n<code>' + code + '</code>\n\n👤 ' + (w.name || '') + (label ? '\n📱 ' + label : '') + '\n🔑 דרך: ' + via + '\n🌐 IP: ' + ip + '\n🕐 ' + ilTime() + '\n\nמסור את הקוד לעובד <b>פנים מול פנים</b> (תקף 5 דק\'). לא ביקשת? אל תמסור — ובדוק מי מחזיק את הסיסמה.');
+  if (!ok) { await credRef.set({ devOtp: FieldValue.delete() }, { merge: true }); throw new functions.https.HttpsError('unavailable', 'otp-send'); }
+  return { needOtp: true, devApprove: true };
+}
 
 // ─── LOGIN — אימות בצד שרת + Custom Token עם role claim (שלב 2 אבטחה) ───
 // קלט: {user, pass?} | {user, faceDescriptor?} | {user, registerDescriptors?} | {user, empBarcode?} | {emergencyCode} | {user, faceFailAlert, photoB64?}
@@ -401,6 +436,12 @@ const loginImpl = async (data, context) => {
     const rChk = passOk(rStored, rp);
     if (!rChk.ok) await failAuth(n, 'wrong');
     if (rChk.up) await credRef.set({ pass: hashPassS(rp) }, { merge: true });
+    // 📱🔐 מכשיר עוד לא רשום ⇒ קוד מהמנהל *לפני* שמירת הפנים: השמירה מכבה faceUpdateAllowed, והבקשה
+    // החוזרת עם הקוד (אותו payload) הייתה נדחית ב-no-face-update
+    if (w.deviceBinding && w.role !== 'manager' && !creds.deviceId) {
+      const g = await workerDeviceGate(w, credRef, d, context, 'רישום פנים');
+      if (g) { await unclaimAttempt(credRef, n); return g; }
+    }
     await credRef.set({ faceDescriptors: Object.fromEntries(d.registerDescriptors.map((s, i) => [i, s.map(Number)])), faceDescriptor: FieldValue.delete() }, { merge: true });
     await wDoc.ref.set({ faceUpdateAllowed: false, faceRegistered: true, faceDescriptor: FieldValue.delete(), faceDescriptors: FieldValue.delete() }, { merge: true });
   } else if (d.empBarcode != null) {
@@ -454,8 +495,10 @@ const loginImpl = async (data, context) => {
     const dev = String(d.deviceId || '');
     if (!dev) throw new functions.https.HttpsError('failed-precondition', 'device-unknown');
     if (!creds.deviceId) {
-      await credRef.set({ deviceId: dev }, { merge: true });
-      await wDoc.ref.set({ deviceRegistered: true }, { merge: true });
+      // (מסלול רישום הפנים כבר עבר את השער למעלה — workerDeviceGate קורא מחדש ורואה שנרשם ⇒ null)
+      // 📱🔐 מכשיר ראשון ⇒ קוד מהמנהל (workerDeviceGate). ממתין ⇒ הניסיון שנספר מוחזר (הסיסמה הייתה נכונה)
+      const g = await workerDeviceGate(w, credRef, d, context, Array.isArray(d.registerDescriptors) ? 'רישום פנים' : Array.isArray(d.faceDescriptor) ? 'זיהוי פנים' : 'סיסמה');
+      if (g) { await unclaimAttempt(credRef, lastClaim); return g; }
     } else if (creds.deviceId !== dev) {
       await tg('⛔ TextileOps — ניסיון כניסה ממכשיר לא מורשה\n👤 עובד: ' + w.name + '\n🕐 שעה: ' + ilTime());
       throw new functions.https.HttpsError('permission-denied', 'device');
