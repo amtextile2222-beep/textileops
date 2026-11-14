@@ -856,15 +856,17 @@ function _bcToggleSel(containerId,cls,check){
 // קורא את מצב הסימון הנוכחי מה-DOM (bc-print-area) — total/sample + אילו אינדקסים ב-items נבחרו
 function _bcSelSet(){
   const area=document.getElementById('bc-print-area');
-  const sel={total:true,sample:true,items:new Set()};
+  const sel={total:true,sample:true,repair:true,items:new Set()};
   if(!area)return sel;
   const totalCb=area.querySelector('.bc-card[data-idx="total"] .bc-sel');
   if(totalCb)sel.total=totalCb.checked;
   const sampleCb=area.querySelector('.bc-card[data-idx="sample"] .bc-sel');
   if(sampleCb)sel.sample=sampleCb.checked;
+  const repairCb=area.querySelector('.bc-card[data-idx="repair"] .bc-sel'); // 🔧
+  if(repairCb)sel.repair=repairCb.checked;
   area.querySelectorAll('.bc-card[data-idx]').forEach(c=>{
     const idx=c.dataset.idx;
-    if(idx==='total'||idx==='sample')return;
+    if(idx==='total'||idx==='sample'||idx==='repair')return;
     const cb=c.querySelector('.bc-sel');
     if(!cb||cb.checked)sel.items.add(parseInt(idx));
   });
@@ -930,7 +932,7 @@ function bcPrint(mode){
     const items=[]; // כל פריט = שורה שלמה, כדי שלעולם לא ייחתך באמצע
     [...byColor.entries()].forEach(([col,cards])=>{
       const colName=(COLORS_AR[col]||COLORS[col]||col);
-      const wide=col==='total'||col==='sample'; // "כל הכמות" / 👕 דגם — בלי כותרת צבע, שורה שלמה
+      const wide=col==='total'||col==='sample'||col==='repair'; // "כל הכמות" / 👕 דגם / 🔧 תיקון — בלי כותרת צבע, שורה שלמה
       const hdr=wide?'':`<div class="colhdr">צבע: ${col} · ${colName} — ${cards.length} יחידות</div>`;
       const per=wide?1:2; // כרטיס "כל הכמות" תופס שורה שלמה
       for(let i=0;i<cards.length;i+=per){
@@ -972,7 +974,7 @@ function bcPrint(mode){
       .bc-card{border:2px solid #333;border-radius:6px;padding:6px 8px!important;display:inline-flex!important;align-items:center;gap:10px;
         width:calc(50% - 10px);height:46mm;box-sizing:border-box;vertical-align:top;margin:0 4px 2mm;font-size:13px;overflow:hidden;
         break-inside:avoid!important;page-break-inside:avoid!important}
-      .bc-card[data-col="total"],.bc-card[data-col="sample"]{width:calc(100% - 8px)}
+      .bc-card[data-col="total"],.bc-card[data-col="sample"],.bc-card[data-col="repair"]{width:calc(100% - 8px)}
       /* line-height מכווץ בהדפסה בלבד — 7 שורות טקסט (כולל "הזמנה #NNN") נכנסות ב-46 מ"מ */
       .bc-card>div:last-child{line-height:1.5!important}
       .bc-card img{width:38mm;height:38mm}
@@ -1053,6 +1055,13 @@ async function bcDownloadPDF(share){
       {t:'צבע: '+it.col+' · '+colName,mm:3.6,bold:true,color:'#000'},
       {t:code,mm:2.8,bold:false,color:'#555'}]});
   });
+  if(g.repair&&sel.repair)cards.push({qr:g.repair.code,lines:[ // 🔧 תיקון
+    {t:REPAIR_STEP,mm:4,bold:true,color:'#b45309'},
+    {t:'לקוח: '+cust,mm:3.6,bold:true,color:'#000'},
+    {t:'מוצר: '+prod,mm:3.6,bold:true,color:'#000'},
+    ...(sfx?[{t:'🔢 הזמנה #'+sfx,mm:3.6,bold:true,color:'#059669'}]:[]),
+    {t:'מידה/צבע/כמות — בסריקה',mm:3,bold:false,color:'#555'},
+    {t:g.repair.code,mm:2.8,bold:false,color:'#555'}]});
   if(!cards.length){alert('בחר לפחות ברקוד אחד להדפסה');return;}
   const doc=new J({unit:'mm',format:'a4',orientation:'portrait',compress:true}); // 🗜 (26/10/2026) דחיסה — 3.2 מ"ב ⇒ ~40 ק"ב ל-4 מדבקות, אותם פיקסלים
   const CW=105,CH=56,TOP=(297-5*CH)/2; // 8.5 מ"מ שוליים עליון/תחתון, 0 בצדדים

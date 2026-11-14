@@ -77,7 +77,8 @@ function findDupIn(list,bc,taskType){
 async function claimTaskGuard(task){
   if(!db||!S.fbConnected)return{ok:true};
   const{doc,runTransaction}=window._fb;
-  const key=taskGuardKey(task.workerId,task.bc,task.taskType,task.prodStamp);
+  // 🔧 תיקון — אותו ברקוד לכל המידות ⇒ המידה והצבע חלק מהמפתח (תיקון של 2 מידות באותו סל)
+  const key=taskGuardKey(task.workerId,task.bc,task.isRepair?task.taskType+'|'+(task.size||'')+'|'+(task.col||''):task.taskType,task.prodStamp);
   try{
     await runTransaction(db,async tx=>{
       const gRef=doc(db,'taskGuards',key);
@@ -317,13 +318,13 @@ async function bcStartBatch(){
     for(const b of items){
       // חסימה חוזרת ברגע הפתיחה (לא רק בהוספה לסל): סוגר מרוץ של סריקה כפולה מהירה —
       // סריקה שנייה שעברה את בדיקת הסל לפני שהמשימה הראשונה נוצרה. אותו עובד+ברקוד+שלב פעיל = דילוג.
-      if(S.activeTasks.some(x=>x.workerId===u.id&&taskBc(x)===b.raw&&(x.taskType||'')===(b.taskType||'')&&!x.paused)){dupSkip.push((b.taskType||b.prod)+' — '+(T.scan_dup_active||'פעיל כעת'));continue;}
-      if(findDupIn(srvActive,b.raw,b.taskType)){dupSkip.push((b.taskType||b.prod)+' — '+(T.scan_dup_active||'פעיל כעת'));continue;}
+      if(!b.isRepair&&S.activeTasks.some(x=>x.workerId===u.id&&taskBc(x)===b.raw&&(x.taskType||'')===(b.taskType||'')&&!x.paused)){dupSkip.push((b.taskType||b.prod)+' — '+(T.scan_dup_active||'פעיל כעת'));continue;}
+      if(!b.isRepair&&findDupIn(srvActive,b.raw,b.taskType)){dupSkip.push((b.taskType||b.prod)+' — '+(T.scan_dup_active||'פעיל כעת'));continue;}
       // wu ולא u: S.user הוא עותק מרגע ההתחברות — currentStation שלו לא מתעדכן בסריקת תחנה
       const newTask={id:String(Date.now())+Math.random().toString(36).slice(2,6),workerId:u.id,workerName:u.name,scannedBy:S.user?.id||'',scannedByName:S.user?.name||'',dept:b.taskDept||effDept(wu),station:curStation(wu)?.name||'',cust:b.cust,prod:b.prod,size:b.size,qty:b.qty,col:b.col,taskType:b.taskType,bc:b.raw,isTotal:b.isTotal||false,startTime:bcStart,elapsed:0,prodStamp:b.prodStamp,...(b.splitId?{splitId:b.splitId}:{})};
       if(bcBatchId)newTask.batchId=bcBatchId;
       if(b.expMin!=null)newTask.expectedMin=b.expMin;
-      if(b.isSample)newTask.isSample=true;
+      if(b.isSample)newTask.isSample=true;if(b.isRepair)newTask.isRepair=true; // 🔧
       if(!(await claimTaskGuard(newTask)).ok){dupSkip.push((b.taskType||b.prod)+' — '+(T.scan_dup_active||'פעיל כעת'));continue;}
       S.activeTasks.unshift(newTask);created++;
       if(S.fbConnected)await fbSet('activeTasks',newTask.id,{...newTask,startTime:bcStart.toISOString()});

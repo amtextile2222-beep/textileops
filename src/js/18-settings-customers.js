@@ -651,6 +651,8 @@ function addCustomColor(){
   if(code.length===1)code='0'+code;
   const name=(document.getElementById('col-name').value||'').trim();
   if(!code||!name){alert('הזן קוד ושם צבע');return;}
+  // קודים שמורים בברקוד: 00 כל-הכמות · 77 🔧 תיקון · 88 👕 דגם · 99 יצא ללקוח
+  if(['00','77','88','99'].includes(code)){alert('הקוד '+code+' שמור במערכת (00 כל הכמות · 77 תיקון · 88 דגם · 99 יצא ללקוח) — בחר קוד אחר');return;}
   COLORS[code]=name;
   S.customColors[code]=name;
   document.getElementById('col-code').value='';

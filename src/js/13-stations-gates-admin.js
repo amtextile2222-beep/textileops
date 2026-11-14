@@ -1114,7 +1114,7 @@ function tsStopCam(){
   const c=document.getElementById('ts-cam-container');if(c)c.style.display='none';
   const b=document.getElementById('ts-cam-btn');if(b)b.style.display='flex';
 }
-function tsAddToBatch(){
+async function tsAddToBatch(){
   const empId=document.getElementById('ts-emp-sel').value;
   const raw=(document.getElementById('ts-bc-inp').value||'').replace(/\D/g,'');
   const T=LANGS[currentLang];
@@ -1125,10 +1125,10 @@ function tsAddToBatch(){
   if(isSampleScan(raw)){
     // 👕 דגם ראשון — נכנס לסל כמשימת דגם (בלי שלבים ובלי שערים). כמה דגמים בסל = טיימר משותף.
     // ⚠️ בלי הענף הזה רשימת השלבים מוסתרת (מצב דגם) ⇒ נכנסה לסל משימה רגילה עם שלב ריק.
-    const dup=sampleDupFor(empId,raw,_tsBatch);
     document.getElementById('ts-bc-inp').value='';document.getElementById('ts-bc-prev').innerHTML='';tsShowTaskTypeField(true);
-    if(dup){showToast(SAMPLE_STEP+' — '+dup,'var(--red-txt)',6000);return;}
-    _tsBatch.push(sampleBase(raw,(document.getElementById('ts-dept')?.value||'').trim()));
+    const item=await openScanItem(empId,raw,_tsBatch,(document.getElementById('ts-dept')?.value||'').trim()); // 🔧 תיקון ⇒ חלון בחירה
+    if(!item)return;
+    _tsBatch.push(item);
     renderTsBatchQueue();showToast(T.scan_added_cart);
     return;
   }
@@ -1163,9 +1163,9 @@ async function tsStartTask(){
   if(isBcLen(raw.length)&&!bcSignGate('ts',raw))return; // 🔐
   if(isBcLen(raw.length)&&isSampleScan(raw)){
     // 👕 דגם ראשון — בלי שלבים, בלי שערי תחנה/סדר ובלי מגבלות הסל
-    const dup=sampleDupFor(w.id,raw,_tsBatch);
-    if(dup){showToast(SAMPLE_STEP+' — '+dup,'var(--red-txt)',6000);if(!_tsBatch.length)return;}
-    else _tsBatch.push(sampleBase(raw,(document.getElementById('ts-dept')?.value||'').trim()));
+    const item=await openScanItem(w.id,raw,_tsBatch,(document.getElementById('ts-dept')?.value||'').trim()); // 🔧 תיקון ⇒ חלון בחירה
+    if(item===null)return; // בוטל
+    if(item)_tsBatch.push(item);else if(!_tsBatch.length)return; // כפילות — מתחילים את מה שכבר בסל
   }else if(isBcLen(raw.length)){
     if(!isTotalBc(raw)&&parseInt(raw.slice(8,11))===0&&productHasDefinedQty(raw.slice(0,2),raw.slice(2,7))){showToast('⚠ קיים ברקוד עם כמות למוצר זה','var(--red-txt)',6000);return;}
     const cust=raw.slice(0,2),prod=raw.slice(2,7),size=raw.slice(7,8),col=raw.slice(11,13);
@@ -1213,8 +1213,8 @@ async function tsStartTask(){
     const tsSrvActive=await serverActiveTasks(w.id); // קריאה אחת לכל הסל, לא לכל פריט
     for(const b of _tsBatch){
       // חסימה חוזרת ברגע הפתיחה — סוגר מרוץ של פתיחה כפולה של אותה משימה (עובד+ברקוד+שלב פעיל)
-      if(S.activeTasks.some(x=>x.workerId===w.id&&taskBc(x)===b.raw&&(x.taskType||'')===(b.taskType||'')&&!x.paused))continue;
-      if(findDupIn(tsSrvActive,b.raw,b.taskType)){tsDupSkip.push((b.taskType||b.prod)+' — '+(T.scan_dup_active||'פעיל כעת'));continue;}
+      if(!b.isRepair&&S.activeTasks.some(x=>x.workerId===w.id&&taskBc(x)===b.raw&&(x.taskType||'')===(b.taskType||'')&&!x.paused))continue;
+      if(!b.isRepair&&findDupIn(tsSrvActive,b.raw,b.taskType)){tsDupSkip.push((b.taskType||b.prod)+' — '+(T.scan_dup_active||'פעיל כעת'));continue;}
       // scannedBy/scannedByName — **מי הפעיל את הסורק**, להבדיל מ-workerId שהוא **למי** המשימה.
       // האחראי محمد פותח משימות עבור עובדות אחרות, ולכן startTime הוא רגע חלוקת העבודה ולא
       // רגע ההתחלה בפועל. בלי השדה הזה אי אפשר להפריד קצב עבודה מזמן חלוקה. נוסף 10/09/2026
@@ -1222,7 +1222,7 @@ async function tsStartTask(){
       const task={id:String(Date.now())+Math.random().toString(36).slice(2,6),workerId:w.id,workerName:w.name,scannedBy:S.user?.id||'',scannedByName:S.user?.name||'',dept:b.taskDept||effDept(w),station:curStation(w)?.name||'',cust:b.cust,prod:b.prod,size:b.size,qty:b.qty,col:b.col,taskType:b.taskType,bc:b.raw,isTotal:b.isTotal||false,startTime,elapsed:0,accumulatedSec:0,prodStamp:b.prodStamp,...(b.splitId?{splitId:b.splitId}:{})};
       const exp=b.isSample?null:await fetchExpected(b.cust,b.prod,w.id,b.qty||_estQtyBc(b.raw)); // 👕 דגם — אין צפי · 📏 אין כמות ⇒ המשוערת
       if(exp?.ok&&exp.perStep?.[b.taskType]!=null)task.expectedMin=exp.perStep[b.taskType];
-      if(b.isSample)task.isSample=true;
+      if(b.isSample)task.isSample=true;if(b.isRepair)task.isRepair=true; // 🔧
       if(batchId)task.batchId=batchId;
       if(!(await claimTaskGuard(task)).ok){tsDupSkip.push((b.taskType||b.prod)+' — '+(T.scan_dup_active||'פעיל כעת'));continue;}
       S.activeTasks.push(task);created++;

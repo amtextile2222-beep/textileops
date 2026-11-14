@@ -3005,6 +3005,7 @@ function bcOrderProd(raw){
 // שהודפסו לפני הסימון ממשיכות לעבוד כדגם.
 function isSampleScan(raw){
   if(!raw||!isBcLen(raw.length)||isShipBc(raw))return false;
+  if(isRepairBc(raw))return true; // 🔧 תיקון — אותו מסלול פתוח (בלי שלבים/שערים)
   return isSampleBc(raw)||!!bcOrderProd(raw)?.isSample;
 }
 function sampleQtyOf(raw){
@@ -3013,21 +3014,94 @@ function sampleQtyOf(raw){
 }
 // פריט סל של דגם. ⚠️ החותמת נלקחת מרשומת ההזמנה של הברקוד ולא מ-prodStampFor, שבוחר תמיד
 // את החדשה ביותר: הזמנת ייצור של אותו דגם שנפתחה בינתיים הייתה בולעת את שעות הדגם.
-function sampleBase(raw,taskDept){
+// rp (🔧 תיקון) = {size,col,qty} שנבחרו בסריקה (repairPick)
+function sampleBase(raw,taskDept,rp){
   const p=bcOrderProd(raw),sb=isSampleBc(raw),cust=raw.slice(0,2),prod=raw.slice(2,7);
+  const stamp=p?prodStampOf(p):prodStampFor(cust,prod);
+  if(rp)return{raw,cust,prod,size:rp.size,qty:rp.qty,col:rp.col,isTotal:false,taskDept:taskDept||'',
+    taskType:REPAIR_STEP,isSample:true,isRepair:true,prodStamp:stamp};
   return{raw,cust,prod,size:sb?'':raw.slice(7,8),qty:sampleQtyOf(raw),col:sb?'':raw.slice(11,13),
     isTotal:false,taskDept:taskDept||'',taskType:SAMPLE_STEP,isSample:true,
-    prodStamp:p?prodStampOf(p):prodStampFor(cust,prod)};
+    prodStamp:stamp};
 }
 // '' = מותר. חוסם רק כפילות בסל, או אותו עובד שכבר פתוח (לא מושהה) על אותו ברקוד דגם.
-function sampleDupFor(workerId,raw,cart){
+// 🔧 תיקון — כפילות = אותו ברקוד **ואותה מידה+צבע** (תיקון של כמה מידות באותו סל — מותר)
+function sampleDupFor(workerId,raw,cart,rp){
   const T=LANGS[currentLang];
-  if((cart||[]).some(b=>b.raw===raw&&b.taskType===SAMPLE_STEP))return T.scan_dup_in_cart||'כבר בסל';
-  if(S.activeTasks.some(t=>t.workerId===workerId&&taskBc(t)===raw&&t.taskType===SAMPLE_STEP&&!t.paused))return T.scan_dup_active||'פעיל כעת';
+  const step=rp?REPAIR_STEP:SAMPLE_STEP,same=x=>!rp||(String(x.size||'')===rp.size&&String(x.col||'')===rp.col);
+  if((cart||[]).some(b=>b.raw===raw&&b.taskType===step&&same(b)))return T.scan_dup_in_cart||'כבר בסל';
+  if(S.activeTasks.some(t=>t.workerId===workerId&&taskBc(t)===raw&&t.taskType===step&&same(t)&&!t.paused))return T.scan_dup_active||'פעיל כעת';
   return '';
+}
+// ─── 🔧 תיקון חוזר (14/11/2026, בקשת המשתמש) ─────────────────────────────
+// ברקוד תיקון לכל הזמנה (נוצר במחולל ליד "כל הכמות"): size='9', col='77' (צבעים 01-30 ·
+// 00 כל-הכמות · 88 דגם · 99 יצא ללקוח — 77 שמור, ראה addCustomColor). עובר במסלול הדגם: בלי
+// שלבים, בלי שערי תחנה/סדר ובלי חסימת "סיים את תפקידו" (תיקון מגיע גם אחרי יציאה ללקוח).
+// בסריקה בוחרים מידה+צבע מטבלת הכמויות של ההזמנה; הכמות מתמלאת מהשורה וניתנת לעריכה.
+// המשימה: taskType=REPAIR_STEP, isRepair, isSample (= "פתוחה" בשערים ובמגבלות הסל), size/col מהבחירה.
+// העלות — בחלון ההזמנה (מנהל, _repairsFill): זמן × (עלות שעה עמוסה+תקורה). עלות פנימית, לא בתעודה.
+const REPAIR_STEP='🔧 תיקון';
+const REPAIR_COL='77';
+function isRepairBc(raw){raw=String(raw||'');return isBcLen(raw.length)&&raw.slice(7,8)==='9'&&raw.slice(11,13)===REPAIR_COL;}
+function repairCodeOf(cust,prod,sfx){return cust+prod+'9'+'000'+REPAIR_COL+(sfx||'');}
+// חלון בחירה: שורות טבלת הכמויות (מידה · צבע · כמות) + כמות לעריכה. null = בוטל
+function repairPick(raw){
+  return new Promise(res=>{
+    const p=bcOrderProd(raw),rows=(p?.quantities||[]).filter(q=>(parseInt(q.qty)||0)>0);
+    const no=orderNoOf(raw),c=raw.slice(0,2),pr=raw.slice(2,7);
+    document.getElementById('rp-wrap')?.remove();
+    const ov=document.createElement('div');ov.id='rp-wrap';
+    ov.style.cssText='position:fixed;inset:0;background:rgba(0,0,0,.45);z-index:9990;display:flex;align-items:center;justify-content:center;padding:16px';
+    const row=(q,i)=>`<label style="display:flex;align-items:center;gap:8px;padding:9px 10px;border:1px solid var(--brd);border-radius:8px;cursor:pointer;font-size:14px">
+        <input type="radio" name="rp-row" value="${i}" style="width:auto;margin:0">
+        <span style="flex:1">מידה <b>${esc(szLblT(c,pr,String(q.size)))}</b> · ${esc(COLORS[q.color]||q.color||'—')}</span>
+        <span style="color:var(--txt3);font-size:12px">${parseInt(q.qty)} יח'</span></label>`;
+    ov.innerHTML=`<div style="background:var(--card);color:var(--txt);border-radius:14px;padding:16px;width:100%;max-width:420px;max-height:88vh;overflow:auto">
+      <div style="font-size:17px;font-weight:800;margin-bottom:2px">${REPAIR_STEP}</div>
+      <div style="font-size:12px;color:var(--txt3);margin-bottom:12px">לקוח ${esc(c)} · מוצר ${esc(pr)}${no?' · הזמנה #'+esc(no):''}${p?.name?' · '+esc(p.name):''}</div>
+      ${rows.length?`<div style="font-size:13px;font-weight:600;margin-bottom:6px">מידה וצבע:</div>
+        <div style="display:flex;flex-direction:column;gap:6px;margin-bottom:12px">${rows.map(row).join('')}</div>`
+        :'<div style="font-size:12px;color:var(--txt3);margin-bottom:12px">אין טבלת כמויות להזמנה — תיקון בלי מידה/צבע</div>'}
+      <div class="field" style="margin:0"><label>כמות לתיקון</label>
+        <input id="rp-qty" type="number" min="1" step="1" inputmode="numeric" value="${rows.length===1?parseInt(rows[0].qty):(rows.length?'':1)}" style="font-size:16px"></div>
+      <div id="rp-err" style="color:var(--red-txt);font-size:12px;min-height:16px;margin-top:6px"></div>
+      <div style="display:flex;gap:8px;margin-top:6px">
+        <button class="btn primary" style="flex:1;justify-content:center;font-size:15px" id="rp-ok">➕ הוסף</button>
+        <button class="btn" style="flex:1;justify-content:center;font-size:15px" id="rp-cancel">ביטול</button></div></div>`;
+    document.body.appendChild(ov);
+    const qEl=ov.querySelector('#rp-qty'),err=ov.querySelector('#rp-err');
+    // בחירת שורה ממלאת את הכמות שלה — ואפשר לשנות אחר כך
+    ov.querySelectorAll('input[name="rp-row"]').forEach(r=>r.onchange=()=>{qEl.value=parseInt(rows[+r.value].qty)||1;err.textContent='';});
+    if(rows.length===1)ov.querySelector('input[name="rp-row"]').checked=true;
+    const done=v=>{ov.remove();res(v);};
+    ov.querySelector('#rp-cancel').onclick=()=>done(null);
+    ov.onclick=e=>{if(e.target===ov)done(null);};
+    ov.querySelector('#rp-ok').onclick=()=>{
+      const sel=ov.querySelector('input[name="rp-row"]:checked');
+      if(rows.length&&!sel){err.textContent='⚠ בחר/י מידה וצבע';return;}
+      const qty=parseInt(qEl.value)||0;
+      if(qty<1||qty>9999){err.textContent='⚠ כמות לא תקינה';return;}
+      const q=sel?rows[+sel.value]:null;
+      done({size:q?String(q.size??''):'',col:q?String(q.color??''):'',qty});
+    };
+  });
+}
+// פריט סל לדגם/תיקון בכל הסורקים. null = בוטל (בלי הודעה) · false = כפילות (ההודעה הוצגה)
+async function openScanItem(workerId,raw,cart,taskDept){
+  let rp=null;
+  if(isRepairBc(raw)){rp=await repairPick(raw);if(!rp)return null;}
+  const dup=sampleDupFor(workerId,raw,cart,rp);
+  if(dup){showToast((rp?REPAIR_STEP:SAMPLE_STEP)+' — '+dup,'var(--red-txt)',6000);return false;}
+  return sampleBase(raw,taskDept,rp);
 }
 function sampleScanPreview(v){
   const T=LANGS[currentLang];
+  if(isRepairBc(v))return `<div style="display:flex;gap:5px;flex-wrap:wrap;align-items:center;padding:8px;background:var(--bg2);border-radius:var(--r)">
+      <span class="bc-seg bc-c">לקוח: ${esc(v.slice(0,2))}</span>
+      <span class="bc-seg bc-p">מוצר: ${esc(v.slice(2,7))}</span>${bcOrderChip(v)}
+      <span class="bc-seg" style="background:var(--amber-bg,#fef3c7);color:var(--amber-txt,#b45309);font-weight:700">${REPAIR_STEP}</span>
+    </div>
+    <div style="font-size:11px;color:var(--txt3);margin-top:4px">בלי שלבים · פתוח לכל המחלקות והתחנות · מידה, צבע וכמות — בחלון שייפתח</div>`;
   return `<div style="display:flex;gap:5px;flex-wrap:wrap;align-items:center;padding:8px;background:var(--bg2);border-radius:var(--r)">
       <span class="bc-seg bc-c">לקוח: ${esc(v.slice(0,2))}</span>
       <span class="bc-seg bc-p">מוצר: ${esc(v.slice(2,7))}</span>${bcOrderChip(v)}
@@ -7060,7 +7134,8 @@ function findDupIn(list,bc,taskType){
 async function claimTaskGuard(task){
   if(!db||!S.fbConnected)return{ok:true};
   const{doc,runTransaction}=window._fb;
-  const key=taskGuardKey(task.workerId,task.bc,task.taskType,task.prodStamp);
+  // 🔧 תיקון — אותו ברקוד לכל המידות ⇒ המידה והצבע חלק מהמפתח (תיקון של 2 מידות באותו סל)
+  const key=taskGuardKey(task.workerId,task.bc,task.isRepair?task.taskType+'|'+(task.size||'')+'|'+(task.col||''):task.taskType,task.prodStamp);
   try{
     await runTransaction(db,async tx=>{
       const gRef=doc(db,'taskGuards',key);
@@ -7300,13 +7375,13 @@ async function bcStartBatch(){
     for(const b of items){
       // חסימה חוזרת ברגע הפתיחה (לא רק בהוספה לסל): סוגר מרוץ של סריקה כפולה מהירה —
       // סריקה שנייה שעברה את בדיקת הסל לפני שהמשימה הראשונה נוצרה. אותו עובד+ברקוד+שלב פעיל = דילוג.
-      if(S.activeTasks.some(x=>x.workerId===u.id&&taskBc(x)===b.raw&&(x.taskType||'')===(b.taskType||'')&&!x.paused)){dupSkip.push((b.taskType||b.prod)+' — '+(T.scan_dup_active||'פעיל כעת'));continue;}
-      if(findDupIn(srvActive,b.raw,b.taskType)){dupSkip.push((b.taskType||b.prod)+' — '+(T.scan_dup_active||'פעיל כעת'));continue;}
+      if(!b.isRepair&&S.activeTasks.some(x=>x.workerId===u.id&&taskBc(x)===b.raw&&(x.taskType||'')===(b.taskType||'')&&!x.paused)){dupSkip.push((b.taskType||b.prod)+' — '+(T.scan_dup_active||'פעיל כעת'));continue;}
+      if(!b.isRepair&&findDupIn(srvActive,b.raw,b.taskType)){dupSkip.push((b.taskType||b.prod)+' — '+(T.scan_dup_active||'פעיל כעת'));continue;}
       // wu ולא u: S.user הוא עותק מרגע ההתחברות — currentStation שלו לא מתעדכן בסריקת תחנה
       const newTask={id:String(Date.now())+Math.random().toString(36).slice(2,6),workerId:u.id,workerName:u.name,scannedBy:S.user?.id||'',scannedByName:S.user?.name||'',dept:b.taskDept||effDept(wu),station:curStation(wu)?.name||'',cust:b.cust,prod:b.prod,size:b.size,qty:b.qty,col:b.col,taskType:b.taskType,bc:b.raw,isTotal:b.isTotal||false,startTime:bcStart,elapsed:0,prodStamp:b.prodStamp,...(b.splitId?{splitId:b.splitId}:{})};
       if(bcBatchId)newTask.batchId=bcBatchId;
       if(b.expMin!=null)newTask.expectedMin=b.expMin;
-      if(b.isSample)newTask.isSample=true;
+      if(b.isSample)newTask.isSample=true;if(b.isRepair)newTask.isRepair=true; // 🔧
       if(!(await claimTaskGuard(newTask)).ok){dupSkip.push((b.taskType||b.prod)+' — '+(T.scan_dup_active||'פעיל כעת'));continue;}
       S.activeTasks.unshift(newTask);created++;
       if(S.fbConnected)await fbSet('activeTasks',newTask.id,{...newTask,startTime:bcStart.toISOString()});
@@ -8063,8 +8138,9 @@ async function bcStartSample(raw){
   const u=S.user;
   const wu=S.workers.find(x=>x.id===u.id);
   if(!wu||wu.status!=='in'){alert('לא ניתן להתחיל משימה — יש להירשם כנוכח תחילה (כניסה לעבודה בלשונית נוכחות)');return;}
-  const dup=sampleDupFor(u.id,raw,_bcBatch);
-  if(dup){showToast(SAMPLE_STEP+' — '+dup,'var(--red-txt)',6000);return;}
+  // 🔧 תיקון ⇒ חלון מידה/צבע/כמות; דגם ⇒ ישר. null/false = בוטל/כפילות
+  const item=await openScanItem(u.id,raw,_bcBatch,(document.getElementById('bc-dept')?.value||'').trim());
+  if(!item){document.getElementById('bc-inp').value='';parseBc('');return;}
   if(!_bcBatch.length){
     _bcCloseOnStart=[];_bcPauseOnStart=[];
     const existTasks=S.activeTasks.filter(t=>t.workerId===u.id&&!t.paused);
@@ -8074,7 +8150,7 @@ async function bcStartSample(raw){
       else _bcCloseOnStart=existTasks.map(t=>String(t.id));
     }
   }
-  _bcBatch.push(sampleBase(raw,(document.getElementById('bc-dept')?.value||'').trim()));
+  _bcBatch.push(item);
   document.getElementById('bc-inp').value='';parseBc('');
   renderBcBatchQueue();
   // כמו כל ברקוד: לצרף עוד לסל (עוד דגם / עוד מידה) על אותו טיימר, או להתחיל עכשיו.
@@ -11946,7 +12022,7 @@ function tsStopCam(){
   const c=document.getElementById('ts-cam-container');if(c)c.style.display='none';
   const b=document.getElementById('ts-cam-btn');if(b)b.style.display='flex';
 }
-function tsAddToBatch(){
+async function tsAddToBatch(){
   const empId=document.getElementById('ts-emp-sel').value;
   const raw=(document.getElementById('ts-bc-inp').value||'').replace(/\D/g,'');
   const T=LANGS[currentLang];
@@ -11957,10 +12033,10 @@ function tsAddToBatch(){
   if(isSampleScan(raw)){
     // 👕 דגם ראשון — נכנס לסל כמשימת דגם (בלי שלבים ובלי שערים). כמה דגמים בסל = טיימר משותף.
     // ⚠️ בלי הענף הזה רשימת השלבים מוסתרת (מצב דגם) ⇒ נכנסה לסל משימה רגילה עם שלב ריק.
-    const dup=sampleDupFor(empId,raw,_tsBatch);
     document.getElementById('ts-bc-inp').value='';document.getElementById('ts-bc-prev').innerHTML='';tsShowTaskTypeField(true);
-    if(dup){showToast(SAMPLE_STEP+' — '+dup,'var(--red-txt)',6000);return;}
-    _tsBatch.push(sampleBase(raw,(document.getElementById('ts-dept')?.value||'').trim()));
+    const item=await openScanItem(empId,raw,_tsBatch,(document.getElementById('ts-dept')?.value||'').trim()); // 🔧 תיקון ⇒ חלון בחירה
+    if(!item)return;
+    _tsBatch.push(item);
     renderTsBatchQueue();showToast(T.scan_added_cart);
     return;
   }
@@ -11995,9 +12071,9 @@ async function tsStartTask(){
   if(isBcLen(raw.length)&&!bcSignGate('ts',raw))return; // 🔐
   if(isBcLen(raw.length)&&isSampleScan(raw)){
     // 👕 דגם ראשון — בלי שלבים, בלי שערי תחנה/סדר ובלי מגבלות הסל
-    const dup=sampleDupFor(w.id,raw,_tsBatch);
-    if(dup){showToast(SAMPLE_STEP+' — '+dup,'var(--red-txt)',6000);if(!_tsBatch.length)return;}
-    else _tsBatch.push(sampleBase(raw,(document.getElementById('ts-dept')?.value||'').trim()));
+    const item=await openScanItem(w.id,raw,_tsBatch,(document.getElementById('ts-dept')?.value||'').trim()); // 🔧 תיקון ⇒ חלון בחירה
+    if(item===null)return; // בוטל
+    if(item)_tsBatch.push(item);else if(!_tsBatch.length)return; // כפילות — מתחילים את מה שכבר בסל
   }else if(isBcLen(raw.length)){
     if(!isTotalBc(raw)&&parseInt(raw.slice(8,11))===0&&productHasDefinedQty(raw.slice(0,2),raw.slice(2,7))){showToast('⚠ קיים ברקוד עם כמות למוצר זה','var(--red-txt)',6000);return;}
     const cust=raw.slice(0,2),prod=raw.slice(2,7),size=raw.slice(7,8),col=raw.slice(11,13);
@@ -12045,8 +12121,8 @@ async function tsStartTask(){
     const tsSrvActive=await serverActiveTasks(w.id); // קריאה אחת לכל הסל, לא לכל פריט
     for(const b of _tsBatch){
       // חסימה חוזרת ברגע הפתיחה — סוגר מרוץ של פתיחה כפולה של אותה משימה (עובד+ברקוד+שלב פעיל)
-      if(S.activeTasks.some(x=>x.workerId===w.id&&taskBc(x)===b.raw&&(x.taskType||'')===(b.taskType||'')&&!x.paused))continue;
-      if(findDupIn(tsSrvActive,b.raw,b.taskType)){tsDupSkip.push((b.taskType||b.prod)+' — '+(T.scan_dup_active||'פעיל כעת'));continue;}
+      if(!b.isRepair&&S.activeTasks.some(x=>x.workerId===w.id&&taskBc(x)===b.raw&&(x.taskType||'')===(b.taskType||'')&&!x.paused))continue;
+      if(!b.isRepair&&findDupIn(tsSrvActive,b.raw,b.taskType)){tsDupSkip.push((b.taskType||b.prod)+' — '+(T.scan_dup_active||'פעיל כעת'));continue;}
       // scannedBy/scannedByName — **מי הפעיל את הסורק**, להבדיל מ-workerId שהוא **למי** המשימה.
       // האחראי محمد פותח משימות עבור עובדות אחרות, ולכן startTime הוא רגע חלוקת העבודה ולא
       // רגע ההתחלה בפועל. בלי השדה הזה אי אפשר להפריד קצב עבודה מזמן חלוקה. נוסף 10/09/2026
@@ -12054,7 +12130,7 @@ async function tsStartTask(){
       const task={id:String(Date.now())+Math.random().toString(36).slice(2,6),workerId:w.id,workerName:w.name,scannedBy:S.user?.id||'',scannedByName:S.user?.name||'',dept:b.taskDept||effDept(w),station:curStation(w)?.name||'',cust:b.cust,prod:b.prod,size:b.size,qty:b.qty,col:b.col,taskType:b.taskType,bc:b.raw,isTotal:b.isTotal||false,startTime,elapsed:0,accumulatedSec:0,prodStamp:b.prodStamp,...(b.splitId?{splitId:b.splitId}:{})};
       const exp=b.isSample?null:await fetchExpected(b.cust,b.prod,w.id,b.qty||_estQtyBc(b.raw)); // 👕 דגם — אין צפי · 📏 אין כמות ⇒ המשוערת
       if(exp?.ok&&exp.perStep?.[b.taskType]!=null)task.expectedMin=exp.perStep[b.taskType];
-      if(b.isSample)task.isSample=true;
+      if(b.isSample)task.isSample=true;if(b.isRepair)task.isRepair=true; // 🔧
       if(batchId)task.batchId=batchId;
       if(!(await claimTaskGuard(task)).ok){tsDupSkip.push((b.taskType||b.prod)+' — '+(T.scan_dup_active||'פעיל כעת'));continue;}
       S.activeTasks.push(task);created++;
@@ -12535,7 +12611,7 @@ async function mgrPunchOut(wId){
   tgPunch(w.name,w.dept,false,now,w.id);
   saveLS();renderMgrTasks();renderAtt();
 }
-function mgrAddToBatch(){
+async function mgrAddToBatch(){
   const empId=document.getElementById('mgr-emp-sel').value;
   const raw=(document.getElementById('mgr-bc-inp').value||'').replace(/\D/g,'');
   const T=LANGS[currentLang];
@@ -12544,10 +12620,10 @@ function mgrAddToBatch(){
   if(!bcSignGate('mgr',raw))return;
   if(isShipBc(raw)){openShipModal(raw.slice(0,2),raw.slice(2,7),orderNoOf(raw));document.getElementById('mgr-bc-inp').value='';parseMgrBc('');return;} // ברקוד "יצא ללקוח"
   if(isSampleScan(raw)){ // 👕 דגם ראשון — לסל כמשימת דגם, כמו ב-tsAddToBatch
-    const dup=sampleDupFor(empId,raw,_mgrBatch);
     document.getElementById('mgr-bc-inp').value='';parseMgrBc('');
-    if(dup){showToast(SAMPLE_STEP+' — '+dup,'var(--red-txt)',6000);return;}
-    _mgrBatch.push(sampleBase(raw,(document.getElementById('mgr-dept')?.value||'').trim()));
+    const item=await openScanItem(empId,raw,_mgrBatch,(document.getElementById('mgr-dept')?.value||'').trim()); // 🔧 תיקון ⇒ חלון בחירה
+    if(!item)return;
+    _mgrBatch.push(item);
     renderMgrBatchQueue();showToast(T.scan_added_cart);
     return;
   }
@@ -12577,9 +12653,9 @@ async function mgrStartTask(){
   if(isBcLen(raw.length)&&!bcSignGate('mgr',raw))return; // 🔐
   if(isBcLen(raw.length)&&isSampleScan(raw)){
     // 👕 דגם ראשון — בלי שלבים ובלי שערי תחנה/סדר
-    const dup=sampleDupFor(empId,raw,_mgrBatch);
-    if(dup){showToast(SAMPLE_STEP+' — '+dup,'var(--red-txt)',6000);if(!_mgrBatch.length)return;}
-    else _mgrBatch.push(sampleBase(raw,(document.getElementById('mgr-dept')?.value||'').trim()));
+    const item=await openScanItem(empId,raw,_mgrBatch,(document.getElementById('mgr-dept')?.value||'').trim()); // 🔧 תיקון ⇒ חלון בחירה
+    if(item===null)return; // בוטל
+    if(item)_mgrBatch.push(item);else if(!_mgrBatch.length)return; // כפילות — מתחילים את מה שכבר בסל
   }else if(isBcLen(raw.length)){
     if(!isTotalBc(raw)&&parseInt(raw.slice(8,11))===0&&productHasDefinedQty(raw.slice(0,2),raw.slice(2,7))){showToast('⚠ קיים ברקוד עם כמות למוצר זה','var(--red-txt)',6000);return;}
     const cust=raw.slice(0,2),prod=raw.slice(2,7),size=raw.slice(7,8),col=raw.slice(11,13);
@@ -12617,11 +12693,11 @@ async function mgrStartTask(){
   for(const b of _mgrBatch){
     // המסלול הזה סוגר קודם את המשימות הפעילות שב-cache המקומי — אבל משימה שנפתחה
     // ממכשיר אחר לא נמצאת שם כלל, ולכן לא נסגרה ולא נחסמה. כאן היא נתפסת.
-    if(findDupIn(mgrSrvActive,b.raw,b.taskType)){mgrDupSkip.push((b.taskType||b.prod)+' — '+(T.scan_dup_active||'פעיל כעת'));continue;}
+    if(!b.isRepair&&findDupIn(mgrSrvActive,b.raw,b.taskType)){mgrDupSkip.push((b.taskType||b.prod)+' — '+(T.scan_dup_active||'פעיל כעת'));continue;}
     const newTask={id:String(Date.now())+Math.random().toString(36).slice(2,6),workerId:empId,workerName:w.name,scannedBy:S.user?.id||'',scannedByName:S.user?.name||'',dept:b.taskDept||effDept(w),station:curStation(w)?.name||'',cust:b.cust,prod:b.prod,size:b.size,qty:b.qty,col:b.col,taskType:b.taskType,bc:b.raw,isTotal:b.isTotal||false,startTime,elapsed:0,accumulatedSec:0,prodStamp:b.prodStamp,...(b.splitId?{splitId:b.splitId}:{})};
     const expM=b.isSample?null:await fetchExpected(b.cust,b.prod,empId,b.qty||_estQtyBc(b.raw)); // 👕 דגם — אין צפי · 📏 אין כמות ⇒ המשוערת
     if(expM?.ok&&expM.perStep?.[b.taskType]!=null)newTask.expectedMin=expM.perStep[b.taskType];
-    if(b.isSample)newTask.isSample=true;
+    if(b.isSample)newTask.isSample=true;if(b.isRepair)newTask.isRepair=true; // 🔧
     if(batchId)newTask.batchId=batchId;
     if(!(await claimTaskGuard(newTask)).ok){mgrDupSkip.push((b.taskType||b.prod)+' — '+(T.scan_dup_active||'פעיל כעת'));continue;}
     S.activeTasks.unshift(newTask);mgrCreated++;
@@ -15629,6 +15705,8 @@ function addCustomColor(){
   if(code.length===1)code='0'+code;
   const name=(document.getElementById('col-name').value||'').trim();
   if(!code||!name){alert('הזן קוד ושם צבע');return;}
+  // קודים שמורים בברקוד: 00 כל-הכמות · 77 🔧 תיקון · 88 👕 דגם · 99 יצא ללקוח
+  if(['00','77','88','99'].includes(code)){alert('הקוד '+code+' שמור במערכת (00 כל הכמות · 77 תיקון · 88 דגם · 99 יצא ללקוח) — בחר קוד אחר');return;}
   COLORS[code]=name;
   S.customColors[code]=name;
   document.getElementById('col-code').value='';
@@ -17923,6 +18001,33 @@ function bcGenerate(){
     new QRCode(qrWrap,{text:bcQr(code),width:150,height:150,colorDark:'#000000',colorLight:'#ffffff',correctLevel:QRCode.CorrectLevel.M});
     _qrOne(qrWrap);
   });
+  _bcRepairCard(printArea,cust,prod,sfx);
+}
+// 🔧 כרטיס ברקוד תיקון — בכל הזמנה (רגילה ודגם). מסומן כברירת מחדל כמו השאר; bcPrint מדפיס מה-DOM,
+// bcDownloadPDF מ-_bcLastGen.repair. בלי מידה/צבע/כמות — נבחרים בסריקה (repairPick).
+function _bcRepairCard(area,cust,prod,sfx){
+  if(!area)return;
+  const code=repairCodeOf(cust,prod,sfx);
+  if(window._bcLastGen)window._bcLastGen.repair={code};
+  const div=document.createElement('div');
+  div.className='bc-card';div.dataset.col='repair';div.dataset.idx='repair';
+  div.style.cssText='background:#fff;border:3px solid #b45309;border-radius:6px;padding:10px;display:flex;align-items:center;gap:12px;break-inside:avoid;grid-column:1/-1;position:relative';
+  const qrWrap=document.createElement('div');
+  qrWrap.style.cssText='flex-shrink:0;width:150px;height:150px;overflow:hidden';
+  const info=document.createElement('div');
+  info.style.cssText='text-align:right;line-height:2;flex:1';
+  info.innerHTML=`
+    <div style="font-size:15px;font-weight:800;color:#b45309;margin-bottom:4px">${REPAIR_STEP}</div>
+    <div style="font-size:13px;font-weight:700;color:#000">לקוח: ${cust}</div>
+    <div style="font-size:13px;font-weight:700;color:#000">מוצר: ${prod}</div>
+    ${bcOrderLbl(code)}
+    <div style="font-size:12px;color:#555">מידה, צבע וכמות — בוחרים בסריקה</div>
+    <div style="font-size:11px;color:#555;margin-top:4px">${code}</div>`;
+  div.appendChild(qrWrap);div.appendChild(info);div.appendChild(_bcSelCheckbox());
+  _bcNfcBtn(div,code,REPAIR_STEP);
+  area.appendChild(div);
+  new QRCode(qrWrap,{text:bcQr(code),width:150,height:150,colorDark:'#000000',colorLight:'#ffffff',correctLevel:QRCode.CorrectLevel.M});
+  _qrOne(qrWrap);
 }
 // 👕 כרטיס ברקוד דגם בודד. הכמות מהמוצר (מקור האמת), ובהיעדרה מהשורות במחולל.
 // items ריק + sample ⇒ bcPrint/bcDownloadPDF מדפיסים רק אותו (וכרטיס "יצא ללקוח" כרגיל).
@@ -17964,6 +18069,7 @@ function bcGenerateSample(cust,prod,t){
   document.getElementById('bc-print-area').appendChild(div);
   new QRCode(qrWrap,{text:bcQr(code),width:150,height:150,colorDark:'#000000',colorLight:'#ffffff',correctLevel:QRCode.CorrectLevel.M});
   _qrOne(qrWrap);
+  _bcRepairCard(document.getElementById('bc-print-area'),cust,prod,sfx);
 }
 // הדפסה דרך iframe נסתר במקום window.open — ב-PWA במסך הבית (standalone) window.open נתקע על דף ההדפסה ואי אפשר לסגור אותו אלא בסגירת האפליקציה כולה
 // ✍ מסמך עם מקום לחתימת העסק (sig-slot) ⇒ שואלים אם לחתום, ומכניסים את התמונה.
@@ -19647,15 +19753,17 @@ function _bcToggleSel(containerId,cls,check){
 // קורא את מצב הסימון הנוכחי מה-DOM (bc-print-area) — total/sample + אילו אינדקסים ב-items נבחרו
 function _bcSelSet(){
   const area=document.getElementById('bc-print-area');
-  const sel={total:true,sample:true,items:new Set()};
+  const sel={total:true,sample:true,repair:true,items:new Set()};
   if(!area)return sel;
   const totalCb=area.querySelector('.bc-card[data-idx="total"] .bc-sel');
   if(totalCb)sel.total=totalCb.checked;
   const sampleCb=area.querySelector('.bc-card[data-idx="sample"] .bc-sel');
   if(sampleCb)sel.sample=sampleCb.checked;
+  const repairCb=area.querySelector('.bc-card[data-idx="repair"] .bc-sel'); // 🔧
+  if(repairCb)sel.repair=repairCb.checked;
   area.querySelectorAll('.bc-card[data-idx]').forEach(c=>{
     const idx=c.dataset.idx;
-    if(idx==='total'||idx==='sample')return;
+    if(idx==='total'||idx==='sample'||idx==='repair')return;
     const cb=c.querySelector('.bc-sel');
     if(!cb||cb.checked)sel.items.add(parseInt(idx));
   });
@@ -19721,7 +19829,7 @@ function bcPrint(mode){
     const items=[]; // כל פריט = שורה שלמה, כדי שלעולם לא ייחתך באמצע
     [...byColor.entries()].forEach(([col,cards])=>{
       const colName=(COLORS_AR[col]||COLORS[col]||col);
-      const wide=col==='total'||col==='sample'; // "כל הכמות" / 👕 דגם — בלי כותרת צבע, שורה שלמה
+      const wide=col==='total'||col==='sample'||col==='repair'; // "כל הכמות" / 👕 דגם / 🔧 תיקון — בלי כותרת צבע, שורה שלמה
       const hdr=wide?'':`<div class="colhdr">צבע: ${col} · ${colName} — ${cards.length} יחידות</div>`;
       const per=wide?1:2; // כרטיס "כל הכמות" תופס שורה שלמה
       for(let i=0;i<cards.length;i+=per){
@@ -19763,7 +19871,7 @@ function bcPrint(mode){
       .bc-card{border:2px solid #333;border-radius:6px;padding:6px 8px!important;display:inline-flex!important;align-items:center;gap:10px;
         width:calc(50% - 10px);height:46mm;box-sizing:border-box;vertical-align:top;margin:0 4px 2mm;font-size:13px;overflow:hidden;
         break-inside:avoid!important;page-break-inside:avoid!important}
-      .bc-card[data-col="total"],.bc-card[data-col="sample"]{width:calc(100% - 8px)}
+      .bc-card[data-col="total"],.bc-card[data-col="sample"],.bc-card[data-col="repair"]{width:calc(100% - 8px)}
       /* line-height מכווץ בהדפסה בלבד — 7 שורות טקסט (כולל "הזמנה #NNN") נכנסות ב-46 מ"מ */
       .bc-card>div:last-child{line-height:1.5!important}
       .bc-card img{width:38mm;height:38mm}
@@ -19844,6 +19952,13 @@ async function bcDownloadPDF(share){
       {t:'צבע: '+it.col+' · '+colName,mm:3.6,bold:true,color:'#000'},
       {t:code,mm:2.8,bold:false,color:'#555'}]});
   });
+  if(g.repair&&sel.repair)cards.push({qr:g.repair.code,lines:[ // 🔧 תיקון
+    {t:REPAIR_STEP,mm:4,bold:true,color:'#b45309'},
+    {t:'לקוח: '+cust,mm:3.6,bold:true,color:'#000'},
+    {t:'מוצר: '+prod,mm:3.6,bold:true,color:'#000'},
+    ...(sfx?[{t:'🔢 הזמנה #'+sfx,mm:3.6,bold:true,color:'#059669'}]:[]),
+    {t:'מידה/צבע/כמות — בסריקה',mm:3,bold:false,color:'#555'},
+    {t:g.repair.code,mm:2.8,bold:false,color:'#555'}]});
   if(!cards.length){alert('בחר לפחות ברקוד אחד להדפסה');return;}
   const doc=new J({unit:'mm',format:'a4',orientation:'portrait',compress:true}); // 🗜 (26/10/2026) דחיסה — 3.2 מ"ב ⇒ ~40 ק"ב ל-4 מדבקות, אותם פיקסלים
   const CW=105,CH=56,TOP=(297-5*CH)/2; // 8.5 מ"מ שוליים עליון/תחתון, 0 בצדדים
@@ -20170,8 +20285,10 @@ function openProductModal(id){
       <div class="field"><label>✂ עלות גזירה ₪ <span style="font-size:10px;color:var(--txt3)">(ליחידה)</span></label><input id="pm-cutprice" type="number" min="0" step="0.1" value="${p?.cutPrice||''}" placeholder="0" title="מחיר הגזירה ליחידה — נוסף למחיר המכירה. מוזן בהקמת המוצר, לפני שהכמות ידועה. סמן ✂ על שלבי הגזירה כדי שייספרו מולו." style="font-size:13px" oninput="renderProductPricing()"/></div>
       <div class="field"><label>✂ רווח יעד גזירה %</label><input id="pm-cutprofit" type="number" min="0" max="99" step="1" value="${p?.cutProfitPct??''}" placeholder="לפי התפירה" title="אחוז רווח היעד של הגזירה — נפרד מאחוז התפירה. כל עוד ריק, החישוב משתמש באחוז התפירה." style="font-size:13px" oninput="renderProductPricing()"/></div>
     </div>
-    <div id="pm-pricing-result" style="margin-bottom:8px"></div>`;
+    <div id="pm-pricing-result" style="margin-bottom:8px"></div>
+    ${p&&S.user?.role==='manager'?'<div id="pm-repairs" style="margin-bottom:8px"></div>':''}`;
   document.getElementById('prod-modal-wrap').classList.remove('hidden');
+  if(p&&S.user?.role==='manager')_repairsFill(p); // 🔧 תיקונים — מי תיקן ומה עלה
   // התמונות נטענות אסינכרונית; עד שיגיעו _prodImgs ריק והתצוגה מראה "טוען…".
   // ⚠️ אסור לשמור מוצר לפני שהן הגיעו — נשמר דגל שחוסם את saveProduct.
   _prodImgs=p?[...(p.images||[])]:[];
@@ -20734,6 +20851,46 @@ async function recropProdImg(i){
   if(out){_prodImgs[i]=out;refreshImgPreview();}
 }
 
+// ─── 🔧 תיקונים בחלון ההזמנה (14/11/2026, מנהל בלבד) ─────────────────────
+// כל משימות REPAIR_STEP של ההזמנה (היסטוריה — loadHistProd, + פעילות עכשיו): מי, מתי, מידה/צבע,
+// כמות, זמן ועלות. עלות = שעות × (עלות שעה עמוסה של העובדת באותו יום + תקורה) — אותה נוסחה כמו
+// דוח הרווח (שבו התיקון כבר נספר כעבודה על ההזמנה). עלות פנימית — לא נכנסת לתעודה.
+async function _repairsFill(p){
+  const box=document.getElementById('pm-repairs');if(!box)return;
+  const stamp=prodStampOf(p),cache={};
+  const mine=t=>t.cust===p.cust&&t.prod===p.prod&&t.taskType===REPAIR_STEP&&taskOrderStamp(t,cache)===stamp;
+  let hist=[];
+  try{hist=(await loadHistProd(p.prod)).filter(mine);}catch(e){hist=(S.histTasks||[]).filter(mine);}
+  if(document.getElementById('pm-repairs')!==box)return; // החלון נסגר/נפתח מחדש בינתיים
+  const now=Date.now();
+  const act=(S.activeTasks||[]).filter(mine).map(t=>({...t,_live:true,duration:t.paused?(t.accumulatedSec||0):(t.accumulatedSec||0)+Math.max(0,(now-new Date(t.startTime).getTime())/1000)}));
+  const rows=[...act,...hist];
+  if(!rows.length){box.innerHTML=`<div style="font-size:12px;color:var(--txt3);padding:6px 2px">${REPAIR_STEP} — אין תיקונים בהזמנה הזו</div>`;return;}
+  const ctx=typeof _pricingCtx==='function'?_pricingCtx():null;
+  const rateOf=t=>ctx?((loadedHourlyRate(t.workerId,_tDay(t))||ctx.avgAll)+ctx.oh):0;
+  let totSec=0,totCost=0,totQty=0;
+  const tr=rows.map(t=>{
+    const sec=+t.duration||0,cost=sec/3600*rateOf(t);totSec+=sec;totCost+=cost;totQty+=+t.qty||0;
+    const d=new Date(t._live?t.startTime:(t.endTime||t.startTime));
+    const when=pad2(d.getDate())+'/'+pad2(d.getMonth()+1)+' '+pad2(d.getHours())+':'+pad2(d.getMinutes());
+    const sc=[t.size!==''&&t.size!=null?'מידה '+szLblT(t.cust,t.prod,String(t.size)):'',t.col?(COLORS[t.col]||t.col):''].filter(Boolean).join(' · ')||'—';
+    return`<tr style="border-bottom:0.5px solid var(--brd)">
+      <td style="padding:5px 4px;white-space:nowrap">${when}${t._live?` <span class="badge green" style="font-size:10px">${t.paused?'⏸':'▶'} פעיל</span>`:''}</td>
+      <td style="padding:5px 4px">${esc(t.workerName||'')}</td>
+      <td style="padding:5px 4px">${esc(sc)}</td>
+      <td style="padding:5px 4px;text-align:center">${+t.qty||0}</td>
+      <td style="padding:5px 4px;white-space:nowrap">${fmtM(Math.round(sec))}</td>
+      <td style="padding:5px 4px;white-space:nowrap;font-weight:600">${ctx?'₪'+cost.toFixed(2):'—'}</td></tr>`;
+  }).join('');
+  box.innerHTML=`<div style="background:var(--bg2);border-radius:8px;padding:8px 10px;border:1px solid var(--brd)">
+    <div style="font-size:13px;font-weight:700;margin-bottom:4px">${REPAIR_STEP} — ${rows.length} ${rows.length===1?'משימה':'משימות'}</div>
+    <div style="overflow-x:auto"><table style="width:100%;border-collapse:collapse;font-size:12px">
+      <thead><tr style="color:var(--txt3);text-align:right"><th style="padding:3px 4px">מתי</th><th style="padding:3px 4px">עובד/ת</th><th style="padding:3px 4px">מידה/צבע</th><th style="padding:3px 4px">כמות</th><th style="padding:3px 4px">זמן</th><th style="padding:3px 4px">עלות</th></tr></thead>
+      <tbody>${tr}</tbody>
+      <tfoot><tr style="font-weight:700"><td style="padding:5px 4px" colspan="3">סה"כ</td><td style="padding:5px 4px;text-align:center">${totQty}</td><td style="padding:5px 4px;white-space:nowrap">${fmtM(Math.round(totSec))}</td><td style="padding:5px 4px;white-space:nowrap;color:var(--red-txt)">${ctx?'₪'+totCost.toFixed(2):'—'}</td></tr></tfoot>
+    </table></div>
+    <div style="font-size:11px;color:var(--txt3);margin-top:4px">עלות = זמן × (עלות שעה עמוסה של העובד/ת + תקורה) · עלות פנימית — כבר נספרת בדוח הרווח של ההזמנה, לא בתעודה${ctx?'':' · ⚠ אין נתוני עלויות — פתח/י את לשונית העלויות'}</div></div>`;
+}
 // ─── תמונות מוצר — נטענות לפי דרישה ─────────────────────────────────────
 // 🔑 התמונות **אינן** יושבות במסמך המוצר. הן ב-productImages/{id}, ונמשכות רק כשמסתכלים.
 //

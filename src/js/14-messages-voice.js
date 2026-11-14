@@ -437,7 +437,7 @@ async function mgrPunchOut(wId){
   tgPunch(w.name,w.dept,false,now,w.id);
   saveLS();renderMgrTasks();renderAtt();
 }
-function mgrAddToBatch(){
+async function mgrAddToBatch(){
   const empId=document.getElementById('mgr-emp-sel').value;
   const raw=(document.getElementById('mgr-bc-inp').value||'').replace(/\D/g,'');
   const T=LANGS[currentLang];
@@ -446,10 +446,10 @@ function mgrAddToBatch(){
   if(!bcSignGate('mgr',raw))return;
   if(isShipBc(raw)){openShipModal(raw.slice(0,2),raw.slice(2,7),orderNoOf(raw));document.getElementById('mgr-bc-inp').value='';parseMgrBc('');return;} // ברקוד "יצא ללקוח"
   if(isSampleScan(raw)){ // 👕 דגם ראשון — לסל כמשימת דגם, כמו ב-tsAddToBatch
-    const dup=sampleDupFor(empId,raw,_mgrBatch);
     document.getElementById('mgr-bc-inp').value='';parseMgrBc('');
-    if(dup){showToast(SAMPLE_STEP+' — '+dup,'var(--red-txt)',6000);return;}
-    _mgrBatch.push(sampleBase(raw,(document.getElementById('mgr-dept')?.value||'').trim()));
+    const item=await openScanItem(empId,raw,_mgrBatch,(document.getElementById('mgr-dept')?.value||'').trim()); // 🔧 תיקון ⇒ חלון בחירה
+    if(!item)return;
+    _mgrBatch.push(item);
     renderMgrBatchQueue();showToast(T.scan_added_cart);
     return;
   }
@@ -479,9 +479,9 @@ async function mgrStartTask(){
   if(isBcLen(raw.length)&&!bcSignGate('mgr',raw))return; // 🔐
   if(isBcLen(raw.length)&&isSampleScan(raw)){
     // 👕 דגם ראשון — בלי שלבים ובלי שערי תחנה/סדר
-    const dup=sampleDupFor(empId,raw,_mgrBatch);
-    if(dup){showToast(SAMPLE_STEP+' — '+dup,'var(--red-txt)',6000);if(!_mgrBatch.length)return;}
-    else _mgrBatch.push(sampleBase(raw,(document.getElementById('mgr-dept')?.value||'').trim()));
+    const item=await openScanItem(empId,raw,_mgrBatch,(document.getElementById('mgr-dept')?.value||'').trim()); // 🔧 תיקון ⇒ חלון בחירה
+    if(item===null)return; // בוטל
+    if(item)_mgrBatch.push(item);else if(!_mgrBatch.length)return; // כפילות — מתחילים את מה שכבר בסל
   }else if(isBcLen(raw.length)){
     if(!isTotalBc(raw)&&parseInt(raw.slice(8,11))===0&&productHasDefinedQty(raw.slice(0,2),raw.slice(2,7))){showToast('⚠ קיים ברקוד עם כמות למוצר זה','var(--red-txt)',6000);return;}
     const cust=raw.slice(0,2),prod=raw.slice(2,7),size=raw.slice(7,8),col=raw.slice(11,13);
@@ -519,11 +519,11 @@ async function mgrStartTask(){
   for(const b of _mgrBatch){
     // המסלול הזה סוגר קודם את המשימות הפעילות שב-cache המקומי — אבל משימה שנפתחה
     // ממכשיר אחר לא נמצאת שם כלל, ולכן לא נסגרה ולא נחסמה. כאן היא נתפסת.
-    if(findDupIn(mgrSrvActive,b.raw,b.taskType)){mgrDupSkip.push((b.taskType||b.prod)+' — '+(T.scan_dup_active||'פעיל כעת'));continue;}
+    if(!b.isRepair&&findDupIn(mgrSrvActive,b.raw,b.taskType)){mgrDupSkip.push((b.taskType||b.prod)+' — '+(T.scan_dup_active||'פעיל כעת'));continue;}
     const newTask={id:String(Date.now())+Math.random().toString(36).slice(2,6),workerId:empId,workerName:w.name,scannedBy:S.user?.id||'',scannedByName:S.user?.name||'',dept:b.taskDept||effDept(w),station:curStation(w)?.name||'',cust:b.cust,prod:b.prod,size:b.size,qty:b.qty,col:b.col,taskType:b.taskType,bc:b.raw,isTotal:b.isTotal||false,startTime,elapsed:0,accumulatedSec:0,prodStamp:b.prodStamp,...(b.splitId?{splitId:b.splitId}:{})};
     const expM=b.isSample?null:await fetchExpected(b.cust,b.prod,empId,b.qty||_estQtyBc(b.raw)); // 👕 דגם — אין צפי · 📏 אין כמות ⇒ המשוערת
     if(expM?.ok&&expM.perStep?.[b.taskType]!=null)newTask.expectedMin=expM.perStep[b.taskType];
-    if(b.isSample)newTask.isSample=true;
+    if(b.isSample)newTask.isSample=true;if(b.isRepair)newTask.isRepair=true; // 🔧
     if(batchId)newTask.batchId=batchId;
     if(!(await claimTaskGuard(newTask)).ok){mgrDupSkip.push((b.taskType||b.prod)+' — '+(T.scan_dup_active||'פעיל כעת'));continue;}
     S.activeTasks.unshift(newTask);mgrCreated++;

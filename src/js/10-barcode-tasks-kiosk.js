@@ -147,8 +147,9 @@ async function bcStartSample(raw){
   const u=S.user;
   const wu=S.workers.find(x=>x.id===u.id);
   if(!wu||wu.status!=='in'){alert('לא ניתן להתחיל משימה — יש להירשם כנוכח תחילה (כניסה לעבודה בלשונית נוכחות)');return;}
-  const dup=sampleDupFor(u.id,raw,_bcBatch);
-  if(dup){showToast(SAMPLE_STEP+' — '+dup,'var(--red-txt)',6000);return;}
+  // 🔧 תיקון ⇒ חלון מידה/צבע/כמות; דגם ⇒ ישר. null/false = בוטל/כפילות
+  const item=await openScanItem(u.id,raw,_bcBatch,(document.getElementById('bc-dept')?.value||'').trim());
+  if(!item){document.getElementById('bc-inp').value='';parseBc('');return;}
   if(!_bcBatch.length){
     _bcCloseOnStart=[];_bcPauseOnStart=[];
     const existTasks=S.activeTasks.filter(t=>t.workerId===u.id&&!t.paused);
@@ -158,7 +159,7 @@ async function bcStartSample(raw){
       else _bcCloseOnStart=existTasks.map(t=>String(t.id));
     }
   }
-  _bcBatch.push(sampleBase(raw,(document.getElementById('bc-dept')?.value||'').trim()));
+  _bcBatch.push(item);
   document.getElementById('bc-inp').value='';parseBc('');
   renderBcBatchQueue();
   // כמו כל ברקוד: לצרף עוד לסל (עוד דגם / עוד מידה) על אותו טיימר, או להתחיל עכשיו.

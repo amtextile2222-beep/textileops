@@ -16,6 +16,7 @@ function bcOrderProd(raw){
 // שהודפסו לפני הסימון ממשיכות לעבוד כדגם.
 function isSampleScan(raw){
   if(!raw||!isBcLen(raw.length)||isShipBc(raw))return false;
+  if(isRepairBc(raw))return true; // 🔧 תיקון — אותו מסלול פתוח (בלי שלבים/שערים)
   return isSampleBc(raw)||!!bcOrderProd(raw)?.isSample;
 }
 function sampleQtyOf(raw){
@@ -24,21 +25,94 @@ function sampleQtyOf(raw){
 }
 // פריט סל של דגם. ⚠️ החותמת נלקחת מרשומת ההזמנה של הברקוד ולא מ-prodStampFor, שבוחר תמיד
 // את החדשה ביותר: הזמנת ייצור של אותו דגם שנפתחה בינתיים הייתה בולעת את שעות הדגם.
-function sampleBase(raw,taskDept){
+// rp (🔧 תיקון) = {size,col,qty} שנבחרו בסריקה (repairPick)
+function sampleBase(raw,taskDept,rp){
   const p=bcOrderProd(raw),sb=isSampleBc(raw),cust=raw.slice(0,2),prod=raw.slice(2,7);
+  const stamp=p?prodStampOf(p):prodStampFor(cust,prod);
+  if(rp)return{raw,cust,prod,size:rp.size,qty:rp.qty,col:rp.col,isTotal:false,taskDept:taskDept||'',
+    taskType:REPAIR_STEP,isSample:true,isRepair:true,prodStamp:stamp};
   return{raw,cust,prod,size:sb?'':raw.slice(7,8),qty:sampleQtyOf(raw),col:sb?'':raw.slice(11,13),
     isTotal:false,taskDept:taskDept||'',taskType:SAMPLE_STEP,isSample:true,
-    prodStamp:p?prodStampOf(p):prodStampFor(cust,prod)};
+    prodStamp:stamp};
 }
 // '' = מותר. חוסם רק כפילות בסל, או אותו עובד שכבר פתוח (לא מושהה) על אותו ברקוד דגם.
-function sampleDupFor(workerId,raw,cart){
+// 🔧 תיקון — כפילות = אותו ברקוד **ואותה מידה+צבע** (תיקון של כמה מידות באותו סל — מותר)
+function sampleDupFor(workerId,raw,cart,rp){
   const T=LANGS[currentLang];
-  if((cart||[]).some(b=>b.raw===raw&&b.taskType===SAMPLE_STEP))return T.scan_dup_in_cart||'כבר בסל';
-  if(S.activeTasks.some(t=>t.workerId===workerId&&taskBc(t)===raw&&t.taskType===SAMPLE_STEP&&!t.paused))return T.scan_dup_active||'פעיל כעת';
+  const step=rp?REPAIR_STEP:SAMPLE_STEP,same=x=>!rp||(String(x.size||'')===rp.size&&String(x.col||'')===rp.col);
+  if((cart||[]).some(b=>b.raw===raw&&b.taskType===step&&same(b)))return T.scan_dup_in_cart||'כבר בסל';
+  if(S.activeTasks.some(t=>t.workerId===workerId&&taskBc(t)===raw&&t.taskType===step&&same(t)&&!t.paused))return T.scan_dup_active||'פעיל כעת';
   return '';
+}
+// ─── 🔧 תיקון חוזר (14/11/2026, בקשת המשתמש) ─────────────────────────────
+// ברקוד תיקון לכל הזמנה (נוצר במחולל ליד "כל הכמות"): size='9', col='77' (צבעים 01-30 ·
+// 00 כל-הכמות · 88 דגם · 99 יצא ללקוח — 77 שמור, ראה addCustomColor). עובר במסלול הדגם: בלי
+// שלבים, בלי שערי תחנה/סדר ובלי חסימת "סיים את תפקידו" (תיקון מגיע גם אחרי יציאה ללקוח).
+// בסריקה בוחרים מידה+צבע מטבלת הכמויות של ההזמנה; הכמות מתמלאת מהשורה וניתנת לעריכה.
+// המשימה: taskType=REPAIR_STEP, isRepair, isSample (= "פתוחה" בשערים ובמגבלות הסל), size/col מהבחירה.
+// העלות — בחלון ההזמנה (מנהל, _repairsFill): זמן × (עלות שעה עמוסה+תקורה). עלות פנימית, לא בתעודה.
+const REPAIR_STEP='🔧 תיקון';
+const REPAIR_COL='77';
+function isRepairBc(raw){raw=String(raw||'');return isBcLen(raw.length)&&raw.slice(7,8)==='9'&&raw.slice(11,13)===REPAIR_COL;}
+function repairCodeOf(cust,prod,sfx){return cust+prod+'9'+'000'+REPAIR_COL+(sfx||'');}
+// חלון בחירה: שורות טבלת הכמויות (מידה · צבע · כמות) + כמות לעריכה. null = בוטל
+function repairPick(raw){
+  return new Promise(res=>{
+    const p=bcOrderProd(raw),rows=(p?.quantities||[]).filter(q=>(parseInt(q.qty)||0)>0);
+    const no=orderNoOf(raw),c=raw.slice(0,2),pr=raw.slice(2,7);
+    document.getElementById('rp-wrap')?.remove();
+    const ov=document.createElement('div');ov.id='rp-wrap';
+    ov.style.cssText='position:fixed;inset:0;background:rgba(0,0,0,.45);z-index:9990;display:flex;align-items:center;justify-content:center;padding:16px';
+    const row=(q,i)=>`<label style="display:flex;align-items:center;gap:8px;padding:9px 10px;border:1px solid var(--brd);border-radius:8px;cursor:pointer;font-size:14px">
+        <input type="radio" name="rp-row" value="${i}" style="width:auto;margin:0">
+        <span style="flex:1">מידה <b>${esc(szLblT(c,pr,String(q.size)))}</b> · ${esc(COLORS[q.color]||q.color||'—')}</span>
+        <span style="color:var(--txt3);font-size:12px">${parseInt(q.qty)} יח'</span></label>`;
+    ov.innerHTML=`<div style="background:var(--card);color:var(--txt);border-radius:14px;padding:16px;width:100%;max-width:420px;max-height:88vh;overflow:auto">
+      <div style="font-size:17px;font-weight:800;margin-bottom:2px">${REPAIR_STEP}</div>
+      <div style="font-size:12px;color:var(--txt3);margin-bottom:12px">לקוח ${esc(c)} · מוצר ${esc(pr)}${no?' · הזמנה #'+esc(no):''}${p?.name?' · '+esc(p.name):''}</div>
+      ${rows.length?`<div style="font-size:13px;font-weight:600;margin-bottom:6px">מידה וצבע:</div>
+        <div style="display:flex;flex-direction:column;gap:6px;margin-bottom:12px">${rows.map(row).join('')}</div>`
+        :'<div style="font-size:12px;color:var(--txt3);margin-bottom:12px">אין טבלת כמויות להזמנה — תיקון בלי מידה/צבע</div>'}
+      <div class="field" style="margin:0"><label>כמות לתיקון</label>
+        <input id="rp-qty" type="number" min="1" step="1" inputmode="numeric" value="${rows.length===1?parseInt(rows[0].qty):(rows.length?'':1)}" style="font-size:16px"></div>
+      <div id="rp-err" style="color:var(--red-txt);font-size:12px;min-height:16px;margin-top:6px"></div>
+      <div style="display:flex;gap:8px;margin-top:6px">
+        <button class="btn primary" style="flex:1;justify-content:center;font-size:15px" id="rp-ok">➕ הוסף</button>
+        <button class="btn" style="flex:1;justify-content:center;font-size:15px" id="rp-cancel">ביטול</button></div></div>`;
+    document.body.appendChild(ov);
+    const qEl=ov.querySelector('#rp-qty'),err=ov.querySelector('#rp-err');
+    // בחירת שורה ממלאת את הכמות שלה — ואפשר לשנות אחר כך
+    ov.querySelectorAll('input[name="rp-row"]').forEach(r=>r.onchange=()=>{qEl.value=parseInt(rows[+r.value].qty)||1;err.textContent='';});
+    if(rows.length===1)ov.querySelector('input[name="rp-row"]').checked=true;
+    const done=v=>{ov.remove();res(v);};
+    ov.querySelector('#rp-cancel').onclick=()=>done(null);
+    ov.onclick=e=>{if(e.target===ov)done(null);};
+    ov.querySelector('#rp-ok').onclick=()=>{
+      const sel=ov.querySelector('input[name="rp-row"]:checked');
+      if(rows.length&&!sel){err.textContent='⚠ בחר/י מידה וצבע';return;}
+      const qty=parseInt(qEl.value)||0;
+      if(qty<1||qty>9999){err.textContent='⚠ כמות לא תקינה';return;}
+      const q=sel?rows[+sel.value]:null;
+      done({size:q?String(q.size??''):'',col:q?String(q.color??''):'',qty});
+    };
+  });
+}
+// פריט סל לדגם/תיקון בכל הסורקים. null = בוטל (בלי הודעה) · false = כפילות (ההודעה הוצגה)
+async function openScanItem(workerId,raw,cart,taskDept){
+  let rp=null;
+  if(isRepairBc(raw)){rp=await repairPick(raw);if(!rp)return null;}
+  const dup=sampleDupFor(workerId,raw,cart,rp);
+  if(dup){showToast((rp?REPAIR_STEP:SAMPLE_STEP)+' — '+dup,'var(--red-txt)',6000);return false;}
+  return sampleBase(raw,taskDept,rp);
 }
 function sampleScanPreview(v){
   const T=LANGS[currentLang];
+  if(isRepairBc(v))return `<div style="display:flex;gap:5px;flex-wrap:wrap;align-items:center;padding:8px;background:var(--bg2);border-radius:var(--r)">
+      <span class="bc-seg bc-c">לקוח: ${esc(v.slice(0,2))}</span>
+      <span class="bc-seg bc-p">מוצר: ${esc(v.slice(2,7))}</span>${bcOrderChip(v)}
+      <span class="bc-seg" style="background:var(--amber-bg,#fef3c7);color:var(--amber-txt,#b45309);font-weight:700">${REPAIR_STEP}</span>
+    </div>
+    <div style="font-size:11px;color:var(--txt3);margin-top:4px">בלי שלבים · פתוח לכל המחלקות והתחנות · מידה, צבע וכמות — בחלון שייפתח</div>`;
   return `<div style="display:flex;gap:5px;flex-wrap:wrap;align-items:center;padding:8px;background:var(--bg2);border-radius:var(--r)">
       <span class="bc-seg bc-c">לקוח: ${esc(v.slice(0,2))}</span>
       <span class="bc-seg bc-p">מוצר: ${esc(v.slice(2,7))}</span>${bcOrderChip(v)}

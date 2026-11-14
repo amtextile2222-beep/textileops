@@ -382,6 +382,33 @@ function bcGenerate(){
     new QRCode(qrWrap,{text:bcQr(code),width:150,height:150,colorDark:'#000000',colorLight:'#ffffff',correctLevel:QRCode.CorrectLevel.M});
     _qrOne(qrWrap);
   });
+  _bcRepairCard(printArea,cust,prod,sfx);
+}
+// 🔧 כרטיס ברקוד תיקון — בכל הזמנה (רגילה ודגם). מסומן כברירת מחדל כמו השאר; bcPrint מדפיס מה-DOM,
+// bcDownloadPDF מ-_bcLastGen.repair. בלי מידה/צבע/כמות — נבחרים בסריקה (repairPick).
+function _bcRepairCard(area,cust,prod,sfx){
+  if(!area)return;
+  const code=repairCodeOf(cust,prod,sfx);
+  if(window._bcLastGen)window._bcLastGen.repair={code};
+  const div=document.createElement('div');
+  div.className='bc-card';div.dataset.col='repair';div.dataset.idx='repair';
+  div.style.cssText='background:#fff;border:3px solid #b45309;border-radius:6px;padding:10px;display:flex;align-items:center;gap:12px;break-inside:avoid;grid-column:1/-1;position:relative';
+  const qrWrap=document.createElement('div');
+  qrWrap.style.cssText='flex-shrink:0;width:150px;height:150px;overflow:hidden';
+  const info=document.createElement('div');
+  info.style.cssText='text-align:right;line-height:2;flex:1';
+  info.innerHTML=`
+    <div style="font-size:15px;font-weight:800;color:#b45309;margin-bottom:4px">${REPAIR_STEP}</div>
+    <div style="font-size:13px;font-weight:700;color:#000">לקוח: ${cust}</div>
+    <div style="font-size:13px;font-weight:700;color:#000">מוצר: ${prod}</div>
+    ${bcOrderLbl(code)}
+    <div style="font-size:12px;color:#555">מידה, צבע וכמות — בוחרים בסריקה</div>
+    <div style="font-size:11px;color:#555;margin-top:4px">${code}</div>`;
+  div.appendChild(qrWrap);div.appendChild(info);div.appendChild(_bcSelCheckbox());
+  _bcNfcBtn(div,code,REPAIR_STEP);
+  area.appendChild(div);
+  new QRCode(qrWrap,{text:bcQr(code),width:150,height:150,colorDark:'#000000',colorLight:'#ffffff',correctLevel:QRCode.CorrectLevel.M});
+  _qrOne(qrWrap);
 }
 // 👕 כרטיס ברקוד דגם בודד. הכמות מהמוצר (מקור האמת), ובהיעדרה מהשורות במחולל.
 // items ריק + sample ⇒ bcPrint/bcDownloadPDF מדפיסים רק אותו (וכרטיס "יצא ללקוח" כרגיל).
@@ -423,6 +450,7 @@ function bcGenerateSample(cust,prod,t){
   document.getElementById('bc-print-area').appendChild(div);
   new QRCode(qrWrap,{text:bcQr(code),width:150,height:150,colorDark:'#000000',colorLight:'#ffffff',correctLevel:QRCode.CorrectLevel.M});
   _qrOne(qrWrap);
+  _bcRepairCard(document.getElementById('bc-print-area'),cust,prod,sfx);
 }
 // הדפסה דרך iframe נסתר במקום window.open — ב-PWA במסך הבית (standalone) window.open נתקע על דף ההדפסה ואי אפשר לסגור אותו אלא בסגירת האפליקציה כולה
 // ✍ מסמך עם מקום לחתימת העסק (sig-slot) ⇒ שואלים אם לחתום, ומכניסים את התמונה.

@@ -290,8 +290,10 @@ function openProductModal(id){
       <div class="field"><label>✂ עלות גזירה ₪ <span style="font-size:10px;color:var(--txt3)">(ליחידה)</span></label><input id="pm-cutprice" type="number" min="0" step="0.1" value="${p?.cutPrice||''}" placeholder="0" title="מחיר הגזירה ליחידה — נוסף למחיר המכירה. מוזן בהקמת המוצר, לפני שהכמות ידועה. סמן ✂ על שלבי הגזירה כדי שייספרו מולו." style="font-size:13px" oninput="renderProductPricing()"/></div>
       <div class="field"><label>✂ רווח יעד גזירה %</label><input id="pm-cutprofit" type="number" min="0" max="99" step="1" value="${p?.cutProfitPct??''}" placeholder="לפי התפירה" title="אחוז רווח היעד של הגזירה — נפרד מאחוז התפירה. כל עוד ריק, החישוב משתמש באחוז התפירה." style="font-size:13px" oninput="renderProductPricing()"/></div>
     </div>
-    <div id="pm-pricing-result" style="margin-bottom:8px"></div>`;
+    <div id="pm-pricing-result" style="margin-bottom:8px"></div>
+    ${p&&S.user?.role==='manager'?'<div id="pm-repairs" style="margin-bottom:8px"></div>':''}`;
   document.getElementById('prod-modal-wrap').classList.remove('hidden');
+  if(p&&S.user?.role==='manager')_repairsFill(p); // 🔧 תיקונים — מי תיקן ומה עלה
   // התמונות נטענות אסינכרונית; עד שיגיעו _prodImgs ריק והתצוגה מראה "טוען…".
   // ⚠️ אסור לשמור מוצר לפני שהן הגיעו — נשמר דגל שחוסם את saveProduct.
   _prodImgs=p?[...(p.images||[])]:[];
@@ -854,3 +856,43 @@ async function recropProdImg(i){
   if(out){_prodImgs[i]=out;refreshImgPreview();}
 }
 
+// ─── 🔧 תיקונים בחלון ההזמנה (14/11/2026, מנהל בלבד) ─────────────────────
+// כל משימות REPAIR_STEP של ההזמנה (היסטוריה — loadHistProd, + פעילות עכשיו): מי, מתי, מידה/צבע,
+// כמות, זמן ועלות. עלות = שעות × (עלות שעה עמוסה של העובדת באותו יום + תקורה) — אותה נוסחה כמו
+// דוח הרווח (שבו התיקון כבר נספר כעבודה על ההזמנה). עלות פנימית — לא נכנסת לתעודה.
+async function _repairsFill(p){
+  const box=document.getElementById('pm-repairs');if(!box)return;
+  const stamp=prodStampOf(p),cache={};
+  const mine=t=>t.cust===p.cust&&t.prod===p.prod&&t.taskType===REPAIR_STEP&&taskOrderStamp(t,cache)===stamp;
+  let hist=[];
+  try{hist=(await loadHistProd(p.prod)).filter(mine);}catch(e){hist=(S.histTasks||[]).filter(mine);}
+  if(document.getElementById('pm-repairs')!==box)return; // החלון נסגר/נפתח מחדש בינתיים
+  const now=Date.now();
+  const act=(S.activeTasks||[]).filter(mine).map(t=>({...t,_live:true,duration:t.paused?(t.accumulatedSec||0):(t.accumulatedSec||0)+Math.max(0,(now-new Date(t.startTime).getTime())/1000)}));
+  const rows=[...act,...hist];
+  if(!rows.length){box.innerHTML=`<div style="font-size:12px;color:var(--txt3);padding:6px 2px">${REPAIR_STEP} — אין תיקונים בהזמנה הזו</div>`;return;}
+  const ctx=typeof _pricingCtx==='function'?_pricingCtx():null;
+  const rateOf=t=>ctx?((loadedHourlyRate(t.workerId,_tDay(t))||ctx.avgAll)+ctx.oh):0;
+  let totSec=0,totCost=0,totQty=0;
+  const tr=rows.map(t=>{
+    const sec=+t.duration||0,cost=sec/3600*rateOf(t);totSec+=sec;totCost+=cost;totQty+=+t.qty||0;
+    const d=new Date(t._live?t.startTime:(t.endTime||t.startTime));
+    const when=pad2(d.getDate())+'/'+pad2(d.getMonth()+1)+' '+pad2(d.getHours())+':'+pad2(d.getMinutes());
+    const sc=[t.size!==''&&t.size!=null?'מידה '+szLblT(t.cust,t.prod,String(t.size)):'',t.col?(COLORS[t.col]||t.col):''].filter(Boolean).join(' · ')||'—';
+    return`<tr style="border-bottom:0.5px solid var(--brd)">
+      <td style="padding:5px 4px;white-space:nowrap">${when}${t._live?` <span class="badge green" style="font-size:10px">${t.paused?'⏸':'▶'} פעיל</span>`:''}</td>
+      <td style="padding:5px 4px">${esc(t.workerName||'')}</td>
+      <td style="padding:5px 4px">${esc(sc)}</td>
+      <td style="padding:5px 4px;text-align:center">${+t.qty||0}</td>
+      <td style="padding:5px 4px;white-space:nowrap">${fmtM(Math.round(sec))}</td>
+      <td style="padding:5px 4px;white-space:nowrap;font-weight:600">${ctx?'₪'+cost.toFixed(2):'—'}</td></tr>`;
+  }).join('');
+  box.innerHTML=`<div style="background:var(--bg2);border-radius:8px;padding:8px 10px;border:1px solid var(--brd)">
+    <div style="font-size:13px;font-weight:700;margin-bottom:4px">${REPAIR_STEP} — ${rows.length} ${rows.length===1?'משימה':'משימות'}</div>
+    <div style="overflow-x:auto"><table style="width:100%;border-collapse:collapse;font-size:12px">
+      <thead><tr style="color:var(--txt3);text-align:right"><th style="padding:3px 4px">מתי</th><th style="padding:3px 4px">עובד/ת</th><th style="padding:3px 4px">מידה/צבע</th><th style="padding:3px 4px">כמות</th><th style="padding:3px 4px">זמן</th><th style="padding:3px 4px">עלות</th></tr></thead>
+      <tbody>${tr}</tbody>
+      <tfoot><tr style="font-weight:700"><td style="padding:5px 4px" colspan="3">סה"כ</td><td style="padding:5px 4px;text-align:center">${totQty}</td><td style="padding:5px 4px;white-space:nowrap">${fmtM(Math.round(totSec))}</td><td style="padding:5px 4px;white-space:nowrap;color:var(--red-txt)">${ctx?'₪'+totCost.toFixed(2):'—'}</td></tr></tfoot>
+    </table></div>
+    <div style="font-size:11px;color:var(--txt3);margin-top:4px">עלות = זמן × (עלות שעה עמוסה של העובד/ת + תקורה) · עלות פנימית — כבר נספרת בדוח הרווח של ההזמנה, לא בתעודה${ctx?'':' · ⚠ אין נתוני עלויות — פתח/י את לשונית העלויות'}</div></div>`;
+}
