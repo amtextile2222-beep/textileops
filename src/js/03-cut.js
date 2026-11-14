@@ -30,7 +30,7 @@ function sampleBase(raw,taskDept,rp){
   const p=bcOrderProd(raw),sb=isSampleBc(raw),cust=raw.slice(0,2),prod=raw.slice(2,7);
   const stamp=p?prodStampOf(p):prodStampFor(cust,prod);
   if(rp)return{raw,cust,prod,size:rp.size,qty:rp.qty,col:rp.col,isTotal:false,taskDept:taskDept||'',
-    taskType:REPAIR_STEP,isSample:true,isRepair:true,prodStamp:stamp};
+    taskType:repairType(rp),isSample:true,isRepair:true,prodStamp:stamp};
   return{raw,cust,prod,size:sb?'':raw.slice(7,8),qty:sampleQtyOf(raw),col:sb?'':raw.slice(11,13),
     isTotal:false,taskDept:taskDept||'',taskType:SAMPLE_STEP,isSample:true,
     prodStamp:stamp};
@@ -39,7 +39,7 @@ function sampleBase(raw,taskDept,rp){
 // 🔧 תיקון — כפילות = אותו ברקוד **ואותה מידה+צבע** (תיקון של כמה מידות באותו סל — מותר)
 function sampleDupFor(workerId,raw,cart,rp){
   const T=LANGS[currentLang];
-  const step=rp?REPAIR_STEP:SAMPLE_STEP,same=x=>!rp||(String(x.size||'')===rp.size&&String(x.col||'')===rp.col);
+  const step=rp?repairType(rp):SAMPLE_STEP,same=x=>!rp||(String(x.size||'')===rp.size&&String(x.col||'')===rp.col);
   if((cart||[]).some(b=>b.raw===raw&&b.taskType===step&&same(b)))return T.scan_dup_in_cart||'כבר בסל';
   if(S.activeTasks.some(t=>t.workerId===workerId&&taskBc(t)===raw&&t.taskType===step&&same(t)&&!t.paused))return T.scan_dup_active||'פעיל כעת';
   return '';
@@ -55,6 +55,11 @@ const REPAIR_STEP='🔧 תיקון';
 const REPAIR_COL='77';
 function isRepairBc(raw){raw=String(raw||'');return isBcLen(raw.length)&&raw.slice(7,8)==='9'&&raw.slice(11,13)===REPAIR_COL;}
 function repairCodeOf(cust,prod,sfx){return cust+prod+'9'+'000'+REPAIR_COL+(sfx||'');}
+// שם המשימה: "🔧 תיקון" או "🔧 תיקון — <מה מתקנים>" (שדה חופשי בחלון, 14/11/2026). הזיהוי בקוד — לפי isRepair
+// או הקידומת (isRepairTask), לא לפי שוויון לשם.
+function repairType(rp){const n=String(rp?.note||'').trim();return REPAIR_STEP+(n?' — '+n:'');}
+function isRepairTask(t){return !!t&&(!!t.isRepair||String(t.taskType||'').startsWith(REPAIR_STEP));}
+function repairNoteOf(t){const s=String(t?.taskType||'');return s.startsWith(REPAIR_STEP+' — ')?s.slice(REPAIR_STEP.length+3):'';}
 // חלון בחירה: שורות טבלת הכמויות (מידה · צבע · כמות) + כמות לעריכה. null = בוטל
 function repairPick(raw){
   return new Promise(res=>{
@@ -73,6 +78,8 @@ function repairPick(raw){
       ${rows.length?`<div style="font-size:13px;font-weight:600;margin-bottom:6px">מידה וצבע:</div>
         <div style="display:flex;flex-direction:column;gap:6px;margin-bottom:12px">${rows.map(row).join('')}</div>`
         :'<div style="font-size:12px;color:var(--txt3);margin-bottom:12px">אין טבלת כמויות להזמנה — תיקון בלי מידה/צבע</div>'}
+      <div class="field" style="margin:0 0 10px"><label>שלב / מה מתקנים <span style="font-size:11px;color:var(--txt3)">(לא חובה)</span></label>
+        <input id="rp-note" type="text" maxlength="60" placeholder="למשל: תפירת כפתור, כיווץ צד" style="font-size:15px"></div>
       <div class="field" style="margin:0"><label>כמות לתיקון</label>
         <input id="rp-qty" type="number" min="1" step="1" inputmode="numeric" value="${rows.length===1?parseInt(rows[0].qty):(rows.length?'':1)}" style="font-size:16px"></div>
       <div id="rp-err" style="color:var(--red-txt);font-size:12px;min-height:16px;margin-top:6px"></div>
@@ -93,7 +100,8 @@ function repairPick(raw){
       const qty=parseInt(qEl.value)||0;
       if(qty<1||qty>9999){err.textContent='⚠ כמות לא תקינה';return;}
       const q=sel?rows[+sel.value]:null;
-      done({size:q?String(q.size??''):'',col:q?String(q.color??''):'',qty});
+      const note=String(ov.querySelector('#rp-note').value||'').replace(/\s+/g,' ').trim().slice(0,60);
+      done({size:q?String(q.size??''):'',col:q?String(q.color??''):'',qty,note});
     };
   });
 }

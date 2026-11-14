@@ -863,7 +863,7 @@ async function recropProdImg(i){
 async function _repairsFill(p){
   const box=document.getElementById('pm-repairs');if(!box)return;
   const stamp=prodStampOf(p),cache={};
-  const mine=t=>t.cust===p.cust&&t.prod===p.prod&&t.taskType===REPAIR_STEP&&taskOrderStamp(t,cache)===stamp;
+  const mine=t=>t.cust===p.cust&&t.prod===p.prod&&isRepairTask(t)&&taskOrderStamp(t,cache)===stamp;
   let hist=[];
   try{hist=(await loadHistProd(p.prod)).filter(mine);}catch(e){hist=(S.histTasks||[]).filter(mine);}
   if(document.getElementById('pm-repairs')!==box)return; // החלון נסגר/נפתח מחדש בינתיים
@@ -882,7 +882,7 @@ async function _repairsFill(p){
     return`<tr style="border-bottom:0.5px solid var(--brd)">
       <td style="padding:5px 4px;white-space:nowrap">${when}${t._live?` <span class="badge green" style="font-size:10px">${t.paused?'⏸':'▶'} פעיל</span>`:''}</td>
       <td style="padding:5px 4px">${esc(t.workerName||'')}</td>
-      <td style="padding:5px 4px">${esc(sc)}</td>
+      <td style="padding:5px 4px">${esc(sc)}${repairNoteOf(t)?'<div style="font-size:11px;color:var(--txt2)">'+esc(repairNoteOf(t))+'</div>':''}</td>
       <td style="padding:5px 4px;text-align:center">${+t.qty||0}</td>
       <td style="padding:5px 4px;white-space:nowrap">${fmtM(Math.round(sec))}</td>
       <td style="padding:5px 4px;white-space:nowrap;font-weight:600">${ctx?'₪'+cost.toFixed(2):'—'}</td></tr>`;
@@ -890,7 +890,7 @@ async function _repairsFill(p){
   box.innerHTML=`<div style="background:var(--bg2);border-radius:8px;padding:8px 10px;border:1px solid var(--brd)">
     <div style="font-size:13px;font-weight:700;margin-bottom:4px">${REPAIR_STEP} — ${rows.length} ${rows.length===1?'משימה':'משימות'}</div>
     <div style="overflow-x:auto"><table style="width:100%;border-collapse:collapse;font-size:12px">
-      <thead><tr style="color:var(--txt3);text-align:right"><th style="padding:3px 4px">מתי</th><th style="padding:3px 4px">עובד/ת</th><th style="padding:3px 4px">מידה/צבע</th><th style="padding:3px 4px">כמות</th><th style="padding:3px 4px">זמן</th><th style="padding:3px 4px">עלות</th></tr></thead>
+      <thead><tr style="color:var(--txt3);text-align:right"><th style="padding:3px 4px">מתי</th><th style="padding:3px 4px">עובד/ת</th><th style="padding:3px 4px">מידה/צבע · מה</th><th style="padding:3px 4px">כמות</th><th style="padding:3px 4px">זמן</th><th style="padding:3px 4px">עלות</th></tr></thead>
       <tbody>${tr}</tbody>
       <tfoot><tr style="font-weight:700"><td style="padding:5px 4px" colspan="3">סה"כ</td><td style="padding:5px 4px;text-align:center">${totQty}</td><td style="padding:5px 4px;white-space:nowrap">${fmtM(Math.round(totSec))}</td><td style="padding:5px 4px;white-space:nowrap;color:var(--red-txt)">${ctx?'₪'+totCost.toFixed(2):'—'}</td></tr></tfoot>
     </table></div>
