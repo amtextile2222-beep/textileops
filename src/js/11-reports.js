@@ -230,6 +230,8 @@ function _ordDeptPlan(p,ctx){
     stepKey[n]=k;add(k);plan[k]+=pb?(mins[n]||0):stepManualMin(s);if(sc[n]){pc[k]+=sc[n][0];bc[k]+=sc[n][1];}});
   return{stepKey,plan,ord,add,pc,bc};
 }
+// 🔧 (14/11/2026) מפתח המחלקה של משימה — תיקון בשורה משלו (לא מתוקצב), לא בתוך המחלקה של התחנה שנסרקה
+function _dKeyOf(d,t){const k=(typeof isRepairTask==='function'&&isRepairTask(t))?REPAIR_STEP:(d.stepKey[t.taskType]||_dTimeKey(t.dept)||_rl('no_dept'));d.add(k);return k;}
 // מוקצב מול בפועל לפי מחלקה להזמנה פעילה — ללשונית משימות ולמסך התצוגה. ⚠️ **אפס קריאות Firestore**:
 // S.histTasks (החלון החי, HIST_WINDOW_DAYS) + המשימות הרצות עכשיו — אותה החלטה כמו _kioskProdPanel,
 // כי שני המסכים מתרנדרים כל היום. הזמנה שרצה מעל 14 יום תראה כאן פחות מהדוח (שם — כל ההיסטוריה).
@@ -239,7 +241,7 @@ function _liveOrdDeptTime(cust,prod,stamp){
   const units=Math.max(_prodQty(p),+p.shippedQty||0)||(+p.estQty||0);if(!units)return null;
   const d=_ordDeptPlan(p,_pricingCtx()),act={},clk={},oc={};
   const mine=t=>t.cust===cust&&t.prod===prod&&taskOrderStamp(t,oc)===stamp;
-  const keyOf=t=>{const k=d.stepKey[t.taskType]||_dTimeKey(t.dept)||_rl('no_dept');d.add(k);return k;};
+  const keyOf=t=>_dKeyOf(d,t);
   // ⚖ בפועל = דקות שעון × מקדם העובדת (_rwOf) — עובדת יקרה "צורכת" יותר מהמוקצב; clk = שעון נטו לתצוגה
   const addT=(t,min)=>{const k=keyOf(t);clk[k]=(clk[k]||0)+min;act[k]=(act[k]||0)+min*_rwOf(t.workerId,p,k.startsWith('✂ '));};
   const done=S.histTasks.filter(t=>mine(t)&&(t.duration||0)>0),nd=normalizeBatchDurations(done);
@@ -1164,6 +1166,11 @@ function buildProfitReport(fl){
       costUnit+=actPU!=null?actPU:budPU;
       return{name:stepName(s),budPU,actPU,units};
     });
+    // 🔧 (14/11/2026) תיקונים — לא שלב בתמחור ⇒ נפלו מהרווח ליחידה. עלות כל התיקונים ÷ היחידות (מתוכנן/יצא)
+    const repTs=pTasks.filter(t=>isRepairTask(t)),repMin=repTs.reduce((s,t)=>s+(nd[t.id]||0)/60,0);
+    const repCost=repTs.reduce((s,t)=>s+((nd[t.id]||0)/3600)*((loadedHourlyRate(t.workerId,_tDay(t))||ctx.avgAll)+ctx.oh),0);
+    const repBase=Math.max(_prodQty(p),p.shippedQty!=null?+p.shippedQty||0:0);
+    const repPU=repCost>0&&repBase>0?repCost/repBase:0;costUnit+=repPU;
     const profit=pb.price-costUnit;
     const profitPct=pb.price>0?profit/pb.price*100:0;
     // כמות שיצאה בפועל (מברקוד "יצא ללקוח") — לרווח האמיתי של ההזמנה: הכנסה רק על מה שיצא
@@ -1174,10 +1181,10 @@ function buildProfitReport(fl){
     // הבפועל = זמן המשימות לפי המחלקה של השלב שלהן (שלב לא מוכר ⇒ מחלקת העובד).
     const dp=_ordDeptPlan(p,ctx),dAct={},dClk={},dCost={}; // אותו חישוב מוקצב כמו בלשונית משימות ובמסך התצוגה
     // 💸 dCost = עלות אמיתית: שעות נטו של כל משימה × (תעריף העובדת ביום המשימה + תקורה) — כמו actPU בשורות השלבים
-    pTasks.forEach(t=>{const k=dp.stepKey[t.taskType]||_dTimeKey(t.dept)||_rl('no_dept');dp.add(k);const m=(nd[t.id]||0)/60;dClk[k]=(dClk[k]||0)+m;dAct[k]=(dAct[k]||0)+m*_rwOf(t.workerId,p,k.startsWith('✂ '));
+    pTasks.forEach(t=>{const k=_dKeyOf(dp,t);const m=(nd[t.id]||0)/60;dClk[k]=(dClk[k]||0)+m;dAct[k]=(dAct[k]||0)+m*_rwOf(t.workerId,p,k.startsWith('✂ '));
       dCost[k]=(dCost[k]||0)+m/60*((loadedHourlyRate(t.workerId,_tDay(t))||ctx.avgAll)+ctx.oh);});
     const deptRows=dp.ord.filter(k=>dp.plan[k]>0||dAct[k]>0).map(k=>({k,planU:dp.plan[k],act:dAct[k]||0,clk:dClk[k]||0,pcU:dp.pc[k]||0,bcU:dp.bc[k]||0,cost:dCost[k]||0}));
-    blocks.push({p,pb,stepRows,cutRows,cutActMin,withData,profit,profitPct,shipped,planned,actMinTot,deptRows});
+    blocks.push({p,pb,stepRows,cutRows,cutActMin,withData,profit,profitPct,shipped,planned,actMinTot,deptRows,repMin,repCost,repPU,repN:repTs.length});
   }
   if(!blocks.length){el.innerHTML='<div style="color:var(--txt3);font-size:12px;padding:.5rem 0">אין מוצרים מתומחרים עם משימות שהושלמו בטווח הנבחר</div>';return;}
   el.innerHTML=`<div style="font-size:11px;color:var(--txt3);margin-bottom:6px">רווח בפועל ליחידה = מחיר − חומרים − עלות עבודה+תקורה בפועל · שלבים בלי נתונים מחושבים לפי המוקצב · 🚚 אמיתי = הכנסה רק על הכמות שיצאה ללקוח בפועל</div>`+blocks.map(b=>{
@@ -1197,7 +1204,7 @@ function buildProfitReport(fl){
           const totBud=b.pb.budMinUnit*base;
           if(!(totBud>0))return'';
           // ✂ שעות הגזירה יורדות מ"בפועל" של התפירה — התקציב כאן הוא תקציב התפירה בלבד.
-          const sewAct=Math.max(0,b.actMinTot-b.cutActMin);
+          const sewAct=Math.max(0,b.actMinTot-b.cutActMin-(b.repMin||0)); // 🔧 תיקונים — בשורה משלהם
           const left=totBud-sewAct;
           const noCut=b.cutActMin>0?`, ללא ${fmtExpMin(b.cutActMin)} גזירה`:'';
           // ⏱ (24/10/2026) שני זמנים: מה **שהוזן** בשלבים (= דף השלבים / חלון המוצר) ומה **שהתקציב
@@ -1227,7 +1234,7 @@ function buildProfitReport(fl){
             <thead><tr style="color:var(--txt3);border-bottom:1px solid var(--brd)"><th style="${td}">🏭 ${_rl('dept')} (${base} ${_rl('units')})</th><th style="${td}">${_rl('planned')}</th><th style="${td}">${_rl('actual')}</th><th style="${td}"></th><th style="${td}" title="${esc(_rl('cplan_t'))}">${_rl('cplan')}</th><th style="${td}" title="${esc(_rl('cact_t'))}">${_rl('cact')}</th><th style="${td}">${_rl('cdiff')}</th></tr></thead>
             <tbody>${b.deptRows.map(r=>{const pl=r.planU*base,l=pl-r.act,cp=r.pcU*base,cd=cp-r.cost,ils=v=>'₪'+Math.round(v).toLocaleString();
               return`<tr style="border-bottom:0.5px dashed var(--brd)"><td style="${td}">${esc(r.k)}</td><td style="${td}">${pl>0?fmtExpMin(pl):'—'}</td><td style="${td};font-weight:600">${r.act>0?fmtExpMin(r.act):'—'}${r.clk>0&&Math.abs(r.clk-r.act)>=1?`<div style="font-size:10px;font-weight:400;color:var(--txt3)" title="${esc(_rl('clock_t'))}">${_rl('clock')} ${fmtExpMin(r.clk)}</div>`:''}</td>
-                <td style="${td};font-weight:700;color:${l<0?'var(--red-txt)':'var(--green-txt,#16a34a)'}">${pl>0?_rl(l<0?'over':'left')+' '+fmtExpMin(Math.abs(l)):''}</td>
+                <td style="${td};font-weight:700;color:${l<0?'var(--red-txt)':'var(--green-txt,#16a34a)'}">${pl>0?_rl(l<0?'over':'left')+' '+fmtExpMin(Math.abs(l)):(r.k===REPAIR_STEP&&r.cost>0?'<span style="color:var(--red-txt)" title="תיקון — לא מתוקצב, כל העלות יורדת מהרווח">לא מתוקצב</span>':'')}</td>
                 <td style="${td}">${cp>0?ils(cp):'—'}</td><td style="${td};font-weight:600">${r.cost>0?ils(r.cost):'—'}</td>
                 <td style="${td};font-weight:700;color:${cd<0?'var(--red-txt)':'var(--green-txt,#16a34a)'}">${cp>0&&r.cost>0?(cd<0?_rl('over')+' ':_rl('left')+' ')+ils(Math.abs(cd)):''}</td></tr>`;}).join('')}</tbody></table>
             ${(()=>{ // 💸 סיכום: עלות החריגות (מול הזמנים שהוזנו) + ההפסד ברווח (רק מה שעבר את תקציב המחלקה — עד שם הרווח עוד מוגן)
@@ -1252,7 +1259,11 @@ function buildProfitReport(fl){
           <span style="color:var(--txt3)">מוקצב ₪${s.budPU.toFixed(2)}</span>
           <span style="font-weight:600">${has?`בפועל ₪${s.actPU.toFixed(2)} (${s.units} יח')`:'— אין נתונים'}</span>
           ${has?`<span style="font-weight:700">${leak>0?'▲ +':'▼ '}₪${Math.abs(leak).toFixed(2)}</span>`:''}
-        </div>`;}).join('')}${b.cutRows.length?`
+        </div>`;}).join('')}${b.repCost>0?`<div style="display:flex;gap:8px;align-items:center;font-size:12px;padding:3px 0;border-bottom:0.5px dashed var(--brd);color:var(--red-txt)" title="עלות כל משימות התיקון של ההזמנה ÷ היחידות — לא מתוקצב, יורד מהרווח">
+          <span style="flex:1;min-width:110px">${REPAIR_STEP} (${b.repN})</span>
+          <span style="color:var(--txt3)">לא מתוקצב</span>
+          <span style="font-weight:600">בפועל ₪${b.repPU.toFixed(2)}/יח' · ${fmtExpMin(b.repMin)} · ₪${Math.round(b.repCost)}</span>
+        </div>`:''}${b.cutRows.length?`
         <div style="margin-top:6px;padding-top:5px;border-top:1px solid var(--brd)">
           <div style="font-size:11px;color:var(--txt3);margin-bottom:2px">✂ גזירה — נמדד מול ₪${b.pb.cutPrice.toFixed(2)}/יח' ברווח ${b.pb.cutPct.toFixed(0)}%, לא מול מחיר התפירה</div>
           ${b.cutRows.map(s=>`<div style="display:flex;gap:8px;align-items:center;font-size:12px;padding:3px 0;border-bottom:0.5px dashed var(--brd)">
