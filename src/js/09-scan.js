@@ -405,6 +405,7 @@ function closeInfoHtml(t){
   return` <span style="color:var(--txt2)" title="${esc((t.closedDev||'')+(t.closedBy?' · '+t.closedBy:''))}">· 🏁 ${esc(lbl)}${t.closedByName?' · '+esc(t.closedByName):''}</span>`;
 }
 async function closeBatchProportional(tasks,endTime,why){
+  await _attEnsure(tasks); // 👤 עובד/עוזר שסוגר משימה של אחרת — הנוכחות שלה לתקרה
   const lead=tasks[0];
   const baseSec=_capByAttendance(lead,lead.paused?(lead.accumulatedSec||0):(lead.accumulatedSec||0)+calcTaskDurSec(lead.startTime,endTime,lead.workerId));
   for(const t of tasks){
@@ -424,6 +425,7 @@ async function closeBatchProportional(tasks,endTime,why){
 // סוגר אוסף משימות עם חלוקת זמן נכונה: משימות שחולקות batchId (עבדו במקביל על טיימר אחד)
 // מתחלקות יחסית; משימות בודדות נסגרות עם הזמן המלא שלהן. כל מסלולי הסגירה עוברים דרך כאן.
 async function closeTasksBatchAware(tasks,endTime,why){
+  await _attEnsure(tasks);
   const groups={};
   const singles=[];
   tasks.forEach(t=>{if(t.batchId){(groups[t.workerId+'|'+t.batchId]=groups[t.workerId+'|'+t.batchId]||[]).push(t);}else singles.push(t);});
@@ -506,7 +508,7 @@ function _clusterClock(ws,we,wid){
     const ss=r.sessions&&r.sessions.length?r.sessions:(r.checkin?[{in:r.checkin,out:r.checkout||null}]:[]);
     ss.forEach(s=>{if(s.in&&!seen.has(s.in)){seen.add(s.in);sess.push(s);}});
   };
-  (S.attHistory||[]).forEach(r=>{if(r.workerId===wid)addRec(r);});
+  _attRecs().forEach(r=>{if(r.workerId===wid)addRec(r);});
   if(w)addRec(w);
   let tot=0,found=false;
   for(const s of sess){
@@ -628,6 +630,7 @@ async function applySwapMode(mode,workerId,activeCurrent,swapTime){
 async function closeTaskList(tasks,endTime,why){
   const list=(tasks||[]).filter(t=>!_isClosedTask(t.id));
   if(!list.length)return 0;
+  await _attEnsure(list); // calcTaskDurSec חותך משימה שחצתה יום ביציאה של העובדת באותו יום
   const batches={};list.forEach(t=>{const bid=t.batchId||t.id;if(!batches[bid])batches[bid]=[];batches[bid].push(t);});
   for(const bTasks of Object.values(batches)){
     if(bTasks.length>1)await closeBatchProportional(bTasks,endTime,why);
@@ -811,7 +814,7 @@ function calcTaskDurSec(startTime,endTime,workerId){
   if(!isNaN(st)&&!isNaN(et)&&et.toDateString()!==st.toDateString()){
     const d=st.getFullYear()+'-'+pad2(st.getMonth()+1)+'-'+pad2(st.getDate());
     let cut=shiftEndDate(d);
-    const rec=(S.attHistory||[]).find(r=>r.workerId===workerId&&r.date===d);
+    const rec=_attRecs().find(r=>r.workerId===workerId&&r.date===d);
     const co=rec?(attLastOut(rec)||rec.checkout):null;
     if(co&&!isNaN(new Date(co)))cut=new Date(co);
     if(et>cut)et=cut<st?st:cut;

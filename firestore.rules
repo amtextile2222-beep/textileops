@@ -145,8 +145,12 @@ service cloud.firestore {
     // כותבת רשומות של אחרים מכל מכשיר (סגירת נוכחות בבוקר, איפוס חצות, משימות משותפות).
     // מחיקה — רק מי שיש לו אותה במסך: נוכחות אינה נמחקת מהאפליקציה בכלל (מנהל בלבד);
     // היסטוריית משימות ומוצרים נמחקים ממסכי מנהל/אחראי (deleteHistTask/restoreHistTask/deleteProduct).
+    // 👤 נוכחות לפי עובדת (14/11/2026): שאילתה (list) — עובד/עוזר רק על עצמו (הלקוח שולח
+    // where workerId==uid). get של מסמך בודד — לכל מחובר: ניקוי הבוקר, האיפוס בחצות וסגירת
+    // משימה של עובדת אחרת (מסירת מכונה) קוראים רשומה של אחר לפי המפתח workerId_date.
     match /attHistory/{id} {
-      allow read, create, update: if hasRole();
+      allow get, create, update: if hasRole();
+      allow list: if isMgr() || isSup() || (hasRole() && resource.data.workerId == request.auth.uid);
       allow delete: if isMgr();
     }
     match /histTasks/{id} {

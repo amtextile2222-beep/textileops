@@ -337,6 +337,7 @@ function startDataListeners(){
   }else _liveReviveAll();
   _startPricingListener();
   _startCashboxListener();
+  _startAttListener();
   _syncWatchStart();_syncDot();
   // הגדרות רגישות (עלויות) — קריאה מותרת רק למנהל ב-Rules
   if(!_adminListenerStarted&&S.user?.role==='manager'&&db){
@@ -424,7 +425,9 @@ function listenFb(){
     if(!snap.metadata.fromCache){
       const today=todayStr();
       const localDate=t=>{const d=t.startTime instanceof Date?t.startTime:new Date(t.startTime);return d.getFullYear()+'-'+pad2(d.getMonth()+1)+'-'+pad2(d.getDate());};
-      const stale=S.activeTasks.filter(t=>localDate(t)<today&&!t.paused);
+      // 👤 עובד/עוזר — רק המשימות שלו: אין אצלו נוכחות של אחרות ⇒ העיגון היה נופל לחצות.
+      // של אחרות — מכשיר מנהל/אחראי, ובלילה השרת (attendanceCloser 23:30).
+      const stale=S.activeTasks.filter(t=>localDate(t)<today&&!t.paused&&(_attAll()||t.workerId===S.user?.id));
       stale.forEach(t=>{
         const d=t.startTime instanceof Date?t.startTime:new Date(t.startTime);
         // עוגן ההשהיה: היציאה האחרונה של העובד באותו יום (attHistory), לא חצות —
@@ -466,14 +469,7 @@ function listenFb(){
     S.histTasks=snap.docs.map(d=>{const dd=d.data();return{...dd,id:d.id,startTime:dd.startTime?.toDate?dd.startTime.toDate():new Date(dd.startTime),endTime:dd.endTime?.toDate?dd.endTime.toDate():new Date(dd.endTime)};});
     renderAll();
   });
-  // attendance history — חלון חי של ATT_WINDOW_DAYS ימים אחרונים בלבד.
-  // קודם לכן נקרא כל האוסף בכל טעינה. ישן יותר נשלף לפי דרישה (loadAttRange).
-  // date הוא מחרוזת YYYY-MM-DD ⇒ השוואה לקסיקוגרפית; אומת ש-950/950 הרשומות נושאות אותו.
-  const _attCutoff=new Date(Date.now()-ATT_WINDOW_DAYS*86400000).toISOString().slice(0,10);
-  _live('attHistory',()=>query(collection(db,'attHistory'),where('date','>=',_attCutoff),orderBy('date','desc')),snap=>{
-    S.attHistory=snap.docs.map(d=>({...d.data()}));
-    renderAll();
-  });
+  // attendance history — עבר ל-_startAttListener (startDataListeners): השאילתה תלויה במשתמש
   // products
   _live('products',()=>collection(db,'products'),snap=>{
     S.products=snap.docs.map(d=>({id:d.id,...d.data()}));
@@ -579,6 +575,66 @@ function _canCashbox(){
   return Array.isArray(w.permissions)?w.permissions.includes('cashbox'):true;
 }
 // נקרא בכל כניסה (startDataListeners) — לא מ-listenFb שרץ פעם אחת לטאב: אחרת מנהל שנכנס אחרי עובדת באותו טאב לא היה מקבל קופה
+// 👤 נוכחות לפי עובדת (14/11/2026): עובד/עוזר מוריד רק את הרשומות שלו (~400 קריאות פחות בכל פתיחה).
+// Rules: list (שאילתה) — עובד/עוזר רק עם where workerId==עצמו; get של מסמך בודד פתוח לכל מחובר —
+// ניקוי הבוקר (getDoc), האיפוס בחצות (fbGet) וסגירת משימה של עובדת אחרת (מסירת מכונה) קוראים
+// רשומה של אחר לפי המפתח workerId_date. אינדקס: workerId+date (firestore.indexes.json).
+// חלון חי של ATT_WINDOW_DAYS ימים; ישן יותר — loadAttRange. date = YYYY-MM-DD ⇒ השוואה לקסיקוגרפית.
+function _attAll(){const r=S.user?.role;return r==='manager'||r==='supervisor';}
+function _attScope(){return _attAll()?'*':(S.user?.id||'');}
+let _attKey=null;
+let _attExtra={}; // עובד/עוזר: workerId_date ⇒ רשומה של עובדת אחרת שנשלפה ב-get (null = אין רשומה)
+function _startAttListener(){
+  if(!db||!S.user)return;
+  const key=_attScope();if(!key)return;
+  const st=_liveReg.attHistory;if(st&&st.unsub&&_attKey===key)return;
+  _attKey=key;_attExtra={};
+  const{collection,query,where,orderBy}=window._fb;
+  _live('attHistory',()=>{
+    const cut=new Date(Date.now()-ATT_WINDOW_DAYS*86400000).toISOString().slice(0,10);
+    const k=_attScope(),cs=[where('date','>=',cut),orderBy('date','desc')];
+    if(k!=='*')cs.unshift(where('workerId','==',k));
+    return query(collection(db,'attHistory'),...cs);
+  },snap=>{
+    S.attHistory=snap.docs.map(d=>({...d.data()}));
+    renderAll();
+  });
+}
+// כל הרשומות שיש בזיכרון: החלון החי + מה שנשלף לעובדות אחרות (אצל עובד/עוזר)
+function _attRecs(){
+  const a=S.attHistory||[];if(_attAll())return a;
+  const x=Object.values(_attExtra).filter(Boolean);return x.length?a.concat(x):a;
+}
+// לפני סגירה של משימה של עובדת אחרת אצל עובד/עוזר: שליפת הנוכחות שלה מהיום שהמשימה התחילה
+// (עד 30 יום) ועד אתמול — get לכל יום. בלי זה _capByAttendance רואה רק את היום ⇒ חותך את מה שנצבר.
+async function _attEnsure(tasks){
+  if(_attAll()||!db||!S.fbConnected)return;
+  const me=S.user?.id,{getDoc,doc}=window._fb,today=todayStr(),minMs=Date.now()-30*864e5,jobs=[];
+  (tasks||[]).forEach(t=>{
+    if(!t||!t.workerId||t.workerId===me)return;
+    const c=[t.startTime,t.pausedAt,t.origStart].map(v=>v?new Date(v).getTime():NaN).filter(isFinite);
+    if(!c.length)return;
+    const d=new Date(Math.max(Math.min(...c),minMs));d.setHours(0,0,0,0);
+    for(let i=0;i<31;i++,d.setDate(d.getDate()+1)){
+      const ds=d.getFullYear()+'-'+pad2(d.getMonth()+1)+'-'+pad2(d.getDate());if(ds>=today)break;
+      const k=t.workerId+'_'+ds;if(k in _attExtra)continue;
+      _attExtra[k]=null;
+      jobs.push(getDoc(doc(db,'attHistory',k)).then(s=>{_attExtra[k]=s.exists()?s.data():null;}).catch(()=>{delete _attExtra[k];}));
+    }
+  });
+  if(jobs.length)await Promise.all(jobs);
+}
+// האם יש בזיכרון את כל ימי הנוכחות של העובדת מ-fromDate עד אתמול? (עובד/עוזר, עובדת אחרת)
+// false ⇒ לא לחתוך לפי נוכחות — עדיף זמן מלא מאשר למחוק זמן שנצבר בגלל נתון חסר.
+function _attHave(wid,fromDate){
+  if(_attAll()||wid===S.user?.id)return true;
+  const today=todayStr(),d=new Date(fromDate+'T00:00:00');if(isNaN(d))return false;
+  for(let i=0;i<400;i++,d.setDate(d.getDate()+1)){
+    const ds=d.getFullYear()+'-'+pad2(d.getMonth()+1)+'-'+pad2(d.getDate());if(ds>=today)return true;
+    if(!((wid+'_'+ds) in _attExtra))return false;
+  }
+  return false;
+}
 function _startCashboxListener(){
   if(!db)return;
   if(!_canCashbox()){S.cashbox=[];return;}

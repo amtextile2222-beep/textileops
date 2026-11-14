@@ -7,7 +7,7 @@
 const fs = require('fs');
 const path = require('path');
 const { initializeTestEnvironment, assertSucceeds, assertFails } = require('@firebase/rules-unit-testing');
-const { doc, getDoc, setDoc, updateDoc, deleteDoc, addDoc, collection, getDocs, query, where, runTransaction } = require('firebase/firestore');
+const { doc, getDoc, setDoc, updateDoc, deleteDoc, addDoc, collection, getDocs, query, where, orderBy, runTransaction } = require('firebase/firestore');
 
 // emulators:exec מריץ מהשורש (firebase.json של הפרויקט) ומעביר את כתובת האמולטור במשתנה הסביבה
 const EMU = (process.env.FIRESTORE_EMULATOR_HOST || '127.0.0.1:8080').split(':');
@@ -66,6 +66,13 @@ const EMU = (process.env.FIRESTORE_EMULATOR_HOST || '127.0.0.1:8080').split(':')
 
   await seed();
 
+  // ═══ מנהל / אחראי — כל הנוכחות ═══
+  for (const [nm, db] of [['מנהל', mgr], ['אחראי', sup]]) {
+    await ok(nm + ': קריאת attHistory של כולם', getDocs(query(collection(db, 'attHistory'), where('date', '>=', '2026-10-01'), orderBy('date', 'desc'))));
+    await ok(nm + ': attHistory כל הטווח (דוח נוכחות)', getDocs(query(collection(db, 'attHistory'), orderBy('date', 'desc'))));
+  }
+  await no('בלי role: קריאת attHistory', getDocs(query(collection(cust, 'attHistory'), where('workerId', '==', 'c1'))));
+
   // ═══ עובד / עוזר — פעולות רגילות חייבות להמשיך לעבוד ═══
   for (const [nm, db, uid] of [['עובד', wrk, 'w1'], ['עוזר', hlp, 'h1']]) {
     await ok(nm + ': קריאת workers', getDocs(collection(db, 'workers')));
@@ -73,7 +80,14 @@ const EMU = (process.env.FIRESTORE_EMULATOR_HOST || '127.0.0.1:8080').split(':')
     await ok(nm + ': קריאת products', getDocs(collection(db, 'products')));
     await ok(nm + ': קריאת appSettings (כל האוסף)', getDocs(collection(db, 'appSettings')));
     await ok(nm + ': קריאת histTasks חלון', getDocs(query(collection(db, 'histTasks'), where('endTime', '>=', '2026-10-01'))));
-    await ok(nm + ': קריאת attHistory חלון', getDocs(query(collection(db, 'attHistory'), where('date', '>=', '2026-10-01'))));
+    // 👤 נוכחות לפי עובדת (14/11/2026): שאילתה רק על עצמו; get של רשומה בודדת (גם של אחר) פתוח
+    await no(nm + ': קריאת attHistory של כולם', getDocs(query(collection(db, 'attHistory'), where('date', '>=', '2026-10-01'))));
+    await ok(nm + ': קריאת attHistory שלו', getDocs(query(collection(db, 'attHistory'), where('workerId', '==', uid), where('date', '>=', '2026-10-01'), orderBy('date', 'desc'))));
+    await ok(nm + ': attHistory שלו בלי תאריך (דוח אישי)', getDocs(query(collection(db, 'attHistory'), where('workerId', '==', uid), orderBy('date', 'desc'))));
+    await no(nm + ': attHistory של עובדת אחרת (שאילתה)', getDocs(query(collection(db, 'attHistory'), where('workerId', '==', 'zz'), where('date', '>=', '2026-10-01'))));
+    await ok(nm + ': get רשומת נוכחות של אחרת (ניקוי בוקר)', getDoc(D(db, 'attHistory/w1_2026-11-01')));
+    await ok(nm + ': get רשומה שלא קיימת', getDoc(D(db, 'attHistory/zz_2026-11-02')));
+    await ok(nm + ': כתיבת נוכחות של אחרת (ניקוי בוקר)', setDoc(D(db, 'attHistory/zz_2026-11-03'), { workerId: 'zz', date: '2026-11-03' }, { merge: true }));
     await ok(nm + ': קריאת stations', getDocs(collection(db, 'stations')));
     await ok(nm + ': קריאת cashbox', getDocs(collection(db, 'cashbox')));
     await ok(nm + ': פתיחת משימה', setDoc(D(db, 'activeTasks/n_' + uid), { workerId: uid, bc: '1' }, { merge: true }));

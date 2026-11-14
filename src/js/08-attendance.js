@@ -515,7 +515,9 @@ function _capByAttendance(t,sec){
     [t.pausedAt,t.origStart].forEach(v=>{if(v){const ms=new Date(v).getTime();if(isFinite(ms))cand.push(ms);}});
     const firstDay=new Date(Math.min(...cand));
     const fromDate=firstDay.getFullYear()+'-'+pad2(firstDay.getMonth()+1)+'-'+pad2(firstDay.getDate());
-    let capMs=(S.attHistory||[]).filter(r=>r.workerId===t.workerId&&r.date>=fromDate)
+    // 👤 עובד/עוזר בלי כל ימי הנוכחות של העובדת האחרת (נשלפו ב-_attEnsure) ⇒ בלי תקרה
+    if(!_attHave(t.workerId,fromDate))return sec;
+    let capMs=_attRecs().filter(r=>r.workerId===t.workerId&&r.date>=fromDate)
       .reduce((s,r)=>s+(r.netMs||0),0);
     capMs+=calcNetWork(w); // היום הנוכחי עדיין לא בהיסטוריה
     if(capMs>0&&sec>capMs/1000)return Math.round(capMs/1000);

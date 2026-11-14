@@ -55,18 +55,21 @@ async function loadHistProd(prod){
 }
 // שליפת נוכחות לפי טווח תאריכים — לפי דרישה, מעבר לחלון החי (ATT_WINDOW_DAYS=45).
 // date הוא מחרוזת YYYY-MM-DD ⇒ השוואה ישירה, בלי המרות ISO כמו ב-loadHistRange.
-// ריק = ללא גבול. אינדקס: שדה יחיד (date) ⇒ אין צורך באינדקס מורכב.
+// ריק = ללא גבול. אינדקס: date לבד (מנהל/אחראי) · workerId+date (עובד/עוזר, 14/11/2026).
 // 🛑 כל דוח שנותן למשתמש לבחור טווח תאריכים חייב לעבור דרך כאן. שימוש ישיר
 //    ב-S.attHistory לטווח נבחר יחזיר בחסר בשקט ברגע שהטווח חורג מ-45 יום.
 // var ולא let — מוצהר מתחת לפונקציות שמשתמשות בו (runDailyBackup וכו'), ו-let היה TDZ.
 var _attRangeCache={key:'',ts:0,data:null};
 async function loadAttRange(fromD,toD){
-  const key=(fromD||'')+'|'+(toD||'');
+  // 👤 עובד/עוזר — רק הרשומות שלו (Rules: list רק עם where workerId==עצמו; אינדקס workerId+date)
+  const scope=_attScope();
+  const key=scope+'|'+(fromD||'')+'|'+(toD||'');
   if(_attRangeCache.key===key&&_attRangeCache.data&&Date.now()-_attRangeCache.ts<30000)return _attRangeCache.data;
-  if(!db||!S.fbConnected)return (S.attHistory||[]).slice();
+  if(!db||!S.fbConnected||!scope)return (S.attHistory||[]).slice();
   try{
     const{collection,query,where,orderBy,getDocs}=window._fb;
     const cs=[];
+    if(scope!=='*')cs.push(where('workerId','==',scope));
     if(fromD)cs.push(where('date','>=',fromD));
     if(toD)cs.push(where('date','<=',toD));
     cs.push(orderBy('date','desc'));
