@@ -482,3 +482,51 @@ function _printViaIframe(html){
   f.onload=()=>setTimeout(go,300);
   setTimeout(go,600);
 }
+// 🔧 ברקוד תיקון בודד — כרטיס מהיר ליד ספירה/גזירה ויצא ללקוח (14/11/2026). אותו ברקוד כמו הכרטיס
+// שנוסף ל"צור" של המידות (repairCodeOf); מידה, צבע וכמות — נבחרים בסריקה (repairPick).
+function bcGenerateRepair(){
+  const cust=(document.getElementById('bc-gen-cust')?.value||'').replace(/\D/g,'').padStart(2,'0').slice(0,2);
+  const prod=(document.getElementById('bc-gen-prod')?.value||'').replace(/\D/g,'').padStart(5,'0').slice(0,5);
+  if(cust==='00'||prod==='00000'){alert('הזן מספר לקוח ומספר מוצר');return;}
+  const _t=bcGenTarget(),code=repairCodeOf(cust,prod,bcSuffixFor(_t));
+  const {name:pname,date:pdate}=_bcProdMeta(_t);
+  const out=document.getElementById('bc-gen-output');if(!out)return;
+  out.innerHTML=`
+    <div style="display:flex;gap:8px;margin-bottom:10px">
+      <button class="btn" onclick="bcPrintRepair('${cust}','${prod}','${code}','${escj(pname)}','${escj(pdate)}')" style="font-size:13px">🖨️ הדפס</button>
+      <button class="btn" onclick="bcPrintRepair('${cust}','${prod}','${code}','${escj(pname)}','${escj(pdate)}',true)" style="font-size:13px">💬 שלח בוואטסאפ</button>
+    </div>
+    <div style="background:#fff;border:3px solid #b45309;border-radius:8px;padding:14px;display:flex;align-items:center;gap:14px;max-width:400px">
+      <div id="bc-repair-qr" style="flex-shrink:0;width:150px;height:150px"></div>
+      <div style="line-height:2">
+        <div style="font-size:14px;font-weight:800;color:#b45309">${REPAIR_STEP}</div>
+        <div style="font-size:13px;font-weight:700;color:#000">לקוח: ${cust}</div>
+        <div style="font-size:13px;font-weight:700;color:#000">מוצר: ${prod}</div>
+        ${bcOrderLbl(code)}
+        <div style="font-size:12px;color:#666">מידה, צבע וכמות — בוחרים בסריקה</div>
+        <div style="font-size:11px;color:#999;margin-top:4px">${code}</div>
+        ${_bcProdMetaLine(pname,pdate)}
+      </div>
+    </div>`;
+  new QRCode(document.getElementById('bc-repair-qr'),{text:bcQr(code),width:150,height:150,colorDark:'#000000',colorLight:'#ffffff',correctLevel:QRCode.CorrectLevel.M});
+  _qrOne(document.getElementById('bc-repair-qr'));
+}
+function bcPrintRepair(cust,prod,code,pname,pdate,share){
+  const canvas=document.querySelector('#bc-repair-qr canvas');
+  const img=canvas?`<img src="${canvas.toDataURL('image/png')}" style="width:150px;height:150px"/>`:'';
+  _bcCardOut(share,'repair-barcode',cust,prod,code,'ברקוד תיקון',`<html dir="rtl"><head><title>ברקוד תיקון</title>
+    <style>body{margin:20px;font-family:Arial,sans-serif;background:#fff}
+    .card{border:3px solid #b45309;border-radius:8px;padding:16px;display:inline-flex;align-items:center;gap:16px}
+    @media print{@page{size:A4 portrait;margin:10mm}}</style></head><body>
+    <div class="card">
+      ${img}
+      <div style="line-height:2.2">
+        <div style="font-size:16px;font-weight:800;color:#b45309">${REPAIR_STEP}</div>
+        <div style="font-size:14px;font-weight:700">לקוח: ${cust}</div>
+        <div style="font-size:14px;font-weight:700">מוצר: ${prod}</div>
+        ${bcOrderLbl(code)}
+        <div style="font-size:13px;color:#666">מידה, צבע וכמות — בוחרים בסריקה</div>
+        <div style="font-size:11px;color:#999;margin-top:4px">${code}</div>
+        ${_bcProdMetaLine(pname,pdate)}
+      </div></div></body></html>`);
+}
