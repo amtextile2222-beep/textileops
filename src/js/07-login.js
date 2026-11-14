@@ -1,8 +1,30 @@
 // ─── LOGIN ──────────────────────────────────────────────────
-let loginAttempts=0;let loginLocked=false;let loginLockTimer=null;
-// ⏱ הנעילה המקומית = הנעילה בשרת (login: 5 ניסיונות ⇒ דקה). עד 12/11/2026 המסך אמר 30 שניות והשתחרר אחרי 30,
-// בזמן שהשרת המשיך לדחות עוד חצי דקה
-const LOGIN_LOCK_MS=60000;
+let loginAttempts=0;
+// 🔒 נעילת כניסה (14/11/2026): הנעילה האמיתית בשרת ומתארכת (5 ניסיונות ⇒ 1 → 5 → 15 → 60 דק').
+// השרת מחזיר כמה זמן נשאר (details.leftMs, או lockMs בניסיון שנעל) ⇒ נשמר ב-localStorage לשם המשתמש,
+// כך שרענון הדף לא מעלים את ההודעה: מסך הכניסה מציג "הכניסה נעולה" + ספירה לאחור, והכפתור כבוי עד שהזמן עובר.
+// (עד היום מונה בזיכרון בלבד — רענון איפס את המסך, אבל השרת המשיך לדחות.)
+let _lockTmr=null;
+function _lockGet(u){try{const o=JSON.parse(localStorage.getItem('txops_lock')||'null');if(o&&u&&o.u===u&&o.until>Date.now())return o.until;}catch(e){}return 0;}
+function _lockSet(u,ms){if(!u||!(ms>0))return;try{localStorage.setItem('txops_lock',JSON.stringify({u,until:Date.now()+ms}));}catch(e){}_lockShow(u);}
+function _lockTxt(until){
+  const s=Math.max(1,Math.ceil((until-Date.now())/1000)),d=new Date(until);
+  const left=s>=60?Math.floor(s/60)+':'+pad2(s%60)+' דק\'':s+' שנ\'';
+  return '🔒 הכניסה נעולה עקב ניסיונות כושלים — נסה שוב בעוד '+left+' (ב-'+pad2(d.getHours())+':'+pad2(d.getMinutes())+')';
+}
+// מציג/מנקה את הנעילה של u במסך הכניסה. מחזיר true כשנעול.
+function _lockShow(u){
+  clearInterval(_lockTmr);_lockTmr=null;
+  const until=_lockGet(u),err=document.getElementById('l-err');
+  const dis=on=>['l-pass','l-btn'].forEach(id=>{const el=document.getElementById(id);if(el)el.disabled=on;});
+  if(!until){dis(false);if(err&&err.dataset.lock){err.textContent='';delete err.dataset.lock;}return false;}
+  dis(true);
+  const tick=()=>{if(Date.now()>=until){loginAttempts=0;_lockShow(u);return;}if(err){err.textContent=_lockTxt(until);err.dataset.lock='1';}};
+  tick();_lockTmr=setInterval(tick,1000);
+  return true;
+}
+// נעילה שהשרת דיווח עליה בשגיאה (locked ⇒ leftMs; כישלון שנעל ⇒ lockMs). true = נעול עכשיו
+function _lockFromErr(u,e){const d=(e&&e.details)||{};return _lockSet(u,+d.leftMs||+d.lockMs||0),!!_lockGet(u);}
 // כניסת חירום — למנהלים בלבד, מוגן ב-hash
 const _EMRG_H='$h:f434da0ecb3e3968e92503d17e29177511eb65394ff0d232f51a5f33a6ce9613';
 // ─── שלב 2 אבטחה: כל האימות עובר דרך Cloud Function login ───
@@ -79,7 +101,7 @@ function _loginErrMsg(code){
     'wrong':'שם משתמש או סיסמה שגויים',
     'missing-pass':'נא למלא שם משתמש וסיסמה',
     'disabled':'⛔ הגישה הושעתה זמנית — פנה למנהל',
-    'locked':'יותר מדי ניסיונות — נסה שוב בעוד דקה',
+    'locked':'🔒 הכניסה נעולה זמנית עקב ניסיונות כושלים — נסה שוב מאוחר יותר',
     'ip':'⛔ כניסה נחסמה — חייב להיות מחובר ל-WiFi המפעל',
     'time-window':'⛔ כניסה מחוץ לימים/שעות המותרים — פנה למנהל',
     'device':'⛔ מכשיר לא מורשה — פנה למנהל',
@@ -112,6 +134,7 @@ function _loginErrTech(e){
 // stage: איפה נפלנו — call (הקריאה לשרת), token (כניסה עם הטוקן), finish (בניית המסך)
 function _loginFailMsg(e,stage){
   const c=_loginErrCode(e);
+  if(c==='locked'){const ms=+((e&&e.details)||{}).leftMs;if(ms>0)return _lockTxt(Date.now()+ms);}
   if(c!=='network')return _loginErrMsg(c);
   if(typeof navigator!=='undefined'&&navigator.onLine===false)return '⛔ אין חיבור לאינטרנט — התחבר לרשת ונסה שוב';
   const srv=String((e&&e.message)||'').trim().startsWith('srv:');
@@ -124,21 +147,21 @@ function _loginFailMsg(e,stage){
 }
 function _loginShowErr(e,stage){
   console.error('login ['+stage+']:',e);
+  // השרת נעל (locked, או הניסיון הזה נעל) ⇒ ספירה לאחור שנשמרת גם אחרי רענון
+  const u=(document.getElementById('l-user')?.value||'').trim()||S._pendingUser?.user||'';
+  if(_lockFromErr(u,e))return;
   const el=document.getElementById('l-err');
   if(el)el.textContent=_loginFailMsg(e,stage);
 }
 // מונה הסיסמאות השגויות — משותף לכניסה רגילה ולכל מסלול אחר
-function _loginWrongPass(){
-  loginAttempts++;
-  if(loginAttempts>=5){
-    loginLocked=true;
-    document.getElementById('l-err').textContent='יותר מדי ניסיונות — חשבון נעול לדקה';
-    document.getElementById('l-user').disabled=true;
-    document.getElementById('l-pass').disabled=true;
-    loginLockTimer=setTimeout(()=>{loginLocked=false;loginAttempts=0;document.getElementById('l-user').disabled=false;document.getElementById('l-pass').disabled=false;document.getElementById('l-err').textContent='';},LOGIN_LOCK_MS);
-  } else {
-    document.getElementById('l-err').textContent='שם משתמש או סיסמה שגויים ('+loginAttempts+'/5)';
-  }
+function _loginWrongPass(e){
+  const u=(document.getElementById('l-user')?.value||'').trim();
+  const d=(e&&e.details)||{};
+  if(_lockFromErr(u,e))return; // הניסיון החמישי — השרת נעל ⇒ ספירה לאחור
+  // מספר הניסיון מהשרת (נספר שם לכל המכשירים); שרת ישן בלי details — מונה מקומי, ובחמישי דקה
+  loginAttempts=+d.n||loginAttempts+1;
+  if(!d.n&&loginAttempts>=5){loginAttempts=0;_lockSet(u,60000);return;}
+  document.getElementById('l-err').textContent='שם משתמש או סיסמה שגויים ('+Math.min(loginAttempts,5)+'/5)';
 }
 // ─── שחזור session אחרי טעינה מחדש ──────────────────────────────────────
 // S.user חי בזיכרון בלבד (saveLS לא שומר אותו), ולכן כל הריגה של הטאב ע"י
@@ -312,6 +335,7 @@ function onUserInput(u){
   document.getElementById('l-face-hint').style.display=w?'block':'none';
   document.getElementById('l-bc-hint').style.display=bcw?'block':'none';
   if(!bcw)stopBcLogin();
+  _lockShow(u.trim()); // 🔒 נעילה שמורה (גם אחרי רענון)
   if(w)loadFaceModels(); // טעינה מוקדמת ברקע — שהמודלים יהיו מוכנים כשהעובד ילחץ כניסה
 }
 // טעינה מוקדמת בעליית הדף אם יש בכלל עובדים עם זיהוי פנים (מה-cache המקומי) — במקום להטעין כשהעובד כבר עומד מול המצלמה
@@ -330,6 +354,7 @@ function _startAutoLogin(){
     inp.value=lu;
     onUserInput(lu);
     document.getElementById('l-switch-user').style.display='';
+    if(_lockGet(lu))return; // 🔒 נעול — לא פותחים מצלמה לבד; ההודעה כבר מוצגת (onUserInput)
     _autoFaceLogin(lu);
     _autoBcLogin(lu);
   }
@@ -365,7 +390,7 @@ async function startBcLogin(){
   if(!u){document.getElementById('l-err').textContent='נא למלא שם משתמש';return;}
   if(_bcLoginStream)return; // כבר פתוח
   // אותן חסימות כמו doLogin — לא לפתוח מצלמה על גרסה ישנה או חשבון נעול
-  if(loginLocked){document.getElementById('l-err').textContent='חשבון נעול לדקה עקב ניסיונות כושלים';return;}
+  if(_lockShow(u))return;
   if(await checkVersion()){document.getElementById('l-err').textContent='🔄 יש גרסה חדשה — לחץ "עדכן עכשיו" למעלה ונסה שוב';return;}
   const video=document.getElementById('l-bc-video');
   const status=document.getElementById('l-bc-status');
@@ -406,7 +431,7 @@ async function nfcBcLogin(){
   const u=document.getElementById('l-user').value.trim();
   const err=document.getElementById('l-err');
   if(!u){err.textContent='נא למלא שם משתמש';return;}
-  if(loginLocked){err.textContent='חשבון נעול לדקה עקב ניסיונות כושלים';return;}
+  if(_lockShow(u))return;
   if(await checkVersion()){err.textContent='🔄 יש גרסה חדשה — לחץ "עדכן עכשיו" למעלה ונסה שוב';return;}
   err.textContent='';
   nfcRead(async txt=>{
@@ -461,9 +486,9 @@ function _autoBcLogin(u){
   },500);
 }
 async function doLogin(){
-  if(loginLocked){document.getElementById('l-err').textContent='חשבון נעול לדקה עקב ניסיונות כושלים';return;}
-  if(await checkVersion()){document.getElementById('l-err').textContent='🔄 יש גרסה חדשה — לחץ "עדכן עכשיו" למעלה ונסה שוב';return;}
   const u=document.getElementById('l-user').value.trim();
+  if(_lockShow(u))return;
+  if(await checkVersion()){document.getElementById('l-err').textContent='🔄 יש גרסה חדשה — לחץ "עדכן עכשיו" למעלה ונסה שוב';return;}
   // 🛑 שדה הסיסמה **מוסתר** לעובד עם פנים/ברקוד, אבל הערך שהוקלד בו קודם נשאר. בלי הבדיקה הזו
   // הוא נשלח לשרת, חזרה 'wrong' (n/5) והמצלמה לא נפתחה אף פעם (רהאם 10/11/2026).
   const _pw=document.getElementById('l-pass-wrap');
@@ -484,7 +509,7 @@ async function doLogin(){
     if(devId)payload.deviceId=devId;
     res=await loginCall(payload);
   }catch(e){
-    if(_loginErrCode(e)==='wrong'){_loginWrongPass();return;}
+    if(_loginErrCode(e)==='wrong'){_loginWrongPass(e);return;}
     _loginShowErr(e,'call');
     return;
   }

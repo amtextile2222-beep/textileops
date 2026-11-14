@@ -107,7 +107,10 @@ async function _runFaceAuthLoop(){
         }
       }catch(e){
         const c=_loginErrCode(e);
-        if(c==='face-mismatch'){
+        // 🔒 השרת נעל (locked / הכישלון החמישי) ⇒ נשמר לספירה לאחור במסך הכניסה, גם אחרי רענון
+        const _lk=(c==='locked'||c==='face-mismatch')&&_lockFromErr(_u,e);
+        if(_lk&&c==='face-mismatch'){delete _faceFailPersist[_u];clearInterval(_faceAuthLoop);_faceAuthLoop=null;_onFaceAuthFailed();}
+        else if(c==='face-mismatch'){
           _faceFailPersist[_u]=(_faceFailPersist[_u]||0)+1;
           const fc=_faceFailPersist[_u];
           document.getElementById('face-auth-status').textContent='לא זוהית — ניסיון '+Math.min(fc,3)+'/3';

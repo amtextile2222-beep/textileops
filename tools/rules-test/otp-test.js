@@ -54,10 +54,10 @@ const lastCode = () => { const m = /<code>(\d{6})<\/code>/.exec(sent[sent.length
   for (let i = 0; i < 5; i++) await err(login({ user: 'boss', pass: 'pw', deviceId: 'B', otp: '000001' }));
   const cB = lastCode();
   t('אחרי 5 שגויים — גם הקוד הנכון נדחה', (await err(login({ user: 'boss', pass: 'pw', deviceId: 'B', otp: cB }))) !== '');
-  await db.doc('credentials/m1').set({ failCount: 0 }, { merge: true });
+  await db.doc('credentials/m1').set({ failCount: 0, lockLevel: 0, lockUntil: 0 }, { merge: true });
   // חירום
   t('קוד חירום שגוי ⇒ emergency-wrong', (await err(login({ emergencyCode: '1', deviceId: 'A' }))) === 'emergency-wrong');
-  await db.doc('credentials/_emergency').set({ failCount: 0 }, { merge: true });
+  await db.doc('credentials/_emergency').set({ failCount: 0, lockLevel: 0, lockUntil: 0 }, { merge: true });
   r = await login({ emergencyCode: '9999', deviceId: 'A' });
   t('קוד חירום ממכשיר מוכר ⇒ טוקן', !!r.token);
   r = await login({ emergencyCode: '9999', deviceId: 'C' });
@@ -96,6 +96,35 @@ const lastCode = () => { const m = /<code>(\d{6})<\/code>/.exec(sent[sent.length
   tgDown = true;
   t('טלגרם לא זמין ⇒ otp-send', (await err(login({ user: 'boss', pass: 'pw', deviceId: 'D' }))) === 'otp-send');
   tgDown = false;
+  // ⏫ נעילה מתארכת (14/11/2026): 1 → 5 → 15 → 60 דק', details לספירה לאחור, הצלחה מאפסת
+  const errD = async p => { try { await p; return {}; } catch (e) { return { m: e.message, d: e.details || {} }; } };
+  const cw = () => db.doc('credentials/w1');
+  await cw().set({ failCount: 0, lockLevel: 0, lockUntil: 0 }, { merge: true });
+  let e4; for (let i = 0; i < 4; i++) e4 = await errD(login({ user: 'wk', pass: 'x', deviceId: 'Z' }));
+  t('ניסיון 4 ⇒ wrong עם n=4', e4.m === 'wrong' && e4.d.n === 4 && !e4.d.lockMs);
+  const nTg = sent.length;
+  let e5 = await errD(login({ user: 'wk', pass: 'x', deviceId: 'Z' }));
+  t('ניסיון 5 ⇒ wrong + lockMs דקה', e5.m === 'wrong' && e5.d.lockMs === 60000);
+  t('טלגרם: ננעל לדקה', sent.length === nTg + 1 && /ננעל לדקה/.test(sent[sent.length - 1]));
+  let e6 = await errD(login({ user: 'wk', pass: 'pw', deviceId: 'Z' }));
+  t('בזמן נעילה גם סיסמה נכונה ⇒ locked + leftMs', e6.m === 'locked' && e6.d.leftMs > 50000 && e6.d.leftMs <= 60000);
+  const expire = () => cw().set({ lockUntil: Date.now() - 1 }, { merge: true });
+  await expire(); for (let i = 0; i < 5; i++) e5 = await errD(login({ user: 'wk', pass: 'x', deviceId: 'Z' }));
+  t('נעילה שנייה ⇒ 5 דק\'', e5.d.lockMs === 5 * 60000 && /ל-5 דקות/.test(sent[sent.length - 1]));
+  await expire(); for (let i = 0; i < 5; i++) e5 = await errD(login({ user: 'wk', pass: 'x', deviceId: 'Z' }));
+  t('נעילה שלישית ⇒ 15 דק\'', e5.d.lockMs === 15 * 60000);
+  await expire(); for (let i = 0; i < 5; i++) e5 = await errD(login({ user: 'wk', pass: 'x', deviceId: 'Z' }));
+  t('נעילה רביעית ⇒ שעה', e5.d.lockMs === 60 * 60000 && /לשעה/.test(sent[sent.length - 1]));
+  await expire(); r = await login({ user: 'wk', pass: 'pw', deviceId: 'Z' });
+  const cAfter = (await cw().get()).data();
+  t('הצלחה ⇒ טוקן ואיפוס רמה', !!r.token && cAfter.lockLevel === 0 && cAfter.failCount === 0);
+  for (let i = 0; i < 5; i++) e5 = await errD(login({ user: 'wk', pass: 'x', deviceId: 'Z' }));
+  t('אחרי הצלחה — שוב דקה', e5.d.lockMs === 60000);
+  // רשומה ישנה (לפני 14/11: בלי lockUntil) — החלון הישן מ-lastFail
+  await cw().set({ failCount: 5, lastFail: Date.now() - 20000, lockUntil: admin.firestore.FieldValue.delete() }, { merge: true });
+  e6 = await errD(login({ user: 'wk', pass: 'pw', deviceId: 'Z' }));
+  t('רשומה ישנה ⇒ עדיין נעול (~40 שנ\')', e6.m === 'locked' && e6.d.leftMs > 30000 && e6.d.leftMs <= 40000);
+  await cw().set({ failCount: 0, lockLevel: 0, lockUntil: 0 }, { merge: true });
   console.log(`\n══ ${pass} עברו · ${fail} נכשלו ══`);
   process.exit(fail ? 1 : 0);
 })().catch(e => { console.error(e); process.exit(1); });

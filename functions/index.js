@@ -175,26 +175,52 @@ async function mgrDeviceGate(uid, name, d, context, via) {
 // טרנזקציה: מאות בקשות במקביל קראו כולן failCount=0, נבדקו כולן, והנעילה (5 ניסיונות) לא עצרה אף אחת.
 // עכשיו כל בקשה תופסת מקום במונה לפני שהסוד נבדק ⇒ לכל היותר 5 בדיקות בחלון, גם במקביל.
 // הצלחה מאפסת (failCount: 0 בסוף login); שלב ביניים שהצליח (סיסמה נכונה ⇒ needFace) מחזיר את המקום (unclaimAttempt).
-// מחזיר את מספר הניסיון (1..5). נעול ⇒ זורק 'locked'.
+// מחזיר {n: מספר הניסיון 1..5, lockMs: >0 אם הניסיון הזה נעל, prev/prevUntil: לשחזור ב-unclaimAttempt}.
+// נעול ⇒ זורק 'locked' עם details.leftMs (הלקוח מציג ספירה לאחור ושומר אותה — רענון לא מבטל).
+// ⏫ (14/11/2026) נעילה מתארכת: כל נעילה חוזרת ארוכה מהקודמת — LOGIN_LOCK_STEPS (1 → 5 → 15 → 60 דק').
+// credentials: lockLevel (כמה נעילות ברצף), lockUntil (ms). הצלחה מאפסת הכל; יממה בלי כישלון ⇒ חוזרים לדקה.
+// עד היום תמיד דקה ⇒ 5 ניחושים בדקה כל היום (~7,000 ביממה).
 const LOGIN_MAX_FAILS = 5;
-async function claimAttempt(credRef, lockMs) {
+const LOGIN_LOCK_STEPS = [1, 5, 15, 60].map(m => m * 60 * 1000);
+const LOCK_DECAY_MS = 24 * 3600 * 1000;
+// כמה זמן נשאר לנעילה (0 = לא נעול). רשומה מלפני 14/11 (בלי lockUntil) — החלון הישן: steps[0] מ-lastFail
+function lockLeftMs(c, now, steps) {
+  if ((c.lockUntil || 0) > now) return c.lockUntil - now;
+  if (!c.lockUntil && (c.failCount || 0) >= LOGIN_MAX_FAILS) return Math.max(0, steps[0] - (now - (c.lastFail || 0)));
+  return 0;
+}
+const lockErr = ms => new functions.https.HttpsError('resource-exhausted', 'locked', { leftMs: Math.ceil(ms) });
+const lockLbl = ms => ms >= 3600000 ? 'לשעה' : ms > 60000 ? 'ל-' + Math.round(ms / 60000) + ' דקות' : 'לדקה';
+async function claimAttempt(credRef, steps) {
+  steps = steps || LOGIN_LOCK_STEPS;
   const r = await db.runTransaction(async tx => {
     const s = await tx.get(credRef);
     const c = s.exists ? s.data() : {};
-    let fc = c.failCount || 0;
     const now = Date.now();
+    const left = lockLeftMs(c, now, steps);
+    if (left > 0) return { locked: left };
+    let fc = c.failCount || 0;
+    if (fc >= LOGIN_MAX_FAILS) fc = 0; // חלון הנעילה עבר — מתחילים לספור מחדש (בלי זה כל טעות בודדת הייתה נועלת שוב מיד)
+    const prev = c.lockLevel || 0;
+    const lvl = c.lastFail && now - c.lastFail > LOCK_DECAY_MS ? 0 : prev;
+    fc++;
+    const upd = { failCount: fc, lastFail: now };
+    let lockMs = 0;
     if (fc >= LOGIN_MAX_FAILS) {
-      if (now - (c.lastFail || 0) < lockMs) return 0;
-      fc = 0; // חלון הנעילה עבר — מתחילים לספור מחדש (בלי זה כל טעות בודדת הייתה נועלת שוב מיד)
-    }
-    tx.set(credRef, { failCount: fc + 1, lastFail: now }, { merge: true });
-    return fc + 1;
+      lockMs = steps[Math.min(lvl, steps.length - 1)];
+      upd.lockLevel = lvl + 1; upd.lockUntil = now + lockMs;
+    } else if (lvl !== prev) upd.lockLevel = lvl;
+    tx.set(credRef, upd, { merge: true });
+    return { n: fc, lockMs, prev, prevUntil: c.lockUntil || 0 };
   });
-  if (!r) throw new functions.https.HttpsError('resource-exhausted', 'locked');
+  if (r.locked) throw lockErr(r.locked);
   return r;
 }
-function unclaimAttempt(credRef) {
-  return credRef.set({ failCount: FieldValue.increment(-1) }, { merge: true }).catch(() => {});
+// שלב ביניים שהצליח (סיסמה נכונה ⇒ needFace/OTP) — מחזיר את המקום, וגם מבטל נעילה שהניסיון הזה יצר
+function unclaimAttempt(credRef, c) {
+  const upd = { failCount: FieldValue.increment(-1) };
+  if (c && c.lockMs) { upd.lockLevel = c.prev; upd.lockUntil = c.prevUntil; }
+  return credRef.set(upd, { merge: true }).catch(() => {});
 }
 // תבנית פנים תקינה = 128 מספרים סופיים (face-api). אורך אחר נדחה: euclidean משווה לפי הקצר מבין השניים,
 // ולכן וקטור של 64 הקטין את המרחק פי ~1.4 והסף 0.6 עבר בקלות (12/11/2026)
@@ -251,15 +277,15 @@ const loginImpl = async (data, context) => {
     const emRef = db.collection('credentials').doc('_emergency');
     const emSnap = await emRef.get();
     const em = emSnap.exists ? emSnap.data() : {};
-    if ((em.failCount || 0) >= LOGIN_MAX_FAILS && Date.now() - (em.lastFail || 0) < 10 * 60 * 1000) {
-      throw new functions.https.HttpsError('resource-exhausted', 'locked');
-    }
-    await claimAttempt(emRef, 10 * 60 * 1000);
+    const EM_STEPS = [10 * 60 * 1000]; // קוד חירום — תמיד 10 דק' (לא מתארך)
+    const emLeft = lockLeftMs(em, Date.now(), EM_STEPS);
+    if (emLeft > 0) throw lockErr(emLeft);
+    await claimAttempt(emRef, EM_STEPS);
     if (!cfgHash || hashPass(String(d.emergencyCode)) !== cfgHash) {
       await tg('🚨 TextileOps — קוד חירום שגוי!\n🕐 שעה: ' + ilTime() + '\nמישהו הזין קוד חירום לא נכון. ייתכן ניסיון פריצה!');
       throw new functions.https.HttpsError('permission-denied', 'emergency-wrong');
     }
-    await emRef.set({ failCount: 0 }, { merge: true });
+    await emRef.set({ failCount: 0, lockLevel: 0, lockUntil: 0 }, { merge: true });
     const mq = await db.collection('workers').where('role', '==', 'manager').limit(1).get();
     const mgr = mq.empty ? { id: 'emergency', name: 'מנהל חירום', role: 'manager' } : { id: mq.docs[0].id, ...mq.docs[0].data() };
     // 🔐 גם קוד החירום — רק ממכשיר מוכר של המנהל, או עם קוד בטלגרם
@@ -305,16 +331,14 @@ const loginImpl = async (data, context) => {
     return { ok: true };
   }
 
-  // ── נעילה זמנית אחרי 5 כשלונות (חלון 60 שנ') ──
+  // ── נעילה זמנית אחרי 5 כשלונות — מתארכת (LOGIN_LOCK_STEPS) ──
   // בדיקה מוקדמת וזולה; הספירה עצמה (והאיפוס אחרי שהחלון עבר) — ב-claimAttempt, בטרנזקציה
-  const LOCK_MS = 60 * 1000;
-  if ((creds.failCount || 0) >= LOGIN_MAX_FAILS && Date.now() - (creds.lastFail || 0) < LOCK_MS) {
-    throw new functions.https.HttpsError('resource-exhausted', 'locked');
-  }
+  { const left = lockLeftMs(creds, Date.now(), LOGIN_LOCK_STEPS); if (left > 0) throw lockErr(left); }
   // כישלון הזדהות: הניסיון כבר נספר ב-claimAttempt. בניסיון החמישי (= נעילה) — התראה אחת למנהל
-  const failAuth = async (n, code) => {
-    if (n >= LOGIN_MAX_FAILS) await tg('🔒 TextileOps — חשבון ננעל לדקה אחרי ' + LOGIN_MAX_FAILS + ' ניסיונות כניסה כושלים\n👤 עובד: ' + (w.name || user) + '\n🌐 IP: ' + (callerIp(context) || '?') + '\n🕐 שעה: ' + ilTime());
-    throw new functions.https.HttpsError('permission-denied', code);
+  // details: n (n/5 במסך), lockMs (>0 ⇒ הניסיון הזה נעל — הלקוח מציג ספירה לאחור)
+  const failAuth = async (c, code) => {
+    if (c.lockMs) await tg('🔒 TextileOps — חשבון ננעל ' + lockLbl(c.lockMs) + ' אחרי ' + LOGIN_MAX_FAILS + ' ניסיונות כניסה כושלים' + (c.prev ? ' (נעילה ' + (c.prev + 1) + ' ברצף)' : '') + '\n👤 עובד: ' + (w.name || user) + '\n🌐 IP: ' + (callerIp(context) || '?') + '\n🕐 שעה: ' + ilTime());
+    throw new functions.https.HttpsError('permission-denied', code, { n: c.n, lockMs: c.lockMs || 0 });
   };
   if (w.disabled) throw new functions.https.HttpsError('permission-denied', 'disabled');
 
@@ -354,11 +378,12 @@ const loginImpl = async (data, context) => {
   const faceSrc = storedDescriptors(creds).length ? creds : w;
   const hasFace = !!w.faceAuth && storedDescriptors(faceSrc).length > 0;
   let needFaceRegister = false;
+  let lastClaim = null; // הניסיון שנספר (לשחזור ב-unclaimAttempt בשער המנהל)
 
   if (Array.isArray(d.faceDescriptor) && d.faceDescriptor.length >= 64) {
     // ── אימות פנים בצד שרת ──
     if (!hasFace) throw new functions.https.HttpsError('failed-precondition', 'wrong');
-    const n = await claimAttempt(credRef, LOCK_MS);
+    const n = lastClaim = await claimAttempt(credRef);
     // 🔒 רק וקטור מלא (128) מול תבניות באותו אורך — ראה validDescriptor
     const live = d.faceDescriptor.map(Number);
     const stored = storedDescriptors(faceSrc).filter(s => s.length === FACE_DIM);
@@ -370,7 +395,7 @@ const loginImpl = async (data, context) => {
     if (!validSamples(d.registerDescriptors)) throw new functions.https.HttpsError('invalid-argument', 'wrong');
     // 🔒 אישור המנהל לבדו אינו הזדהות: בלי סיסמה, כל מי שידע את שם המשתמש של עובד מאושר
     // היה רושם את פניו שלו ונכנס בשמו (נסגר 25/09/2026). אותה בדיקה כמו במסלול הסיסמה למטה.
-    const n = await claimAttempt(credRef, LOCK_MS);
+    const n = lastClaim = await claimAttempt(credRef);
     const rp = String(d.pass || '');
     const rStored = creds.pass !== undefined ? creds.pass : (w.pass || '');
     const rChk = passOk(rStored, rp);
@@ -402,21 +427,21 @@ const loginImpl = async (data, context) => {
       throw new functions.https.HttpsError('permission-denied', 'device');
     }
     // הברקוד חייב להתאים בדיוק לעובד שהוזן/נשמר בשם המשתמש
-    const n = await claimAttempt(credRef, LOCK_MS);
+    const n = lastClaim = await claimAttempt(credRef);
     if (String(d.empBarcode).trim() !== 'EMP:' + w.id) await failAuth(n, 'barcode-wrong');
   } else if (d.pass != null && String(d.pass).length) {
     // != null: ה-SDK של callable מעביר undefined כ-null — null אינו סיסמה (רהאם 10/11/2026)
     // ── אימות סיסמה ──
     const stored = creds.pass !== undefined ? creds.pass : (w.pass || '');
     const p = String(d.pass);
-    const n = await claimAttempt(credRef, LOCK_MS);
+    const n = lastClaim = await claimAttempt(credRef);
     const chk = passOk(stored, p);
     if (!chk.ok) await failAuth(n, 'wrong');
     // סיסמה בפורמט ישן (SHA-256 בלי salt / טקסט רגיל) — שדרוג ל-scrypt עם salt
     if (chk.up) await credRef.set({ pass: hashPassS(p) }, { merge: true });
     // עובד עם פנים רשומות — סיסמה לבדה לא מספיקה, נדרש זיהוי פנים
     // (הסיסמה נכונה ⇒ הניסיון שנספר מוחזר; שלב הפנים ייספר בנפרד)
-    if (w.faceAuth && hasFace) { await unclaimAttempt(credRef); return { needFace: true, name: w.name, faceUpdateAllowed: !!w.faceUpdateAllowed }; }
+    if (w.faceAuth && hasFace) { await unclaimAttempt(credRef, n); return { needFace: true, name: w.name, faceUpdateAllowed: !!w.faceUpdateAllowed }; }
     if (w.faceAuth && !hasFace) needFaceRegister = true;
   } else {
     // אין סיסמה — אם יש זיהוי פנים רשום, הלקוח יפתח מצלמה
@@ -440,10 +465,10 @@ const loginImpl = async (data, context) => {
   // ── 🔐 מנהל ממכשיר לא מוכר — קוד חד-פעמי בטלגרם (mgrDeviceGate) ──
   if ((w.role || 'worker') === 'manager') {
     const g = await mgrDeviceGate(w.id, w.name || user, d, context, Array.isArray(d.faceDescriptor) ? 'זיהוי פנים' : 'סיסמה');
-    if (g) { await unclaimAttempt(credRef); return g; }
+    if (g) { await unclaimAttempt(credRef, lastClaim); return g; }
   }
 
-  await credRef.set({ failCount: 0 }, { merge: true });
+  await credRef.set({ failCount: 0, lockLevel: 0, lockUntil: 0 }, { merge: true });
   const role = w.role || 'worker';
   const token = await admin.auth().createCustomToken(w.id, { role, sat: Date.now() });
   return { token, worker: sanitizeWorker(w), needFaceRegister };
