@@ -68,6 +68,12 @@ async function startFaceAuth(){
 // מונה כשלונות פנים לפי משתמש — שורד סגירה/פתיחה של מסך הכניסה.
 // (מונה מקומי בתוך הלולאה התאפס בכל פתיחה מחדש → עובד נכשל 9 פעמים בשרת בלי שנשלחה התראה למנהל)
 let _faceFailPersist={};
+// סיבוב הראש: מיקום קצה האף (נקודה 30) בין קצוות הלסת (0, 16) — 0.5 = ישר, רחוק מ-0.5 = מסובב
+function _faceYaw(lm){
+  const p=lm&&lm.positions;if(!p||p.length<31)return 0.5;
+  const a=p[0].x,b=p[16].x,n=p[30].x;
+  return b!==a?(n-a)/(b-a):0.5;
+}
 async function _runFaceAuthLoop(){
   // שלב 2 אבטחה: ההשוואה מתבצעת בשרת — הלקוח שולח descriptor חי ומקבל טוקן רק אם יש התאמה
   const video=document.getElementById('face-auth-video');
@@ -78,12 +84,31 @@ async function _runFaceAuthLoop(){
   // טובים ברצף (ציון זיהוי + גודל פנים בפריים), ממצעים את ה-descriptors לניקוי רעש, ורק אז שולחים
   let goodFrames=[];
   const GOOD_NEEDED=2,MIN_SCORE=0.6,MIN_FACE_RATIO=0.22;
+  // 🙂 בדיקת "חי" (14/11/2026) — רק למי שמסומן בכרטיס העובד (faceLive; מגיע מהשרת עם needFace, או מהרמז המקומי).
+  // לפני שליחה לשרת: סיבוב ראש לצד ואז חזרה ישר. נמדד ביחס מיקום קצה האף בין שני קצוות הלסת (_faceYaw):
+  // ראש אמיתי שמסתובב — היחס זז; תמונה מודפסת/מסך שמסובבים — כל הנקודות מתכווצות יחד והיחס כמעט לא משתנה.
+  // הכיוון לא נבדק (ימינה או שמאלה) — מצלמה קדמית משקפת אחרת בכל מכשיר. פנים שנעלמו >1.5 שנ' ⇒ מתחילים מחדש.
+  // ⚠️ נבדק בטלפון בלבד — מי שכותב קוד ושולח לשרת ישירות עוקף; נגד תמונה מול המצלמה זה עובד.
+  const needLive=!!(S._pendingUser?.faceLive||_loginWorkers().find(x=>x.user===_u)?.faceLive);
+  const LIVE_TURN=0.15,LIVE_FRONT=0.08,stEl=()=>document.getElementById('face-auth-status');
+  let live=needLive?'turn':'ok',lostAt=0;
   _faceAuthLoop=setInterval(async()=>{
     if(busy||video.readyState<2||!S._pendingUser)return;
     busy=true;
     try{
       const det=await faceapi.detectSingleFace(video,opts).withFaceLandmarks(true).withFaceDescriptor();
-      if(!det){goodFrames=[];document.getElementById('face-auth-status').textContent='לא זוהו פנים — קרב/י למצלמה';return;}
+      if(!det){
+        goodFrames=[];
+        if(needLive){if(!lostAt)lostAt=Date.now();else if(Date.now()-lostAt>1500)live='turn';}
+        stEl().textContent='לא זוהו פנים — קרב/י למצלמה';return;
+      }
+      lostAt=0;
+      if(live!=='ok'){
+        goodFrames=[];
+        const y=_faceYaw(det.landmarks);
+        if(live==='turn'){if(Math.abs(y-0.5)>LIVE_TURN)live='back';else{stEl().textContent='🙂 סובב/י את הראש לצד — ימינה או שמאלה';return;}}
+        if(live==='back'){if(Math.abs(y-0.5)<LIVE_FRONT)live='ok';else{stEl().textContent='👍 יופי — עכשיו חזרה ישר למצלמה';return;}}
+      }
       const ratio=(det.detection?.box?.width||0)/(video.videoWidth||1);
       if((det.detection?.score||0)<MIN_SCORE||ratio<MIN_FACE_RATIO){
         goodFrames=[];

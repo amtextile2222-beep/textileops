@@ -6,7 +6,7 @@
 // עכשיו Firestore שומר את הנתונים במכשיר בעצמו (_initDb) ⇒ כאן רק מה שצריך **לפני** הכניסה, כשאין עדיין גישה לשרת:
 // _lsHints — רמזי מסך הכניסה (מי עם פנים / ברקוד / מנהל לחירום בלי רשת), ⚠️ **לא** ב-S.workers: autoPunchIn
 // ו-waitForWorker היו תופסים את הרשומה המקוצרת ככרטיס עובד וכותבים ממנה. + מונה משימות, צבעים, מה נשלח לטלגרם.
-const _LS_HINT_KEYS=['id','user','name','role','dept','faceAuth','faceRegistered','deviceBinding','deviceRegistered'];
+const _LS_HINT_KEYS=['id','user','name','role','dept','faceAuth','faceRegistered','faceLive','deviceBinding','deviceRegistered'];
 let _lsHints=[];
 function _hintsOf(ws){return (ws||[]).filter(w=>w&&w.user).map(w=>{const o={};_LS_HINT_KEYS.forEach(k=>{if(w[k]!==undefined)o[k]=w[k];});return o;});}
 // מקור לרמזי מסך הכניסה: העובדים החיים אם נטענו, אחרת הרמזים השמורים

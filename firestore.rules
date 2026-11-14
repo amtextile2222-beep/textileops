@@ -40,6 +40,7 @@ service cloud.firestore {
         && request.resource.data.get('user', '') == resource.data.get('user', '')
         && request.resource.data.get('deviceBinding', false) == resource.data.get('deviceBinding', false)
         && request.resource.data.get('faceAuth', false) == resource.data.get('faceAuth', false)
+        && request.resource.data.get('faceLive', false) == resource.data.get('faceLive', false)
         && request.resource.data.get('requireFactoryIP', false) == resource.data.get('requireFactoryIP', false)
         && request.resource.data.get('disabled', false) == resource.data.get('disabled', false)
         && request.resource.data.get('faceUpdateAllowed', false) == resource.data.get('faceUpdateAllowed', false)

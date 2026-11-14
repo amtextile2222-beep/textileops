@@ -447,7 +447,7 @@ async function _bcLoginWith(u,text){
       const res=await loginCall({user:u,empBarcode:text.trim(),deviceId:devId||undefined});
       if(res.needFace){ // המנהל הפעיל זיהוי פנים בינתיים — נופלים חזרה לפנים
         stopBcLogin();
-        S._pendingUser={user:u,name:res.name,faceUpdateAllowed:!!res.faceUpdateAllowed};
+        S._pendingUser={user:u,name:res.name,faceUpdateAllowed:!!res.faceUpdateAllowed,faceLive:!!res.faceLive};
         startFaceAuth();
         return;
       }
@@ -515,7 +515,7 @@ async function doLogin(){
   }
   if(res.needFace){
     // לעובד הזה נדרש זיהוי פנים — השרת יאמת את הפנים ויחזיר טוקן
-    S._pendingUser={user:u,name:res.name,faceUpdateAllowed:!!res.faceUpdateAllowed};
+    S._pendingUser={user:u,name:res.name,faceUpdateAllowed:!!res.faceUpdateAllowed,faceLive:!!res.faceLive};
     startFaceAuth();
     return;
   }

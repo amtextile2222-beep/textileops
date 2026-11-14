@@ -154,7 +154,11 @@ const EMU = (process.env.FIRESTORE_EMULATOR_HOST || '127.0.0.1:8080').split(':')
     await no(nm + ': credentials', getDoc(D(db, 'credentials/w1')));
     await no(nm + ': productPricing', getDoc(D(db, 'productPricing/p1')));
     await no(nm + ': שינוי תפקיד לעצמו', updateDoc(D(db, 'workers/' + uid), { role: 'manager' }));
+    await no(nm + ': כיבוי בדיקת "חי" לעצמו', updateDoc(D(db, 'workers/' + uid), { faceLive: true }));
   }
+  await ok('מנהל: הדלקת בדיקת "חי" לעובד', updateDoc(D(mgr, 'workers/w1'), { faceLive: true }));
+  await no('עובד: כיבוי בדיקת "חי" שהמנהל הדליק', updateDoc(D(wrk, 'workers/w1'), { faceLive: false }));
+  await ok('עובד: החתמה לא נוגעת ב-faceLive', updateDoc(D(wrk, 'workers/w1'), { status: 'in' }));
 
   // ═══ עובד עם הרשאת תעודות משלוח ═══
   await ok('עובד+תעודות: מונה חשבוניות', runTransaction(wdn, async tx => { const r = D(wdn, 'appSettings/proformaInvoice'); const s = await tx.get(r); tx.set(r, { last: (s.data().last || 0) + 1 }, { merge: true }); }));

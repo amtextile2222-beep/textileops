@@ -411,7 +411,7 @@ const loginImpl = async (data, context) => {
     // אחרת הראשון שיסרוק מדבקה של חבר היה כובל את הטלפון שלו לחשבון הזר.
     if (w.faceAuth && hasFace) {
       // למי שמוגדר זיהוי פנים — הפנים נשארות חובה, אין עקיפה בברקוד
-      return { needFace: true, name: w.name, faceUpdateAllowed: !!w.faceUpdateAllowed };
+      return { needFace: true, name: w.name, faceUpdateAllowed: !!w.faceUpdateAllowed, faceLive: !!w.faceLive };
     }
     if (!w.deviceBinding || w.role === 'manager') {
       throw new functions.https.HttpsError('failed-precondition', 'barcode-not-allowed');
@@ -441,11 +441,11 @@ const loginImpl = async (data, context) => {
     if (chk.up) await credRef.set({ pass: hashPassS(p) }, { merge: true });
     // עובד עם פנים רשומות — סיסמה לבדה לא מספיקה, נדרש זיהוי פנים
     // (הסיסמה נכונה ⇒ הניסיון שנספר מוחזר; שלב הפנים ייספר בנפרד)
-    if (w.faceAuth && hasFace) { await unclaimAttempt(credRef, n); return { needFace: true, name: w.name, faceUpdateAllowed: !!w.faceUpdateAllowed }; }
+    if (w.faceAuth && hasFace) { await unclaimAttempt(credRef, n); return { needFace: true, name: w.name, faceUpdateAllowed: !!w.faceUpdateAllowed, faceLive: !!w.faceLive }; }
     if (w.faceAuth && !hasFace) needFaceRegister = true;
   } else {
     // אין סיסמה — אם יש זיהוי פנים רשום, הלקוח יפתח מצלמה
-    if (hasFace) return { needFace: true, name: w.name, faceUpdateAllowed: !!w.faceUpdateAllowed };
+    if (hasFace) return { needFace: true, name: w.name, faceUpdateAllowed: !!w.faceUpdateAllowed, faceLive: !!w.faceLive };
     throw new functions.https.HttpsError('invalid-argument', 'missing-pass');
   }
 

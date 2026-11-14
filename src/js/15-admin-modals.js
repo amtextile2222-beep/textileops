@@ -376,6 +376,11 @@ function openModal(action,id){
           <input type="checkbox" id="mf-face-auth" ${w?.faceAuth?'checked':''} style="width:auto;cursor:pointer"/>
           דרוש זיהוי פנים בכניסה
         </label>
+        <label style="display:flex;align-items:center;gap:10px;cursor:pointer;font-size:13px;color:var(--txt);margin-top:8px;padding-right:22px">
+          <input type="checkbox" id="mf-face-live" ${w?.faceLive?'checked':''} style="width:auto;cursor:pointer"/>
+          🙂 בדיקת "חי" — לסובב את הראש לפני הכניסה
+        </label>
+        <div style="font-size:11px;color:var(--txt3);margin-top:2px;padding-right:22px">חוסם כניסה עם תמונה מודפסת או תמונה על מסך. אם לעובד/ת לא מסתדר — לבטל כאן.</div>
         ${w?`<div style="margin-top:8px;display:flex;align-items:center;gap:8px">
           <span style="font-size:12px;color:var(--txt3)">${(w.faceRegistered||w.faceDescriptor||w.faceDescriptors&&Object.keys(w.faceDescriptors).length)?'✅ פנים רשומים':'⚠️ פנים לא רשומים'}</span>
           <button type="button" class="btn" style="font-size:11px;padding:4px 10px" onclick="closeModal();allowFaceUpdateByAdmin('${w.id}')">📸 ${(w.faceRegistered||w.faceDescriptor||w.faceDescriptors&&Object.keys(w.faceDescriptors).length)?'אשר עדכון פנים לעובד':'אשר רישום פנים לעובד'}</button>
@@ -781,6 +786,7 @@ async function confirmModal(){
     w.stepOrderGateMode=document.getElementById('mf-gate-order')?.value||'';
     if(document.getElementById('mf-voice')){w.voiceMode=document.getElementById('mf-voice').value;w.voiceTo=_mfVoiceTo();}
     w.faceAuth=!!document.getElementById('mf-face-auth')?.checked;
+    w.faceLive=!!document.getElementById('mf-face-live')?.checked; // 🙂 בדיקת "חי" בכניסה בפנים (14/11/2026)
     if(w.role==='supervisor'){
       w.oversightPrefs={punch_in:!!document.getElementById('mf-ov-punch_in')?.checked,punch_out:!!document.getElementById('mf-ov-punch_out')?.checked,task_start:!!document.getElementById('mf-ov-task_start')?.checked,task_end:!!document.getElementById('mf-ov-task_end')?.checked,worker_msg:!!document.getElementById('mf-ov-worker_msg')?.checked};
     }else{
