@@ -22136,9 +22136,24 @@ function cancelFaceReg(){
 /* ── AUTO UPDATE CHECK ── */
 // שומר את ?kiosk=1 דרך הרענון — בלעדיו מסך הקיר נטען בלי הדגל, וגם אחרי כניסה מחדש
 // הלוח לא נפתח אוטומטית וצריך ללחוץ 📺 ידנית.
-function doAppUpdate(){
+// 🔄 (14/11/2026) עד היום רענון מיידי ⇒ אם הייתה כתיבה בדרך (למשל קישור תחנה שנסרק שנייה קודם) הדפדפן
+// הקפיץ "לצאת מהאתר? השינויים לא יישמרו" (beforeunload ב-_syncWatchStart) — אחראי באנדרואיד קיבל חלון לבן.
+// עכשיו: מחכים עד 6 שנ' שהכתיבות יאושרו בשרת. אם עדיין יש — עם מטמון מקומי (_dbPersist) הן שמורות
+// במכשיר ונשלחות אחרי הטעינה ⇒ מנקים את המונה ומרעננים בלי השאלה; בלי מטמון — הדפדפן ישאל (סיכון אמיתי).
+let _updBusy=false;
+async function doAppUpdate(){
+  if(_updBusy)return;_updBusy=true;
   const k=/[?&#]kiosk=1\b/.test(location.href)?'&kiosk=1':'';
+  try{
+    if(typeof _pwSet!=='undefined'&&_pwSet.size){
+      showToast('⏳ '+_syncT().pendShort(_pwSet.size),'var(--amber-txt)',6000);
+      const t0=Date.now();
+      while(_pwSet.size&&Date.now()-t0<6000)await new Promise(r=>setTimeout(r,250));
+      if(_pwSet.size&&typeof _dbPersist!=='undefined'&&_dbPersist)_pwSet.clear();
+    }
+  }catch(e){}
   window.location.href=window.location.pathname+'?t='+Date.now()+k;
+  setTimeout(()=>{_updBusy=false;},3000); // הדפדפן שאל ובוטל — אפשר ללחוץ שוב
 }
 let _appVerTag=null;      // הטביעה האחרונה שנצפתה — לדיווח בדופק הטאב
 const _appVerBase={};     // בסיס השוואה *נפרד לכל סוג טביעה* — ראה _verFingerprint
