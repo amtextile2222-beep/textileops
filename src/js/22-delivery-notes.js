@@ -403,7 +403,7 @@ async function saveShipEdit(pid,idx){
     const r={...base,rows,total:qty,packs,note,orig,outer,smp,
       edits:base.edits.concat([{at:new Date().toISOString(),by:S.user?.id||'',
         byName:S.user?.name||S.user?.user||'',prevTotal:prev,newTotal:qty,...(!!x.smp!==smp?{smp}:{})}]).slice(-20)};
-    if(!smp)delete r.smp;
+    if(!smp){delete r.smp;delete r.back;}
     return r;
   });
   // 👕 סימון/ביטול "דגם לאישור" משנה את "יצא" ואת שלב shipped ⇒ חישוב מלא (כמו מחיקה/העברה)
@@ -547,6 +547,7 @@ function showShipments(pid){
     ${smpStatusHtml(p)}
     ${list.map((s,i)=>`<div class="row" style="align-items:center">
       <span class="bc-seg" style="background:var(--green-bg,#dcfce7);color:var(--green-txt,#16a34a);font-weight:700;flex-shrink:0">${s.no?String(s.no).padStart(4,'0'):'—'}</span>
+      ${s.smp?smpBackBtn(pid,i,s):''}
       <span style="flex:1;font-size:12px;margin-right:8px">${s.smp?'<b style="color:var(--blue-txt,#1e40af)">👕 דגם לאישור</b> · ':''}${shipEditMark(s)}${heDate(s.date)} · <b>${s.total}</b> יח'${packsCount(s.packs)?' · 📦 '+packsCount(s.packs):''}${outerTxt(s.outer)?' · 🛍 '+esc(outerTxt(s.outer)):''}${s.note?' · 📝':''}${shipPackCost(s)&&canSeePackPrice()?' · <span style="color:var(--green-txt,#16a34a);font-weight:700">'+dnMoney(shipPackCost(s))+'</span>':''}</span>
       <button class="btn" style="font-size:11px;padding:4px 8px" title="עריכת כמויות, אריזה והערה — המספר והתאריך לא משתנים" onclick="editShipment('${escj(pid)}',${i})">✏️</button>
       <button class="btn" style="font-size:11px;padding:4px 8px" title="עריכת חומר אריזה (קולב/ניילון/צלופן)" onclick="editShipMats('${escj(pid)}',${i})">📦</button>
@@ -563,15 +564,33 @@ function showShipments(pid){
 // או המנהל כאן (via:'app'). ביטול = null
 function smpStatusHtml(p){
   const l=shipsSmp(p);if(!l.length&&!p.smpOk)return'';
+  const bk=s=>s.back&&+s.back.at?new Date(+s.back.at):null;
   const dm=d=>d?String(d).slice(8,10)+'/'+String(d).slice(5,7):'';
   const ok=p.smpOk&&+p.smpOk.at?p.smpOk:null,od=ok?new Date(+ok.at):null;
   const who=ok?(ok.via==='cust'?'הלקוח'+(ok.by?' ('+esc(ok.by)+')':''):esc(ok.byName||'המפעל')):'';
   const mgr=S.user?.role==='manager';
   return `<div style="font-size:12px;padding:7px 9px;border-radius:8px;margin-bottom:8px;background:${ok?'var(--green-bg,#dcfce7)':'var(--blue-bg,#dbeafe)'};color:${ok?'var(--green-txt,#16a34a)':'var(--blue-txt,#1e40af)'}">
-    👕 <b>דגם לאישור:</b> ${l.map(s=>(+s.total||0)+" יח' · "+dm(s.date)).join(' | ')||'—'}
+    👕 <b>דגם לאישור:</b> ${l.map(s=>{const b=bk(s);return (+s.total||0)+" יח' · נשלח "+dm(s.date)+(b?' · ↩ חזר '+b.getDate()+'/'+(b.getMonth()+1):' · אצל הלקוח');}).join(' | ')||'—'}
     <div style="margin-top:3px;display:flex;align-items:center;gap:6px;flex-wrap:wrap">${ok?`<b>✅ אושר ${od.getDate()}/${od.getMonth()+1}</b> · ${who}`:'<b>⏳ ממתין לאישור הלקוח</b>'}
       ${mgr?`<button class="btn" style="font-size:11px;padding:3px 8px;margin-inline-start:auto" onclick="smpApprove('${escj(p.id)}',${ok?'false':'true'})">${ok?'↺ בטל אישור':'✅ סמן כמאושר'}</button>`:''}</div>
   </div>`;
+}
+// ↩ הדגם חזר מהלקוח למפעל (15/11/2026) — נפרד מ"נשלח": shipments[i].back={at,by,byName}; ביטול = מחיקה
+function smpBack(s){return s&&s.back&&+s.back.at?s.back:null;}
+function smpBackBtn(pid,i,s){const b=smpBack(s);
+  return `<button class="btn" style="font-size:11px;padding:4px 8px;${b?'color:var(--green-txt,#16a34a)':''}" title="${b?'הדגם חזר למפעל — לחץ לביטול':'סמן שהדגם חזר מהלקוח למפעל'}" onclick="smpSetBack('${escj(pid)}',${i},${b?'false':'true'})">${b?'↩ חזר '+new Date(+b.at).getDate()+'/'+(new Date(+b.at).getMonth()+1):'↩ חזר למפעל'}</button>`;}
+async function smpSetBack(pid,idx,on){
+  const p=(S.products||[]).find(x=>x.id===pid);if(!p)return;
+  const list=prodShipments(p).map(x=>({...x})),s=list[idx];if(!s||!isSmpSh(s))return;
+  const no=String(s.no||0).padStart(4,'0');
+  if(!await showConfirm(on?'↩ הדגם חזר':'ביטול "חזר למפעל"',on?'לסמן שהדגם מתעודה '+no+' ('+(+s.total||0)+" יח') חזר מהלקוח למפעל היום?":'לבטל את הסימון "חזר למפעל" בתעודה '+no+'?',on?'↩ חזר':'בטל סימון','חזור'))return;
+  if(on)s.back={at:Date.now(),by:S.user?.id||'',byName:S.user?.name||S.user?.user||''};else delete s.back;
+  p.shipments=list;
+  saveLS();
+  if(S.fbConnected)try{await fbReplaceFields('products',p.id,{shipments:list});}catch(e){}
+  showToast(on?'↩ הדגם סומן כחזר למפעל':'↺ הסימון בוטל');
+  if(document.getElementById('shl-wrap'))showShipments(pid);
+  try{renderDNotes();}catch(e){}
 }
 async function smpApprove(pid,on){
   if(S.user?.role!=='manager')return;

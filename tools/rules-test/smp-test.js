@@ -57,6 +57,11 @@ const t = (name, cond) => { if (cond) { pass++; console.log('✓', name); } else
   r = await call('POST', custTok, { approve: 'p1' });
   t('אישור שני ⇒ 200 בלי טלגרם נוסף ובלי שינוי', r.s === 200 && sent.length === n0 + 1 && (await db.doc('products/p1').get()).data().smpOk.at === ok.at);
 
+  // ↩ חזר למפעל — b בדף הלקוח (לקוח 02: עוד לא במטמון)
+  await db.doc('products/p3').update({ shipments: [{ ...smpSh, back: { at: Date.parse('2026-10-25T09:00:00Z'), by: 'm' } }] });
+  r = await call('GET', { ...custTok, uid: 'c2', email: 'b@x.com' });
+  const ob = (r.j.orders || []).find(o => o.pid === 'p3');
+  t('חזר למפעל ⇒ b בתאריך החזרה', ob && ob.smp[0].b === '2026-10-25' && ob.smp[0].d === '2026-10-20');
   console.log(`\n${pass} עברו, ${fail} נכשלו`);
   process.exit(fail ? 1 : 0);
 })().catch(e => { console.error(e); process.exit(1); });

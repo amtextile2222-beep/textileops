@@ -212,7 +212,8 @@ function card(o){
 // המפעל מקבל הודעה. בתצוגת מנהל — בלי כפתור (המנהל מסמן באפליקציה)
 function smpHtml(o){
   const l=Array.isArray(o.smp)?o.smp:[];if(!l.length&&!o.smpOk)return'';
-  const sent=l.map(x=>x.n+" יח' · נשלח "+esc(fmtDM(x.d))).join(' | ');
+  // ↩ x.b = חזר למפעל (15/11/2026); שרת ישן — בלי b
+  const sent=l.map(x=>x.n+" יח' · נשלח "+esc(fmtDM(x.d))+(x.b?' · ↩ חזר למפעל '+esc(fmtDM(x.b)):'')).join(' | ');
   if(o.smpOk)return `<div class="smp ok">✅ <b>הדגם אושר</b> · ${esc(fmtDM(o.smpOk))}${sent?'<div class="smp-l">👕 '+sent+'</div>':''}</div>`;
   return `<div class="smp">👕 <b>דגם לאישור</b><div class="smp-l">${sent}</div>${!AS&&o.pid?`<button class="smpb" data-pid="${esc(o.pid)}" data-nm="${esc(o.name||('דגם '+o.prod))}">✅ אישור הדגם</button>`:''}</div>`;
 }

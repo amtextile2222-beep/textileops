@@ -523,7 +523,7 @@ function renderDNotes(){
       const _k=dnKey(r);
       return `<tr${_dnSel.has(_k)?' style="background:rgba(24,95,165,.08)"':''}>
         <td style="text-align:center"><input type="checkbox" ${_dnSel.has(_k)?'checked':''} onchange="dnSelToggle('${escj(_k)}',this.checked)" style="width:16px;height:16px;cursor:pointer"></td>
-        <td><span class="bc-seg" style="background:var(--green-bg,#dcfce7);color:var(--green-txt,#16a34a);font-weight:700">${r.s.no?String(r.s.no).padStart(4,'0'):'—'}</span>${shipEditMark(r.s)}${r.smp?'<div style="font-size:10px;font-weight:700;color:var(--blue-txt,#1e40af)">👕 דגם לאישור'+(r.p.smpOk?' · ✅ אושר':'')+'</div>':''}${r.count>1?`<span style="font-size:10px;color:var(--txt3)"> ${r.i+1}/${r.count}</span>`:''}</td>
+        <td><span class="bc-seg" style="background:var(--green-bg,#dcfce7);color:var(--green-txt,#16a34a);font-weight:700">${r.s.no?String(r.s.no).padStart(4,'0'):'—'}</span>${shipEditMark(r.s)}${r.smp?'<div style="font-size:10px;font-weight:700;color:var(--blue-txt,#1e40af)">👕 דגם לאישור'+(smpBack(r.s)?' · ↩ חזר':' · אצל הלקוח')+(r.p.smpOk?' · ✅ אושר':'')+'</div>':''}${r.count>1?`<span style="font-size:10px;color:var(--txt3)"> ${r.i+1}/${r.count}</span>`:''}</td>
         <td style="white-space:nowrap">${heDate(r.s.date)}</td>
         <td>${esc(S.customerNames?.[r.p.cust]||('לקוח '+(r.p.cust||'')))}</td>
         <td>${esc(r.p.name||r.p.prod||'')}${r.s.note?`<span title="${esc(r.s.note)}"> 📝</span>`:''}</td>
@@ -533,6 +533,7 @@ function renderDNotes(){
         <td style="text-align:center">${pk||''}</td>
         ${cp?'<td style="white-space:nowrap">'+dnPayCell(r)+'</td>':''}
         <td style="white-space:nowrap;text-align:left">
+          ${r.smp?smpBackBtn(r.p.id,r.i,r.s):''}
           <button class="btn" style="font-size:11px;padding:4px 8px" title="עריכת כמויות, אריזה והערה — המספר והתאריך לא משתנים" onclick="editShipment('${escj(r.p.id)}',${r.i})">✏️</button>
           <button class="btn" style="font-size:11px;padding:4px 8px" title="עריכת חומר אריזה (קולב/ניילון/צלופן)" onclick="editShipMats('${escj(r.p.id)}',${r.i})">📦</button>
           <button class="btn" style="font-size:11px;padding:4px 9px" onclick="printDeliveryNote('${escj(r.p.id)}',${r.i})">📄 הדפס</button>
