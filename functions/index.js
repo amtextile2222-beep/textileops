@@ -1901,9 +1901,9 @@ function trackStates(prods, tasks) {
 }
 // 👕 דגמים לאישור של הזמנה לדף הלקוח: smp=[{d, n}] (תאריך תעודה, יחידות) · smpOk = תאריך האישור (YYYY-MM-DD) או ''
 function trackSmp(p) {
-  // b = תאריך החזרה למפעל (shipments[].back.at) או ''
+  // b = תאריך החזרה למפעל (shipments[].back.at) או '' · t = "הערה לתעודה" — בדגם לאישור גם הודעה ללקוח (מה לבדוק)
   const smp = calc.shipsSmp(p).map(s => ({ d: String(s.date || '').slice(0, 10), n: (+s.total || 0) + calc.shUnsewn(s),
-    b: s.back && +s.back.at ? ilDateOf(new Date(+s.back.at).toISOString()) : '' }));
+    b: s.back && +s.back.at ? ilDateOf(new Date(+s.back.at).toISOString()) : '', t: String(s.note || '').slice(0, 200) }));
   const at = p.smpOk && +p.smpOk.at;
   return smp.length || at ? { smp, smpOk: at ? ilDateOf(new Date(at).toISOString()) : '' } : {};
 }

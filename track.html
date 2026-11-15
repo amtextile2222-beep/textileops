@@ -106,6 +106,7 @@ h2{font-size:14px;color:var(--txt2);margin:20px 0 8px}
 .smp{margin-top:8px;padding:8px 10px;border-radius:10px;background:var(--blue-bg);color:var(--blue);font-size:13px}
 .smp.ok{background:var(--green-bg);color:var(--green)}
 .smp-l{font-size:12px;margin-top:2px}
+.smp-t{font-size:13px;margin:3px 0 4px;padding:6px 9px;border-radius:8px;background:var(--card);color:var(--txt);white-space:pre-wrap}
 .smpb{margin-top:7px;width:100%;padding:9px 12px;border-radius:10px;border:0;background:var(--acc);color:#fff;font:inherit;font-size:14px;font-weight:700;cursor:pointer}
 .smpb:disabled{opacity:.6;cursor:default}
 .cutm{position:fixed;inset:0;background:rgba(0,0,0,.5);display:flex;align-items:center;justify-content:center;padding:10px;z-index:50}
@@ -214,7 +215,7 @@ function smpHtml(o){
   const l=Array.isArray(o.smp)?o.smp:[];if(!l.length&&!o.smpOk)return'';
   // ↩ x.b = חזר למפעל (15/11/2026); שרת ישן — בלי b
   // כל תעודת דגם בשורה משלה (15/11/2026 — בשורה אחת עם "|" התעודה השנייה נבלעה)
-  const sent=l.map(x=>'<div class="smp-l">👕 '+x.n+" יח' · נשלח "+esc(fmtDM(x.d))+(x.b?' · ↩ חזר למפעל '+esc(fmtDM(x.b)):' · אצלכם')+'</div>').join('');
+  const sent=l.map(x=>'<div class="smp-l">👕 '+x.n+" יח' · נשלח "+esc(fmtDM(x.d))+(x.b?' · ↩ חזר למפעל '+esc(fmtDM(x.b)):' · אצלכם')+'</div>'+(x.t?'<div class="smp-t">📝 '+esc(x.t)+'</div>':'')).join(''); // 📝 ההערה מהתעודה
   if(o.smpOk)return `<div class="smp ok">✅ <b>הדגם אושר</b> · ${esc(fmtDM(o.smpOk))}${sent}</div>`;
   return `<div class="smp">👕 <b>דגם לאישור</b>${sent}${!AS&&o.pid?`<button class="smpb" data-pid="${esc(o.pid)}" data-nm="${esc(o.name||('דגם '+o.prod))}">✅ אישור הדגם</button>`:''}</div>`;
 }

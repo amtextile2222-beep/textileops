@@ -169,7 +169,7 @@ const _shipOrigVal=()=>Math.max(0,parseInt(document.getElementById('ship-orig')?
 const _shipSmpVal=()=>!!document.getElementById('ship-smp')?.checked;
 const shipSmpHtml=on=>`<label style="display:flex;align-items:flex-start;gap:7px;font-size:12px;font-weight:600;margin-top:10px;cursor:pointer;padding:7px 9px;border-radius:8px;background:var(--blue-bg,#dbeafe);color:var(--blue-txt,#1e40af)">
       <input type="checkbox" id="ship-smp"${on?' checked':''} style="width:16px;height:16px;flex-shrink:0;margin-top:1px"/>
-      <span>👕 דגם לאישור<div style="font-size:10px;font-weight:400;margin-top:2px">לא נספר ב"יצא" ולא בהתחשבנות. כשהדגם חוזר מהלקוח — מסמנים "↩ חזר למפעל" בתעודה. הלקוח רואה בדף המעקב מתי נשלח, מתי חזר, ומאשר את הדגם.</div></span>
+      <span>👕 דגם לאישור<div style="font-size:10px;font-weight:400;margin-top:2px">לא נספר ב"יצא" ולא בהתחשבנות. כשהדגם חוזר מהלקוח — מסמנים "↩ חזר למפעל" בתעודה. הלקוח רואה בדף המעקב מתי נשלח, מתי חזר, ומאשר את הדגם. <b>📝 ההערה לתעודה מוצגת לו שם</b> — למשל מה לבדוק לפני האישור.</div></span>
     </label>`;
 const shipOrigHtml=v=>`<div style="margin-top:9px;display:flex;align-items:center;gap:8px">
       <label style="font-size:12px;font-weight:600;flex:1">👕 דגם מקורי שחוזר ללקוח <span style="font-size:10px;font-weight:400;color:var(--txt3)">(מודפס בתעודה, לא בהתחשבנות)</span></label>
