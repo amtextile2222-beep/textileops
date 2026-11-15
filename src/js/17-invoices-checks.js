@@ -578,6 +578,17 @@ async function confirmShip(){
   // 📦 חומר האריזה מחויב ללקוח ⇒ משלוח בלי חומר מגיע לדוח בלי החיוב הזה.
   // לא חוסם — יש משלוחים בלי אריזה — אבל שואל, כי לשכוח את זה עולה כסף אמיתי.
   if(!packMode&&!await showConfirm('בלי חומר אריזה','לא הוזנה כמות לאף חומר אריזה, ולכן לא ייכנס חיוב עליו. לאשר בכל זאת?','אשר','חזור'))return;
+  // 👕 (15/11/2026) המשלוח הזה משלים את ההזמנה ויש דגמים לאישור שלא חזרו ⇒ שואלים: נשארו אצל הלקוח (לחיוב) / חזרו / בלי שינוי
+  let smpAct=-1,smpOpen=[];
+  if(!smp&&!rs){
+    const all=prodShipments(p),ord=_prodQty(p);
+    smpOpen=all.map((s,i)=>({s,i})).filter(x=>isSmpSh(x.s)&&!smpBack(x.s));
+    if(smpOpen.length&&ord>0&&shipsReal(p).reduce((t,s)=>t+(+s.total||0)+shUnsewn(s),0)+qty+_shipUnsewnSum()>=ord){
+      const u=smpOpen.reduce((t,x)=>t+(+x.s.total||0),0);
+      smpAct=await showConfirm3('👕 דגמים אצל הלקוח',`המשלוח הזה משלים את ההזמנה, ו-${u} יח' של דגם לאישור (תעודה ${smpOpen.map(x=>String(x.s.no||0).padStart(4,'0')).join(', ')}) לא סומנו כחוזרים. מה איתם?`,
+        '✅ נשארו אצל הלקוח — לחיוב','↩ חזרו למפעל (היום)','לא לשנות עכשיו');
+    }
+  }
   const matNoPrice=mats.filter(m=>!m.price&&!m.own&&!packIncl(m.k)).map(m=>packMatName(m.k));
   if(matNoPrice.length&&canSeePackPrice()&&!await showConfirm('חומר בלי מחיר','אין מחיר במחירון ל: '+matNoPrice.join(', ')+'. הכמות תירשם אבל תסומן בדוח כחסרת מחיר. להמשיך?','המשך','חזור'))return;
   // 🚚 **כל אישור יוצר משלוח חדש עם תעודה משלו** — לא דורס את הקודם.
@@ -587,6 +598,9 @@ async function confirmShip(){
   // 📦 packMode ו-mats נגררים כאן מאותה סיבה כמו packs ו-note: בנייה מחדש של
   // הרשימה בלעדיהם הייתה מוחקת בשקט את חיוב האריזה של כל תעודה קודמת.
   const list=prodShipments(p).map(s=>({...s,no:+s.no||0,date:s.date||'',at:s.at||'',rows:s.rows||[],total:+s.total||0,packs:Array.isArray(s.packs)?s.packs:[],note:s.note||'',packMode:s.packMode||'',mats:Array.isArray(s.mats)?s.mats:[]}));
+  // 👕 התשובה לשאלת הדגמים — על אותה רשימה, כך שהכל נשמר בכתיבה אחת
+  if(smpAct===0||smpAct===1){const now0=Date.now(),who={by:S.user?.id||'',byName:S.user?.name||S.user?.user||''};
+    smpOpen.forEach(x=>{const s=list[x.i];if(!s)return;if(smpAct===0){delete s.smp;delete s.back;s.kept={at:now0,...who};}else s.back={at:now0,...who};});}
   const no=rs&&rs.no!=null?rs.no:await nextDeliveryNoteNo();
   list.push({no:no||0,date,at:now.toISOString(),rows,total:qty,packs,note:dnote,packMode,mats,...(orig?{orig}:{}),...(smp?{smp:true}:{}),...(outer.length?{outer}:{}),
     ...(rs?.restore?{restoredAt:now.toISOString(),restoredBy:S.user?.name||''}:{}),

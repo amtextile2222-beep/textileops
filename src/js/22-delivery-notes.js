@@ -575,22 +575,70 @@ function smpStatusHtml(p){
       ${mgr?`<button class="btn" style="font-size:11px;padding:3px 8px;margin-inline-start:auto" onclick="smpApprove('${escj(p.id)}',${ok?'false':'true'})">${ok?'↺ בטל אישור':'✅ סמן כמאושר'}</button>`:''}</div>
   </div>`;
 }
-// ↩ הדגם חזר מהלקוח למפעל (15/11/2026) — נפרד מ"נשלח": shipments[i].back={at,by,byName}; ביטול = מחיקה
+// ↩ הדגם חזר מהלקוח למפעל (15/11/2026) — נפרד מ"נשלח": shipments[i].back={at,by,byName}, at = צהרי התאריך שנבחר
+// ✅ נשאר אצל הלקוח — לחיוב: smp יורד ⇒ תעודה רגילה (נספרת ב"יצא" ובהתחשבנות, במספר ובתאריך המקוריים),
+// kept={at,by,byName} נשאר לתיעוד. מהחלון של כפתור הדגם, או מהשאלה במשלוח שמשלים את ההזמנה (confirmShip)
 function smpBack(s){return s&&s.back&&+s.back.at?s.back:null;}
+const _dDM=ms=>{const d=new Date(+ms);return d.getDate()+'/'+(d.getMonth()+1);};
+const _dISO=ms=>{const d=new Date(+ms);return d.getFullYear()+'-'+pad2(d.getMonth()+1)+'-'+pad2(d.getDate());};
 function smpBackBtn(pid,i,s){const b=smpBack(s);
-  return `<button class="btn" style="font-size:11px;padding:4px 8px;${b?'color:var(--green-txt,#16a34a)':''}" title="${b?'הדגם חזר למפעל — לחץ לביטול':'סמן שהדגם חזר מהלקוח למפעל'}" onclick="smpSetBack('${escj(pid)}',${i},${b?'false':'true'})">${b?'↩ חזר '+new Date(+b.at).getDate()+'/'+(new Date(+b.at).getMonth()+1):'↩ חזר למפעל'}</button>`;}
-async function smpSetBack(pid,idx,on){
+  return `<button class="btn" style="font-size:11px;padding:4px 8px;${b?'color:var(--green-txt,#16a34a)':'color:var(--blue-txt,#1e40af)'}" title="חזרת הדגם למפעל (ותאריך) / נשאר אצל הלקוח — לחיוב" onclick="smpDlg('${escj(pid)}',${i})">${b?'↩ חזר '+_dDM(b.at):'👕 חזר / נשאר?'}</button>`;}
+function smpDlg(pid,idx){
+  const p=(S.products||[]).find(x=>x.id===pid);const s=p&&prodShipments(p)[idx];if(!s||!isSmpSh(s))return;
+  document.getElementById('smp-wrap')?.remove();
+  const b=smpBack(s),no=String(s.no||0).padStart(4,'0'),d0=String(s.date||'').slice(0,10),today=todayStr();
+  const w=document.createElement('div');w.id='smp-wrap';
+  w.style.cssText='position:fixed;inset:0;background:rgba(0,0,0,.5);display:flex;align-items:center;justify-content:center;z-index:10001;padding:16px';
+  w.onclick=e=>{if(e.target===w)w.remove();};
+  w.innerHTML=`<div style="background:var(--card);border-radius:14px;padding:18px;max-width:360px;width:100%;box-shadow:0 10px 40px rgba(0,0,0,.3)">
+    <div style="font-size:16px;font-weight:800;margin-bottom:2px">👕 דגם לאישור — תעודה ${no}</div>
+    <div style="font-size:12px;color:var(--txt3);margin-bottom:12px">${esc(p.name||p.prod)} · ${+s.total||0} יח' · נשלח ${d0?d0.slice(8,10)+'/'+d0.slice(5,7):'—'}${b?' · <b style="color:var(--green-txt,#16a34a)">חזר '+_dDM(b.at)+'</b>':' · אצל הלקוח'}</div>
+    <label style="font-size:13px;font-weight:700">↩ תאריך חזרת הדגם למפעל</label>
+    <input id="smp-bd" type="date" value="${b?_dISO(b.at):today}" ${d0?'min="'+d0+'"':''} max="${today}" style="width:100%;margin:5px 0 8px;font-size:14px;padding:7px;border-radius:8px;border:1px solid var(--brd);background:var(--bg);color:var(--txt)"/>
+    <button class="btn primary" style="width:100%;font-size:14px;margin-bottom:6px" onclick="smpSetBack('${escj(pid)}',${idx},document.getElementById('smp-bd').value)">↩ ${b?'עדכן תאריך חזרה':'חזר למפעל'}</button>
+    ${b?`<button class="btn" style="width:100%;font-size:13px;margin-bottom:6px" onclick="smpSetBack('${escj(pid)}',${idx},'')">↺ בטל סימון חזרה</button>`:''}
+    <div style="border-top:1px solid var(--brd);margin:8px 0;padding-top:8px;font-size:11px;color:var(--txt3)">הדגם לא חוזר — הלקוח השאיר אותו כחלק מהכמות:</div>
+    <button class="btn" style="width:100%;font-size:14px;margin-bottom:6px;color:var(--green-txt,#16a34a)" onclick="smpKeep('${escj(pid)}',[${idx}])">✅ נשאר אצל הלקוח — לחיוב</button>
+    <button class="btn" style="width:100%;font-size:13px" onclick="document.getElementById('smp-wrap')?.remove()">סגור</button>
+  </div>`;
+  document.body.appendChild(w);
+}
+async function _smpSave(p,list,full){
+  if(full)_shipRecalc(p,list);else p.shipments=list;
+  saveLS();
+  if(S.fbConnected)try{await fbReplaceFields('products',p.id,full?{shipments:list,shippedQty:p.shippedQty,shippedRows:p.shippedRows,dnNo:p.dnNo,stageLog:p.stageLog||[],shippedAt:p.shippedAt||null}:{shipments:list});}catch(e){}
+  document.getElementById('smp-wrap')?.remove();
+  if(document.getElementById('shl-wrap'))showShipments(p.id);
+  try{renderDNotes();}catch(e){}
+  try{buildStageReport();}catch(e){}
+}
+// d = YYYY-MM-DD ⇒ חזר בתאריך הזה; '' ⇒ ביטול הסימון
+async function smpSetBack(pid,idx,d){
   const p=(S.products||[]).find(x=>x.id===pid);if(!p)return;
   const list=prodShipments(p).map(x=>({...x})),s=list[idx];if(!s||!isSmpSh(s))return;
-  const no=String(s.no||0).padStart(4,'0');
-  if(!await showConfirm(on?'↩ הדגם חזר':'ביטול "חזר למפעל"',on?'לסמן שהדגם מתעודה '+no+' ('+(+s.total||0)+" יח') חזר מהלקוח למפעל היום?":'לבטל את הסימון "חזר למפעל" בתעודה '+no+'?',on?'↩ חזר':'בטל סימון','חזור'))return;
-  if(on)s.back={at:Date.now(),by:S.user?.id||'',byName:S.user?.name||S.user?.user||''};else delete s.back;
-  p.shipments=list;
-  saveLS();
-  if(S.fbConnected)try{await fbReplaceFields('products',p.id,{shipments:list});}catch(e){}
-  showToast(on?'↩ הדגם סומן כחזר למפעל':'↺ הסימון בוטל');
-  if(document.getElementById('shl-wrap'))showShipments(pid);
-  try{renderDNotes();}catch(e){}
+  if(d){
+    const d0=String(s.date||'').slice(0,10);
+    if(!/^\d{4}-\d{2}-\d{2}$/.test(d)||d>todayStr()||(d0&&d<d0)){alert('תאריך לא תקין — בין תאריך התעודה להיום');return;}
+    s.back={at:new Date(d+'T12:00:00').getTime(),by:S.user?.id||'',byName:S.user?.name||S.user?.user||''};
+  }else{
+    if(!await showConfirm('ביטול "חזר למפעל"','לבטל את סימון החזרה בתעודה '+String(s.no||0).padStart(4,'0')+'?','בטל סימון','חזור'))return;
+    delete s.back;
+  }
+  await _smpSave(p,list,false);
+  showToast(d?'↩ הדגם חזר למפעל · '+d.slice(8,10)+'/'+d.slice(5,7):'↺ הסימון בוטל');
+}
+// idxs = תעודות הדגם שנשארו אצל הלקוח ⇒ תעודות רגילות. ask=false ⇒ כבר נשאל (confirmShip)
+async function smpKeep(pid,idxs,ask=true){
+  const p=(S.products||[]).find(x=>x.id===pid);if(!p)return false;
+  const list=prodShipments(p).map(x=>({...x})),ss=idxs.map(i=>list[i]).filter(s=>s&&isSmpSh(s));if(!ss.length)return false;
+  const nos=ss.map(s=>String(s.no||0).padStart(4,'0')).join(', '),u=ss.reduce((t,s)=>t+(+s.total||0),0);
+  const dates=[...new Set(ss.map(s=>String(s.date||'').slice(0,10)))].map(d=>d.slice(8,10)+'/'+d.slice(5,7)).join(', ');
+  if(ask&&!await showConfirm('✅ נשאר אצל הלקוח',`הדגם (${u} יח', תעודה ${nos}) נשאר אצל הלקוח ⇒ התעודה הופכת לרגילה: נספרת ב"יצא" ובהתחשבנות.\n⚠ התאריך שלה נשאר ${dates} — אם ההתחשבנות של אותו חודש כבר הופקה, צרפו אותה להתחשבנות הבאה.`,'✅ לחיוב','חזור'))return false;
+  const k={at:Date.now(),by:S.user?.id||'',byName:S.user?.name||S.user?.user||''};
+  ss.forEach(s=>{delete s.smp;delete s.back;s.kept=k;});
+  await _smpSave(p,list,true);
+  showToast('✅ '+u+" יח' דגם נספרו כיצאו ללקוח (תעודה "+nos+')','var(--green-txt)',5000);
+  return true;
 }
 async function smpApprove(pid,on){
   if(S.user?.role!=='manager')return;
