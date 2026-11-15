@@ -55,6 +55,14 @@ function prodShipments(p){
 const isSmpSh=s=>!!(s&&s.smp);
 function shipsReal(p){return prodShipments(p).filter(s=>!isSmpSh(s));}
 function shipsSmp(p){return prodShipments(p).filter(isSmpSh);}
+// 👕 החלטת הלקוח על הדגם (15/11/2026): smpOk = אושר · smpNo = לא אושר ({at,by,via,why}). ההחלטה = המאוחרת מביניהן.
+// open = מחכים להחלטה: אין החלטה, או שנשלח דגם (תעודת smp) **אחרי** ההחלטה — למשל דגם מתוקן אחרי "לא אושר"
+function smpState(p){
+  const l=shipsSmp(p),rec=(k,x)=>x&&+x.at?{k,...x}:null,ok=rec('ok',p.smpOk),no=rec('no',p.smpNo);
+  const dec=ok&&no?(+ok.at>=+no.at?ok:no):(ok||no);
+  const last=l.reduce((m,s)=>Math.max(m,_shipMs(s)),0);
+  return{l,dec,open:l.length>0&&(!dec||last>+dec.at)};
+}
 // חומרי האריזה שנרשמו בתעודה (רק עם כמות)
 function shipMats(s){return (Array.isArray(s?.mats)?s.mats:[]).filter(m=>m&&(+m.n||0)>0);}
 // מועד התעודה מול departedAt (תעודה ששוחזרה/הוקדמה — לפי התאריך שלה)
@@ -234,5 +242,5 @@ function stockNeed(ps,prods,now){
 const NOTIFY_DEF_WIN={0:['07:00','18:00'],1:['07:00','18:00'],2:['07:00','18:00'],3:['07:00','18:00'],4:['07:00','18:00'],5:['07:00','13:00']};
 
 if(typeof module==='object'&&module&&module.exports)module.exports={PIPE_IDS,PIPE_DEPART_FROM,PIPE_PARTIAL_FROM,prodStampOf,_prodQty,estQtyOf,
-  orderNoOf,taskBc,coverKey,stepName,stepStation,pipeFamOfDept,pipeFamOfStep,GRADE_U,isUnsewn,shUnsewn,prodShipments,isSmpSh,shipsReal,shipsSmp,shipMats,_shipAtMs,_shipMs,
+  orderNoOf,taskBc,coverKey,stepName,stepStation,pipeFamOfDept,pipeFamOfStep,GRADE_U,isUnsewn,shUnsewn,prodShipments,isSmpSh,shipsReal,shipsSmp,smpState,shipMats,_shipAtMs,_shipMs,
   pipeDnDate,pipeEntryDate,pipeShipDate,pipeShipInfo,pipeCore,PACK_MATS,stockItemOf,stockSizeUnits,stockBalances,stockNeed,NOTIFY_DEF_WIN};

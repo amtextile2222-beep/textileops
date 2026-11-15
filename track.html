@@ -105,6 +105,10 @@ h2{font-size:14px;color:var(--txt2);margin:20px 0 8px}
 /* 👕 דגם לאישור (15/11/2026) */
 .smp{margin-top:8px;padding:8px 10px;border-radius:10px;background:var(--blue-bg);color:var(--blue);font-size:13px}
 .smp.ok{background:var(--green-bg);color:var(--green)}
+.smp.no{background:var(--red-bg);color:var(--red)}
+.smp-w{font-size:12px;margin:4px 0;padding:6px 9px;border-radius:8px;background:var(--red-bg);color:var(--red)}
+.smpbr{display:flex;gap:8px}.smpbr .smpb{flex:1}
+.smpb.rej{background:var(--card);color:var(--red);border:1px solid var(--red)}
 .smp-l{font-size:12px;margin-top:2px}
 .smp-t{font-size:13px;margin:3px 0 4px;padding:6px 9px;border-radius:8px;background:var(--card);color:var(--txt);white-space:pre-wrap}
 .smpb{margin-top:7px;width:100%;padding:9px 12px;border-radius:10px;border:0;background:var(--acc);color:#fff;font:inherit;font-size:14px;font-weight:700;cursor:pointer}
@@ -211,23 +215,30 @@ function card(o){
 }
 // 👕 דגם לאישור (15/11/2026): הדגמים שנשלחו לבדיקה (o.smp=[{d,n}]) + אישור. הלקוח מאשר בכפתור (POST approve) —
 // המפעל מקבל הודעה. בתצוגת מנהל — בלי כפתור (המנהל מסמן באפליקציה)
+// ✖ לא אושר (15/11/2026): o.sd = ההחלטה האחרונה {k,d,why}, o.so = מחכים להחלטה (שרת ישן — רק smpOk)
 function smpHtml(o){
-  const l=Array.isArray(o.smp)?o.smp:[];if(!l.length&&!o.smpOk)return'';
+  const l=Array.isArray(o.smp)?o.smp:[];if(!l.length&&!o.smpOk&&!o.sd)return'';
+  const sd=o.sd||null,open='so' in o?!!o.so:!o.smpOk;
   // ↩ x.b = חזר למפעל (15/11/2026); שרת ישן — בלי b
   // כל תעודת דגם בשורה משלה (15/11/2026 — בשורה אחת עם "|" התעודה השנייה נבלעה)
   const sent=l.map(x=>'<div class="smp-l">👕 '+x.n+" יח' · נשלח "+esc(fmtDM(x.d))+(x.b?' · ↩ חזר למפעל '+esc(fmtDM(x.b)):' · אצלכם')+'</div>'+(x.t?'<div class="smp-t">📝 '+esc(x.t)+'</div>':'')).join(''); // 📝 ההערה מהתעודה
-  if(o.smpOk)return `<div class="smp ok">✅ <b>הדגם אושר</b> · ${esc(fmtDM(o.smpOk))}${sent}</div>`;
-  return `<div class="smp">👕 <b>דגם לאישור</b>${sent}${!AS&&o.pid?`<button class="smpb" data-pid="${esc(o.pid)}" data-nm="${esc(o.name||('דגם '+o.prod))}">✅ אישור הדגם</button>`:''}</div>`;
+  const why=x=>x.why?'<div class="smp-t">📝 '+esc(x.why)+'</div>':'';
+  if(!open&&sd&&sd.k==='no')return `<div class="smp no">✖ <b>הדגם לא אושר</b> · ${esc(fmtDM(sd.d))}${why(sd)}<div class="smp-l">המפעל קיבל את ההערות ויכין דגם מתוקן.</div>${sent}</div>`;
+  if(!open&&(sd?sd.k==='ok':o.smpOk))return `<div class="smp ok">✅ <b>הדגם אושר</b> · ${esc(fmtDM(sd?sd.d:o.smpOk))}${sent}</div>`;
+  const nm=esc(o.name||('דגם '+o.prod));
+  return `<div class="smp">👕 <b>דגם לאישור</b>${sd&&sd.k==='no'?`<div class="smp-w">✖ הדגם הקודם לא אושר (${esc(fmtDM(sd.d))})${sd.why?': '+esc(sd.why):''}</div>`:''}${sent}${!AS&&o.pid?`<div class="smpbr"><button class="smpb" data-pid="${esc(o.pid)}" data-nm="${nm}">✅ אישור הדגם</button><button class="smpb rej" data-pid="${esc(o.pid)}" data-nm="${nm}" data-rej="1">✖ לא מאושר</button></div>`:''}</div>`;
 }
 async function approveSmp(b){
   const u=auth.currentUser;if(!u||AS)return;
-  if(!confirm('לאשר את הדגם של '+b.dataset.nm+'?\nהמפעל יקבל הודעה שהדגם אושר.'))return;
+  const rej=!!b.dataset.rej,lbl=b.textContent;let why='';
+  if(rej){why=(prompt('מה צריך לתקן בדגם של '+b.dataset.nm+'?\nההערה תישלח למפעל.')||'').trim();if(!why)return;}
+  else if(!confirm('לאשר את הדגם של '+b.dataset.nm+'?\nהמפעל יקבל הודעה שהדגם אושר.'))return;
   b.disabled=true;b.textContent='⏳ שולח…';
   try{
-    const r=await fetch(URL_FN,{method:'POST',cache:'no-store',headers:{Authorization:'Bearer '+await u.getIdToken(),'X-Dev':devId(),'Content-Type':'application/json'},body:JSON.stringify({approve:b.dataset.pid})});
+    const r=await fetch(URL_FN,{method:'POST',cache:'no-store',headers:{Authorization:'Bearer '+await u.getIdToken(),'X-Dev':devId(),'Content-Type':'application/json'},body:JSON.stringify(rej?{reject:b.dataset.pid,why:why.slice(0,300)}:{approve:b.dataset.pid})});
     if(!r.ok)throw new Error(r.status);
     await load();
-  }catch(e){b.disabled=false;b.textContent='✅ אישור הדגם';alert('האישור לא נשלח. נסו שוב בעוד רגע.');}
+  }catch(e){b.disabled=false;b.textContent=lbl;alert('ההודעה לא נשלחה. נסו שוב בעוד רגע.');}
 }
 // 🍎 הדפסה באייפון (11/11/2026): ב-PWA במסך הבית window.print() לא עושה כלום ⇒ צילום (html2canvas) ⇒ PDF (jsPDF)
 // ⇒ חלון השיתוף ⇒ "הדפסה". כמו _dnPdfBlob באפליקציה. navigator.share דורש לחיצה טרייה ⇒ הכנה בלחיצה הראשונה,

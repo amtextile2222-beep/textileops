@@ -63,6 +63,25 @@ const t = (name, cond) => { if (cond) { pass++; console.log('✓', name); } else
   const ob = (r.j.orders || []).find(o => o.pid === 'p3');
   t('חזר למפעל ⇒ b בתאריך החזרה', ob && ob.smp[0].b === '2026-10-25' && ob.smp[0].d === '2026-10-20');
   t('הערת התעודה ⇒ t', ob && ob.smp[0].t === 'בדקו <מידות>');
+  // ✖ לא אושר
+  await db.doc('products/p5').set({ cust: '01', prod: '14755', name: 'Rej', orderNo: 1, quantities: [{ qty: 5 }], stageLog: [], shipments: [smpSh], createdAt: Date.now() - 86400000 });
+  r = await call('POST', custTok, { reject: 'p5' });
+  t('לא אושר בלי סיבה ⇒ 400', r.s === 400 && !(await db.doc('products/p5').get()).data().smpNo);
+  const n1 = sent.length;
+  r = await call('POST', custTok, { reject: 'p5', why: 'צבע <כהה> מדי' });
+  const sn = (await db.doc('products/p5').get()).data().smpNo;
+  t('לא אושר ⇒ smpNo + why', r.s === 200 && sn && sn.why === 'צבע <כהה> מדי' && sn.via === 'cust');
+  t('לא אושר ⇒ תשובה sd=no, so=false', r.j.sd && r.j.sd.k === 'no' && r.j.so === false && r.j.smpOk === '');
+  t('טלגרם: לא אישר + הסיבה מוגנת', sent.length === n1 + 1 && /לא אישר/.test(sent[sent.length - 1]) && /&lt;כהה&gt;/.test(sent[sent.length - 1]));
+  r = await call('POST', custTok, { approve: 'p5' });
+  t('אחרי החלטה (בלי דגם חדש) ⇒ אישור לא נכתב', r.s === 200 && !(await db.doc('products/p5').get()).data().smpOk && sent.length === n1 + 1);
+  const calc = require('../../functions/shared/calc.js');
+  const pp = (await db.doc('products/p5').get()).data();
+  pp.shipments = pp.shipments.concat([{ ...smpSh, no: 999, date: '2099-01-01', at: '2099-01-01T10:00:00Z' }]);
+  const st = calc.smpState(pp);
+  t('דגם מתוקן אחרי "לא אושר" ⇒ שוב פתוח', st.open && st.dec.k === 'no');
+  pp.smpOk = { at: Date.parse('2099-02-01T00:00:00Z') };
+  t('אישור אחרי הדגם המתוקן ⇒ סגור, אושר', !calc.smpState(pp).open && calc.smpState(pp).dec.k === 'ok');
   console.log(`\n${pass} עברו, ${fail} נכשלו`);
   process.exit(fail ? 1 : 0);
 })().catch(e => { console.error(e); process.exit(1); });

@@ -1904,8 +1904,13 @@ function trackSmp(p) {
   // b = תאריך החזרה למפעל (shipments[].back.at) או '' · t = "הערה לתעודה" — בדגם לאישור גם הודעה ללקוח (מה לבדוק)
   const smp = calc.shipsSmp(p).map(s => ({ d: String(s.date || '').slice(0, 10), n: (+s.total || 0) + calc.shUnsewn(s),
     b: s.back && +s.back.at ? ilDateOf(new Date(+s.back.at).toISOString()) : '', t: String(s.note || '').slice(0, 200) }));
-  const at = p.smpOk && +p.smpOk.at;
-  return smp.length || at ? { smp, smpOk: at ? ilDateOf(new Date(at).toISOString()) : '' } : {};
+  // sd = ההחלטה האחרונה {k:'ok'|'no', d, why} · so = מחכים להחלטה (דגם חדש אחרי ההחלטה = שוב פתוח)
+  // smpOk נשאר לדף ישן (מלפני "לא אושר"): תאריך האישור רק כשהאישור הוא ההחלטה התקפה
+  const st = calc.smpState(p), dec = st.dec;
+  if (!smp.length && !dec) return {};
+  const day = x => ilDateOf(new Date(+x.at).toISOString());
+  return { smp, so: st.open, sd: dec ? { k: dec.k, d: day(dec), why: String(dec.why || '').slice(0, 300) } : null,
+    smpOk: dec && dec.k === 'ok' && !st.open ? day(dec) : '' };
 }
 // רשומת מייל מורשה: {e, at, max} — at = מתי נוסף (ms), max = מכשירים מותרים (0/חסר = ללא הגבלה).
 // מחרוזת = רשומה מלפני 10/10/2026 בלי at
@@ -2123,37 +2128,41 @@ exports.customerTrack = functions.runWith({ memory: '1GB' }).https.onRequest(asy
     const a = await trackAuth(req, res);
     if (!a) return;
     const { cust } = a;
-    // 👕 אישור דגם (15/11/2026) — POST {approve: מזהה מוצר}. רק לקוח (לא תצוגת מנהל — המנהל מסמן באפליקציה),
-    // רק הזמנה של הלקוח הזה שיש לה תעודת דגם לאישור. אושר כבר ⇒ מחזיר את האישור הקיים בלי לכתוב ובלי טלגרם
+    // 👕 החלטה על דגם (15/11/2026) — POST {approve: מזהה} או {reject: מזהה, why: מה לתקן}. רק לקוח (לא תצוגת
+    // מנהל — המנהל מסמן באפליקציה), רק הזמנה של הלקוח הזה עם תעודת דגם. אין דגם שמחכה להחלטה (calc.smpState) ⇒
+    // מחזיר את ההחלטה הקיימת בלי לכתוב ובלי טלגרם. דגם חדש אחרי "לא אושר" ⇒ שוב פתוח
     if (req.method === 'POST') {
       if (a.asCust) { res.status(403).json({ error: 'manager' }); return; }
       const b = (req.body && typeof req.body === 'object') ? req.body : {};
-      const pid = String(b.approve || '');
+      const rej = !b.approve && !!b.reject, pid = String(b.approve || b.reject || '');
       if (!/^[\w-]{1,128}$/.test(pid)) { res.status(400).json({ error: 'approve' }); return; }
+      const why = String(b.why || '').trim().slice(0, 300);
+      if (rej && !why) { res.status(400).json({ error: 'why' }); return; }
       const ref = db.doc('products/' + pid);
       const r = await db.runTransaction(async tx => {
         const s = await tx.get(ref), p = s.data();
-        if (!p || String(p.cust) !== cust || !calc.shipsSmp(p).length) return null;
-        if (p.smpOk && +p.smpOk.at) return { p, ok: p.smpOk, already: true };
-        const ok = { at: Date.now(), by: a.email, via: 'cust' };
-        tx.update(ref, { smpOk: ok });
-        return { p, ok };
+        if (!p || String(p.cust) !== cust) return null;
+        const st = calc.smpState(p);
+        if (!st.l.length) return null;
+        if (!st.open) return { p, already: true };
+        const rec = { at: Date.now(), by: a.email, via: 'cust', ...(rej ? { why } : {}) };
+        tx.update(ref, { [rej ? 'smpNo' : 'smpOk']: rec });
+        return { p: { ...p, [rej ? 'smpNo' : 'smpOk']: rec } };
       });
       if (!r) { res.status(404).json({ error: 'none' }); return; }
-      const day = ilDateOf(new Date(+r.ok.at).toISOString());
-      // המטמון (15 דק') — מעדכנים במקום, כדי שהרענון הבא לא יחזיר "ממתין לאישור"
+      // המטמון (15 דק') — מעדכנים במקום, כדי שהרענון הבא יראה את ההחלטה
       const hit = _trackCache.get(cust);
       if (hit) {
-        const hp = hit.prods.find(x => x.id === pid); if (hp) hp.smpOk = r.ok;
-        const o = (hit.body.orders || []).find(x => x.pid === pid); if (o) o.smpOk = day;
+        const i = hit.prods.findIndex(x => x.id === pid); if (i >= 0) hit.prods[i] = { ...hit.prods[i], smpOk: r.p.smpOk, smpNo: r.p.smpNo };
+        const o = (hit.body.orders || []).find(x => x.pid === pid); if (o) { delete o.smpOk; Object.assign(o, trackSmp(r.p)); }
       }
       if (!r.already) {
         const { token: tgToken, chatId: tgChatId } = tgCfg();
         const nm = (hit && hit.body.name) || ((await db.doc('appSettings/customerNames').get()).data() || {})[cust] || ('לקוח ' + cust);
         const no = parseInt(r.p.orderNo, 10) || 0;
-        if (tgToken && tgChatId) await sendTelegram(tgToken, tgChatId, '👕✅ TextileOps — הלקוח אישר את הדגם\n👤 ' + escTg(nm) + '\n📦 ' + escTg(r.p.name || r.p.prod) + (no ? ' · הזמנה #' + String(no).padStart(3, '0') : '') + '\n📧 ' + escTg(a.email) + '\n🕐 ' + ilTime()).catch(() => {});
+        if (tgToken && tgChatId) await sendTelegram(tgToken, tgChatId, (rej ? '👕✖ TextileOps — הלקוח <b>לא אישר</b> את הדגם' : '👕✅ TextileOps — הלקוח אישר את הדגם') + '\n👤 ' + escTg(nm) + '\n📦 ' + escTg(r.p.name || r.p.prod) + (no ? ' · הזמנה #' + String(no).padStart(3, '0') : '') + (rej ? '\n📝 מה לתקן: ' + escTg(why) : '') + '\n📧 ' + escTg(a.email) + '\n🕐 ' + ilTime()).catch(() => {});
       }
-      res.json({ ok: true, smpOk: day }); return;
+      res.json({ ok: true, ...trackSmp(r.p) }); return;
     }
     // ✂️ דוח גזירה של הזמנה (08/11/2026) — רק בלחיצה: 2 קריאות (המוצר — לוודא שהוא של הלקוח הזה, ודף ההדפסה)
     const cutp = String(req.query.cutp || '');

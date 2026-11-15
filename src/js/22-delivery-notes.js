@@ -562,17 +562,21 @@ function showShipments(pid){
 // ─── 👕 דגם לאישור (15/11/2026) ───────────────────────────────
 // תעודות smp = דגמים שנשלחו לבדיקה. האישור: products.smpOk={at,by,byName,via} — הלקוח בדף המעקב (via:'cust', השרת)
 // או המנהל כאן (via:'app'). ביטול = null
+// ✖ לא אושר (15/11/2026): products.smpNo={at,by,byName,via,why}; ההחלטה = המאוחרת (smpState ב-calc.js), דגם חדש אחריה = שוב ממתין
 function smpStatusHtml(p){
-  const l=shipsSmp(p);if(!l.length&&!p.smpOk)return'';
+  const st=smpState(p),l=st.l,dec=st.dec;if(!l.length&&!dec)return'';
   const bk=s=>s.back&&+s.back.at?new Date(+s.back.at):null;
   const dm=d=>d?String(d).slice(8,10)+'/'+String(d).slice(5,7):'';
-  const ok=p.smpOk&&+p.smpOk.at?p.smpOk:null,od=ok?new Date(+ok.at):null;
-  const who=ok?(ok.via==='cust'?'הלקוח'+(ok.by?' ('+esc(ok.by)+')':''):esc(ok.byName||'המפעל')):'';
-  const mgr=S.user?.role==='manager';
-  return `<div style="font-size:12px;padding:7px 9px;border-radius:8px;margin-bottom:8px;background:${ok?'var(--green-bg,#dcfce7)':'var(--blue-bg,#dbeafe)'};color:${ok?'var(--green-txt,#16a34a)':'var(--blue-txt,#1e40af)'}">
+  const ok=dec&&dec.k==='ok'&&!st.open?dec:null,no=dec&&dec.k==='no'&&!st.open?dec:null,od=dec?new Date(+dec.at):null;
+  const who=dec?(dec.via==='cust'?'הלקוח'+(dec.by?' ('+esc(dec.by)+')':''):esc(dec.byName||'המפעל')):'';
+  const mgr=S.user?.role==='manager',bg=ok?'green':no?'red':'blue';
+  const btn=(k,t)=>`<button class="btn" style="font-size:11px;padding:3px 8px" onclick="smpDecide('${escj(p.id)}','${k}')">${t}</button>`;
+  return `<div style="font-size:12px;padding:7px 9px;border-radius:8px;margin-bottom:8px;background:var(--${bg}-bg);color:var(--${bg}-txt)">
     👕 <b>דגם לאישור:</b> ${l.map(s=>{const b=bk(s);return (+s.total||0)+" יח' · נשלח "+dm(s.date)+(b?' · ↩ חזר '+b.getDate()+'/'+(b.getMonth()+1):' · אצל הלקוח');}).join(' | ')||'—'}
-    <div style="margin-top:3px;display:flex;align-items:center;gap:6px;flex-wrap:wrap">${ok?`<b>✅ אושר ${od.getDate()}/${od.getMonth()+1}</b> · ${who}`:'<b>⏳ ממתין לאישור הלקוח</b>'}
-      ${mgr?`<button class="btn" style="font-size:11px;padding:3px 8px;margin-inline-start:auto" onclick="smpApprove('${escj(p.id)}',${ok?'false':'true'})">${ok?'↺ בטל אישור':'✅ סמן כמאושר'}</button>`:''}</div>
+    ${st.open&&dec&&dec.k==='no'?`<div style="margin-top:3px;color:var(--red-txt)">✖ הדגם הקודם לא אושר ${od.getDate()}/${od.getMonth()+1}${dec.why?': '+esc(dec.why):''}</div>`:''}
+    <div style="margin-top:3px;display:flex;align-items:center;gap:6px;flex-wrap:wrap">${ok?`<b>✅ אושר ${od.getDate()}/${od.getMonth()+1}</b> · ${who}`:no?`<b>✖ לא אושר ${od.getDate()}/${od.getMonth()+1}</b> · ${who}`:'<b>⏳ ממתין להחלטת הלקוח</b>'}
+      ${mgr?`<span style="margin-inline-start:auto;display:flex;gap:4px;flex-wrap:wrap">${ok||no?btn('','↺ בטל החלטה'):btn('ok','✅ אושר')+btn('no','✖ לא אושר')}</span>`:''}</div>
+    ${no&&no.why?`<div style="margin-top:3px">📝 מה לתקן: ${esc(no.why)}</div>`:''}
   </div>`;
 }
 // ↩ הדגם חזר מהלקוח למפעל (15/11/2026) — נפרד מ"נשלח": shipments[i].back={at,by,byName}, at = צהרי התאריך שנבחר
@@ -640,14 +644,20 @@ async function smpKeep(pid,idxs,ask=true){
   showToast('✅ '+u+" יח' דגם נספרו כיצאו ללקוח (תעודה "+nos+')','var(--green-txt)',5000);
   return true;
 }
-async function smpApprove(pid,on){
+// k: 'ok' אושר · 'no' לא אושר (שואל מה לתקן) · '' ביטול ההחלטה התקפה (חוזר ל"ממתין")
+async function smpDecide(pid,k){
   if(S.user?.role!=='manager')return;
   const p=(S.products||[]).find(x=>x.id===pid);if(!p)return;
-  if(!await showConfirm(on?'👕 הדגם אושר':'ביטול אישור',on?'לסמן שהלקוח אישר את הדגם של '+(p.name||p.prod)+'?':'לבטל את אישור הדגם? גם הלקוח יראה שוב "ממתין לאישור".',on?'✅ אושר':'בטל אישור','חזור'))return;
-  p.smpOk=on?{at:Date.now(),by:S.user?.id||'',byName:S.user?.name||S.user?.user||'',via:'app'}:null;
+  const nm=p.name||p.prod,who={at:Date.now(),by:S.user?.id||'',byName:S.user?.name||S.user?.user||'',via:'app'},upd={};
+  if(k==='ok'){if(!await showConfirm('👕 הדגם אושר','לסמן שהלקוח אישר את הדגם של '+nm+'?','✅ אושר','חזור'))return;upd.smpOk=who;}
+  else if(k==='no'){const why=(prompt('הדגם של '+nm+' לא אושר — מה צריך לתקן?\n(יוצג גם ללקוח בדף המעקב)')||'').trim();if(!why)return;upd.smpNo={...who,why:why.slice(0,300)};}
+  else{const d=smpState(p).dec;if(!d)return;
+    if(!await showConfirm('ביטול החלטה','לבטל את ה"'+(d.k==='ok'?'אושר':'לא אושר')+'"? גם הלקוח יראה שוב "ממתין".','בטל','חזור'))return;
+    upd[d.k==='ok'?'smpOk':'smpNo']=null;}
+  Object.assign(p,upd);
   saveLS();
-  if(S.fbConnected)try{await fbReplaceFields('products',p.id,{smpOk:p.smpOk});}catch(e){}
-  showToast(on?'✅ הדגם סומן כמאושר':'↺ האישור בוטל');
+  if(S.fbConnected)try{await fbReplaceFields('products',p.id,upd);}catch(e){}
+  showToast(k==='ok'?'✅ הדגם סומן כמאושר':k==='no'?'✖ הדגם סומן כלא מאושר':'↺ ההחלטה בוטלה');
   if(document.getElementById('shl-wrap'))showShipments(pid);
   try{renderDNotes();}catch(e){}
 }
