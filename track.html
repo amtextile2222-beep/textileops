@@ -26,19 +26,29 @@ header .logo{font-size:28px}
 #asx{margin-inline-start:auto;font-size:14px;font-weight:700;padding:8px 12px;border-radius:10px;border:1px solid var(--brd);background:var(--card);color:var(--txt);cursor:pointer}
 h1{font-size:20px;margin:0}
 .sub{font-size:13px;color:var(--txt3)}
-h2{font-size:14px;color:var(--txt2);margin:20px 0 8px}
-.card{background:var(--card);border:1px solid var(--brd);border-radius:16px;padding:12px 14px;margin-bottom:10px;box-shadow:var(--sh)}
-.top{display:flex;justify-content:space-between;align-items:flex-start;gap:8px}
-.nm{font-weight:700;font-size:15px}
-.meta{font-size:12px;color:var(--txt3);margin-top:2px}
+h2{font-size:15px;color:var(--txt);margin:22px 0 10px;scroll-margin-top:12px}
+/* 🎨 (15/11/2026) ליטוש: יותר אוויר, טקסט גדול יותר בטלפון, פס שלבים עבה יותר */
+.card{background:var(--card);border:1px solid var(--brd);border-radius:18px;padding:16px 18px;margin-bottom:14px;box-shadow:var(--sh);scroll-margin-top:12px}
+.top{display:flex;justify-content:space-between;align-items:flex-start;gap:12px}
+.nm{font-weight:700;font-size:16px;line-height:1.35}
+.meta{font-size:13px;color:var(--txt3);margin-top:3px}
+/* 📊 סיכום בראש הדף (15/11/2026) — 4 מספרים; לחיצה ⇒ גלילה לחלק שלו */
+.sumg{display:grid;grid-template-columns:repeat(4,minmax(0,1fr));gap:10px;margin-bottom:16px}
+@media (max-width:560px){.sumg{grid-template-columns:repeat(2,minmax(0,1fr))}}
+.sumt{display:block;text-align:right;padding:10px 12px;border-radius:14px;border:1px solid var(--brd);background:var(--card);color:var(--txt);font:inherit;cursor:pointer;box-shadow:var(--sh)}
+.sumt span{display:block;font-size:12px;color:var(--txt3)}
+.sumt b{display:block;font-size:24px;line-height:1.2;margin-top:2px}
+.sumt.blue b{color:var(--blue)}.sumt.red b{color:var(--red)}.sumt.acc b{color:var(--acc)}.sumt.ok b{color:var(--green)}
+.sumt.zero{cursor:default;box-shadow:none}.sumt.zero b{color:var(--txt3)}
+.hl{animation:hl 1.4s ease-out}@keyframes hl{0%{box-shadow:0 0 0 3px var(--acc)}100%{box-shadow:0 0 0 0 transparent}}
 .badge{flex:0 0 auto;font-size:12px;font-weight:700;padding:3px 10px;border-radius:999px;background:var(--blue-bg);color:var(--blue);white-space:nowrap;border:1px solid color-mix(in srgb,currentColor 22%,transparent)}
 .badge.done{background:var(--green-bg);color:var(--green)}
-.bar{display:flex;gap:3px;margin:10px 0 4px}
+.bar{display:flex;gap:4px;margin:14px 0 6px}
 .bar span{flex:1;min-width:0;text-align:center}
-.bar i{display:block;height:6px;border-radius:3px;background:var(--track)}
+.bar i{display:block;height:8px;border-radius:4px;background:var(--track)}
 .bar .on i{background:var(--blue)}
 .bar.done i{background:var(--green)}
-.bar em{display:block;font-style:normal;font-size:10px;line-height:1.2;margin-top:4px;color:var(--txt3)}
+.bar em{display:block;font-style:normal;font-size:11px;line-height:1.25;margin-top:5px;color:var(--txt3)}
 .bar .on em{color:var(--txt2)}
 .bar .cur em{color:var(--blue);font-weight:700}
 .bar.done em{color:var(--txt2);font-weight:400}
@@ -48,12 +58,12 @@ h2{font-size:14px;color:var(--txt2);margin:20px 0 8px}
 .bar .ok em{color:var(--txt2)}
 .bar .bad i{background:var(--red)}
 .bar .bad em{color:var(--red);font-weight:700}
-.short{font-size:12px;margin-top:4px;padding:5px 8px;border-radius:8px;background:var(--red-bg);color:var(--red)}
+.short{font-size:13px;margin-top:6px;padding:7px 10px;border-radius:10px;background:var(--red-bg);color:var(--red)}
 .short.res{background:none;color:var(--txt3);padding:2px 8px}
 @media (max-width:420px){.bar{gap:2px}.bar em{font-size:9px}}
-.pct{height:6px;border-radius:3px;background:var(--track);overflow:hidden;margin-top:6px}
+.pct{height:8px;border-radius:4px;background:var(--track);overflow:hidden;margin-top:6px}
 .pct b{display:block;height:100%;background:var(--blue)}
-.stage{font-size:12px;color:var(--txt2)}
+.stage{font-size:13px;color:var(--txt2);margin-top:2px}
 .msg{text-align:center;color:var(--txt3);padding:40px 10px;font-size:14px}
 /* 📦 מלאי חומר האריזה (23/10/2026): במסך רחב — עמודה צרה משמאל לצד ההזמנות (נשארת גלויה בגלילה);
    בטלפון — למעלה, לפני ההזמנות. בלי מלאי הדף נשאר בעמודה אחת ברוחב הרגיל */
@@ -129,7 +139,7 @@ h2{font-size:14px;color:var(--txt2);margin:20px 0 8px}
 #cutc{flex:1;display:flex}
 .cutf{flex:1;width:100%;border:0;background:#fff}
 /* 🖼 תמונות (08/11/2026) */
-.thumb{flex:0 0 auto;width:56px;height:56px;object-fit:cover;border-radius:10px;border:1px solid var(--brd);background:var(--track);cursor:zoom-in}
+.thumb{flex:0 0 auto;width:64px;height:64px;object-fit:cover;border-radius:12px;border:1px solid var(--brd);background:var(--track);cursor:zoom-in}
 .sthumb{float:left;width:40px;height:40px;object-fit:cover;border-radius:8px;border:1px solid var(--brd);margin:0 0 4px 8px;cursor:zoom-in}
 .stk::after{content:"";display:block;clear:both}
 .imgm-b{max-width:95vw;max-height:92vh;text-align:center;color:#fff;font-size:14px}
@@ -227,7 +237,7 @@ function card(o){
 function smpTop(orders){
   const l=(orders||[]).filter(o=>Array.isArray(o.smp)&&o.smp.length&&('so' in o?o.so:!o.smpOk));
   if(!l.length)return'';
-  return `<div class="smp-top"><h3>👕 ${l.length===1?'דגם אחד מחכה':l.length+' דגמים מחכים'} לאישור שלכם</h3>`+l.map(o=>{
+  return `<div class="smp-top" id="smp-top"><h3>👕 ${l.length===1?'דגם אחד מחכה':l.length+' דגמים מחכים'} לאישור שלכם</h3>`+l.map(o=>{
     const x=o.smp[o.smp.length-1],no=o.no?'הזמנה #'+String(o.no).padStart(3,'0')+' · ':'';
     return `<button class="smp-go" data-go="${esc(o.pid||'')}"><b>${esc(o.name||('דגם '+o.prod))}</b>
       <small>${no}${x.n} יח' · נשלח ${esc(fmtDM(x.d))}${x.b?' · ↩ חזר למפעל '+esc(fmtDM(x.b)):''}${o.sd&&o.sd.k==='no'?' · הדגם הקודם לא אושר':''}</small>
@@ -303,6 +313,8 @@ async function openCut(pid,nm){
 }
 appEl.addEventListener('click',e=>{const b=e.target.closest('.cutb');if(b)openCut(b.dataset.cut,b.dataset.nm);
   const sb=e.target.closest('.smpb');if(sb&&!sb.disabled)approveSmp(sb);
+  // 📊 אריח סיכום ⇒ גלילה לחלק שלו + הבהוב
+  const sm=e.target.closest('[data-sum]');if(sm){const t=$(sm.dataset.sum);if(t){t.scrollIntoView({behavior:'smooth',block:'start'});const h=t.closest('.card,.smp-top,.ord-sum')||t;h.classList.remove('hl');void h.offsetWidth;h.classList.add('hl');}}
   const go=e.target.closest('.smp-go');if(go){const c=$('ord-'+go.dataset.go);if(c)c.scrollIntoView({behavior:'smooth',block:'start'});}
   const im=e.target.closest('img[data-img][src]');if(im&&IMG_OK.test(im.src))bigImg(im.src,im.alt);});
 // 🖼 תמונות (08/11/2026) — דגם בכרטיס, חומר במלאי. נטענות מהשרת (?img=) פעם אחת לכל מועד (v) ונשמרות בזיכרון,
@@ -500,7 +512,7 @@ async function load(fresh){
     const fmtD=ms=>{const t=new Date(+ms);return String(t.getDate()).padStart(2,'0')+'/'+String(t.getMonth()+1).padStart(2,'0');};
     const oLbl=o=>(o.name||('דגם '+o.prod))+(o.no?' · הזמנה #'+String(o.no).padStart(3,'0'):'');
     const ordShort=act.flatMap(o=>(Array.isArray(o.short)?o.short:[]).filter(x=>!x.res).map(x=>({o,x}))).sort((a,b)=>a.x.at-b.x.at);
-    const ordHtml=ordShort.length?`<div class="stk-sum ord-sum"><div class="stk-sh">⚠ ${ordShort.length===1?'חוסר אחד':ordShort.length+' חוסרים'} בהזמנות בייצור<button id="ordp">🖨 הדפסה</button></div><ul class="stk-sl">`+
+    const ordHtml=ordShort.length?`<div class="stk-sum ord-sum" id="ord-sum"><div class="stk-sh">⚠ ${ordShort.length===1?'חוסר אחד':ordShort.length+' חוסרים'} בהזמנות בייצור<button id="ordp">🖨 הדפסה</button></div><ul class="stk-sl">`+
       ordShort.map(({o,x})=>`<li><b>${esc(oLbl(o))}</b> — ${esc(STAGES[x.st]||'')}: ${esc(x.txt)} · ${fmtD(x.at)}</li>`).join('')+'</ul></div>':'';
     window._ordPrint=()=>{let p=$('stkpr');if(!p){p=document.createElement('div');p.id='stkpr';p.className='stkpdf';document.body.appendChild(p);}
       const dt=new Date().toLocaleString('he-IL',{day:'2-digit',month:'2-digit',year:'numeric',hour:'2-digit',minute:'2-digit'});
@@ -508,14 +520,19 @@ async function load(fresh){
         ordShort.map(({o,x})=>`<tr><td>${esc(oLbl(o))}</td><td>${esc(STAGES[x.st]||'')}</td><td class="x">${esc(x.txt)}</td><td>${fmtD(x.at)}</td></tr>`).join('')+'</table>';
       if(IOS){stkPdf(p.innerHTML,'ordp');return;}
       window.print();};
-    const stkHtml=stk.length?`<h2>📦 החומרים שלכם במפעל</h2><div class="card">${nBad?`<div class="stk-sum"><div class="stk-sh">⚠ ${nBad===1?'חומר אחד':nBad+' חומרים'} — כדאי לשלוח עוד<button id="stkp">🖨 הדפסה</button></div>${shortHtml}</div>`:'<div class="stk-sum ok">✓ יש מספיק מכל החומרים</div>'}${multi
+    const stkHtml=stk.length?`<h2 id="stk-box">📦 החומרים שלכם במפעל</h2><div class="card">${nBad?`<div class="stk-sum"><div class="stk-sh">⚠ ${nBad===1?'חומר אחד':nBad+' חומרים'} — כדאי לשלוח עוד<button id="stkp">🖨 הדפסה</button></div>${shortHtml}</div>`:'<div class="stk-sum ok">✓ יש מספיק מכל החומרים</div>'}${multi
         ?Object.keys(DEPT).map(d=>{const l=stk.filter(s=>(s.dept||'pack')===d);return l.length?`<div class="stk-d">${DEPT[d]}</div>`+stkList(l):'';}).join('')
         :stkList(stk)}<div class="meta" style="margin-top:8px">מתעדכן אוטומטית עם כל משלוח שיוצא אליכם.</div></div>`:'';
     appEl.closest('.wrap')?.classList.toggle('wide',!!stk.length);
-    appEl.innerHTML=`<div class="lay${stk.length?' has-stk':''}"><main>`+(!d.orders.length?'<div class="msg">אין כרגע הזמנות פעילות.</div>':
+    // 📊 סיכום בראש הדף (15/11/2026): בייצור · מחכה לאישורכם · חוסרים · חומר לשלוח (בלי מלאי — נשלחו). 0 = אפור ובלי לחיצה
+    const nSmp=d.orders.filter(o=>Array.isArray(o.smp)&&o.smp.length&&('so' in o?o.so:!o.smpOk)).length;
+    const tile=(lbl,n,cls,go)=>`<button class="sumt ${n?cls:'zero'}"${n&&go?' data-sum="'+go+'"':''}><span>${lbl}</span><b>${n}</b></button>`;
+    const sumHtml=d.orders.length?'<div class="sumg">'+tile('בייצור',act.length,'blue','h-act')+tile('מחכה לאישורכם',nSmp,'acc','smp-top')
+      +tile('חוסרים בהזמנות',ordShort.length,'red','ord-sum')+(stk.length?tile('חומרים לשלוח',nBad,'red','stk-box'):tile('נשלחו (30 יום)',shp.length,'ok','h-shp'))+'</div>':'';
+    appEl.innerHTML=sumHtml+`<div class="lay${stk.length?' has-stk':''}"><main>`+(!d.orders.length?'<div class="msg">אין כרגע הזמנות פעילות.</div>':
       smpTop(d.orders)+
-      (act.length?`<h2>🏭 בייצור (${act.length})</h2>`+ordHtml+act.map(card).join(''):'')+
-      (shp.length?`<h2>✅ נשלחו ב-30 הימים האחרונים (${shp.length})</h2>`+shp.map(card).join(''):''))+
+      (act.length?`<h2 id="h-act">🏭 בייצור (${act.length})</h2>`+ordHtml+act.map(card).join(''):'')+
+      (shp.length?`<h2 id="h-shp">✅ נשלחו ב-30 הימים האחרונים (${shp.length})</h2>`+shp.map(card).join(''):''))+
       `</main>${stk.length?'<aside>'+stkHtml+'</aside>':''}</div>`;
     const sp=$('stkp');if(sp)sp.onclick=()=>window._stkPrint&&window._stkPrint();
     const op=$('ordp');if(op)op.onclick=()=>window._ordPrint&&window._ordPrint();
