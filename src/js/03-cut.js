@@ -166,7 +166,7 @@ const stepPending=s=>!stepStation(s)&&!(stepManualMin(s)>0)&&!stepLevel(s);
 // בכל מכשיר), או סימון ידני/משלוח שאחרי התפירה (הזמנה ישנה שהמשימות שלה כבר מחוץ לחלון)
 function orderInSewing(p){
   if(!p)return false;
-  if(+p.shippedQty>0||(Array.isArray(p.shipments)&&p.shipments.length))return true;
+  if(+p.shippedQty>0||shipsReal(p).length)return true; // 👕 דגם לאישור — לא סימן שההזמנה בתפירה
   const ov=p.pipeOverride?.list;if(ov&&PIPE_IDX(ov)>=PIPE_IDX('sewing'))return true;
   const log=Array.isArray(p.stageLog)?p.stageLog:[],si=PROD_STAGES.findIndex(s=>s.id==='sewing');
   if(log.some(e=>PROD_STAGES.findIndex(s=>s.id===e.id)>=si&&si>=0))return true;

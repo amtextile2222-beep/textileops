@@ -413,12 +413,14 @@ let _dnSel=new Set();
 const dnKey=r=>r.p.id+'|'+r.i;
 // שורות הדוח אחרי סינון — משותף לטבלה ולהדפסה, כדי שהנייר יהיה **בדיוק** מה שבמסך.
 // `onlySel` ⇒ רק מה שסומן (ועדיין בתוך הסינון — תעודה מסומנת שהסינון מסתיר לא תודפס בהפתעה).
-function dnFiltered(onlySel){
+// bill ⇒ בלי דגמים לאישור (isSmpSh) — להתחשבנות/חשבונית. בטבלה ובהדפסת תעודות/רשימה לנהג הם מופיעים, בסכום 0
+function dnFiltered(onlySel,bill){
   const g=id=>(document.getElementById(id)?.value||'').trim();
   const q=g('dn-search').toLowerCase(),cust=g('dn-cust'),from=g('dn-from'),to=g('dn-to'),pay=_canPricing()?g('dn-pay'):'';
   // משלוח בלי תאריך לא נופל מהסינון — עדיף להראות אותו מאשר להעלים תעודה שקיימת
   const rows=allDeliveryNotes().filter(r=>{
     if(onlySel&&!_dnSel.has(dnKey(r)))return false;
+    if(bill&&isSmpSh(r.s))return false;
     const d=r.s.date||'';
     if(cust&&r.p.cust!==cust)return false;
     if(from&&d&&d<from)return false;
@@ -436,6 +438,8 @@ function dnFiltered(onlySel){
   rows.forEach(r=>{
     r.pr=dnUnitPrice(r.p);
     r.qty=+r.s.total||0;
+    // 👕 דגם לאישור — חוזר למפעל ויוצא שוב עם הכמות המלאה ⇒ בלי סכום ובלי יחידות בסה"כ
+    if(isSmpSh(r.s)){r.smp=true;r.work=0;r.mats=[];r.pack=0;r.amount=0;return;}
     // מחיר עבודה חסר ⇒ 0 ומסומן. חומר האריזה **כן** נספר גם אז — הכמות והמחיר
     // שלו נצרבו על התעודה ולכן הם ידועים בוודאות, בלי קשר לכרטיס המוצר.
     r.work=r.pr.missing?0:r.pr.unit*r.qty;
@@ -519,13 +523,13 @@ function renderDNotes(){
       const _k=dnKey(r);
       return `<tr${_dnSel.has(_k)?' style="background:rgba(24,95,165,.08)"':''}>
         <td style="text-align:center"><input type="checkbox" ${_dnSel.has(_k)?'checked':''} onchange="dnSelToggle('${escj(_k)}',this.checked)" style="width:16px;height:16px;cursor:pointer"></td>
-        <td><span class="bc-seg" style="background:var(--green-bg,#dcfce7);color:var(--green-txt,#16a34a);font-weight:700">${r.s.no?String(r.s.no).padStart(4,'0'):'—'}</span>${shipEditMark(r.s)}${r.count>1?`<span style="font-size:10px;color:var(--txt3)"> ${r.i+1}/${r.count}</span>`:''}</td>
+        <td><span class="bc-seg" style="background:var(--green-bg,#dcfce7);color:var(--green-txt,#16a34a);font-weight:700">${r.s.no?String(r.s.no).padStart(4,'0'):'—'}</span>${shipEditMark(r.s)}${r.smp?'<div style="font-size:10px;font-weight:700;color:var(--blue-txt,#1e40af)">👕 דגם לאישור'+(r.p.smpOk?' · ✅ אושר':'')+'</div>':''}${r.count>1?`<span style="font-size:10px;color:var(--txt3)"> ${r.i+1}/${r.count}</span>`:''}</td>
         <td style="white-space:nowrap">${heDate(r.s.date)}</td>
         <td>${esc(S.customerNames?.[r.p.cust]||('לקוח '+(r.p.cust||'')))}</td>
         <td>${esc(r.p.name||r.p.prod||'')}${r.s.note?`<span title="${esc(r.s.note)}"> 📝</span>`:''}</td>
         <td style="color:var(--txt3)">${(parseInt(r.p.orderNo,10)||0)?'#'+String(r.p.orderNo).padStart(3,'0'):'—'}</td>
-        <td style="text-align:center;font-weight:700">${r.qty}</td>
-        ${money}
+        <td style="text-align:center;font-weight:700${r.smp?';color:var(--txt3)':''}">${r.qty}</td>
+        ${r.smp?'<td colspan="4" style="text-align:center;color:var(--blue-txt,#1e40af);font-size:12px">👕 דגם לאישור — לא לחיוב</td>':money}
         <td style="text-align:center">${pk||''}</td>
         ${cp?'<td style="white-space:nowrap">'+dnPayCell(r)+'</td>':''}
         <td style="white-space:nowrap;text-align:left">
@@ -558,7 +562,7 @@ function renderDNotes(){
 // inv ⇒ "חשבונית עסקה": אותה טבלה + מספר מסמך ושורות מע"מ וסה"כ לתשלום (מ-printProforma)
 function printSettlement(onlySel,noPrice,inv){
   // הדפסה חוזרת של חשבונית ⇒ מתמונת המצב השמורה, לא מהמסך
-  const f=inv?.f||dnFiltered(!!onlySel);
+  const f=inv?.f||dnFiltered(!!onlySel,!noPrice); // 👕 רשימה לנהג — כולל דגמים; התחשבנות — בלעדיהם
   if(!f.rows.length){showToast('⚠ אין תעודות בסינון הנוכחי','var(--red-txt)');return;}
   const co=S.settings?.company||{};
   const custs=dnCustomers(f.rows);
@@ -701,7 +705,8 @@ function deliveryNoteHtml(p,sh,idx,count){
   // מאזן ההזמנה **עד המשלוח הזה כולל** — תעודה ישנה חייבת להראות את המצב בזמנה
   // ולא את המצב היום, אחרת הדפסה חוזרת של תעודה מלפני חודש תסתור את מה שנמסר
   const ordered=_prodQty(p)||0;
-  const upto=list.slice(0,idx+1).reduce((t,s)=>t+(+s.total||0)+shUnsewn(s),0); // ✂ לא תפור יצא — לא "יתרה להשלמה"
+  const upto=list.slice(0,idx+1).filter(s=>!isSmpSh(s)).reduce((t,s)=>t+(+s.total||0)+shUnsewn(s),0); // ✂ לא תפור יצא — לא "יתרה להשלמה" · 👕 דגם חוזר — לא נספר
+  const smp=isSmpSh(sh);
   const balance=ordered?Math.max(0,ordered-upto):0;
   // יצא יותר ממה שהוזמן: "יתרה להשלמה: 0" הסתיר את העובדה. העודף מוצג במפורש,
   // ולפי המצב **באותו משלוח** — כמו כל שאר המספרים על התעודה.
@@ -772,7 +777,7 @@ table.pk th.ttl{background:#eef2ff;font-size:12px;text-align:center}
   <div class="doc">
     <h1>תעודת משלוח</h1>
     <div class="no">מס' ${sh&&sh.no?String(sh.no).padStart(4,'0'):'—'}</div>
-    ${count>1?`<div class="dt" style="font-weight:700">משלוח ${idx+1} מתוך ${count}</div>`:''}
+    ${smp?'<div class="dt" style="font-weight:800;color:#b91c1c;font-size:13px">👕 דגם לאישור — לא לחיוב</div>':count>1?`<div class="dt" style="font-weight:700">משלוח ${idx+1} מתוך ${count}</div>`:''}
     <div class="dt">תאריך: ${esc(heDate(dDate)||'—')}</div>
   </div>
 </div>
@@ -793,9 +798,10 @@ table.pk th.ttl{background:#eef2ff;font-size:12px;text-align:center}
     ${line('תאריך:',heDate(dDate))}
     ${line('שעה:',dnTime)}
     ${ordered?line('כמות בהזמנה:',ordered+" יח'"):''}
-    ${ordered?(surplus?line('עודף מעל ההזמנה:',surplus+" יח'"):line('יתרה להשלמה:',balance+" יח'")):''}
+    ${ordered&&!smp?(surplus?line('עודף מעל ההזמנה:',surplus+" יח'"):line('יתרה להשלמה:',balance+" יח'")):''}
     ${unsewn?line('לא תפור:',unsewn+" יח' (לא לחיוב)"):''}
     ${+sh?.orig?line('דגם מקורי:',(+sh.orig)+" יח' הוחזר"):''}
+    ${smp?line('דגם לאישור:','יוחזר למפעל אחרי הבדיקה'):''}
     ${packCount?line('חבילות:',packCount+(outer?' '+outerIn(outer):'')):line('אריזה:',outer)}
     ${line('סוג אריזה:',packModeName(sh&&sh.packMode))}
   </div>

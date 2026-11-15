@@ -1877,7 +1877,8 @@ function trackStates(prods, tasks) {
       }
       return last;
     };
-    const firstDn = minD(Array.isArray(p.shipments) && p.shipments.length ? p.shipments.map(s => String(s.date || '').slice(0, 10)) : [trackDnDate(p)]);
+    const realSh = calc.shipsReal(p); // 👕 דגם לאישור — לא "מוכן ליציאה"
+    const firstDn = minD(Array.isArray(p.shipments) && p.shipments.length ? (realSh.length ? realSh : p.shipments).map(s => String(s.date || '').slice(0, 10)) : [trackDnDate(p)]);
     const dates = [trackEntryDate(p), minD(famT('recv', 'startTime')), minD(famT('recv', 'endTime')), minD(famT('sew', 'startTime')),
       doneAt('sew'), minD(famT('pack', 'startTime')), minD([doneAt('pack'), shipped ? firstDn : '']), departed ? trackShipDate(p) : '']
       .map((d, i) => i > st ? '' : (i === st && !d && ov === id ? dOf(p.pipeOverride.at) : d));
@@ -1886,6 +1887,8 @@ function trackStates(prods, tasks) {
       ship: departed ? trackShipDate(p) : '', stage: st, sewPct, packPct, split, dates,
       // ✂️ דוח גזירה (08/11/2026): מזהה המוצר כשיש עותק מעודכן ב-cutPrints (pAt = at) — הדף טוען אותו בלחיצה (?cutp=)
       cut: p.cutReport && +p.cutReport.pAt && +p.cutReport.pAt === +p.cutReport.at ? p.id : '',
+      // 👕 דגם לאישור (15/11/2026): תעודות smp — מתי ממה נשלח; smpOk = תאריך האישור. pid — לכפתור האישור (POST approve)
+      pid: p.id, ...trackSmp(p),
       // 🖼 תמונת הדגם (08/11/2026): thumbs/{מזהה} של ההזמנה, ובלי — של ההזמנה החדשה ביותר של הדגם שיש לה (תמונות לא עוברות להזמנה חדשה)
       ...trackThumb(p, prods),
       // out = יחידות שיצאו: משלוח חלקי, או כמה תעודות שרק חלקן סומנו כיציאה (A251, 22/10/2026 — כמו parts בלוח)
@@ -1895,6 +1898,12 @@ function trackStates(prods, tasks) {
       short: (Array.isArray(p.shortages) ? p.shortages : []).filter(x => x && x.txt && (!x.res || Date.now() - x.res < 30 * 86400000))
         .map(x => ({ id: String(x.id || ''), st: Math.max(0, Math.min(7, parseInt(x.st, 10) || 0)), txt: String(x.txt).slice(0, 200), at: +x.at || 0, res: +x.res || 0 })) };
   });
+}
+// 👕 דגמים לאישור של הזמנה לדף הלקוח: smp=[{d, n}] (תאריך תעודה, יחידות) · smpOk = תאריך האישור (YYYY-MM-DD) או ''
+function trackSmp(p) {
+  const smp = calc.shipsSmp(p).map(s => ({ d: String(s.date || '').slice(0, 10), n: (+s.total || 0) + calc.shUnsewn(s) }));
+  const at = p.smpOk && +p.smpOk.at;
+  return smp.length || at ? { smp, smpOk: at ? ilDateOf(new Date(at).toISOString()) : '' } : {};
 }
 // רשומת מייל מורשה: {e, at, max} — at = מתי נוסף (ms), max = מכשירים מותרים (0/חסר = ללא הגבלה).
 // מחרוזת = רשומה מלפני 10/10/2026 בלי at
@@ -2104,14 +2113,46 @@ exports.customerTrack = functions.runWith({ memory: '1GB' }).https.onRequest(asy
   res.set('Access-Control-Allow-Origin', '*');
   res.set('Cache-Control', 'no-store');
   if (req.method === 'OPTIONS') {
-    res.set('Access-Control-Allow-Methods', 'GET');
-    res.set('Access-Control-Allow-Headers', 'Authorization, X-Dev');
+    res.set('Access-Control-Allow-Methods', 'GET, POST');
+    res.set('Access-Control-Allow-Headers', 'Authorization, X-Dev, Content-Type');
     res.status(204).send(''); return;
   }
   try {
     const a = await trackAuth(req, res);
     if (!a) return;
     const { cust } = a;
+    // 👕 אישור דגם (15/11/2026) — POST {approve: מזהה מוצר}. רק לקוח (לא תצוגת מנהל — המנהל מסמן באפליקציה),
+    // רק הזמנה של הלקוח הזה שיש לה תעודת דגם לאישור. אושר כבר ⇒ מחזיר את האישור הקיים בלי לכתוב ובלי טלגרם
+    if (req.method === 'POST') {
+      if (a.asCust) { res.status(403).json({ error: 'manager' }); return; }
+      const b = (req.body && typeof req.body === 'object') ? req.body : {};
+      const pid = String(b.approve || '');
+      if (!/^[\w-]{1,128}$/.test(pid)) { res.status(400).json({ error: 'approve' }); return; }
+      const ref = db.doc('products/' + pid);
+      const r = await db.runTransaction(async tx => {
+        const s = await tx.get(ref), p = s.data();
+        if (!p || String(p.cust) !== cust || !calc.shipsSmp(p).length) return null;
+        if (p.smpOk && +p.smpOk.at) return { p, ok: p.smpOk, already: true };
+        const ok = { at: Date.now(), by: a.email, via: 'cust' };
+        tx.update(ref, { smpOk: ok });
+        return { p, ok };
+      });
+      if (!r) { res.status(404).json({ error: 'none' }); return; }
+      const day = ilDateOf(new Date(+r.ok.at).toISOString());
+      // המטמון (15 דק') — מעדכנים במקום, כדי שהרענון הבא לא יחזיר "ממתין לאישור"
+      const hit = _trackCache.get(cust);
+      if (hit) {
+        const hp = hit.prods.find(x => x.id === pid); if (hp) hp.smpOk = r.ok;
+        const o = (hit.body.orders || []).find(x => x.pid === pid); if (o) o.smpOk = day;
+      }
+      if (!r.already) {
+        const { token: tgToken, chatId: tgChatId } = tgCfg();
+        const nm = (hit && hit.body.name) || ((await db.doc('appSettings/customerNames').get()).data() || {})[cust] || ('לקוח ' + cust);
+        const no = parseInt(r.p.orderNo, 10) || 0;
+        if (tgToken && tgChatId) await sendTelegram(tgToken, tgChatId, '👕✅ TextileOps — הלקוח אישר את הדגם\n👤 ' + escTg(nm) + '\n📦 ' + escTg(r.p.name || r.p.prod) + (no ? ' · הזמנה #' + String(no).padStart(3, '0') : '') + '\n📧 ' + escTg(a.email) + '\n🕐 ' + ilTime()).catch(() => {});
+      }
+      res.json({ ok: true, smpOk: day }); return;
+    }
     // ✂️ דוח גזירה של הזמנה (08/11/2026) — רק בלחיצה: 2 קריאות (המוצר — לוודא שהוא של הלקוח הזה, ודף ההדפסה)
     const cutp = String(req.query.cutp || '');
     if (cutp) {

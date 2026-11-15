@@ -49,6 +49,12 @@ function prodShipments(p){
   if(p.shippedQty!=null)return[{no:parseInt(p.dnNo,10)||0,date:p.dnDate||(p.shippedAt?String(p.shippedAt).slice(0,10):''),at:p.shippedAt||'',rows:Array.isArray(p.shippedRows)?p.shippedRows:[],total:Math.max(0,+p.shippedQty||0)}];
   return[];
 }
+// 👕 דגם לאישור (15/11/2026): תעודה עם smp — הדגם נשלח ללקוח לבדיקה וחוזר למפעל, ויוצא שוב עם כל הכמות.
+// מודפסת ונשמרת במאגר המשלוחים (מספר, הדפסה, עריכה), אבל **לא** ב"יצא" (shippedQty), לא ביתרה, לא בלוח ולא בהתחשבנות.
+// החומר שנארז בה כן יורד מהמלאי (stockBalances קורא את prodShipments). products.smpOk = {at,by,via} — הדגם אושר
+const isSmpSh=s=>!!(s&&s.smp);
+function shipsReal(p){return prodShipments(p).filter(s=>!isSmpSh(s));}
+function shipsSmp(p){return prodShipments(p).filter(isSmpSh);}
 // חומרי האריזה שנרשמו בתעודה (רק עם כמות)
 function shipMats(s){return (Array.isArray(s?.mats)?s.mats:[]).filter(m=>m&&(+m.n||0)>0);}
 // מועד התעודה מול departedAt (תעודה ששוחזרה/הוקדמה — לפי התאריך שלה)
@@ -76,8 +82,9 @@ function pipeShipDate(p){
 // נשארת במצב הייצור. יציאה **פר תעודה**: תעודה שהופקה (at) עד departedAt = יצאה.
 // 🛑 לא חלקי: תעודה אחרונה לפני PIPE_PARTIAL_FROM, או דחיפה ידנית ל"מוכן ליציאה"/הלאה (= סגירה בחוסר)
 function pipeShipInfo(p,qty){
-  const shipped=(p.stageLog||[]).some(e=>e.id==='shipped')||+p.shippedQty>0;
-  const shL=shipped?prodShipments(p):[];
+  const allSmp=Array.isArray(p.shipments)&&p.shipments.length>0&&p.shipments.every(isSmpSh); // 👕 רק דגמים לאישור = לא יצא
+  const shipped=!allSmp&&((p.stageLog||[]).some(e=>e.id==='shipped')||+p.shippedQty>0);
+  const shL=shipped?shipsReal(p):[];
   const shU=s=>(+s.total||0)+shUnsewn(s);
   const depT=p.departedAt?Date.parse(p.departedAt):NaN;
   const shDep=s=>{const d=String(s.date||'').slice(0,10);if(d&&d<PIPE_DEPART_FROM)return true;if(isNaN(depT))return false;
@@ -227,5 +234,5 @@ function stockNeed(ps,prods,now){
 const NOTIFY_DEF_WIN={0:['07:00','18:00'],1:['07:00','18:00'],2:['07:00','18:00'],3:['07:00','18:00'],4:['07:00','18:00'],5:['07:00','13:00']};
 
 if(typeof module==='object'&&module&&module.exports)module.exports={PIPE_IDS,PIPE_DEPART_FROM,PIPE_PARTIAL_FROM,prodStampOf,_prodQty,estQtyOf,
-  orderNoOf,taskBc,coverKey,stepName,stepStation,pipeFamOfDept,pipeFamOfStep,GRADE_U,isUnsewn,shUnsewn,prodShipments,shipMats,_shipAtMs,_shipMs,
+  orderNoOf,taskBc,coverKey,stepName,stepStation,pipeFamOfDept,pipeFamOfStep,GRADE_U,isUnsewn,shUnsewn,prodShipments,isSmpSh,shipsReal,shipsSmp,shipMats,_shipAtMs,_shipMs,
   pipeDnDate,pipeEntryDate,pipeShipDate,pipeShipInfo,pipeCore,PACK_MATS,stockItemOf,stockSizeUnits,stockBalances,stockNeed,NOTIFY_DEF_WIN};

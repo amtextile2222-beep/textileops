@@ -102,6 +102,12 @@ h2{font-size:14px;color:var(--txt2);margin:20px 0 8px}
 /* ✂️ דוח גזירה (08/11/2026): שורה בכרטיס ⇒ חלון עם הדוח (iframe) והדפסה */
 .cutb{display:flex;align-items:center;width:100%;margin-top:8px;padding:8px 10px;border-radius:10px;border:1px solid var(--brd);background:var(--blue-bg);color:var(--blue);font:inherit;font-size:13px;font-weight:700;cursor:pointer;text-align:right}
 .cutb span{margin-right:auto;font-size:16px}
+/* 👕 דגם לאישור (15/11/2026) */
+.smp{margin-top:8px;padding:8px 10px;border-radius:10px;background:var(--blue-bg);color:var(--blue);font-size:13px}
+.smp.ok{background:var(--green-bg);color:var(--green)}
+.smp-l{font-size:12px;margin-top:2px}
+.smpb{margin-top:7px;width:100%;padding:9px 12px;border-radius:10px;border:0;background:var(--acc);color:#fff;font:inherit;font-size:14px;font-weight:700;cursor:pointer}
+.smpb:disabled{opacity:.6;cursor:default}
 .cutm{position:fixed;inset:0;background:rgba(0,0,0,.5);display:flex;align-items:center;justify-content:center;padding:10px;z-index:50}
 .cutm-b{background:var(--card);border-radius:14px;width:100%;max-width:900px;height:100%;max-height:92vh;display:flex;flex-direction:column;overflow:hidden}
 .cutm-h{display:flex;align-items:center;gap:8px;padding:10px 12px;border-bottom:1px solid var(--brd);font-size:14px}
@@ -198,8 +204,27 @@ function card(o){
     ${pct!=null?`<div class="pct" title="${pct}%"><b style="width:${Math.max(0,Math.min(100,pct))}%"></b></div>`:''}
     ${o.out>0?`<div class="stage">🚚 נשלחו ${o.out} יח' · השאר: ${esc(STAGES[o.stage]||'בייצור')}</div>`:''}
     ${shHtml}
+    ${smpHtml(o)}
     ${o.cut?`<button class="cutb" data-cut="${esc(o.cut)}" data-nm="${esc(o.name||('דגם '+o.prod))}">✂️ דוח גזירה <span>‹</span></button>`:''}
   </div>`;
+}
+// 👕 דגם לאישור (15/11/2026): הדגמים שנשלחו לבדיקה (o.smp=[{d,n}]) + אישור. הלקוח מאשר בכפתור (POST approve) —
+// המפעל מקבל הודעה. בתצוגת מנהל — בלי כפתור (המנהל מסמן באפליקציה)
+function smpHtml(o){
+  const l=Array.isArray(o.smp)?o.smp:[];if(!l.length&&!o.smpOk)return'';
+  const sent=l.map(x=>x.n+" יח' · נשלח "+esc(fmtDM(x.d))).join(' | ');
+  if(o.smpOk)return `<div class="smp ok">✅ <b>הדגם אושר</b> · ${esc(fmtDM(o.smpOk))}${sent?'<div class="smp-l">👕 '+sent+'</div>':''}</div>`;
+  return `<div class="smp">👕 <b>דגם לאישור</b><div class="smp-l">${sent}</div>${!AS&&o.pid?`<button class="smpb" data-pid="${esc(o.pid)}" data-nm="${esc(o.name||('דגם '+o.prod))}">✅ אישור הדגם</button>`:''}</div>`;
+}
+async function approveSmp(b){
+  const u=auth.currentUser;if(!u||AS)return;
+  if(!confirm('לאשר את הדגם של '+b.dataset.nm+'?\nהמפעל יקבל הודעה שהדגם אושר.'))return;
+  b.disabled=true;b.textContent='⏳ שולח…';
+  try{
+    const r=await fetch(URL_FN,{method:'POST',cache:'no-store',headers:{Authorization:'Bearer '+await u.getIdToken(),'X-Dev':devId(),'Content-Type':'application/json'},body:JSON.stringify({approve:b.dataset.pid})});
+    if(!r.ok)throw new Error(r.status);
+    await load();
+  }catch(e){b.disabled=false;b.textContent='✅ אישור הדגם';alert('האישור לא נשלח. נסו שוב בעוד רגע.');}
 }
 // 🍎 הדפסה באייפון (11/11/2026): ב-PWA במסך הבית window.print() לא עושה כלום ⇒ צילום (html2canvas) ⇒ PDF (jsPDF)
 // ⇒ חלון השיתוף ⇒ "הדפסה". כמו _dnPdfBlob באפליקציה. navigator.share דורש לחיצה טרייה ⇒ הכנה בלחיצה הראשונה,
@@ -245,6 +270,7 @@ async function openCut(pid,nm){
   }catch(e){const c=$('cutc');if(c)c.textContent='⚠️ לא ניתן לטעון את הדוח כרגע. נסו שוב בעוד רגע.';}
 }
 appEl.addEventListener('click',e=>{const b=e.target.closest('.cutb');if(b)openCut(b.dataset.cut,b.dataset.nm);
+  const sb=e.target.closest('.smpb');if(sb&&!sb.disabled)approveSmp(sb);
   const im=e.target.closest('img[data-img][src]');if(im&&IMG_OK.test(im.src))bigImg(im.src,im.alt);});
 // 🖼 תמונות (08/11/2026) — דגם בכרטיס, חומר במלאי. נטענות מהשרת (?img=) פעם אחת לכל מועד (v) ונשמרות בזיכרון,
 // כך שהרענון כל דקה לא טוען שוב. לחיצה = הגדלה

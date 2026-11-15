@@ -739,6 +739,7 @@ function _incShipRows(){
   (S.products||[]).forEach(p=>{
     const pr=dnUnitPrice(p);
     prodShipments(p).forEach((s,i)=>{
+      if(isSmpSh(s))return; // 👕 דגם לאישור — לא הכנסה
       const qty=+s.total||0,pack=shipPackCost(s),work=pr.missing?0:pr.unit*qty;
       if(!(qty>0)&&!pack)return;
       const inv=_pfList.length?dnInvOf({p,s,i}):null;

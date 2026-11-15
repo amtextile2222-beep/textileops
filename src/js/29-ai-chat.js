@@ -114,8 +114,8 @@ function _aiMoneyText(openRows){
       return `${m}: ${r.length} תעודות, ${r.reduce((t,x)=>t+(+x.s.total||0),0)} יח', ${ils(r.reduce((t,x)=>t+x.work+x.pack,0))}`+
         (r.some(x=>x.noPrice)?` (בלי מחיר: ${[...new Set(r.filter(x=>x.noPrice).map(x=>x.p.prod))].join(', ')})`:'');};
     const op=openRows.map(({p,st})=>{const pr=dnUnitPrice(p),q=st.qty||estQtyOf(p),est=!st.qty&&q>0;
-      const out=prodShipments(p).reduce((t,s)=>t+(+s.total||0)+shUnsewn(s),0),rem=Math.max(0,q-out);
-      return {p,pr,rem,est,v:pr.missing?0:rem*pr.unit,last:prodShipments(p).map(s=>String(s.date||'').slice(0,10)).filter(Boolean).pop()||''};});
+      const out=shipsReal(p).reduce((t,s)=>t+(+s.total||0)+shUnsewn(s),0),rem=Math.max(0,q-out);
+      return {p,pr,rem,est,v:pr.missing?0:rem*pr.unit,last:shipsReal(p).map(s=>String(s.date||'').slice(0,10)).filter(Boolean).pop()||''};});
     // הזמנה "פתוחה" בלוח שכל הכמות שלה כבר בתעודה (מוכן ליציאה) — 0 בפתוחות כי היא כבר בסכום התעודות.
     // בלי השורה הזו העוזר הסיק שהיא חסרת מחיר (נצפה 11/11: 00205 #3)
     const inDn=op.filter(o=>o.rem===0&&o.last).map(o=>{const no=parseInt(o.p.orderNo,10)||0;return `${o.p.prod}${no?' #'+no:''} (תעודה ${o.last})`;});

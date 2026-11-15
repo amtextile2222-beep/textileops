@@ -18,13 +18,13 @@ const GRADE_A='א',GRADE_B='ב';
 // והמספר הישן נשאר על שתיהן.
 // `shippedQty` נשאר **סכום כל המשלוחים** כדי שדוח הרווח וכל שאר הקוראים לא ישתנו.
 // 🔗 עבר ל-functions/shared/calc.js (משותף לשרת): prodShipments
-function shipmentsTotal(p){return prodShipments(p).reduce((t,s)=>t+(+s.total||0),0);}
+function shipmentsTotal(p){return shipsReal(p).reduce((t,s)=>t+(+s.total||0),0);} // 👕 בלי דגמים לאישור
 // כמה כבר יצא לכל מידה+צבע (שני הסוגים יחד) — הבסיס לחישוב היתרה בסריקה הבאה
 // exclude = משלוח שלא נספר. נדרש בעריכת תעודה: "כבר יצא" חייב להיות **בלי**
 // התעודה שעורכים, אחרת הכמות שלה הייתה נספרת גם כיתרה שנותרה וגם כיתרה שיצאה.
 function shippedCellMap(p,exclude){
   const m=new Map();
-  prodShipments(p).forEach(s=>{if(exclude&&s===exclude)return;(s.rows||[]).forEach(r=>{
+  prodShipments(p).forEach(s=>{if((exclude&&s===exclude)||isSmpSh(s))return;(s.rows||[]).forEach(r=>{ // 👕 דגם חוזר — לא מקטין את היתרה
     const k=String(r.size??'')+'|'+String(r.color??'');
     m.set(k,(m.get(k)||0)+(parseInt(r.qty)||0));
   });});
@@ -34,7 +34,7 @@ function shippedCellMap(p,exclude){
 // ולא על משלוח מסוים יראה את התמונה המצטברת
 function mergeShipRows(list){
   const m=new Map();
-  list.forEach(s=>(s.rows||[]).forEach(r=>{
+  list.filter(s=>!isSmpSh(s)).forEach(s=>(s.rows||[]).forEach(r=>{ // 👕 דגם לאישור — לא ב"יצא"
     const k=String(r.size??'')+'|'+String(r.color??'')+'|'+(r.grade||GRADE_A);
     m.set(k,(m.get(k)||0)+(parseInt(r.qty)||0));
   }));
@@ -165,6 +165,12 @@ const _packsMatchN=(u,q,x,o)=>[q,q+x].some(v=>u===v||u===v+o);
 const _packsMatch=(u,q)=>_packsMatchN(u,q,_shipUnsewnSum(),_shipOrigVal());
 // 👕 דגם מקורי של הלקוח שחוזר עם הסחורה — מודפס בתעודה בלבד, לא ביחידות ולא בהתחשבנות
 const _shipOrigVal=()=>Math.max(0,parseInt(document.getElementById('ship-orig')?.value)||0);
+// 👕 דגם לאישור (15/11/2026) — הדגם חוזר למפעל ויוצא שוב עם כל הכמות ⇒ התעודה לא ב"יצא" ולא בהתחשבנות (isSmpSh)
+const _shipSmpVal=()=>!!document.getElementById('ship-smp')?.checked;
+const shipSmpHtml=on=>`<label style="display:flex;align-items:flex-start;gap:7px;font-size:12px;font-weight:600;margin-top:10px;cursor:pointer;padding:7px 9px;border-radius:8px;background:var(--blue-bg,#dbeafe);color:var(--blue-txt,#1e40af)">
+      <input type="checkbox" id="ship-smp"${on?' checked':''} style="width:16px;height:16px;flex-shrink:0;margin-top:1px"/>
+      <span>👕 דגם לאישור — חוזר למפעל<div style="font-size:10px;font-weight:400;margin-top:2px">לא נספר ב"יצא" ולא בהתחשבנות. הלקוח רואה בדף המעקב מתי נשלח ומאשר את הדגם.</div></span>
+    </label>`;
 const shipOrigHtml=v=>`<div style="margin-top:9px;display:flex;align-items:center;gap:8px">
       <label style="font-size:12px;font-weight:600;flex:1">👕 דגם מקורי שחוזר ללקוח <span style="font-size:10px;font-weight:400;color:var(--txt3)">(מודפס בתעודה, לא בהתחשבנות)</span></label>
       <input id="ship-orig" type="number" inputmode="numeric" min="0" value="${v||''}" placeholder="0" oninput="shipPackTotal()" style="width:70px;font-size:13px;padding:6px;border-radius:8px;border:1px solid var(--brd);background:var(--bg);color:var(--txt)"/>
@@ -486,6 +492,7 @@ function openShipModal(cust,prod,orderNo){
       <input id="ship-note" type="text" maxlength="140" placeholder="לא חובה — תודפס בתעודה" style="width:100%;margin-top:4px;font-size:13px;padding:7px;border-radius:8px;border:1px solid var(--brd);background:var(--bg);color:var(--txt)"/>
     </div>
     ${shipOrigHtml(0)}
+    ${shipSmpHtml(false)}
     <label style="display:flex;align-items:center;gap:7px;font-size:12px;font-weight:600;margin-top:10px;cursor:pointer">
       <input type="checkbox" id="ship-autoprint"${S.settings?.dnAutoPrint===false?'':' checked'} style="width:16px;height:16px"/>
       🖨 הדפס את התעודה מיד אחרי האישור
@@ -580,7 +587,7 @@ async function nextProformaNo(rec){
   return out;
 }
 async function printProforma(onlySel){
-  const f=dnFiltered(!!onlySel);
+  const f=dnFiltered(!!onlySel,true); // 👕 בלי דגמים לאישור
   if(!f.rows.length){showToast('⚠ אין תעודות לחשבונית','var(--red-txt)');return;}
   const custs=dnCustomers(f.rows);
   // חשבונית היא ללקוח אחד — מסמך עם כמה לקוחות אי אפשר למסור לאף אחד מהם

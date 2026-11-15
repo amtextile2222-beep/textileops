@@ -552,6 +552,7 @@ async function confirmShip(){
   const packMode=packModeOf(mats);
   const dnote=(document.getElementById('ship-note')?.value||'').trim();
   const orig=_shipOrigVal();
+  const smp=_shipSmpVal(); // 👕 דגם לאישור
   const autoPrint=!!document.getElementById('ship-autoprint')?.checked;
   // ♻ שחזור: המספר והתאריך המקוריים · 📅 בדיעבד (09/10, מנהל): תאריך שנבחר, ומספר — הבא בתור או בלי
   let rs=_shipRestore?{..._shipRestore,restore:true}:null;
@@ -587,22 +588,25 @@ async function confirmShip(){
   // הרשימה בלעדיהם הייתה מוחקת בשקט את חיוב האריזה של כל תעודה קודמת.
   const list=prodShipments(p).map(s=>({...s,no:+s.no||0,date:s.date||'',at:s.at||'',rows:s.rows||[],total:+s.total||0,packs:Array.isArray(s.packs)?s.packs:[],note:s.note||'',packMode:s.packMode||'',mats:Array.isArray(s.mats)?s.mats:[]}));
   const no=rs&&rs.no!=null?rs.no:await nextDeliveryNoteNo();
-  list.push({no:no||0,date,at:now.toISOString(),rows,total:qty,packs,note:dnote,packMode,mats,...(orig?{orig}:{}),...(outer.length?{outer}:{}),
+  list.push({no:no||0,date,at:now.toISOString(),rows,total:qty,packs,note:dnote,packMode,mats,...(orig?{orig}:{}),...(smp?{smp:true}:{}),...(outer.length?{outer}:{}),
     ...(rs?.restore?{restoredAt:now.toISOString(),restoredBy:S.user?.name||''}:{}),
     ...(rs?.past?{backdatedAt:now.toISOString(),backdatedBy:S.user?.name||''}:{})});
   p.shipments=list;
+  if(smp)_shipRecalc(p,list); // 👕 דגם לאישור — לא נוגע ב"יצא", בתאריך היציאה ובשלב shipped
+  else{
   // הסך המצטבר נשמר בשדות הוותיקים כדי שדוח הרווח וכל שאר הקוראים לא ישתנו
-  p.shippedQty=list.reduce((t,s)=>t+(+s.total||0),0);
+  p.shippedQty=shipsReal(p).reduce((t,s)=>t+(+s.total||0),0);
   p.shippedRows=mergeShipRows(list);
   if(!rs||!p.shippedAt)p.shippedAt=now.toISOString();
   // בשחזור — dnNo נשאר המספר הגבוה (הוא "התעודה האחרונה" של ההזמנה), והתאריך לא זז אחורה
   if(rs){p.dnNo=Math.max(parseInt(p.dnNo,10)||0,no);if(!p.dnDate)p.dnDate=date;}
   else{p.dnNo=no||p.dnNo;p.dnDate=date;}
-  const note='משלוח '+list.length+': '+qty+" יח' · סה\"כ "+p.shippedQty+" יח'";
+  const note='משלוח '+shipsReal(p).length+': '+qty+" יח' · סה\"כ "+p.shippedQty+" יח'";
   const ex=p.stageLog.find(s=>s.id==='shipped');
   if(ex){if(!rs){ex.date=date;ex.time=time;}ex.note=note;ex.auto=true;}
   else p.stageLog.push({id:'shipped',date,time,note,auto:true});
   p.stageLog.sort((a,b)=>PROD_STAGES.findIndex(x=>x.id===a.id)-PROD_STAGES.findIndex(x=>x.id===b.id));
+  }
   // העדפת ההדפסה היא **פר מכשיר** ונשמרת מקומית בלבד: במסך מגע ליד הסורק רוצים
   // נייר מיד, ובנייד של המנהל דיאלוג הדפסה בכל סריקה רק מפריע
   S.settings.dnAutoPrint=autoPrint;
@@ -610,7 +614,7 @@ async function confirmShip(){
   if(S.fbConnected)try{await fbSet('products',p.id,{...p});}catch(e){}
   pstkAlert(_stk);
   closeShipModal();
-  showToast((rs?.restore?'♻ תעודה '+String(no).padStart(4,'0')+' שוחזרה':rs?.past?'📅 משלוח מ-'+date.slice(8,10)+'/'+date.slice(5,7)+(no?' · תעודה '+String(no).padStart(4,'0'):' · בלי מספר'):'✅ תעודת משלוח '+String(no||0).padStart(4,'0'))+' · '+qty+" יח'"+(list.length>1?' (משלוח '+list.length+')':''));
+  showToast((smp?'👕 דגם לאישור · ':'')+(rs?.restore?'♻ תעודה '+String(no).padStart(4,'0')+' שוחזרה':rs?.past?'📅 משלוח מ-'+date.slice(8,10)+'/'+date.slice(5,7)+(no?' · תעודה '+String(no).padStart(4,'0'):' · בלי מספר'):'✅ תעודת משלוח '+String(no||0).padStart(4,'0'))+' · '+qty+" יח'"+(list.length>1?' (משלוח '+list.length+')':''));
   try{renderDNotes();}catch(e){}
   try{buildStageReport();}catch(e){}
   try{renderProducts();}catch(e){}

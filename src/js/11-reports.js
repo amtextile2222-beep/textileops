@@ -733,7 +733,7 @@ async function pipeDepart(pid,on){
   // "רק הישנה" = departedAt על מועד התעודה הזו — יציאה נקבעת פר תעודה לפי at ≤ departedAt (pipeStateOf)
   let cut=on?new Date().toISOString():null;
   const depT=p.departedAt?Date.parse(p.departedAt):NaN;
-  const pend=on?prodShipments(p).filter(s=>{const d=String(s.date||'').slice(0,10);if(d&&d<PIPE_DEPART_FROM)return false;return isNaN(depT)||_shipAtMs(s)>depT;})
+  const pend=on?shipsReal(p).filter(s=>{const d=String(s.date||'').slice(0,10);if(d&&d<PIPE_DEPART_FROM)return false;return isNaN(depT)||_shipAtMs(s)>depT;})
     .sort((a,b)=>(_shipAtMs(a)||0)-(_shipAtMs(b)||0)):[];
   if(pend.length>1&&!isNaN(_shipAtMs(pend[0]))){
     const u=s=>(+s.total||0)+shUnsewn(s),no=s=>String(s.no||'').padStart(4,'0');

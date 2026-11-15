@@ -240,13 +240,9 @@ async function delShipment(pid,idx){
     prod:p.prod||'',name:p.name||'',orderNo:parseInt(p.orderNo,10)||0,total:+s.total||0,
     by:S.user?.id||'',byName:S.user?.name||S.user?.user||''});
   const left=list.filter((_,k)=>k!==idx);
-  p.shipments=left;
-  p.shippedQty=left.reduce((t,x)=>t+(+x.total||0),0);
-  p.shippedRows=mergeShipRows(left);
-  p.dnNo=left.length?left[left.length-1].no:0;
-  if(!left.length){delete p.shippedAt;p.shippedQty=null;p.stageLog=(p.stageLog||[]).filter(e=>e.id!=='shipped');}
+  _shipRecalc(p,left); // 👕 כולל דגמים לאישור — "יצא" ושלב shipped רק מתעודות רגילות
   saveLS();
-  if(S.fbConnected)try{await fbReplaceFields('products',p.id,{shipments:left,shippedQty:p.shippedQty,shippedRows:p.shippedRows,dnNo:p.dnNo,stageLog:p.stageLog||[]});}catch(e){}
+  if(S.fbConnected)try{await fbReplaceFields('products',p.id,{shipments:left,shippedQty:p.shippedQty,shippedRows:p.shippedRows,dnNo:p.dnNo,stageLog:p.stageLog||[],shippedAt:p.shippedAt||null});}catch(e){}
   showToast('🗑 המשלוח נמחק');
   try{buildStageReport();}catch(e){}
   try{renderProducts();}catch(e){}
@@ -256,16 +252,18 @@ async function delShipment(pid,idx){
 // על ההזמנה **האחרונה** של הדגם (5215: ה-81 של #002 נרשמו על #003). התעודה עוברת כמו שהיא —
 // מספר, תאריך, כמויות, אריזה — ושתי ההזמנות מחושבות מחדש. לא נרשם ביטול: המספר לא נשרף.
 // ⚠️ תעודה בלי מספר מזוהה בחשבונית ידנית לפי מוצר|מיקום — להעביר **לפני** סימון החשבונית.
+// 👕 (15/11/2026) "יצא", תאריך היציאה ושלב shipped — רק מתעודות רגילות; דגם לאישור נשאר במאגר בלבד
 function _shipRecalc(p,list){
   p.shipments=list;
-  p.shippedQty=list.length?list.reduce((t,x)=>t+(+x.total||0),0):null;
+  const real=list.filter(x=>!isSmpSh(x));
+  p.shippedQty=real.length?real.reduce((t,x)=>t+(+x.total||0),0):null;
   p.shippedRows=mergeShipRows(list);
   p.dnNo=list.reduce((m,x)=>Math.max(m,+x.no||0),0);
   if(!Array.isArray(p.stageLog))p.stageLog=[];
-  if(!list.length){delete p.shippedAt;p.stageLog=p.stageLog.filter(e=>e.id!=='shipped');return;}
-  const last=list.reduce((a,x)=>String(x.date||'')>String(a.date||'')?x:a,list[0]);
+  if(!real.length){delete p.shippedAt;p.stageLog=p.stageLog.filter(e=>e.id!=='shipped');return;}
+  const last=real.reduce((a,x)=>String(x.date||'')>String(a.date||'')?x:a,real[0]);
   if(!p.shippedAt)p.shippedAt=last.at||new Date().toISOString();
-  const note='משלוח '+list.length+': '+(+list[list.length-1].total||0)+" יח' · סה\"כ "+p.shippedQty+" יח'";
+  const note='משלוח '+real.length+': '+(+real[real.length-1].total||0)+" יח' · סה\"כ "+p.shippedQty+" יח'";
   const ex=p.stageLog.find(e=>e.id==='shipped');
   if(ex){ex.note=note;ex.auto=true;}
   else{p.stageLog.push({id:'shipped',date:last.date||todayStr(),time:'',note,auto:true});
@@ -359,6 +357,7 @@ function editShipment(pid,idx){
       <input id="ship-note" type="text" maxlength="140" value="${esc(s.note||'')}" placeholder="לא חובה — תודפס בתעודה" style="width:100%;margin-top:4px;font-size:13px;padding:7px;border-radius:8px;border:1px solid var(--brd);background:var(--bg);color:var(--txt)"/>
     </div>
     ${shipOrigHtml(+s.orig||0)}
+    ${shipSmpHtml(!!s.smp)}
     <label style="display:flex;align-items:center;gap:7px;font-size:12px;font-weight:600;margin-top:10px;cursor:pointer">
       <input type="checkbox" id="esh-print" checked style="width:16px;height:16px"/>
       🖨 הדפס את התעודה המתוקנת אחרי השמירה
@@ -383,6 +382,7 @@ async function saveShipEdit(pid,idx){
   const outer=_shipOuterCollect();
   const note=(document.getElementById('ship-note')?.value||'').trim();
   const orig=_shipOrigVal();
+  const smp=_shipSmpVal(); // 👕
   const doPrint=!!document.getElementById('esh-print')?.checked;
   const prev=+old.total||0;
   if(!qty&&!await showConfirm('תעודה ריקה','לא נותרה שום כמות בתעודה. לשמור בכל זאת?','שמור','חזור'))return;
@@ -400,19 +400,16 @@ async function saveShipEdit(pid,idx){
       mats:Array.isArray(x.mats)?x.mats:[],edits:Array.isArray(x.edits)?x.edits:[]};
     if(k!==idx)return base;
     // 🔒 no/date/at לא נגזרים מחדש — הם מזהים את הנייר שאצל הלקוח
-    return {...base,rows,total:qty,packs,note,orig,outer,
+    const r={...base,rows,total:qty,packs,note,orig,outer,smp,
       edits:base.edits.concat([{at:new Date().toISOString(),by:S.user?.id||'',
-        byName:S.user?.name||S.user?.user||'',prevTotal:prev,newTotal:qty}]).slice(-20)};
+        byName:S.user?.name||S.user?.user||'',prevTotal:prev,newTotal:qty,...(!!x.smp!==smp?{smp}:{})}]).slice(-20)};
+    if(!smp)delete r.smp;
+    return r;
   });
-  p.shipments=list;
-  p.shippedQty=list.reduce((t,x)=>t+(+x.total||0),0);
-  p.shippedRows=mergeShipRows(list);
-  // שורת היומן בכרטיס המוצר מתארת את המשלוח האחרון ואת הסך — שניהם זזו
-  const lastSh=list[list.length-1]||{};
-  const ex=(p.stageLog||[]).find(x=>x.id==='shipped');
-  if(ex)ex.note='משלוח '+list.length+': '+(+lastSh.total||0)+" יח' · סה\"כ "+p.shippedQty+" יח'";
+  // 👕 סימון/ביטול "דגם לאישור" משנה את "יצא" ואת שלב shipped ⇒ חישוב מלא (כמו מחיקה/העברה)
+  _shipRecalc(p,list);
   saveLS();
-  if(S.fbConnected)try{await fbReplaceFields('products',p.id,{shipments:list,shippedQty:p.shippedQty,shippedRows:p.shippedRows,stageLog:p.stageLog||[]});}catch(e){}
+  if(S.fbConnected)try{await fbReplaceFields('products',p.id,{shipments:list,shippedQty:p.shippedQty,shippedRows:p.shippedRows,dnNo:p.dnNo,stageLog:p.stageLog||[],shippedAt:p.shippedAt||null});}catch(e){}
   document.getElementById('esh-wrap')?.remove();
   showToast('✅ תעודה '+String(old.no||0).padStart(4,'0')+' תוקנה · '+prev+' ← '+qty+" יח'",'var(--green-txt)',4000);
   try{buildStageReport();}catch(e){}
@@ -547,9 +544,10 @@ function showShipments(pid){
   wrap.innerHTML=`<div style="background:var(--card);border-radius:14px;padding:20px;max-width:400px;width:100%;box-shadow:0 10px 40px rgba(0,0,0,.3);margin:auto">
     <div style="font-size:16px;font-weight:800;margin-bottom:2px">🚚 משלוחים</div>
     <div style="font-size:12px;color:var(--txt3);margin-bottom:10px">${esc(p.name||p.prod)} · סה"כ יצא ${shipmentsTotal(p)} מתוך ${_prodQty(p)||'?'} יח'</div>
+    ${smpStatusHtml(p)}
     ${list.map((s,i)=>`<div class="row" style="align-items:center">
       <span class="bc-seg" style="background:var(--green-bg,#dcfce7);color:var(--green-txt,#16a34a);font-weight:700;flex-shrink:0">${s.no?String(s.no).padStart(4,'0'):'—'}</span>
-      <span style="flex:1;font-size:12px;margin-right:8px">${shipEditMark(s)}${heDate(s.date)} · <b>${s.total}</b> יח'${packsCount(s.packs)?' · 📦 '+packsCount(s.packs):''}${outerTxt(s.outer)?' · 🛍 '+esc(outerTxt(s.outer)):''}${s.note?' · 📝':''}${shipPackCost(s)&&canSeePackPrice()?' · <span style="color:var(--green-txt,#16a34a);font-weight:700">'+dnMoney(shipPackCost(s))+'</span>':''}</span>
+      <span style="flex:1;font-size:12px;margin-right:8px">${s.smp?'<b style="color:var(--blue-txt,#1e40af)">👕 דגם לאישור</b> · ':''}${shipEditMark(s)}${heDate(s.date)} · <b>${s.total}</b> יח'${packsCount(s.packs)?' · 📦 '+packsCount(s.packs):''}${outerTxt(s.outer)?' · 🛍 '+esc(outerTxt(s.outer)):''}${s.note?' · 📝':''}${shipPackCost(s)&&canSeePackPrice()?' · <span style="color:var(--green-txt,#16a34a);font-weight:700">'+dnMoney(shipPackCost(s))+'</span>':''}</span>
       <button class="btn" style="font-size:11px;padding:4px 8px" title="עריכת כמויות, אריזה והערה — המספר והתאריך לא משתנים" onclick="editShipment('${escj(pid)}',${i})">✏️</button>
       <button class="btn" style="font-size:11px;padding:4px 8px" title="עריכת חומר אריזה (קולב/ניילון/צלופן)" onclick="editShipMats('${escj(pid)}',${i})">📦</button>
       <button class="btn" style="font-size:11px;padding:4px 9px" onclick="printDeliveryNote('${escj(pid)}',${i})">📄 הדפס</button>
@@ -559,6 +557,32 @@ function showShipments(pid){
     <button class="btn" style="width:100%;margin-top:12px;font-size:13px" onclick="document.getElementById('shl-wrap').remove()">סגור</button>
   </div>`;
   document.body.appendChild(wrap);
+}
+// ─── 👕 דגם לאישור (15/11/2026) ───────────────────────────────
+// תעודות smp = דגמים שנשלחו לבדיקה. האישור: products.smpOk={at,by,byName,via} — הלקוח בדף המעקב (via:'cust', השרת)
+// או המנהל כאן (via:'app'). ביטול = null
+function smpStatusHtml(p){
+  const l=shipsSmp(p);if(!l.length&&!p.smpOk)return'';
+  const dm=d=>d?String(d).slice(8,10)+'/'+String(d).slice(5,7):'';
+  const ok=p.smpOk&&+p.smpOk.at?p.smpOk:null,od=ok?new Date(+ok.at):null;
+  const who=ok?(ok.via==='cust'?'הלקוח'+(ok.by?' ('+esc(ok.by)+')':''):esc(ok.byName||'המפעל')):'';
+  const mgr=S.user?.role==='manager';
+  return `<div style="font-size:12px;padding:7px 9px;border-radius:8px;margin-bottom:8px;background:${ok?'var(--green-bg,#dcfce7)':'var(--blue-bg,#dbeafe)'};color:${ok?'var(--green-txt,#16a34a)':'var(--blue-txt,#1e40af)'}">
+    👕 <b>דגם לאישור:</b> ${l.map(s=>(+s.total||0)+" יח' · "+dm(s.date)).join(' | ')||'—'}
+    <div style="margin-top:3px;display:flex;align-items:center;gap:6px;flex-wrap:wrap">${ok?`<b>✅ אושר ${od.getDate()}/${od.getMonth()+1}</b> · ${who}`:'<b>⏳ ממתין לאישור הלקוח</b>'}
+      ${mgr?`<button class="btn" style="font-size:11px;padding:3px 8px;margin-inline-start:auto" onclick="smpApprove('${escj(p.id)}',${ok?'false':'true'})">${ok?'↺ בטל אישור':'✅ סמן כמאושר'}</button>`:''}</div>
+  </div>`;
+}
+async function smpApprove(pid,on){
+  if(S.user?.role!=='manager')return;
+  const p=(S.products||[]).find(x=>x.id===pid);if(!p)return;
+  if(!await showConfirm(on?'👕 הדגם אושר':'ביטול אישור',on?'לסמן שהלקוח אישר את הדגם של '+(p.name||p.prod)+'?':'לבטל את אישור הדגם? גם הלקוח יראה שוב "ממתין לאישור".',on?'✅ אושר':'בטל אישור','חזור'))return;
+  p.smpOk=on?{at:Date.now(),by:S.user?.id||'',byName:S.user?.name||S.user?.user||'',via:'app'}:null;
+  saveLS();
+  if(S.fbConnected)try{await fbReplaceFields('products',p.id,{smpOk:p.smpOk});}catch(e){}
+  showToast(on?'✅ הדגם סומן כמאושר':'↺ האישור בוטל');
+  if(document.getElementById('shl-wrap'))showShipments(pid);
+  try{renderDNotes();}catch(e){}
 }
 // ─── 📄 לשונית תעודות משלוח ───────────────────────────────────
 // עד כאן תעודה הייתה נגישה **רק דרך כרטיס המוצר שלה**: לקוח שהתקשר עם מספר
@@ -691,7 +715,7 @@ function dnPayCell(r){
 async function dnManualInvoice(){
   if(!_canPricing()){showToast('⚠ אין הרשאה','var(--red-txt)');return;}
   if(!db||!S.fbConnected){showToast('⚠ אין חיבור','var(--red-txt)');return;}
-  const f=dnFiltered(true);
+  const f=dnFiltered(true,true); // 👕 בלי דגמים לאישור
   if(!f.rows.length){showToast('⚠ סמן ☑ קודם את התעודות שחויבו בחשבונית הידנית','var(--amber-txt)',5000);return;}
   const custs=dnCustomers(f.rows);
   if(custs.length!==1){showToast('⚠ חשבונית היא ללקוח אחד — סמן תעודות של לקוח אחד בלבד','var(--red-txt)',5000);return;}
