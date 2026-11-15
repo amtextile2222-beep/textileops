@@ -82,6 +82,22 @@ const t = (name, cond) => { if (cond) { pass++; console.log('✓', name); } else
   t('דגם מתוקן אחרי "לא אושר" ⇒ שוב פתוח', st.open && st.dec.k === 'no');
   pp.smpOk = { at: Date.parse('2099-02-01T00:00:00Z') };
   t('אישור אחרי הדגם המתוקן ⇒ סגור, אושר', !calc.smpState(pp).open && calc.smpState(pp).dec.k === 'ok');
+  // 🔄 trackBump: שינוי במוצר ⇒ כל העותקים בונים מחדש
+  await call('GET', custTok); // מטמון טרי ללקוח 01
+  const before = (await db.doc('products/p2').get()).data();
+  const after = { ...before, shipments: [smpSh] };
+  await db.doc('products/p2').set(after);
+  r = await call('GET', custTok);
+  t('בלי bump ⇒ המטמון הישן', !(r.j.orders.find(o => o.pid === 'p2').smp));
+  const snap = (d, ex = true) => ({ exists: ex, data: () => d });
+  await new Promise(res => setTimeout(res, 5));
+  await fns.trackBumpOnProduct.run({ before: snap({ ...before, stageLog: [1] }), after: snap({ ...before, stageLog: [1, 2] }) }, {});
+  t('שינוי stageLog בלבד ⇒ בלי bump', !((await db.doc('adminSettings/trackBump').get()).data() || {})['01']);
+  await fns.trackBumpOnProduct.run({ before: snap(before), after: snap(after) }, {});
+  t('שינוי תעודות ⇒ bump ללקוח', +((await db.doc('adminSettings/trackBump').get()).data() || {})['01'] > 0);
+  r = await call('GET', custTok);
+  const o2b = r.j.orders.find(o => o.pid === 'p2');
+  t('אחרי bump ⇒ נבנה מחדש (הדגם מופיע)', o2b && o2b.smp && o2b.smp.length === 1);
   console.log(`\n${pass} עברו, ${fail} נכשלו`);
   process.exit(fail ? 1 : 0);
 })().catch(e => { console.error(e); process.exit(1); });

@@ -2102,17 +2102,35 @@ async function trackBuild(cust) {
   console.log(`trackBuild ${cust}: ${hRead} hist read, ${tasks.length} tasks, ${codes.length} models, ${ids.length} saved, ${Date.now() - t0} ms`);
   const body = { name: (nS.data() || {})[cust] || '', at: new Date().toISOString(), orders,
     stock: trackPackStock(cust, prods, kS.data() || {}) };
-  _trackCache.set(cust, { at: Date.now(), body, prods });
+  _trackCache.set(cust, { at: t0, body, prods }); // t0 — שינוי שנרשם (trackBump) בזמן הבנייה יגרום לבנייה נוספת
   return body;
 }
 // 💰 (28/10/2026) במטמון: רק מסמך המלאי נקרא מחדש, והמלאי מחושב מהמוצרים שבמטמון — עד 23/10 נקראו כל המוצרים
 // של הלקוח בכל רענון (כל דקה לכל דף פתוח) ⇒ רוב 21M הקריאות של אוקטובר. משלוח חדש משפיע על המלאי תוך 3 דק'.
+// 🔄 (15/11/2026) לכל עותק של הפונקציה מטמון משלו ⇒ "רענן עכשיו" / אישור דגם עדכנו רק עותק אחד, ועותק אחר המשיך
+// להחזיר את המצב הישן עד 15 דק'. adminSettings/trackBump = {לקוח: מתי השתנה} (נכתב ב-trackBumpOnProduct) —
+// נקרא יחד עם המלאי בכל בקשה (קריאה אחת נוספת), ושינוי אחרי בניית המטמון ⇒ בנייה מחדש בכל העותקים
 async function trackBody(cust) {
   const hit = _trackCache.get(cust);
   if (!hit || Date.now() - hit.at >= TRACK_CACHE_MS) return trackBuild(cust);
-  const hk = await db.doc('appSettings/packStock').get();
+  const [hk, bk] = await Promise.all([db.doc('appSettings/packStock').get(), db.doc('adminSettings/trackBump').get()]);
+  if ((+((bk.data() || {})[cust]) || 0) > hit.at) return trackBuild(cust);
   return { ...hit.body, stock: trackPackStock(cust, hit.prods, hk.data() || {}) };
 }
+// 🔄 שינוי במוצר שדף הלקוח מציג ⇒ trackBump[לקוח] = עכשיו. רק שדות שמשתנים ידנית (תעודות ודגמים, יציאה, חוסרים,
+// דחיפה/סימון בלוח) — לא stageLog, שמשתנה בכל סריקה (המשימות עצמן נקראות ממילא בבנייה כל 15 דק')
+const TRACK_BUMP_KEYS = ['shipments', 'smpOk', 'smpNo', 'departedAt', 'shortages', 'pipeOverride', 'stepMarks', 'orderNo', 'name'];
+exports.trackBumpOnProduct = functions.firestore.document('products/{id}').onWrite(async (change) => {
+  const a = change.before.exists ? change.before.data() : null, b = change.after.exists ? change.after.data() : null;
+  const cust = String((b && b.cust) || (a && a.cust) || '');
+  if (!/^\d{1,4}$/.test(cust)) return null;
+  const j = v => JSON.stringify(v === undefined ? null : v);
+  if (a && b && String(a.cust) === String(b.cust) && TRACK_BUMP_KEYS.every(k => j(a[k]) === j(b[k]))) return null;
+  const at = Date.now(), upd = { [cust]: at };
+  if (a && b && String(a.cust) !== String(b.cust) && /^\d{1,4}$/.test(String(a.cust))) upd[String(a.cust)] = at; // הועבר ללקוח אחר
+  await db.doc('adminSettings/trackBump').set(upd, { merge: true });
+  return null;
+});
 
 // ⚡ 1GB: בדור הראשון המעבד גדל עם הזיכרון — עיבוד אלפי משימות על ברירת המחדל (256MB) לקח 11 שנ'
 // (נמדד 10/10/2026). רק לפונקציה הזו; נקראת לעיתים רחוקות, כך שהעלות זניחה
