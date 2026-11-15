@@ -575,7 +575,7 @@ function smpStatusHtml(p){
     👕 <b>דגם לאישור:</b> ${l.map(s=>{const b=bk(s);return (+s.total||0)+" יח' · נשלח "+dm(s.date)+(b?' · ↩ חזר '+b.getDate()+'/'+(b.getMonth()+1):' · אצל הלקוח');}).join(' | ')||'—'}
     ${st.open&&dec&&dec.k==='no'?`<div style="margin-top:3px;color:var(--red-txt)">✖ הדגם הקודם לא אושר ${od.getDate()}/${od.getMonth()+1}${dec.why?': '+esc(dec.why):''}</div>`:''}
     <div style="margin-top:3px;display:flex;align-items:center;gap:6px;flex-wrap:wrap">${ok?`<b>✅ אושר ${od.getDate()}/${od.getMonth()+1}</b> · ${who}`:no?`<b>✖ לא אושר ${od.getDate()}/${od.getMonth()+1}</b> · ${who}`:'<b>⏳ ממתין להחלטת הלקוח</b>'}
-      ${mgr?`<span style="margin-inline-start:auto;display:flex;gap:4px;flex-wrap:wrap">${ok||no?btn('','↺ בטל החלטה'):btn('ok','✅ אושר')+btn('no','✖ לא אושר')}</span>`:''}</div>
+      ${mgr?`<span style="margin-inline-start:auto;display:flex;gap:4px;flex-wrap:wrap">${ok||no?btn('edit','✏️ תאריך / פרטים')+btn('','↺ בטל החלטה'):btn('ok','✅ אושר')+btn('no','✖ לא אושר')}</span>`:''}</div>
     ${no&&no.why?`<div style="margin-top:3px">📝 מה לתקן: ${esc(no.why)}</div>`:''}
   </div>`;
 }
@@ -644,21 +644,63 @@ async function smpKeep(pid,idxs,ask=true){
   showToast('✅ '+u+" יח' דגם נספרו כיצאו ללקוח (תעודה "+nos+')','var(--green-txt)',5000);
   return true;
 }
-// k: 'ok' אושר · 'no' לא אושר (שואל מה לתקן) · '' ביטול ההחלטה התקפה (חוזר ל"ממתין")
+// k: 'ok' אושר · 'no' לא אושר · 'edit' עריכת ההחלטה התקפה (תאריך / סוג / מה לתקן) · '' ביטול (חוזר ל"ממתין")
+// 📅 (15/11/2026) תאריך ההחלטה לבחירה: לא לפני הדגם האחרון שנשלח (אחרת הדגם נשאר "ממתין" — smpState), לא אחרי היום.
+// היום ⇒ השעה עכשיו; תאריך קודם ⇒ 20:00 באותו יום (אחרי תעודת הדגם של אותו יום)
 async function smpDecide(pid,k){
   if(S.user?.role!=='manager')return;
   const p=(S.products||[]).find(x=>x.id===pid);if(!p)return;
-  const nm=p.name||p.prod,who={at:Date.now(),by:S.user?.id||'',byName:S.user?.name||S.user?.user||'',via:'app'},upd={};
-  if(k==='ok'){if(!await showConfirm('👕 הדגם אושר','לסמן שהלקוח אישר את הדגם של '+nm+'?','✅ אושר','חזור'))return;upd.smpOk=who;}
-  else if(k==='no'){const why=(prompt('הדגם של '+nm+' לא אושר — מה צריך לתקן?\n(יוצג גם ללקוח בדף המעקב)')||'').trim();if(!why)return;upd.smpNo={...who,why:why.slice(0,300)};}
-  else{const d=smpState(p).dec;if(!d)return;
-    if(!await showConfirm('ביטול החלטה','לבטל את ה"'+(d.k==='ok'?'אושר':'לא אושר')+'"? גם הלקוח יראה שוב "ממתין".','בטל','חזור'))return;
-    upd[d.k==='ok'?'smpOk':'smpNo']=null;}
+  const st=smpState(p),cur=st.dec;
+  if(!k){if(!cur)return;
+    if(!await showConfirm('ביטול החלטה','לבטל את ה"'+(cur.k==='ok'?'אושר':'לא אושר')+'"? גם הלקוח יראה שוב "ממתין".','בטל','חזור'))return;
+    return _smpDecSave(p,{[cur.k==='ok'?'smpOk':'smpNo']:null},'↺ ההחלטה בוטלה');}
+  const ed=k==='edit'?cur:null;if(k==='edit'&&!cur)return;
+  const kind=ed?ed.k:k,today=todayStr();
+  const last=st.l.reduce((m,s)=>{const d=String(s.date||'').slice(0,10);return d>m?d:m;},'');
+  document.getElementById('smpd-wrap')?.remove();
+  const w=document.createElement('div');w.id='smpd-wrap';
+  w.style.cssText='position:fixed;inset:0;background:rgba(0,0,0,.5);display:flex;align-items:center;justify-content:center;z-index:10001;padding:16px';
+  w.onclick=e=>{if(e.target===w)w.remove();};
+  const rb=(v,t)=>`<label style="flex:1;display:flex;align-items:center;gap:6px;padding:7px 9px;border:1px solid var(--brd);border-radius:8px;cursor:pointer;font-size:13px;font-weight:700"><input type="radio" name="smpd-k" value="${v}"${kind===v?' checked':''} onchange="document.getElementById('smpd-whyw').style.display=this.value==='no'?'':'none'"/>${t}</label>`;
+  w.innerHTML=`<div style="background:var(--card);border-radius:14px;padding:18px;max-width:360px;width:100%;box-shadow:0 10px 40px rgba(0,0,0,.3)">
+    <div style="font-size:16px;font-weight:800;margin-bottom:2px">👕 החלטת הלקוח על הדגם</div>
+    <div style="font-size:12px;color:var(--txt3);margin-bottom:10px">${esc(p.name||p.prod)}${ed&&ed.via==='cust'?' · ⚠ ההחלטה נרשמה ע"י הלקוח'+(ed.by?' ('+esc(ed.by)+')':''):''}</div>
+    <div style="display:flex;gap:6px;margin-bottom:10px">${rb('ok','✅ אושר')}${rb('no','✖ לא אושר')}</div>
+    <label style="font-size:13px;font-weight:700">📅 תאריך ההחלטה</label>
+    <input id="smpd-d" type="date" value="${ed?_dISO(ed.at):today}" ${last?'min="'+last+'"':''} max="${today}" style="width:100%;margin:5px 0 10px;font-size:14px;padding:7px;border-radius:8px;border:1px solid var(--brd);background:var(--bg);color:var(--txt)"/>
+    <div id="smpd-whyw"${kind==='no'?'':' style="display:none"'}><label style="font-size:13px;font-weight:700">📝 מה צריך לתקן <span style="font-size:11px;font-weight:400;color:var(--txt3)">(יוצג גם ללקוח)</span></label>
+      <textarea id="smpd-why" maxlength="300" rows="3" style="width:100%;margin:5px 0 10px;font-size:13px;padding:7px;border-radius:8px;border:1px solid var(--brd);background:var(--bg);color:var(--txt);font-family:inherit">${esc(ed&&ed.why||'')}</textarea></div>
+    <div style="display:flex;gap:8px"><button class="btn primary" style="flex:1;font-size:14px" onclick="_smpDecDlgSave('${escj(pid)}',${ed?'true':'false'})">שמור</button>
+      <button class="btn" style="flex:1;font-size:14px" onclick="document.getElementById('smpd-wrap')?.remove()">ביטול</button></div>
+  </div>`;
+  document.body.appendChild(w);
+}
+async function _smpDecDlgSave(pid,isEdit){
+  const p=(S.products||[]).find(x=>x.id===pid);if(!p)return;
+  const st=smpState(p),cur=st.dec;
+  const kind=document.querySelector('input[name="smpd-k"]:checked')?.value||'ok',d=document.getElementById('smpd-d')?.value||'';
+  const why=(document.getElementById('smpd-why')?.value||'').trim().slice(0,300),today=todayStr();
+  const last=st.l.reduce((m,s)=>{const x=String(s.date||'').slice(0,10);return x>m?x:m;},'');
+  if(!/^\d{4}-\d{2}-\d{2}$/.test(d)||d>today){alert('תאריך לא תקין');return;}
+  if(last&&d<last){alert('התאריך לפני הדגם האחרון שנשלח ('+last.slice(8,10)+'/'+last.slice(5,7)+') — החלטה כזו היא על דגם קודם');return;}
+  if(kind==='no'&&!why){alert('כתבו מה צריך לתקן');return;}
+  // היום ⇒ עכשיו; תאריך קודם ⇒ 20:00. ההחלטה חייבת להיות אחרי מועד תעודת הדגם האחרונה (smpState)
+  const lastMs=st.l.reduce((m,s)=>Math.max(m,_shipMs(s)),0);
+  let at=d===today?Date.now():new Date(d+'T20:00:00').getTime();if(at<=lastMs)at=lastMs+60000;
+  const keep=isEdit&&cur?{by:cur.by||'',byName:cur.byName||'',via:cur.via||'app'}:{by:S.user?.id||'',byName:S.user?.name||S.user?.user||'',via:'app'};
+  const rec={...keep,at,...(kind==='no'?{why}:{}),...(isEdit?{editAt:Date.now(),editBy:S.user?.name||S.user?.user||''}:{})};
+  const upd={[kind==='ok'?'smpOk':'smpNo']:rec};
+  // עריכה שהחליפה סוג (אושר ⇄ לא אושר) ⇒ ההחלטה הקודמת נמחקת, אחרת שתיהן נשארות והמאוחרת קובעת
+  if(isEdit&&cur&&cur.k!==kind)upd[cur.k==='ok'?'smpOk':'smpNo']=null;
+  document.getElementById('smpd-wrap')?.remove();
+  await _smpDecSave(p,upd,kind==='ok'?'✅ הדגם אושר · '+d.slice(8,10)+'/'+d.slice(5,7):'✖ הדגם לא אושר · '+d.slice(8,10)+'/'+d.slice(5,7));
+}
+async function _smpDecSave(p,upd,msg){
   Object.assign(p,upd);
   saveLS();
   if(S.fbConnected)try{await fbReplaceFields('products',p.id,upd);}catch(e){}
-  showToast(k==='ok'?'✅ הדגם סומן כמאושר':k==='no'?'✖ הדגם סומן כלא מאושר':'↺ ההחלטה בוטלה');
-  if(document.getElementById('shl-wrap'))showShipments(pid);
+  showToast(msg);
+  if(document.getElementById('shl-wrap'))showShipments(p.id);
   try{renderDNotes();}catch(e){}
 }
 // ─── 📄 לשונית תעודות משלוח ───────────────────────────────────
