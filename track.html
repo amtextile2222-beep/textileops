@@ -88,6 +88,13 @@ h2{font-size:14px;color:var(--txt2);margin:20px 0 8px}
 .stk-sl li{margin:2px 0}
 .stk-sl b{font-weight:700}
 .ord-sum{margin-bottom:12px;font-size:13px;padding:10px 12px}
+/* 👕 דגמים שמחכים לאישור — בראש הדף (15/11/2026) */
+.smp-top{background:var(--blue-bg);color:var(--blue);border-radius:14px;padding:10px 12px;margin-bottom:12px;font-size:13px;box-shadow:var(--sh)}
+.smp-top h3{margin:0 0 6px;font-size:15px}
+.smp-go{display:block;width:100%;text-align:right;margin-top:6px;padding:8px 10px;border-radius:10px;border:1px solid var(--brd);background:var(--card);color:var(--txt);font:inherit;font-size:13px;cursor:pointer}
+.smp-go small{display:block;color:var(--txt3);font-size:12px;margin-top:2px}
+.smp-go em{font-style:normal;color:var(--acc);font-weight:700}
+#frsh{font:inherit;font-size:13px;font-weight:700;padding:4px 10px;border-radius:8px;border:1px solid var(--brd);background:var(--card);color:var(--txt);cursor:pointer;margin-inline-start:6px}
 /* .stkpdf = עיצוב הדף המודפס — גם ב-@media print (#stkpr) וגם בצילום ל-PDF באייפון */
 .stkpdf{color:#000;background:#fff;font-size:13px;padding:12mm;direction:rtl}
 .stkpdf h3{margin:0 0 2px;font-size:18px}.stkpdf .d{color:#555;margin-bottom:10px}
@@ -199,7 +206,7 @@ function card(o){
   const shHtml=sh.slice().sort((a,b)=>(!!a.res-!!b.res)||(b.at-a.at)).map(x=>x.res
     ?`<div class="short res">✓ ${esc(STAGES[x.st]||'')}: ${esc(x.txt)} · ${dm(x.at)} · נפתר ${dm(x.res)}</div>`
     :`<div class="short">⚠ חוסר · ${esc(STAGES[x.st]||'')}: ${esc(x.txt)} · ${dm(x.at)}</div>`).join('');
-  return `<div class="card">
+  return `<div class="card"${o.pid?' id="ord-'+esc(o.pid)+'"':''}>
     <div class="top">${imgTag(o.img,o.iv,'thumb',o.name||('דגם '+o.prod))}<div style="flex:1;min-width:0"><div class="nm">${esc(o.name||('דגם '+o.prod))}</div>
       <div class="meta">${no}${o.qty?o.qty+" יח' · ":o.est?'~'+o.est+" יח' (משוער) · ":''}${done?'נשלח '+fmtD(o.ship):'התקבל '+fmtD(o.entry)}</div></div>
       <span class="badge ${done?'done':''}">${esc(STAGES[o.stage]||'')}${pct!=null?' '+pct+'%':''}</span></div>
@@ -215,6 +222,17 @@ function card(o){
 }
 // 👕 דגם לאישור (15/11/2026): הדגמים שנשלחו לבדיקה (o.smp=[{d,n}]) + אישור. הלקוח מאשר בכפתור (POST approve) —
 // המפעל מקבל הודעה. בתצוגת מנהל — בלי כפתור (המנהל מסמן באפליקציה)
+// 👕 ריכוז בראש הדף (15/11/2026): כל הזמנה עם דגם שמחכה להחלטה — שם, מספר הזמנה, מה נשלח ומתי, ההערה מהתעודה.
+// לחיצה ⇒ גלילה לכרטיס (שם הכפתורים). שרת ישן (בלי so) ⇒ smp בלי smpOk
+function smpTop(orders){
+  const l=(orders||[]).filter(o=>Array.isArray(o.smp)&&o.smp.length&&('so' in o?o.so:!o.smpOk));
+  if(!l.length)return'';
+  return `<div class="smp-top"><h3>👕 ${l.length===1?'דגם אחד מחכה':l.length+' דגמים מחכים'} לאישור שלכם</h3>`+l.map(o=>{
+    const x=o.smp[o.smp.length-1],no=o.no?'הזמנה #'+String(o.no).padStart(3,'0')+' · ':'';
+    return `<button class="smp-go" data-go="${esc(o.pid||'')}"><b>${esc(o.name||('דגם '+o.prod))}</b>
+      <small>${no}${x.n} יח' · נשלח ${esc(fmtDM(x.d))}${x.b?' · ↩ חזר למפעל '+esc(fmtDM(x.b)):''}${o.sd&&o.sd.k==='no'?' · הדגם הקודם לא אושר':''}</small>
+      ${x.t?'<small>📝 '+esc(x.t)+'</small>':''}<small><em>לאישור / הערות ‹</em></small></button>`;}).join('')+'</div>';
+}
 // ✖ לא אושר (15/11/2026): o.sd = ההחלטה האחרונה {k,d,why}, o.so = מחכים להחלטה (שרת ישן — רק smpOk)
 function smpHtml(o){
   const l=Array.isArray(o.smp)?o.smp:[];if(!l.length&&!o.smpOk&&!o.sd)return'';
@@ -285,6 +303,7 @@ async function openCut(pid,nm){
 }
 appEl.addEventListener('click',e=>{const b=e.target.closest('.cutb');if(b)openCut(b.dataset.cut,b.dataset.nm);
   const sb=e.target.closest('.smpb');if(sb&&!sb.disabled)approveSmp(sb);
+  const go=e.target.closest('.smp-go');if(go){const c=$('ord-'+go.dataset.go);if(c)c.scrollIntoView({behavior:'smooth',block:'start'});}
   const im=e.target.closest('img[data-img][src]');if(im&&IMG_OK.test(im.src))bigImg(im.src,im.alt);});
 // 🖼 תמונות (08/11/2026) — דגם בכרטיס, חומר במלאי. נטענות מהשרת (?img=) פעם אחת לכל מועד (v) ונשמרות בזיכרון,
 // כך שהרענון כל דקה לא טוען שוב. לחיצה = הגדלה
@@ -418,11 +437,11 @@ async function finishLink(em,link){
   }
 }
 
-async function load(){
+async function load(fresh){
   const u=(AS?mAuth:auth).currentUser;if(!u||busy)return;
   busy=true;
   try{
-    const r=await fetch(URL_FN+(AS?'?cust='+encodeURIComponent(AS):''),{cache:'no-store',headers:{Authorization:'Bearer '+await u.getIdToken(),'X-Dev':devId()}});
+    const r=await fetch(URL_FN+(AS?'?cust='+encodeURIComponent(AS)+(fresh?'&fresh=1':''):''),{cache:'no-store',headers:{Authorization:'Bearer '+await u.getIdToken(),'X-Dev':devId()}});
     if(AS&&!r.ok){appEl.innerHTML=`<div class="msg">🔒 תצוגת לקוח זמינה למנהל בלבד.<br>היכנסו לאפליקציה כמנהל ופתחו שוב מחלון "פרטי לקוח".</div>`;return;}
     if(r.status===401){const j=await r.json().catch(()=>({}));if(j.error==='reauth')reauthMsg=true;await signOut(auth);return;}
     if(r.status===403){
@@ -494,6 +513,7 @@ async function load(){
         :stkList(stk)}<div class="meta" style="margin-top:8px">מתעדכן אוטומטית עם כל משלוח שיוצא אליכם.</div></div>`:'';
     appEl.closest('.wrap')?.classList.toggle('wide',!!stk.length);
     appEl.innerHTML=`<div class="lay${stk.length?' has-stk':''}"><main>`+(!d.orders.length?'<div class="msg">אין כרגע הזמנות פעילות.</div>':
+      smpTop(d.orders)+
       (act.length?`<h2>🏭 בייצור (${act.length})</h2>`+ordHtml+act.map(card).join(''):'')+
       (shp.length?`<h2>✅ נשלחו ב-30 הימים האחרונים (${shp.length})</h2>`+shp.map(card).join(''):''))+
       `</main>${stk.length?'<aside>'+stkHtml+'</aside>':''}</div>`;
@@ -502,7 +522,8 @@ async function load(){
     loadImgs();
     const t=new Date(d.at);
     const upd=' · עודכן '+t.toLocaleString('he-IL',{day:'2-digit',month:'2-digit',hour:'2-digit',minute:'2-digit'});
-    if(AS){ft.innerHTML='👁 תצוגת מנהל — כך הלקוח רואה את הדף'+upd;return;}
+    if(AS){ft.innerHTML='👁 תצוגת מנהל — כך הלקוח רואה את הדף'+upd+' <button id="frsh">🔄 רענן עכשיו</button>';
+      $('frsh').onclick=async e=>{e.target.disabled=true;e.target.textContent='⏳ בונה…';await load(true);};return;}
     ft.innerHTML=esc(u.email)+upd+' · '+outBtn();
     bindOut();
     pushInit(); // 🔔 פעם אחת אחרי טעינה מוצלחת (pushSt שמור — לא קורא שוב לשרת בכל רענון)

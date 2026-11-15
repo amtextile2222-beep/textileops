@@ -2193,7 +2193,8 @@ exports.customerTrack = functions.runWith({ memory: '1GB' }).https.onRequest(asy
     }
     // ⏱ מטמון 15 דק' (trackBody): הדף מרענן כל דקה; תנועת מלאי (מסמך packStock) מגיעה ללקוח תוך דקה.
     // גם תצוגת המנהל (asCust) דרך המטמון — בלעדיו דף פתוח קרא את כל ההיסטוריה בכל דקה.
-    res.json(await trackBody(cust));
+    // 🔄 תצוגת מנהל: ?fresh=1 ⇒ בנייה מחדש בלי המטמון (בדיקה מיד אחרי שינוי). ללקוח — תמיד דרך המטמון
+    res.json(a.asCust && req.query.fresh === '1' ? await trackBuild(cust) : await trackBody(cust));
   } catch (e) {
     console.error('customerTrack error:', e);
     res.status(500).json({ error: 'server' });
