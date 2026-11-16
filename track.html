@@ -207,14 +207,20 @@ header.brand #asx{background:rgba(255,255,255,.14);color:#fff;border-color:rgba(
 .card.st-bad{border-inline-start:4px solid var(--red)}
 .card.st-shp{border-inline-start:4px solid var(--green)}
 @media (prefers-color-scheme:dark){header.brand{background:linear-gradient(135deg,#24525c,#2D6470)}}
+/* אייקון בתוך טקסט — בגובה האות, בצבע הטקסט */
+.ic{width:1.15em;height:1.15em;vertical-align:-.2em;flex:0 0 auto;display:inline-block}
+header.brand .logo .ic{width:26px;height:26px;vertical-align:0}
+h2 .ic{width:1.25em;height:1.25em;color:var(--blue)}
+.msg .ic{width:1.3em;height:1.3em}
+.cutb{gap:6px}
 @media (prefers-reduced-motion:reduce){*,*::before,*::after{animation-duration:.01ms!important;transition-duration:.01ms!important;scroll-behavior:auto!important}}
 </style>
 </head>
 <body>
 <div class="wrap">
-  <header class="brand"><span class="logo">✂️</span><div><h1 id="ttl">מעקב הזמנות</h1><div class="sub" id="sub"></div></div></header>
+  <header class="brand"><span class="logo"><svg class="ic" viewBox="0 0 256 256" fill="currentColor" aria-hidden="true"><path d="M157.73,113.13A8,8,0,0,1,159.82,102L227.48,55.7a8,8,0,0,1,9,13.21l-67.67,46.3a7.92,7.92,0,0,1-4.51,1.4A8,8,0,0,1,157.73,113.13Zm80.87,85.09a8,8,0,0,1-11.12,2.08L136,137.7,93.49,166.78a36,36,0,1,1-9-13.19L121.83,128,84.44,102.41a35.86,35.86,0,1,1,9-13.19l143,97.87A8,8,0,0,1,238.6,198.22ZM80,180a20,20,0,1,0-5.86,14.14A19.85,19.85,0,0,0,80,180ZM74.14,90.13a20,20,0,1,0-28.28,0A19.85,19.85,0,0,0,74.14,90.13Z"/></svg></span><div><h1 id="ttl">מעקב הזמנות</h1><div class="sub" id="sub"></div></div></header>
   <div id="pushbar"></div>
-  <div id="app"><div class="msg">⏳ טוען…</div></div>
+  <div id="app"><div class="msg"><svg class="ic" viewBox="0 0 256 256" fill="currentColor" aria-hidden="true"><path d="M200,75.64V40a16,16,0,0,0-16-16H72A16,16,0,0,0,56,40V76a16.07,16.07,0,0,0,6.4,12.8L114.67,128,62.4,167.2A16.07,16.07,0,0,0,56,180v36a16,16,0,0,0,16,16H184a16,16,0,0,0,16-16V180.36a16.09,16.09,0,0,0-6.35-12.77L141.27,128l52.38-39.6A16.05,16.05,0,0,0,200,75.64ZM72,40H184V75.64L178.23,80H77.33L72,76Zm56,78L98.67,96h58.4Zm56,98H72V180l48-36v24a8,8,0,0,0,16,0V144.08l48,36.28Z"/></svg> טוען…</div></div>
   <footer id="ft"></footer>
 </div>
 <script type="module">
@@ -243,6 +249,10 @@ const LS_MAIL='trk_email';
 // 📱 נפתח מאייקון במסך הבית. באייפון זו אפליקציה עם אחסון נפרד מ-Safari — לחיצה על הקישור במייל
 // מתחברת ב-Safari ולא כאן ⇒ במצב הזה מציעים להדביק את הקישור (signInWithEmailLink מקבל אותו ישירות)
 const STANDALONE=navigator.standalone===true||matchMedia('(display-mode: standalone)').matches;
+// 🎨 (16/11/2026) אייקונים — Phosphor Icons (regular, MIT, phosphoricons.com) במקום אימוג'י, לפי UI UX Pro Max:
+// אחידים בכל מכשיר, בצבע הטקסט, וחדים בכל גודל. ic('wa') ⇒ <svg>. שם חדש = הנתיב מ-@phosphor-icons/core/assets/regular
+const IC={"sc":"<path d=\"M157.73,113.13A8,8,0,0,1,159.82,102L227.48,55.7a8,8,0,0,1,9,13.21l-67.67,46.3a7.92,7.92,0,0,1-4.51,1.4A8,8,0,0,1,157.73,113.13Zm80.87,85.09a8,8,0,0,1-11.12,2.08L136,137.7,93.49,166.78a36,36,0,1,1-9-13.19L121.83,128,84.44,102.41a35.86,35.86,0,1,1,9-13.19l143,97.87A8,8,0,0,1,238.6,198.22ZM80,180a20,20,0,1,0-5.86,14.14A19.85,19.85,0,0,0,80,180ZM74.14,90.13a20,20,0,1,0-28.28,0A19.85,19.85,0,0,0,74.14,90.13Z\"/>","fa":"<path d=\"M116,176a8,8,0,0,1-8,8H80a8,8,0,0,1,0-16h28A8,8,0,0,1,116,176Zm60-8H148a8,8,0,0,0,0,16h28a8,8,0,0,0,0-16Zm64,48a8,8,0,0,1-8,8H24a8,8,0,0,1,0-16h8V88a8,8,0,0,1,12.8-6.4L96,120V88a8,8,0,0,1,12.8-6.4l38.74,29.05L159.1,29.74A16.08,16.08,0,0,1,174.94,16h18.12A16.08,16.08,0,0,1,208.9,29.74l15,105.13s.08.78.08,1.13v72h8A8,8,0,0,1,240,216Zm-77.86-94.4,8.53,6.4h36.11L193.06,32H174.94ZM48,208H208V144H168a8,8,0,0,1-4.8-1.6l-14.4-10.8,0,0L112,104v32a8,8,0,0,1-12.8,6.4L48,104Z\"/>","pk":"<path d=\"M223.68,66.15,135.68,18a15.88,15.88,0,0,0-15.36,0l-88,48.17a16,16,0,0,0-8.32,14v95.64a16,16,0,0,0,8.32,14l88,48.17a15.88,15.88,0,0,0,15.36,0l88-48.17a16,16,0,0,0,8.32-14V80.18A16,16,0,0,0,223.68,66.15ZM128,32l80.34,44-29.77,16.3-80.35-44ZM128,120,47.66,76l33.9-18.56,80.34,44ZM40,90l80,43.78v85.79L40,175.82Zm176,85.78h0l-80,43.79V133.82l32-17.51V152a8,8,0,0,0,16,0V107.55L216,90v85.77Z\"/>","wa":"<path d=\"M236.8,188.09,149.35,36.22h0a24.76,24.76,0,0,0-42.7,0L19.2,188.09a23.51,23.51,0,0,0,0,23.72A24.35,24.35,0,0,0,40.55,224h174.9a24.35,24.35,0,0,0,21.33-12.19A23.51,23.51,0,0,0,236.8,188.09ZM222.93,203.8a8.5,8.5,0,0,1-7.48,4.2H40.55a8.5,8.5,0,0,1-7.48-4.2,7.59,7.59,0,0,1,0-7.72L120.52,44.21a8.75,8.75,0,0,1,15,0l87.45,151.87A7.59,7.59,0,0,1,222.93,203.8ZM120,144V104a8,8,0,0,1,16,0v40a8,8,0,0,1-16,0Zm20,36a12,12,0,1,1-12-12A12,12,0,0,1,140,180Z\"/>","ts":"<path d=\"M247.59,61.22,195.83,33A8,8,0,0,0,192,32H160a8,8,0,0,0-8,8,24,24,0,0,1-48,0,8,8,0,0,0-8-8H64a8,8,0,0,0-3.84,1L8.41,61.22A15.76,15.76,0,0,0,1.82,82.48l19.27,36.81A16.37,16.37,0,0,0,35.67,128H56v80a16,16,0,0,0,16,16H184a16,16,0,0,0,16-16V128h20.34a16.37,16.37,0,0,0,14.58-8.71l19.27-36.81A15.76,15.76,0,0,0,247.59,61.22ZM35.67,112a.62.62,0,0,1-.41-.13L16.09,75.26,56,53.48V112ZM184,208H72V48h16.8a40,40,0,0,0,78.38,0H184Zm36.75-96.14a.55.55,0,0,1-.41.14H200V53.48l39.92,21.78Z\"/>","no":"<path d=\"M229.66,58.34l-32-32a8,8,0,0,0-11.32,0l-96,96A8,8,0,0,0,88,128v32a8,8,0,0,0,8,8h32a8,8,0,0,0,5.66-2.34l96-96A8,8,0,0,0,229.66,58.34ZM124.69,152H104V131.31l64-64L188.69,88ZM200,76.69,179.31,56,192,43.31,212.69,64ZM224,128v80a16,16,0,0,1-16,16H48a16,16,0,0,1-16-16V48A16,16,0,0,1,48,32h80a8,8,0,0,1,0,16H48V208H208V128a8,8,0,0,1,16,0Z\"/>","xc":"<path d=\"M165.66,101.66,139.31,128l26.35,26.34a8,8,0,0,1-11.32,11.32L128,139.31l-26.34,26.35a8,8,0,0,1-11.32-11.32L116.69,128,90.34,101.66a8,8,0,0,1,11.32-11.32L128,116.69l26.34-26.35a8,8,0,0,1,11.32,11.32ZM232,128A104,104,0,1,1,128,24,104.11,104.11,0,0,1,232,128Zm-16,0a88,88,0,1,0-88,88A88.1,88.1,0,0,0,216,128Z\"/>","cc":"<path d=\"M173.66,98.34a8,8,0,0,1,0,11.32l-56,56a8,8,0,0,1-11.32,0l-24-24a8,8,0,0,1,11.32-11.32L112,148.69l50.34-50.35A8,8,0,0,1,173.66,98.34ZM232,128A104,104,0,1,1,128,24,104.11,104.11,0,0,1,232,128Zm-16,0a88,88,0,1,0-88,88A88.1,88.1,0,0,0,216,128Z\"/>","ck":"<path d=\"M229.66,77.66l-128,128a8,8,0,0,1-11.32,0l-56-56a8,8,0,0,1,11.32-11.32L96,188.69,218.34,66.34a8,8,0,0,1,11.32,11.32Z\"/>","pr":"<path d=\"M214.67,72H200V40a8,8,0,0,0-8-8H64a8,8,0,0,0-8,8V72H41.33C27.36,72,16,82.77,16,96v80a8,8,0,0,0,8,8H56v32a8,8,0,0,0,8,8H192a8,8,0,0,0,8-8V184h32a8,8,0,0,0,8-8V96C240,82.77,228.64,72,214.67,72ZM72,48H184V72H72ZM184,208H72V160H184Zm40-40H200V152a8,8,0,0,0-8-8H64a8,8,0,0,0-8,8v16H32V96c0-4.41,4.19-8,9.33-8H214.67c5.14,0,9.33,3.59,9.33,8Zm-24-52a12,12,0,1,1-12-12A12,12,0,0,1,200,116Z\"/>","be":"<path d=\"M221.8,175.94C216.25,166.38,208,139.33,208,104a80,80,0,1,0-160,0c0,35.34-8.26,62.38-13.81,71.94A16,16,0,0,0,48,200H88.81a40,40,0,0,0,78.38,0H208a16,16,0,0,0,13.8-24.06ZM128,216a24,24,0,0,1-22.62-16h45.24A24,24,0,0,1,128,216ZM48,184c7.7-13.24,16-43.92,16-80a64,64,0,1,1,128,0c0,36.05,8.28,66.73,16,80Z\"/>","bs":"<path d=\"M53.92,34.62A8,8,0,1,0,42.08,45.38L58.82,63.8A79.59,79.59,0,0,0,48,104c0,35.34-8.26,62.38-13.81,71.94A16,16,0,0,0,48,200H88.8a40,40,0,0,0,78.4,0h15.44l19.44,21.38a8,8,0,1,0,11.84-10.76ZM128,216a24,24,0,0,1-22.62-16h45.24A24,24,0,0,1,128,216ZM48,184c7.7-13.24,16-43.92,16-80a63.65,63.65,0,0,1,6.26-27.62L168.09,184Zm166-4.73a8.13,8.13,0,0,1-2.93.55,8,8,0,0,1-7.44-5.08C196.35,156.19,192,129.75,192,104A64,64,0,0,0,96.43,48.31a8,8,0,0,1-7.9-13.91A80,80,0,0,1,208,104c0,35.35,8.05,58.59,10.52,64.88A8,8,0,0,1,214,179.25Z\"/>","rf":"<path d=\"M224,48V96a8,8,0,0,1-8,8H168a8,8,0,0,1,0-16h28.69L182.06,73.37a79.56,79.56,0,0,0-56.13-23.43h-.45A79.52,79.52,0,0,0,69.59,72.71,8,8,0,0,1,58.41,61.27a96,96,0,0,1,135,.79L208,76.69V48a8,8,0,0,1,16,0ZM186.41,183.29a80,80,0,0,1-112.47-.66L59.31,168H88a8,8,0,0,0,0-16H40a8,8,0,0,0-8,8v48a8,8,0,0,0,16,0V179.31l14.63,14.63A95.43,95.43,0,0,0,130,222.06h.53a95.36,95.36,0,0,0,67.07-27.33,8,8,0,0,0-11.18-11.44Z\"/>","tr":"<path d=\"M255.42,117l-14-35A15.93,15.93,0,0,0,226.58,72H192V64a8,8,0,0,0-8-8H32A16,16,0,0,0,16,72V184a16,16,0,0,0,16,16H49a32,32,0,0,0,62,0h50a32,32,0,0,0,62,0h17a16,16,0,0,0,16-16V120A7.94,7.94,0,0,0,255.42,117ZM192,88h34.58l9.6,24H192ZM32,72H176v64H32ZM80,208a16,16,0,1,1,16-16A16,16,0,0,1,80,208Zm81-24H111a32,32,0,0,0-62,0H32V152H176v12.31A32.11,32.11,0,0,0,161,184Zm31,24a16,16,0,1,1,16-16A16,16,0,0,1,192,208Zm48-24H223a32.06,32.06,0,0,0-31-24V128h48Z\"/>","nd":"<path d=\"M189.66,66.34a8,8,0,0,1,0,11.32l-16,16a8,8,0,0,1-11.32-11.32l16-16A8,8,0,0,1,189.66,66.34ZM224,72a39.71,39.71,0,0,1-11.72,28.28l-24,24a8,8,0,0,1-4.3,2.23c-51.49,8.84-137.46,94.28-138.32,95.15h0a8,8,0,0,1-11.31-11.32h0C36,208.73,120.69,123.28,129.49,72a8,8,0,0,1,2.23-4.3l24-24A40,40,0,0,1,224,72Zm-16,0a24,24,0,0,0-41-17L144.77,77.29c-4.41,21.15-18.9,46.19-35.49,69.43,23.24-16.59,48.28-31.08,69.43-35.49L201,89A23.85,23.85,0,0,0,208,72Z\"/>","rt":"<path d=\"M232,112a64.07,64.07,0,0,1-64,64H51.31l34.35,34.34a8,8,0,0,1-11.32,11.32l-48-48a8,8,0,0,1,0-11.32l48-48a8,8,0,0,1,11.32,11.32L51.31,160H168a48,48,0,0,0,0-96H80a8,8,0,0,1,0-16h88A64.07,64.07,0,0,1,232,112Z\"/>","ey":"<path d=\"M247.31,124.76c-.35-.79-8.82-19.58-27.65-38.41C194.57,61.26,162.88,48,128,48S61.43,61.26,36.34,86.35C17.51,105.18,9,124,8.69,124.76a8,8,0,0,0,0,6.5c.35.79,8.82,19.57,27.65,38.4C61.43,194.74,93.12,208,128,208s66.57-13.26,91.66-38.34c18.83-18.83,27.3-37.61,27.65-38.4A8,8,0,0,0,247.31,124.76ZM128,192c-30.78,0-57.67-11.19-79.93-33.25A133.47,133.47,0,0,1,25,128,133.33,133.33,0,0,1,48.07,97.25C70.33,75.19,97.22,64,128,64s57.67,11.19,79.93,33.25A133.46,133.46,0,0,1,231.05,128C223.84,141.46,192.43,192,128,192Zm0-112a48,48,0,1,0,48,48A48.05,48.05,0,0,0,128,80Zm0,80a32,32,0,1,1,32-32A32,32,0,0,1,128,160Z\"/>","lk":"<path d=\"M208,80H176V56a48,48,0,0,0-96,0V80H48A16,16,0,0,0,32,96V208a16,16,0,0,0,16,16H208a16,16,0,0,0,16-16V96A16,16,0,0,0,208,80ZM96,56a32,32,0,0,1,64,0V80H96ZM208,208H48V96H208V208Zm-68-56a12,12,0,1,1-12-12A12,12,0,0,1,140,152Z\"/>","ph":"<path d=\"M128,24A104,104,0,1,0,232,128,104.11,104.11,0,0,0,128,24Zm88,104a87.56,87.56,0,0,1-20.41,56.28L71.72,60.4A88,88,0,0,1,216,128ZM40,128A87.56,87.56,0,0,1,60.41,71.72L184.28,195.6A88,88,0,0,1,40,128Z\"/>","en":"<path d=\"M224,48H32a8,8,0,0,0-8,8V192a16,16,0,0,0,16,16H216a16,16,0,0,0,16-16V56A8,8,0,0,0,224,48ZM203.43,64,128,133.15,52.57,64ZM216,192H40V74.19l82.59,75.71a8,8,0,0,0,10.82,0L216,74.19V192Z\"/>","hg":"<path d=\"M200,75.64V40a16,16,0,0,0-16-16H72A16,16,0,0,0,56,40V76a16.07,16.07,0,0,0,6.4,12.8L114.67,128,62.4,167.2A16.07,16.07,0,0,0,56,180v36a16,16,0,0,0,16,16H184a16,16,0,0,0,16-16V180.36a16.09,16.09,0,0,0-6.35-12.77L141.27,128l52.38-39.6A16.05,16.05,0,0,0,200,75.64ZM72,40H184V75.64L178.23,80H77.33L72,76Zm56,78L98.67,96h58.4Zm56,98H72V180l48-36v24a8,8,0,0,0,16,0V144.08l48,36.28Z\"/>"};
+const ic=k=>'<svg class="ic" viewBox="0 0 256 256" fill="currentColor" aria-hidden="true">'+IC[k]+'</svg>';
 const esc=s=>String(s??'').replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;');
 const fmtD=d=>{const m=/^(\d{4})-(\d{2})-(\d{2})/.exec(d||'');return m?m[3]+'/'+m[2]+'/'+m[1]:'';};
 const fmtDM=d=>{const m=/^\d{4}-(\d{2})-(\d{2})/.exec(d||'');return m?m[2]+'/'+m[1]:'';}; // 📅 תאריך שלב בפס
@@ -267,7 +277,7 @@ function card(o){
   const dm=ms=>{const d=new Date(+ms);return String(d.getDate()).padStart(2,'0')+'/'+String(d.getMonth()+1).padStart(2,'0');}; // תאריך מקומי
   const shHtml=sh.slice().sort((a,b)=>(!!a.res-!!b.res)||(b.at-a.at)).map(x=>x.res
     ?`<div class="short res">✓ ${esc(STAGES[x.st]||'')}: ${esc(x.txt)} · ${dm(x.at)} · נפתר ${dm(x.res)}</div>`
-    :`<div class="short">⚠ חוסר · ${esc(STAGES[x.st]||'')}: ${esc(x.txt)} · ${dm(x.at)}</div>`).join('');
+    :`<div class="short">${ic('wa')} חוסר · ${esc(STAGES[x.st]||'')}: ${esc(x.txt)} · ${dm(x.at)}</div>`).join('');
   const stc=done?'st-shp':Array.isArray(o.smp)&&o.smp.length&&('so' in o?o.so:!o.smpOk)?'st-smp':openSt.size?'st-bad':'st-act';
   return `<div class="card ${stc}"${o.pid?' id="ord-'+esc(o.pid)+'"':''}>
     <div class="top">${imgTag(o.img,o.iv,'thumb',o.name||('דגם '+o.prod))}<div style="flex:1;min-width:0"><div class="nm">${esc(o.name||('דגם '+o.prod))}</div>
@@ -277,10 +287,10 @@ function card(o){
     <div class="stage">שלב ${o.stage+1} מתוך ${STAGES.length}</div>
     ${sp?`<div class="stage">בתפירה ${o.sewPct}%</div><div class="pct" title="${o.sewPct}%"><b style="width:${Math.max(0,Math.min(100,o.sewPct))}%"></b></div><div class="stage">באריזה ${pct??0}%</div>`:''}
     ${pct!=null?`<div class="pct" title="${pct}%"><b style="width:${Math.max(0,Math.min(100,pct))}%"></b></div>`:''}
-    ${o.out>0?`<div class="stage">🚚 נשלחו ${o.out} יח' · השאר: ${esc(STAGES[o.stage]||'בייצור')}</div>`:''}
+    ${o.out>0?`<div class="stage">${ic('tr')} נשלחו ${o.out} יח' · השאר: ${esc(STAGES[o.stage]||'בייצור')}</div>`:''}
     ${shHtml}
     ${smpHtml(o)}
-    ${o.cut?`<button class="cutb" data-cut="${esc(o.cut)}" data-nm="${esc(o.name||('דגם '+o.prod))}">✂️ דוח גזירה <span>‹</span></button>`:''}
+    ${o.cut?`<button class="cutb" data-cut="${esc(o.cut)}" data-nm="${esc(o.name||('דגם '+o.prod))}">${ic('sc')} דוח גזירה <span>‹</span></button>`:''}
   </div>`;
 }
 // 👕 דגם לאישור (15/11/2026): הדגמים שנשלחו לבדיקה (o.smp=[{d,n}]) + אישור. הלקוח מאשר בכפתור (POST approve) —
@@ -290,11 +300,11 @@ function card(o){
 function smpTop(orders){
   const l=(orders||[]).filter(o=>Array.isArray(o.smp)&&o.smp.length&&('so' in o?o.so:!o.smpOk));
   if(!l.length)return'';
-  return `<div class="smp-top" id="smp-top"><h3>👕 ${l.length===1?'דגם אחד מחכה':l.length+' דגמים מחכים'} לאישור שלכם</h3>`+l.map(o=>{
+  return `<div class="smp-top" id="smp-top"><h3>${ic('ts')} ${l.length===1?'דגם אחד מחכה':l.length+' דגמים מחכים'} לאישור שלכם</h3>`+l.map(o=>{
     const x=o.smp[o.smp.length-1],no=o.no?'הזמנה #'+String(o.no).padStart(3,'0')+' · ':'';
     return `<button class="smp-go" data-go="${esc(o.pid||'')}"><b>${esc(o.name||('דגם '+o.prod))}</b>
-      <small>${no}${x.n} יח' · נשלח ${esc(fmtDM(x.d))}${x.b?' · ↩ חזר למפעל '+esc(fmtDM(x.b)):''}${o.sd&&o.sd.k==='no'?' · הדגם הקודם לא אושר':''}</small>
-      ${x.t?'<small>📝 '+esc(x.t)+'</small>':''}<small><em>לאישור / הערות ‹</em></small></button>`;}).join('')+'</div>';
+      <small>${no}${x.n} יח' · נשלח ${esc(fmtDM(x.d))}${x.b?' · '+ic('rt')+' חזר למפעל '+esc(fmtDM(x.b)):''}${o.sd&&o.sd.k==='no'?' · הדגם הקודם לא אושר':''}</small>
+      ${x.t?'<small>'+ic('no')+' '+esc(x.t)+'</small>':''}<small><em>לאישור / הערות ‹</em></small></button>`;}).join('')+'</div>';
 }
 // ✖ לא אושר (15/11/2026): o.sd = ההחלטה האחרונה {k,d,why}, o.so = מחכים להחלטה (שרת ישן — רק smpOk)
 function smpHtml(o){
@@ -302,24 +312,24 @@ function smpHtml(o){
   const sd=o.sd||null,open='so' in o?!!o.so:!o.smpOk;
   // ↩ x.b = חזר למפעל (15/11/2026); שרת ישן — בלי b
   // כל תעודת דגם בשורה משלה (15/11/2026 — בשורה אחת עם "|" התעודה השנייה נבלעה)
-  const sent=l.map(x=>'<div class="smp-l">👕 '+x.n+" יח' · נשלח "+esc(fmtDM(x.d))+(x.b?' · ↩ חזר למפעל '+esc(fmtDM(x.b)):' · אצלכם')+'</div>'+(x.t?'<div class="smp-t">📝 '+esc(x.t)+'</div>':'')).join(''); // 📝 ההערה מהתעודה
-  const why=x=>x.why?'<div class="smp-t">📝 '+esc(x.why)+'</div>':'';
-  if(!open&&sd&&sd.k==='no')return `<div class="smp no">✖ <b>הדגם לא אושר</b> · ${esc(fmtDM(sd.d))}${why(sd)}<div class="smp-l">המפעל קיבל את ההערות ויכין דגם מתוקן.</div>${sent}</div>`;
-  if(!open&&(sd?sd.k==='ok':o.smpOk))return `<div class="smp ok">✅ <b>הדגם אושר</b> · ${esc(fmtDM(sd?sd.d:o.smpOk))}${sent}</div>`;
+  const sent=l.map(x=>'<div class="smp-l">'+ic('ts')+' '+x.n+" יח' · נשלח "+esc(fmtDM(x.d))+(x.b?' · '+ic('rt')+' חזר למפעל '+esc(fmtDM(x.b)):' · אצלכם')+'</div>'+(x.t?'<div class="smp-t">'+ic('no')+' '+esc(x.t)+'</div>':'')).join(''); // 📝 ההערה מהתעודה
+  const why=x=>x.why?'<div class="smp-t">'+ic('no')+' '+esc(x.why)+'</div>':'';
+  if(!open&&sd&&sd.k==='no')return `<div class="smp no">${ic('xc')} <b>הדגם לא אושר</b> · ${esc(fmtDM(sd.d))}${why(sd)}<div class="smp-l">המפעל קיבל את ההערות ויכין דגם מתוקן.</div>${sent}</div>`;
+  if(!open&&(sd?sd.k==='ok':o.smpOk))return `<div class="smp ok">${ic('cc')} <b>הדגם אושר</b> · ${esc(fmtDM(sd?sd.d:o.smpOk))}${sent}</div>`;
   const nm=esc(o.name||('דגם '+o.prod));
-  return `<div class="smp">👕 <b>דגם לאישור</b>${sd&&sd.k==='no'?`<div class="smp-w">✖ הדגם הקודם לא אושר (${esc(fmtDM(sd.d))})${sd.why?': '+esc(sd.why):''}</div>`:''}${sent}${!AS&&o.pid?`<div class="smpbr"><button class="smpb" data-pid="${esc(o.pid)}" data-nm="${nm}">✅ אישור הדגם</button><button class="smpb rej" data-pid="${esc(o.pid)}" data-nm="${nm}" data-rej="1">✖ לא מאושר</button></div>`:''}</div>`;
+  return `<div class="smp">${ic('ts')} <b>דגם לאישור</b>${sd&&sd.k==='no'?`<div class="smp-w">${ic('xc')} הדגם הקודם לא אושר (${esc(fmtDM(sd.d))})${sd.why?': '+esc(sd.why):''}</div>`:''}${sent}${!AS&&o.pid?`<div class="smpbr"><button class="smpb" data-pid="${esc(o.pid)}" data-nm="${nm}">${ic('ck')} אישור הדגם</button><button class="smpb rej" data-pid="${esc(o.pid)}" data-nm="${nm}" data-rej="1">${ic('xc')} לא מאושר</button></div>`:''}</div>`;
 }
 async function approveSmp(b){
   const u=auth.currentUser;if(!u||AS)return;
-  const rej=!!b.dataset.rej,lbl=b.textContent;let why='';
+  const rej=!!b.dataset.rej,lbl=b.innerHTML;let why='';
   if(rej){why=(prompt('מה צריך לתקן בדגם של '+b.dataset.nm+'?\nההערה תישלח למפעל.')||'').trim();if(!why)return;}
   else if(!confirm('לאשר את הדגם של '+b.dataset.nm+'?\nהמפעל יקבל הודעה שהדגם אושר.'))return;
-  b.disabled=true;b.textContent='⏳ שולח…';
+  b.disabled=true;b.innerHTML=ic('hg')+' שולח…';
   try{
     const r=await fetch(URL_FN,{method:'POST',cache:'no-store',headers:{Authorization:'Bearer '+await u.getIdToken(),'X-Dev':devId(),'Content-Type':'application/json'},body:JSON.stringify(rej?{reject:b.dataset.pid,why:why.slice(0,300)}:{approve:b.dataset.pid})});
     if(!r.ok)throw new Error(r.status);
     await load();
-  }catch(e){b.disabled=false;b.textContent=lbl;alert('ההודעה לא נשלחה. נסו שוב בעוד רגע.');}
+  }catch(e){b.disabled=false;b.innerHTML=lbl;alert('ההודעה לא נשלחה. נסו שוב בעוד רגע.');}
 }
 // 🍎 הדפסה באייפון (11/11/2026): ב-PWA במסך הבית window.print() לא עושה כלום ⇒ צילום (html2canvas) ⇒ PDF (jsPDF)
 // ⇒ חלון השיתוף ⇒ "הדפסה". כמו _dnPdfBlob באפליקציה. navigator.share דורש לחיצה טרייה ⇒ הכנה בלחיצה הראשונה,
@@ -331,7 +341,7 @@ async function stkPdf(html,bid='stkp'){
   if(_stkBlob&&b?.dataset.ready){const f=new File([_stkBlob],(bid==='ordp'?'orders':'shortage')+'.pdf',{type:'application/pdf'});
     try{if(navigator.canShare&&navigator.canShare({files:[f]})){await navigator.share({files:[f]});return;}}catch(e){if(e?.name==='AbortError')return;}
     const u=URL.createObjectURL(_stkBlob);location.href=u;return;}
-  if(b){b.disabled=true;b.textContent='⏳ מכין…';}
+  if(b){b.disabled=true;b.innerHTML=ic('hg')+' מכין…';}
   try{
     await _ldJs('https://cdnjs.cloudflare.com/ajax/libs/html2canvas/1.4.1/html2canvas.min.js',()=>window.html2canvas,'sha384-ZZ1pncU3bQe8y31yfZdMFdSpttDoPmOZg2wguVK9almUodir1PghgT0eY7Mrty8H');
     await _ldJs('https://cdnjs.cloudflare.com/ajax/libs/jspdf/2.5.1/jspdf.umd.min.js',()=>window.jspdf,'sha384-JcnsjUPPylna1s1fvi1u12X5qjY5OL56iySh75FdtrwhO/SWXgMjoVqcKyIIWOLk');
@@ -342,16 +352,16 @@ async function stkPdf(html,bid='stkp'){
       const c=document.createElement('canvas');c.width=cv.width;c.height=h;const x=c.getContext('2d');x.fillStyle='#fff';x.fillRect(0,0,c.width,h);x.drawImage(cv,0,y,cv.width,h,0,0,cv.width,h);
       if(pg)doc.addPage();doc.addImage(c.toDataURL('image/jpeg',0.92),'JPEG',0,0,210,h*210/cv.width);}
     _stkBlob=_pdfB[bid]=doc.output('blob');
-    if(b){b.disabled=false;b.dataset.ready=1;b.textContent='🖨 PDF מוכן — הדפסה';}
-  }catch(e){if(b){b.disabled=false;b.textContent='🖨 הדפסה';}alert('הכנת ה-PDF נכשלה: '+(e?.message||e));}
+    if(b){b.disabled=false;b.dataset.ready=1;b.innerHTML=ic('pr')+' PDF מוכן — הדפסה';}
+  }catch(e){if(b){b.disabled=false;b.innerHTML=ic('pr')+' הדפסה';}alert('הכנת ה-PDF נכשלה: '+(e?.message||e));}
 }
 // ✂️ דוח גזירה (08/11/2026) — אותו דף שמודפס במפעל (cutPrints), נטען מהשרת רק בלחיצה. iframe בלי סקריפטים
 async function openCut(pid,nm){
   const u=(AS?mAuth:auth).currentUser;if(!u)return;
   $('cutm')?.remove();
   const m=document.createElement('div');m.id='cutm';m.className='cutm';
-  m.innerHTML=`<div class="cutm-b"><div class="cutm-h"><b>✂️ דוח גזירה · ${esc(nm)}</b><span style="flex:1"></span>
-    <button id="cutp" disabled>🖨 הדפסה</button><button id="cutx">✕</button></div><div id="cutc" class="msg">⏳ טוען…</div></div>`;
+  m.innerHTML=`<div class="cutm-b"><div class="cutm-h"><b>${ic('sc')} דוח גזירה · ${esc(nm)}</b><span style="flex:1"></span>
+    <button id="cutp" disabled>${ic('pr')} הדפסה</button><button id="cutx">✕</button></div><div id="cutc" class="msg">${ic('hg')} טוען…</div></div>`;
   document.body.appendChild(m);
   const close=()=>m.remove();
   $('cutx').onclick=close;m.onclick=e=>{if(e.target===m)close();};
@@ -362,7 +372,7 @@ async function openCut(pid,nm){
     const f=document.createElement('iframe');f.className='cutf';f.setAttribute('sandbox','allow-same-origin allow-modals');f.srcdoc=d.html;
     const c=$('cutc');c.className='';c.innerHTML='';c.appendChild(f);
     const pb=$('cutp');pb.disabled=false;pb.onclick=()=>{try{f.contentWindow.focus();f.contentWindow.print();}catch(e){alert('ההדפסה לא נתמכת בדפדפן הזה');}};
-  }catch(e){const c=$('cutc');if(c)c.textContent='⚠️ לא ניתן לטעון את הדוח כרגע. נסו שוב בעוד רגע.';}
+  }catch(e){const c=$('cutc');if(c)c.innerHTML=ic('wa')+' לא ניתן לטעון את הדוח כרגע. נסו שוב בעוד רגע.';}
 }
 appEl.addEventListener('click',e=>{const b=e.target.closest('.cutb');if(b)openCut(b.dataset.cut,b.dataset.nm);
   const sb=e.target.closest('.smpb');if(sb&&!sb.disabled)approveSmp(sb);
@@ -454,19 +464,19 @@ async function pushUi(){
   const el=$('pushbar');if(!el)return;
   if(!pushSt||!pushSt.vapid){el.innerHTML='';return;}
   if(!await pushOk()){
-    el.innerHTML=IOS&&!STANDALONE?'<div class="pbar">🔔 לקבלת התראות באייפון: לחצו על <b>שיתוף</b> ← <b>הוסף למסך הבית</b>, ופתחו את הדף מהאייקון.</div>':'';
+    el.innerHTML=IOS&&!STANDALONE?'<div class="pbar">'+ic('be')+' לקבלת התראות באייפון: לחצו על <b>שיתוף</b> ← <b>הוסף למסך הבית</b>, ופתחו את הדף מהאייקון.</div>':'';
     return;
   }
-  if(Notification.permission==='denied'){el.innerHTML='<div class="pbar">🔕 ההתראות חסומות בדפדפן הזה — אפשר לאשר אותן בהגדרות האתר.</div>';return;}
+  if(Notification.permission==='denied'){el.innerHTML='<div class="pbar">'+ic('bs')+' ההתראות חסומות בדפדפן הזה — אפשר לאשר אותן בהגדרות האתר.</div>';return;}
   el.innerHTML=pushSt.on&&Notification.permission==='granted'
-    ?'<div class="pbar on">🔔 תקבלו התראה כשהזמנה עוברת שלב, או כשחומר שלכם עומד להיגמר · <button id="poff">כיבוי</button></div>'
-    :'<div class="pbar"><button id="pon" class="pbtn">🔔 קבלו התראות על ההזמנות</button><span>מעבר שלב בהזמנה, וחומר שעומד להיגמר — בשעות העבודה</span></div>';
+    ?'<div class="pbar on">'+ic('be')+' תקבלו התראה כשהזמנה עוברת שלב, או כשחומר שלכם עומד להיגמר · <button id="poff">כיבוי</button></div>'
+    :'<div class="pbar"><button id="pon" class="pbtn">'+ic('be')+' קבלו התראות על ההזמנות</button><span>מעבר שלב בהזמנה, וחומר שעומד להיגמר — בשעות העבודה</span></div>';
   const on=$('pon'),off=$('poff');
   if(on)on.onclick=pushOn;
   if(off)off.onclick=async()=>{off.disabled=true;try{await pushCall('POST',{off:true});pushSt.on=false;}catch(e){}pushUi();};
 }
 async function pushOn(){
-  const b=$('pon');if(b){b.disabled=true;b.textContent='⏳ רגע…';}
+  const b=$('pon');if(b){b.disabled=true;b.innerHTML=ic('hg')+' רגע…';}
   try{
     // requestPermission ישירות מהלחיצה — אחרת ספארי/אייפון דוחים את הבקשה
     if(await Notification.requestPermission()!=='granted'){await pushUi();return;}
@@ -503,7 +513,7 @@ function showLogin(msg,confirmMode){
       if(confirmMode){await finishLink(em);return;}
       await sendSignInLinkToEmail(auth,em,{url:PAGE,handleCodeInApp:true});
       ls.set(LS_MAIL,em);
-      appEl.innerHTML=`<div class="login"><p>📧 שלחנו קישור כניסה אל<br><b dir="ltr">${esc(em)}</b></p>
+      appEl.innerHTML=`<div class="login"><p>${ic('en')} שלחנו קישור כניסה אל<br><b dir="ltr">${esc(em)}</b></p>
         ${STANDALONE?`<p>פתחתם ממסך הבית? <b>אל תלחצו</b> על הקישור במייל — לחצו עליו לחיצה ארוכה ← <b>העתק</b>, והדביקו כאן:</p>
         <form id="pf"><input id="pl" dir="ltr" placeholder="https://…" autocomplete="off"/><button>כניסה</button><div class="err" id="per"></div></form>`
         :'<p>פתחו את המייל ולחצו על הקישור.</p>'}<p>לא הגיע? בדקו בתיקיית הספאם.</p></div>`;
@@ -537,15 +547,15 @@ async function load(fresh){
   busy=true;
   try{
     const r=await fetch(URL_FN+(AS?'?cust='+encodeURIComponent(AS)+(fresh?'&fresh=1':''):''),{cache:'no-store',headers:{Authorization:'Bearer '+await u.getIdToken(),'X-Dev':devId()}});
-    if(AS&&!r.ok){appEl.innerHTML=`<div class="msg">🔒 תצוגת לקוח זמינה למנהל בלבד.<br>היכנסו לאפליקציה כמנהל ופתחו שוב מחלון "פרטי לקוח".</div>`;return;}
+    if(AS&&!r.ok){appEl.innerHTML=`<div class="msg">${ic('lk')} תצוגת לקוח זמינה למנהל בלבד.<br>היכנסו לאפליקציה כמנהל ופתחו שוב מחלון "פרטי לקוח".</div>`;return;}
     if(r.status===401){const j=await r.json().catch(()=>({}));if(j.error==='reauth')reauthMsg=true;await signOut(auth);return;}
     if(r.status===403){
       const j=await r.json().catch(()=>({}));
       $('sub').textContent='';
-      appEl.innerHTML=j.error==='pending'?`<div class="msg">⏳ המכשיר הזה עדיין לא אושר לצפייה בהזמנות.<br>שלחנו בקשת אישור למפעל — הדף יתעדכן לבד אחרי האישור.<br><br><button id="rt" style="font-size:14px;padding:8px 16px;border-radius:10px;border:0;background:var(--acc);color:#fff;cursor:pointer">🔄 בדיקה שוב</button></div>`
-        :j.error==='blocked'?`<div class="msg">⛔ הגישה מהמכשיר הזה נחסמה.<br>פנו אלינו לפרטים.</div>`
-        :`<div class="msg">🔒 המייל <b dir="ltr">${esc(u.email)}</b> אינו מורשה לצפות בהזמנות.<br>פנו אלינו כדי להוסיף אותו.</div>`;
-      const rt=$('rt');if(rt)rt.onclick=()=>{appEl.innerHTML='<div class="msg">⏳ בודק…</div>';load();};
+      appEl.innerHTML=j.error==='pending'?`<div class="msg">${ic('hg')} המכשיר הזה עדיין לא אושר לצפייה בהזמנות.<br>שלחנו בקשת אישור למפעל — הדף יתעדכן לבד אחרי האישור.<br><br><button id="rt" style="font-size:14px;padding:8px 16px;border-radius:10px;border:0;background:var(--acc);color:#fff;cursor:pointer">🔄 בדיקה שוב</button></div>`
+        :j.error==='blocked'?`<div class="msg">${ic('ph')} הגישה מהמכשיר הזה נחסמה.<br>פנו אלינו לפרטים.</div>`
+        :`<div class="msg">${ic('lk')} המייל <b dir="ltr">${esc(u.email)}</b> אינו מורשה לצפות בהזמנות.<br>פנו אלינו כדי להוסיף אותו.</div>`;
+      const rt=$('rt');if(rt)rt.onclick=()=>{appEl.innerHTML='<div class="msg">'+ic('hg')+' בודק…</div>';load();};
       // ממתין לאישור ⇒ בדיקה כל 30 שנ' (ולא כל 5 דק') כדי שהאישור ייראה מיד
       if(j.error==='pending'&&!pendT)pendT=setTimeout(()=>{pendT=0;if(!document.hidden)load();},30000);
       ft.innerHTML=outBtn();bindOut();return;
@@ -557,7 +567,7 @@ async function load(fresh){
     // 📦 חומר האריזה שהלקוח סיפק ונמצא במפעל (23/10/2026) — רק חומר שהמפעל סופר; שרת ישן = אין stock
     const stk=Array.isArray(d.stock)?d.stock:[];
     // 🧵 (23/10/2026) גם פריטי גזירה/תפירה (תוויות, פלזלין…) — מקובצים לפי מחלקה, עם יחידה (מטר/גליל…)
-    const DEPT={cut:'✂️ גזירה',sew:'🧵 תפירה',pack:'📦 אריזה'},multi=new Set(stk.map(s=>s.dept||'pack')).size>1;
+    const DEPT={cut:ic('sc')+' גזירה',sew:ic('nd')+' תפירה',pack:ic('pk')+' אריזה'},multi=new Set(stk.map(s=>s.dept||'pack')).size>1;
     // 📋 (25/10/2026) נדרש להזמנות שלכם שבמפעל וכמה חסר — מהשרת (need); בלי need — כמו קודם
     // 📋 (02/11/2026) נוסח ברור יותר: כל חומר — שם בשורה משלו ומתחתיו "במפעל / נדרש / חסר";
     // פריט לפי מידה (מפתח פריט|מידה) — טבלה אחת במקום שורה לכל מידה; למעלה — סיכום כמה חומרים כדאי לשלוח
@@ -569,10 +579,10 @@ async function load(fresh){
     const stkRow=s=>{const{nd,n,miss,bad}=stOf(s),u=unitOf(s);
       return `<div class="stk${bad?' bad':''}">${stkImg(s)}<div class="stk-n">${esc(s.name)}</div><div class="stk-q">
         <span>במפעל <b style="${bad?'color:var(--red)':''}">${n}</b>${u}</span>${nd>0?`<span>נדרש ${r2(nd)}${u}</span>`:''}
-        ${(qOf(s).nq>0||bad)?`<span class="stk-miss">⚠ ${qTxt(s,u,' · ')}${qOf(s).nq>0?' — כדאי לשלוח עוד':''}</span>`:nd>0?'<span class="stk-ok">✓ יש מספיק</span>':''}</div></div>`;};
+        ${(qOf(s).nq>0||bad)?`<span class="stk-miss">${ic('wa')} ${qTxt(s,u,' · ')}${qOf(s).nq>0?' — כדאי לשלוח עוד':''}</span>`:nd>0?'<span class="stk-ok">'+ic('ck')+' יש מספיק</span>':''}</div></div>`;};
     const stkSz=(name,l)=>{const u=unitOf(l[0]),hasNd=l.some(s=>Number(s.need)>0),bad=l.some(s=>stOf(s).bad);
       return `<div class="stk${bad?' bad':''}">${stkImg(l[0])}<div class="stk-n">${esc(name)}</div><table class="stk-t"><tr><th>מידה</th><th>במפעל</th>${hasNd?'<th>נדרש</th><th></th>':''}</tr>${l.map(s=>{const o=stOf(s);
-        const qq=qOf(s);return `<tr${o.bad?' class="bad"':''}><td>${esc(s.sz)}</td><td>${o.n}${u}</td>${hasNd?`<td>${o.nd>0?r2(o.nd)+u:'—'}</td><td>${[qq.nq>0?'חסר '+r2(qq.nq):'',qq.mq>0?'מינ׳ +'+r2(qq.mq):''].filter(Boolean).join(' · ')||(o.bad?'⚠':o.nd>0?'<span class="stk-ok">✓</span>':'')}</td>`:''}</tr>`;}).join('')}</table></div>`;};
+        const qq=qOf(s);return `<tr${o.bad?' class="bad"':''}><td>${esc(s.sz)}</td><td>${o.n}${u}</td>${hasNd?`<td>${o.nd>0?r2(o.nd)+u:'—'}</td><td>${[qq.nq>0?'חסר '+r2(qq.nq):'',qq.mq>0?'מינ׳ +'+r2(qq.mq):''].filter(Boolean).join(' · ')||(o.bad?ic('wa'):o.nd>0?'<span class="stk-ok">'+ic('ck')+'</span>':'')}</td>`:''}</tr>`;}).join('')}</table></div>`;};
     const stkList=l=>{const out=[],grp={};l.forEach(s=>{const m=String(s.k||'').includes('|')&&/^(.*) · מידה (.*)$/.exec(s.name||'');
         if(!m){out.push(s);return;}const b=String(s.k).split('|')[0];if(!grp[b]){grp[b]={name:m[1],l:[]};out.push(grp[b]);}grp[b].l.push({...s,sz:m[2]});});
       return out.map(x=>x.l?stkSz(x.name,x.l):stkRow(x)).join('');};
@@ -595,7 +605,7 @@ async function load(fresh){
     const fmtD=ms=>{const t=new Date(+ms);return String(t.getDate()).padStart(2,'0')+'/'+String(t.getMonth()+1).padStart(2,'0');};
     const oLbl=o=>(o.name||('דגם '+o.prod))+(o.no?' · הזמנה #'+String(o.no).padStart(3,'0'):'');
     const ordShort=act.flatMap(o=>(Array.isArray(o.short)?o.short:[]).filter(x=>!x.res).map(x=>({o,x}))).sort((a,b)=>a.x.at-b.x.at);
-    const ordHtml=ordShort.length?`<div class="stk-sum ord-sum" id="ord-sum"><div class="stk-sh">⚠ ${ordShort.length===1?'חוסר אחד':ordShort.length+' חוסרים'} בהזמנות בייצור<button id="ordp">🖨 הדפסה</button></div><ul class="stk-sl">`+
+    const ordHtml=ordShort.length?`<div class="stk-sum ord-sum" id="ord-sum"><div class="stk-sh">${ic('wa')} ${ordShort.length===1?'חוסר אחד':ordShort.length+' חוסרים'} בהזמנות בייצור<button id="ordp">${ic('pr')} הדפסה</button></div><ul class="stk-sl">`+
       ordShort.map(({o,x})=>`<li><b>${esc(oLbl(o))}</b> — ${esc(STAGES[x.st]||'')}: ${esc(x.txt)} · ${fmtD(x.at)}</li>`).join('')+'</ul></div>':'';
     window._ordPrint=()=>{let p=$('stkpr');if(!p){p=document.createElement('div');p.id='stkpr';p.className='stkpdf';document.body.appendChild(p);}
       const dt=new Date().toLocaleString('he-IL',{day:'2-digit',month:'2-digit',year:'numeric',hour:'2-digit',minute:'2-digit'});
@@ -603,7 +613,7 @@ async function load(fresh){
         ordShort.map(({o,x})=>`<tr><td>${esc(oLbl(o))}</td><td>${esc(STAGES[x.st]||'')}</td><td class="x">${esc(x.txt)}</td><td>${fmtD(x.at)}</td></tr>`).join('')+'</table>';
       if(IOS){stkPdf(p.innerHTML,'ordp');return;}
       window.print();};
-    const stkHtml=stk.length?`<h2 id="stk-box">📦 החומרים שלכם במפעל</h2><div class="card">${nBad?`<div class="stk-sum"><div class="stk-sh">⚠ ${nBad===1?'חומר אחד':nBad+' חומרים'} — כדאי לשלוח עוד<button id="stkp">🖨 הדפסה</button></div>${shortHtml}</div>`:'<div class="stk-sum ok">✓ יש מספיק מכל החומרים</div>'}${multi
+    const stkHtml=stk.length?`<h2 id="stk-box">${ic('pk')} החומרים שלכם במפעל</h2><div class="card">${nBad?`<div class="stk-sum"><div class="stk-sh">${ic('wa')} ${nBad===1?'חומר אחד':nBad+' חומרים'} — כדאי לשלוח עוד<button id="stkp">${ic('pr')} הדפסה</button></div>${shortHtml}</div>`:'<div class="stk-sum ok">✓ יש מספיק מכל החומרים</div>'}${multi
         ?Object.keys(DEPT).map(d=>{const l=stk.filter(s=>(s.dept||'pack')===d);return l.length?`<div class="stk-d">${DEPT[d]}</div>`+stkList(l):'';}).join('')
         :stkList(stk)}<div class="meta" style="margin-top:8px">מתעדכן אוטומטית עם כל משלוח שיוצא אליכם.</div></div>`:'';
     appEl.closest('.wrap')?.classList.toggle('wide',!!stk.length);
@@ -614,21 +624,21 @@ async function load(fresh){
       +tile('חוסרים בהזמנות',ordShort.length,'red','ord-sum')+(stk.length?tile('חומרים לשלוח',nBad,'red','stk-box'):tile('נשלחו (30 יום)',shp.length,'ok','h-shp'))+'</div>':'';
     appEl.innerHTML=sumHtml+`<div class="lay${stk.length?' has-stk':''}"><main>`+(!d.orders.length?'<div class="msg">אין כרגע הזמנות פעילות.</div>':
       smpTop(d.orders)+
-      (act.length?`<h2 id="h-act">🏭 בייצור (${act.length})</h2>`+ordHtml+act.map(card).join(''):'')+
-      (shp.length?`<h2 id="h-shp">✅ נשלחו ב-30 הימים האחרונים (${shp.length})</h2>`+shp.map(card).join(''):''))+
+      (act.length?`<h2 id="h-act">${ic('fa')} בייצור (${act.length})</h2>`+ordHtml+act.map(card).join(''):'')+
+      (shp.length?`<h2 id="h-shp">${ic('cc')} נשלחו ב-30 הימים האחרונים (${shp.length})</h2>`+shp.map(card).join(''):''))+
       `</main>${stk.length?'<aside>'+stkHtml+'</aside>':''}</div>`;
     const sp=$('stkp');if(sp)sp.onclick=()=>window._stkPrint&&window._stkPrint();
     const op=$('ordp');if(op)op.onclick=()=>window._ordPrint&&window._ordPrint();
     loadImgs();
     const t=new Date(d.at);
     const upd=' · עודכן '+t.toLocaleString('he-IL',{day:'2-digit',month:'2-digit',hour:'2-digit',minute:'2-digit'});
-    if(AS){ft.innerHTML='👁 תצוגת מנהל — כך הלקוח רואה את הדף'+upd+' <button id="frsh">🔄 רענן עכשיו</button>';
-      $('frsh').onclick=async e=>{e.target.disabled=true;e.target.textContent='⏳ בונה…';await load(true);};return;}
+    if(AS){ft.innerHTML=ic('ey')+' תצוגת מנהל — כך הלקוח רואה את הדף'+upd+' <button id="frsh">'+ic('rf')+' רענן עכשיו</button>';
+      $('frsh').onclick=async e=>{e.currentTarget.disabled=true;e.currentTarget.innerHTML=ic('hg')+' בונה…';await load(true);};return;}
     ft.innerHTML=esc(u.email)+upd+' · '+outBtn();
     bindOut();
     pushInit(); // 🔔 פעם אחת אחרי טעינה מוצלחת (pushSt שמור — לא קורא שוב לשרת בכל רענון)
   }catch(e){
-    if(!appEl.querySelector('.card'))appEl.innerHTML='<div class="msg">⚠️ לא ניתן לטעון כרגע. נסו שוב בעוד רגע.</div>';
+    if(!appEl.querySelector('.card'))appEl.innerHTML='<div class="msg">'+ic('wa')+' לא ניתן לטעון כרגע. נסו שוב בעוד רגע.</div>';
   }finally{busy=false;}
 }
 
@@ -636,19 +646,19 @@ let confirmPending=false; // מכשיר אחר — מחכים שהלקוח יק�
 async function start(){
   if(AS){
     onAuthStateChanged(mAuth,u=>{
-      if(u){appEl.innerHTML='<div class="msg">⏳ טוען…</div>';load();}
-      else appEl.innerHTML='<div class="msg">🔒 תצוגת לקוח זמינה למנהל בלבד.<br>היכנסו לאפליקציה כמנהל ופתחו שוב מחלון "פרטי לקוח".</div>';
+      if(u){appEl.innerHTML='<div class="msg">'+ic('hg')+' טוען…</div>';load();}
+      else appEl.innerHTML='<div class="msg">'+ic('lk')+' תצוגת לקוח זמינה למנהל בלבד.<br>היכנסו לאפליקציה כמנהל ופתחו שוב מחלון "פרטי לקוח".</div>';
     });
     return;
   }
   if(isSignInWithEmailLink(auth,location.href)){
-    appEl.innerHTML='<div class="msg">⏳ מתחבר…</div>';
+    appEl.innerHTML='<div class="msg">'+ic('hg')+' מתחבר…</div>';
     const em=ls.get(LS_MAIL);
     if(em)await finishLink(em);
     else{confirmPending=true;showLogin('לאישור הכניסה, הזינו שוב את כתובת המייל שאליה נשלח הקישור.',true);}
   }
   onAuthStateChanged(auth,u=>{
-    if(u){confirmPending=false;appEl.innerHTML='<div class="msg">⏳ טוען…</div>';load();}
+    if(u){confirmPending=false;appEl.innerHTML='<div class="msg">'+ic('hg')+' טוען…</div>';load();}
     else if(!confirmPending&&!appEl.querySelector('.login'))showLogin();
   });
 }
