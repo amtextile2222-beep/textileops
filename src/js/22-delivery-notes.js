@@ -358,7 +358,7 @@ function editShipment(pid,idx){
     </div>
     ${shipOrigHtml(+s.orig||0)}
     ${shipSmpHtml(!!s.smp)}
-    ${trCarSelHtml(s.car||'',p.cust)}
+    ${trCarSelHtml(s.car||'',s.car2||'',p.cust)}
     <label style="display:flex;align-items:center;gap:7px;font-size:12px;font-weight:600;margin-top:10px;cursor:pointer">
       <input type="checkbox" id="esh-print" checked style="width:16px;height:16px"/>
       🖨 הדפס את התעודה המתוקנת אחרי השמירה
@@ -406,7 +406,7 @@ async function saveShipEdit(pid,idx){
       edits:base.edits.concat([{at:new Date().toISOString(),by:S.user?.id||'',
         byName:S.user?.name||S.user?.user||'',prevTotal:prev,newTotal:qty,...(!!x.smp!==smp?{smp}:{})}]).slice(-20)};
     if(!smp){delete r.smp;delete r.back;}
-    if(car!==null){if(car)r.car=car;else delete r.car;}
+    trApplyCars(r,car); // 🚛 car/car2
     return r;
   });
   // 👕 סימון/ביטול "דגם לאישור" משנה את "יצא" ואת שלב shipped ⇒ חישוב מלא (כמו מחיקה/העברה)

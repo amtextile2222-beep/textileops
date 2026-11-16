@@ -14275,7 +14275,7 @@ function openShipModal(cust,prod,orderNo){
       <div style="font-size:11px;color:var(--txt3);margin-bottom:7px">רשום מה נארז בפועל. מצב המשלוח נקבע לפי זה, והחומר מחויב ללקוח בדוח ההתחשבנות.</div>
       <div id="ship-mat-rows">${shipMatRowsHtml(p.cust,p)}</div>
     </div>
-    ${trCarSelHtml(null,p.cust)}
+    ${trCarSelHtml(null,null,p.cust)}
     <div style="margin-top:9px">
       <label style="font-size:12px;font-weight:600">📝 הערה לתעודה</label>
       <input id="ship-note" type="text" maxlength="140" placeholder="לא חובה — תודפס בתעודה" style="width:100%;margin-top:4px;font-size:13px;padding:7px;border-radius:8px;border:1px solid var(--brd);background:var(--bg);color:var(--txt)"/>
@@ -15087,7 +15087,7 @@ async function confirmShip(){
   const dnote=(document.getElementById('ship-note')?.value||'').trim();
   const orig=_shipOrigVal();
   const smp=_shipSmpVal(); // 👕 דגם לאישור
-  const car=_shipCarVal()||''; // 🚛 מוביל (16/11/2026)
+  const car=_shipCarVal(); // 🚛 מובילים (16/11/2026) — {car,car2} או null
   const autoPrint=!!document.getElementById('ship-autoprint')?.checked;
   // ♻ שחזור: המספר והתאריך המקוריים · 📅 בדיעבד (09/10, מנהל): תאריך שנבחר, ומספר — הבא בתור או בלי
   let rs=_shipRestore?{..._shipRestore,restore:true}:null;
@@ -15137,7 +15137,7 @@ async function confirmShip(){
   if(smpAct===0||smpAct===1){const now0=Date.now(),who={by:S.user?.id||'',byName:S.user?.name||S.user?.user||''};
     smpOpen.forEach(x=>{const s=list[x.i];if(!s)return;if(smpAct===0){delete s.smp;delete s.back;s.kept={at:now0,...who};}else s.back={at:now0,...who};});}
   const no=rs&&rs.no!=null?rs.no:await nextDeliveryNoteNo();
-  list.push({no:no||0,date,at:now.toISOString(),rows,total:qty,packs,note:dnote,packMode,mats,...(orig?{orig}:{}),...(smp?{smp:true}:{}),...(car?{car}:{}),...(outer.length?{outer}:{}),
+  list.push({no:no||0,date,at:now.toISOString(),rows,total:qty,packs,note:dnote,packMode,mats,...(orig?{orig}:{}),...(smp?{smp:true}:{}),...(car?.car?{car:car.car}:{}),...(car?.car2?{car2:car.car2}:{}),...(outer.length?{outer}:{}),
     ...(rs?.restore?{restoredAt:now.toISOString(),restoredBy:S.user?.name||''}:{}),
     ...(rs?.past?{backdatedAt:now.toISOString(),backdatedBy:S.user?.name||''}:{})});
   p.shipments=list;
@@ -18644,7 +18644,7 @@ function editShipment(pid,idx){
     </div>
     ${shipOrigHtml(+s.orig||0)}
     ${shipSmpHtml(!!s.smp)}
-    ${trCarSelHtml(s.car||'',p.cust)}
+    ${trCarSelHtml(s.car||'',s.car2||'',p.cust)}
     <label style="display:flex;align-items:center;gap:7px;font-size:12px;font-weight:600;margin-top:10px;cursor:pointer">
       <input type="checkbox" id="esh-print" checked style="width:16px;height:16px"/>
       🖨 הדפס את התעודה המתוקנת אחרי השמירה
@@ -18692,7 +18692,7 @@ async function saveShipEdit(pid,idx){
       edits:base.edits.concat([{at:new Date().toISOString(),by:S.user?.id||'',
         byName:S.user?.name||S.user?.user||'',prevTotal:prev,newTotal:qty,...(!!x.smp!==smp?{smp}:{})}]).slice(-20)};
     if(!smp){delete r.smp;delete r.back;}
-    if(car!==null){if(car)r.car=car;else delete r.car;}
+    trApplyCars(r,car); // 🚛 car/car2
     return r;
   });
   // 👕 סימון/ביטול "דגם לאישור" משנה את "יצא" ואת שלב shipped ⇒ חישוב מלא (כמו מחיקה/העברה)
@@ -22901,23 +22901,31 @@ function _trCost(car,q){const p=_trPrices[car]||{};return TR_KINDS.reduce((t,[k]
 const _trQtyTxt=(q,kinds)=>(kinds||TR_KINDS.map(x=>x[0])).filter(k=>+q[k]>0).map(k=>q[k]+' '+TR_KINDS.find(x=>x[0]===k)[1]).join(' · ');
 const _trDM=d=>d?String(d).slice(8,10)+'/'+String(d).slice(5,7):'';
 
+// 🚛🚛 (16/11/2026) לרוב ההובלה עוברת דרך שני מובילים — אחד אוסף מהמפעל ומוסר לשני, השני מוביל ללקוח
+// (ובקליטה — הפוך). car = הראשון, car2 = השני (לא חובה). כל מוביל נספר על כל הכמות לפי המחירון שלו —
+// מוביל שלא מחייב ישירות ⇒ מחירים 0.
+const trCarsOf=x=>{const a=[x?.car||'',x?.car2||''].filter(Boolean);return a.filter((c,i)=>a.indexOf(c)===i);};
 // ── בחירת מוביל בחלון המשלוח / עריכת תעודה ──
-// ברירת מחדל: המוביל של התעודה האחרונה של אותו לקוח
-function trLastCar(cust){
-  let best='',bt='';
-  (S.products||[]).forEach(p=>{if(String(p.cust)!==String(cust))return;prodShipments(p).forEach(s=>{if(s.car&&String(s.at||s.date||'')>bt){bt=String(s.at||s.date||'');best=s.car;}});});
-  return trCarriers().some(c=>c.id===best)?best:'';
+// ברירת מחדל: הזוג של התעודה האחרונה של אותו לקוח
+function trLastCars(cust){
+  let best=['',''],bt='';const ok=id=>trCarriers().some(c=>c.id===id)?id:'';
+  (S.products||[]).forEach(p=>{if(String(p.cust)!==String(cust))return;prodShipments(p).forEach(s=>{if(s.car&&String(s.at||s.date||'')>bt){bt=String(s.at||s.date||'');best=[s.car,s.car2||''];}});});
+  return [ok(best[0]),ok(best[1])];
 }
-function trCarSelHtml(cur,cust){
-  const l=trCarriers();
-  if(!l.length)return _trMgr()?'<div style="font-size:11px;color:var(--txt3);margin-top:8px">🚛 להתחשבנות עם המובילים — הגדר מובילים ב"תעודות משלוח" ← 🚛 הובלות</div>':'';
-  const v=cur!=null?cur:trLastCar(cust);
-  return `<div style="margin-top:9px;display:flex;align-items:center;gap:8px"><label for="ship-car" style="font-size:12px;font-weight:600;white-space:nowrap">🚛 מוביל</label>
-    <select id="ship-car" style="flex:1;font-size:13px;padding:7px;border-radius:8px;border:1px solid var(--brd);background:var(--bg);color:var(--txt)">
-    <option value="">— לא נבחר —</option>${l.map(c=>`<option value="${esc(c.id)}"${c.id===v?' selected':''}>${esc(c.name)}</option>`).join('')}
-    ${v&&!l.some(c=>c.id===v)?`<option value="${esc(v)}" selected>מוביל שנמחק</option>`:''}</select></div>`;
+function _trOpts(v,none){const l=trCarriers();return `<option value="">${none}</option>${l.map(c=>`<option value="${esc(c.id)}"${c.id===v?' selected':''}>${esc(c.name)}</option>`).join('')}${v&&!l.some(c=>c.id===v)?`<option value="${esc(v)}" selected>מוביל שנמחק</option>`:''}`;}
+function trCarSelHtml(cur,cur2,cust){
+  if(!trCarriers().length)return _trMgr()?'<div style="font-size:11px;color:var(--txt3);margin-top:8px">🚛 להתחשבנות עם המובילים — הגדר מובילים ב"תעודות משלוח" ← 🚛 הובלות</div>':'';
+  const[d1,d2]=cur!=null?[cur,cur2||'']:trLastCars(cust);
+  const ss='flex:1;min-width:0;font-size:13px;padding:7px;border-radius:8px;border:1px solid var(--brd);background:var(--bg);color:var(--txt)';
+  return `<div style="margin-top:9px"><div style="font-size:12px;font-weight:600;margin-bottom:4px">🚛 מובילים <span style="font-weight:400;color:var(--txt3)">— אוסף מהמפעל ⇐ מוסר ללקוח (השני לא חובה)</span></div>
+    <div style="display:flex;gap:6px"><select id="ship-car" aria-label="מוביל ראשון" style="${ss}">${_trOpts(d1,'— מוביל —')}</select>
+    <select id="ship-car2" aria-label="מוביל שני" style="${ss}">${_trOpts(d2,'— בלי מוביל שני —')}</select></div></div>`;
 }
-function _shipCarVal(){const el=document.getElementById('ship-car');return el?el.value:null;} // null = אין שדה (אל תיגע)
+// null = אין שדה (אין מובילים) ⇒ לא נוגעים. שני ריקים/זהים ⇒ מנקים
+function _shipCarVal(){const a=document.getElementById('ship-car'),b=document.getElementById('ship-car2');if(!a)return null;
+  let car=a.value,car2=b?b.value:'';if(!car&&car2){car=car2;car2='';}if(car2===car)car2='';return{car,car2};}
+// קובע car/car2 ברשומה (תעודה / קליטה)
+function trApplyCars(r,v){if(!v)return r;if(v.car)r.car=v.car;else delete r.car;if(v.car2)r.car2=v.car2;else delete r.car2;return r;}
 
 // ── חלון ההובלות ──
 async function openTransport(){
@@ -22953,14 +22961,16 @@ async function renderTransport(force){
   const box=document.getElementById('tr-body');if(!box)return;
   const from=document.getElementById('tr-from')?.value||'0000',to=document.getElementById('tr-to')?.value||'9999',cf=document.getElementById('tr-car')?.value||'';
   try{await _trLoadIntake(from,to,force);}catch(e){box.innerHTML='<div style="color:var(--red-txt)">⚠ לא ניתן לטעון את יומן הקליטה: '+esc(e?.code||e?.message||e)+'</div>';return;}
-  const okCar=c=>!cf||(cf==='_none'?!c:c===cf);
-  const outs=allDeliveryNotes().filter(r=>{const d=String(r.s.date||'').slice(0,10);return d>=from&&d<=to&&okCar(r.s.car||'');})
+  const okCar=x=>{const l=trCarsOf(x);return !cf||(cf==='_none'?!l.length:l.includes(cf));};
+  const outs=allDeliveryNotes().filter(r=>{const d=String(r.s.date||'').slice(0,10);return d>=from&&d<=to&&okCar(r.s);})
     .map(r=>({...r,q:trShipQty(r.s)})).sort((a,b)=>String(b.s.date||'').localeCompare(String(a.s.date||''))||(+b.s.no||0)-(+a.s.no||0));
-  const ins=_trIntake.filter(x=>okCar(x.car||'')).sort((a,b)=>String(b.date).localeCompare(String(a.date))||(+b.at||0)-(+a.at||0));
+  const ins=_trIntake.filter(x=>okCar(x)).sort((a,b)=>String(b.date).localeCompare(String(a.date))||(+b.at||0)-(+a.at||0));
   // סיכום לפי מוביל
   const by={};const g=c=>by[c]||(by[c]={out:_trZero(),in:_trZero(),nOut:0,nIn:0});
-  outs.forEach(r=>{const x=g(r.s.car||'');_trSum(x.out,r.q);x.nOut++;});
-  ins.forEach(r=>{const x=g(r.car||'');_trSum(x.in,r);x.nIn++;});
+  // 🚛🚛 הובלה דרך שני מובילים ⇒ נספרת אצל כל אחד מהם (כל אחד לפי המחירון שלו). בסינון מוביל — רק הוא
+  const carsIn=x=>{const l=trCarsOf(x);return !l.length?['']:cf&&cf!=='_none'?l.filter(c=>c===cf):l;};
+  outs.forEach(r=>carsIn(r.s).forEach(c=>{const x=g(c);_trSum(x.out,r.q);x.nOut++;}));
+  ins.forEach(r=>carsIn(r).forEach(c=>{const x=g(c);_trSum(x.in,r);x.nIn++;}));
   const mg=_trMgr(),th='style="text-align:right;padding:6px 8px;font-size:12px;color:var(--txt3);font-weight:600;border-bottom:1px solid var(--brd)"',td='style="padding:6px 8px;border-bottom:1px solid var(--brd);font-size:13px"';
   const keys=Object.keys(by).sort((a,b)=>(a?0:1)-(b?0:1)||trCarName(a).localeCompare(trCarName(b),'he'));
   let tot=0;
@@ -22974,14 +22984,14 @@ async function renderTransport(force){
     ${mg&&keys.filter(Boolean).length>1?`<tr><td ${td} colspan="3"><b>סה"כ</b></td><td ${td}><b>${dnMoney(tot)}</b></td></tr>`:''}</table>`
     :'<div style="color:var(--txt3);font-size:13px;margin-bottom:12px">אין הובלות בטווח הזה.</div>';
   // פירוט
-  const carSel=(cur,on)=>`<select onchange="${on}" style="font-size:12px;padding:3px;border-radius:6px;border:1px solid var(--brd);background:var(--bg);color:var(--txt);max-width:130px"><option value="">— מוביל —</option>${trCarriers().map(c=>`<option value="${esc(c.id)}"${c.id===cur?' selected':''}>${esc(c.name)}</option>`).join('')}</select>`;
+  const carSel=(cur,on,none)=>`<select onchange="${on}" style="font-size:12px;padding:3px;border-radius:6px;border:1px solid var(--brd);background:var(--bg);color:var(--txt);max-width:130px;display:block;margin:1px 0">${_trOpts(cur,none)}</select>`;
   const outHtml=outs.map(r=>{const p=r.p,s=r.s,qt=_trQtyTxt(r.q,['hang','sack','carton']);
     return `<tr><td ${td}>${_trDM(s.date)}</td><td ${td}>${s.no?String(s.no).padStart(4,'0'):'—'}${s.smp?' <span style="font-size:11px;color:var(--blue-txt)">דגם</span>':''}</td>
       <td ${td}>${esc(custName(p.cust))}<div style="font-size:11px;color:var(--txt3)">${esc(p.name||p.prod||'')} · ${+s.total||0} יח'</div></td>
       <td ${td}>${qt||'<span style="color:var(--amber-txt);font-size:12px">⚠ לא נרשמו קולבים/שקים</span>'}</td>
-      <td ${td}>${carSel(s.car||'',`trSetShipCar('${escj(p.id)}',${r.i},this.value)`)}</td></tr>`;}).join('');
+      <td ${td}>${carSel(s.car||'',`trSetShipCar('${escj(p.id)}',${r.i},'car',this.value)`,'— מוביל —')}${s.car?carSel(s.car2||'',`trSetShipCar('${escj(p.id)}',${r.i},'car2',this.value)`,'+ מוביל שני'):''}</td></tr>`;}).join('');
   const inHtml=ins.map(x=>`<tr><td ${td}>${_trDM(x.date)}</td><td ${td}>${esc(custName(x.cust||''))}${x.note?`<div style="font-size:11px;color:var(--txt3)">${esc(x.note)}</div>`:''}</td>
-      <td ${td}>${_trQtyTxt(x)||'—'}</td><td ${td}>${esc(trCarName(x.car||''))}</td>
+      <td ${td}>${_trQtyTxt(x)||'—'}</td><td ${td}>${trCarsOf(x).length?trCarsOf(x).map(c=>esc(trCarName(c))).join(' ⇐ '):esc(trCarName(''))}</td>
       <td ${td} style="white-space:nowrap"><button class="btn" style="font-size:11px;padding:3px 7px" onclick="trIntakeDlg('${escj(x.id)}')">✏️</button>${mg?` <button class="btn" style="font-size:11px;padding:3px 7px" onclick="trIntakeDel('${escj(x.id)}')">🗑</button>`:''}</td></tr>`).join('');
   box.innerHTML=sum
     +`<details open style="margin-bottom:10px"><summary style="font-weight:700;cursor:pointer;font-size:14px">📤 יצא ללקוחות (${outs.length})</summary>
@@ -22990,15 +23000,17 @@ async function renderTransport(force){
     <details open><summary style="font-weight:700;cursor:pointer;font-size:14px">📥 נכנס למפעל (${ins.length})</summary>
       ${ins.length?`<div style="overflow-x:auto"><table style="width:100%;border-collapse:collapse;margin-top:6px"><tr><th ${th}>תאריך</th><th ${th}>לקוח</th><th ${th}>מה נכנס</th><th ${th}>מוביל</th><th ${th}></th></tr>${inHtml}</table></div>`:'<div style="font-size:13px;color:var(--txt3)">אין — רשמו ב"➕ קליטת סחורה".</div>'}</details>`;
 }
-// שיוך מוביל לתעודה קיימת (גם בדיעבד) — רק השדה car, בלי לגעת בשאר התעודה
-async function trSetShipCar(pid,idx,car){
+// שיוך מוביל לתעודה קיימת (גם בדיעבד) — רק car/car2, בלי לגעת בשאר התעודה. which = 'car' | 'car2'
+async function trSetShipCar(pid,idx,which,car){
   if(!_trCan())return;
   const p=(S.products||[]).find(x=>x.id===pid);if(!p)return;
   const list=prodShipments(p).map(s=>({...s}));const s=list[idx];if(!s)return;
-  if(car)s.car=car;else delete s.car;
+  const v={car:s.car||'',car2:s.car2||''};v[which==='car2'?'car2':'car']=car||'';
+  if(!v.car&&v.car2){v.car=v.car2;v.car2='';}if(v.car2===v.car)v.car2='';
+  trApplyCars(s,v);
   p.shipments=list;saveLS();
   if(S.fbConnected)try{await fbReplaceFields('products',p.id,{shipments:list});}catch(e){showToast('⚠ השמירה נכשלה','var(--red-txt)');return;}
-  showToast('🚛 '+trCarName(car)+' · תעודה '+(s.no?String(s.no).padStart(4,'0'):''));
+  showToast('🚛 '+(trCarsOf(s).map(trCarName).join(' ⇐ ')||trCarName(''))+' · תעודה '+(s.no?String(s.no).padStart(4,'0'):''));
   renderTransport();
 }
 
@@ -23012,13 +23024,14 @@ function trIntakeDlg(id){
   w.onclick=e=>{if(e.target===w)w.remove();};
   const fs='width:100%;font-size:14px;padding:8px;border-radius:8px;border:1px solid var(--brd);background:var(--bg);color:var(--txt)';
   const custs=Object.keys(S.customerNames||{}).sort();
-  const lastCar=x?x.car:(_trIntake.slice().sort((a,b)=>(+b.at||0)-(+a.at||0))[0]?.car||'');
+  const lc=x||_trIntake.slice().sort((a,b)=>(+b.at||0)-(+a.at||0))[0]||{};
   w.innerHTML=`<div style="background:var(--card);border-radius:14px;padding:18px;max-width:380px;width:100%;box-shadow:0 10px 40px rgba(0,0,0,.3)">
     <div style="font-size:16px;font-weight:800;margin-bottom:10px">📥 ${x?'עריכת קליטה':'קליטת סחורה'}</div>
     <div style="display:grid;grid-template-columns:1fr 1fr;gap:8px">
       <label style="font-size:12px;font-weight:600">תאריך<input id="tri-d" type="date" value="${esc(x?x.date:todayStr())}" max="${todayStr()}" style="${fs}"></label>
       <label style="font-size:12px;font-weight:600">לקוח<select id="tri-c" style="${fs}"><option value="">—</option>${custs.map(c=>`<option value="${esc(c)}"${x&&x.cust===c?' selected':''}>${esc(custName(c))}</option>`).join('')}</select></label>
-      <label style="font-size:12px;font-weight:600;grid-column:1/-1">🚛 מוביל<select id="tri-car" style="${fs}"><option value="">— לא נבחר —</option>${trCarriers().map(c=>`<option value="${esc(c.id)}"${c.id===lastCar?' selected':''}>${esc(c.name)}</option>`).join('')}</select></label>
+      <label style="font-size:12px;font-weight:600">🚛 מוביל<select id="tri-car" style="${fs}">${_trOpts(lc.car||'','— לא נבחר —')}</select></label>
+      <label style="font-size:12px;font-weight:600">🚛 מוביל שני<select id="tri-car2" style="${fs}">${_trOpts(lc.car2||'','— בלי —')}</select></label>
       ${[['sack','שקים'],['carton','קרטונים'],['roll','גלילים'],['hang','קולבי תלייה']].map(([k,l])=>`<label style="font-size:12px;font-weight:600">${l}<input id="tri-${k}" type="number" inputmode="numeric" min="0" value="${x&&+x[k]?+x[k]:''}" placeholder="0" style="${fs}"></label>`).join('')}
       <label style="font-size:12px;font-weight:600;grid-column:1/-1">📝 הערה<input id="tri-n" type="text" maxlength="140" value="${esc(x?.note||'')}" placeholder="למשל: בד להזמנה 00085" style="${fs}"></label>
     </div>
@@ -23028,12 +23041,13 @@ function trIntakeDlg(id){
 }
 async function trIntakeSave(id){
   const v=k=>Math.max(0,parseInt(document.getElementById('tri-'+k)?.value)||0);
-  const date=document.getElementById('tri-d')?.value||'',cust=document.getElementById('tri-c')?.value||'',car=document.getElementById('tri-car')?.value||'';
+  const date=document.getElementById('tri-d')?.value||'',cust=document.getElementById('tri-c')?.value||'';let car=document.getElementById('tri-car')?.value||'',car2=document.getElementById('tri-car2')?.value||'';
+  if(!car&&car2){car=car2;car2='';}if(car2===car)car2=''; // fbSet = merge ⇒ car2 נשמר כ-'' ולא נמחק
   const q={sack:v('sack'),carton:v('carton'),roll:v('roll'),hang:v('hang')},note=(document.getElementById('tri-n')?.value||'').trim().slice(0,140);
   if(!/^\d{4}-\d{2}-\d{2}$/.test(date)||date>todayStr()){alert('תאריך לא תקין');return;}
   if(!(q.sack+q.carton+q.roll+q.hang)){alert('רשמו כמה שקים / קרטונים / גלילים / קולבים נכנסו');return;}
   const old=id?_trIntake.find(r=>r.id===id):null;
-  const rec={...(old||{}),id:id||('in_'+Date.now().toString(36)+Math.random().toString(36).slice(2,6)),date,cust,car,...q,note,
+  const rec={...(old||{}),id:id||('in_'+Date.now().toString(36)+Math.random().toString(36).slice(2,6)),date,cust,car,car2,...q,note,
     ...(old?{editAt:Date.now(),editBy:S.user?.name||S.user?.user||''}:{at:Date.now(),by:S.user?.id||'',byName:S.user?.name||S.user?.user||''})};
   try{await fbSet('intake',rec.id,rec);}catch(e){alert('השמירה נכשלה: '+(e?.code||e?.message||e));return;}
   document.getElementById('tri-wrap')?.remove();
