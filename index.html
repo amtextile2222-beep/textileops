@@ -22941,6 +22941,7 @@ async function openTransport(){
   w.innerHTML=`<div style="background:var(--card);border-radius:14px;padding:18px;max-width:860px;width:100%;box-shadow:0 10px 40px rgba(0,0,0,.3);margin:auto">
     <div style="display:flex;align-items:center;gap:8px;margin-bottom:10px;flex-wrap:wrap"><div style="font-size:17px;font-weight:800;flex:1">🚛 הובלות — מה יצא ומה נכנס</div>
       <button class="btn primary" style="font-size:12px" onclick="trIntakeDlg()">➕ קליטת סחורה</button>
+      <button class="btn" style="font-size:12px" onclick="trPrintAsk()">🖨 הדפסה</button>
       ${_trMgr()?'<button class="btn" style="font-size:12px" onclick="trCarriersDlg()">⚙ מובילים ומחירים</button>':''}
       <button class="btn" style="font-size:12px" onclick="document.getElementById('tr-wrap')?.remove()">✕</button></div>
     <div style="display:flex;gap:8px;flex-wrap:wrap;margin-bottom:12px">
@@ -23119,6 +23120,79 @@ async function trCarriersSave(){
   S.carriers=list;_trPrices={..._trPrices,...p};_trTrips=trip;saveLS();
   document.getElementById('trc-wrap')?.remove();showToast('🚛 נשמרו '+list.length+' מובילים');
   if(document.getElementById('tr-wrap'))openTransport();
+}
+
+// ── 🖨 דוח הובלות מודפס (16/11/2026) — דף לכל מוביל, לפי הסינון בחלון (תאריכים + מוביל) ──
+// מנהל בוחר: עם מחירים (סכום לתשלום) או בלי — עותק למוביל להשוואה מול החשבון שלו. אחראי — תמיד בלי
+async function trPrintAsk(){
+  let withPrice=false;
+  if(_trMgr()){const a=await showConfirm3('🖨 הדפסת דוח הובלות','לכלול את המחירים והסכום לתשלום?','💰 עם מחירים','📋 בלי מחירים — עותק למוביל','ביטול');if(a===2||a==null)return;withPrice=a===0;}
+  trPrint(withPrice);
+}
+function trPrint(withPrice){
+  const from=document.getElementById('tr-from')?.value||'',to=document.getElementById('tr-to')?.value||'',cf=document.getElementById('tr-car')?.value||'';
+  if(cf==='_none'){showToast('⚠ בחרו מוביל או "כל המובילים"','var(--red-txt)');return;}
+  const inR=d=>{d=String(d||'').slice(0,10);return(!from||d>=from)&&(!to||d<=to);};
+  const allOut=allDeliveryNotes().filter(r=>inR(r.s.date)).map(r=>({...r,q:trShipQty(r.s)}));
+  const allIn=_trIntake.filter(x=>inR(x.date));
+  const cars=(cf?[cf]:trCarriers().map(c=>c.id)).filter(c=>allOut.some(r=>trCarsOf(r.s).includes(c))||allIn.some(x=>trCarsOf(x).includes(c)));
+  if(!cars.length){showToast('⚠ אין הובלות בסינון הנוכחי','var(--red-txt)');return;}
+  const hd=d=>d?String(d).slice(8,10)+'/'+String(d).slice(5,7)+'/'+String(d).slice(0,4):'';
+  const dm=d=>String(d||'').slice(8,10)+'/'+String(d||'').slice(5,7);
+  const cn=c=>S.customerNames?.[c]||(c?'לקוח '+c:'—');
+  const co=S.settings?.company||{},period=(from?hd(from):'תחילת הרישום')+' — '+(to?hd(to):'היום');
+  const n=v=>+v?String(+v):'—',byDate=(a,b)=>String(a).localeCompare(String(b));
+  const pages=cars.map(c=>{
+    const outs=allOut.filter(r=>trCarsOf(r.s).includes(c)).sort((a,b)=>byDate(a.s.date,b.s.date)||(+a.s.no||0)-(+b.s.no||0));
+    const ins=allIn.filter(x=>trCarsOf(x).includes(c)).sort((a,b)=>byDate(a.date,b.date)||(+a.at||0)-(+b.at||0));
+    const qo=outs.reduce((t,r)=>_trSum(t,r.q),_trZero()),qi=ins.reduce((t,x)=>_trSum(t,x),_trZero()),qa=_trSum(_trSum(_trZero(),qo),qi);
+    const other=x=>trCarsOf(x).filter(k=>k!==c).map(trCarName).join(', ')||'—';
+    const vs=_trTrips.filter(x=>x.car===c&&+x.a>0).map(x=>{const d=new Set();
+      outs.forEach(r=>{if(String(r.p.cust)===String(x.cust))d.add(String(r.s.date||'').slice(0,10));});
+      ins.forEach(r=>{if(String(r.cust)===String(x.cust))d.add(String(r.date||'').slice(0,10));});
+      return{cust:x.cust,a:+x.a,n:d.size,days:[...d].sort()};}).filter(v=>v.n);
+    const p=_trPrices[c]||{},lbl={hang:'קולב תלייה',sack:'שק',carton:'קרטון',roll:'גליל'};
+    let tot=0;
+    const priceRows=TR_KINDS.filter(([k])=>qa[k]>0).map(([k])=>{const s=qa[k]*(+p[k]||0);tot+=s;
+      return `<tr><td>${lbl[k]}</td><td class="c">${qo[k]||'—'}</td><td class="c">${qi[k]||'—'}</td><td class="c"><b>${qa[k]}</b></td>${withPrice?`<td class="c">${+p[k]?dnMoney(+p[k]):'<span class="miss">⚠ חסר</span>'}</td><td class="n">${dnMoney(s)}</td>`:''}</tr>`;}).join('')
+      +vs.map(v=>{const s=v.n*v.a;tot+=s;return `<tr><td>📍 הגעות ל${esc(cn(v.cust))}<div class="pm">${v.days.map(dm).join(', ')}</div></td><td class="c" colspan="2"></td><td class="c"><b>${v.n}</b></td>${withPrice?`<td class="c">${dnMoney(v.a)}</td><td class="n">${dnMoney(s)}</td>`:''}</tr>`;}).join('');
+    return `<section>
+    <div class="top"><div><div class="co">${esc(co.name||'')}</div><div class="co-d">${co.phone?'טלפון: '+esc(co.phone):''}</div></div>
+      <div class="doc"><h1>דוח הובלות — ${esc(trCarName(c))}</h1><div class="dt">תקופה: ${esc(period)}</div><div class="dt">הופק: ${hd(todayStr())}</div></div></div>
+    <h2>📤 יצא ללקוחות (${outs.length})</h2>
+    ${outs.length?`<table><thead><tr><th class="c">תאריך</th><th class="c">תעודה</th><th>לקוח</th><th>דגם / הזמנה</th><th class="c">קולבים</th><th class="c">שקים</th><th class="c">קרטונים</th><th>מוביל נוסף</th></tr></thead><tbody>
+      ${outs.map(r=>`<tr><td class="c">${dm(r.s.date)}</td><td class="c">${r.s.no?String(r.s.no).padStart(4,'0'):'—'}</td><td>${esc(cn(r.p.cust))}</td>
+        <td>${esc(r.p.name||r.p.prod||'')}${(parseInt(r.p.orderNo,10)||0)?` <span class="ord">#${String(r.p.orderNo).padStart(3,'0')}</span>`:''}${r.s.smp?' <span class="ord">(דגם)</span>':''}</td>
+        <td class="c">${n(r.q.hang)}</td><td class="c">${n(r.q.sack)}</td><td class="c">${n(r.q.carton)}</td><td>${esc(other(r.s))}</td></tr>`).join('')}
+      </tbody><tfoot><tr><td colspan="4">סה"כ</td><td class="c">${qo.hang}</td><td class="c">${qo.sack}</td><td class="c">${qo.carton}</td><td></td></tr></tfoot></table>`:'<div class="none">אין</div>'}
+    <h2>📥 נכנס למפעל (${ins.length})</h2>
+    ${ins.length?`<table><thead><tr><th class="c">תאריך</th><th>לקוח</th><th class="c">שקים</th><th class="c">קרטונים</th><th class="c">גלילים</th><th class="c">קולבים</th><th>מוביל נוסף</th><th>הערה</th></tr></thead><tbody>
+      ${ins.map(x=>`<tr><td class="c">${dm(x.date)}</td><td>${esc(cn(x.cust))}</td><td class="c">${n(x.sack)}</td><td class="c">${n(x.carton)}</td><td class="c">${n(x.roll)}</td><td class="c">${n(x.hang)}</td><td>${esc(other(x))}</td><td>${esc(x.note||'')}</td></tr>`).join('')}
+      </tbody><tfoot><tr><td colspan="2">סה"כ</td><td class="c">${qi.sack}</td><td class="c">${qi.carton}</td><td class="c">${qi.roll}</td><td class="c">${qi.hang}</td><td colspan="2"></td></tr></tfoot></table>`:'<div class="none">אין</div>'}
+    <h2>סיכום</h2>
+    <table class="sum"><thead><tr><th>פריט</th><th class="c">יצא</th><th class="c">נכנס</th><th class="c">סה"כ</th>${withPrice?'<th class="c">מחיר</th><th class="c">סכום</th>':''}</tr></thead><tbody>${priceRows}</tbody>
+      ${withPrice?`<tfoot><tr><td colspan="5">לתשלום</td><td class="n">${dnMoney(tot)}</td></tr></tfoot>`:''}</table>
+    <div class="sign"><div><b>חתימת המפעל</b></div><div><b>חתימת המוביל</b></div></div>
+    </section>`;}).join('');
+  printViaIframe(`<!DOCTYPE html><html dir="rtl" lang="he"><head><meta charset="UTF-8"/><title>דוח הובלות ${esc(cf?trCarName(cf):'')}</title><style>
+*{box-sizing:border-box;margin:0;padding:0}
+body{font-family:Arial,Helvetica,sans-serif;color:#000;background:#fff;font-size:12.5px;padding:14mm 12mm;-webkit-print-color-adjust:exact;print-color-adjust:exact}
+section+section{page-break-before:always}
+.top{display:flex;justify-content:space-between;align-items:flex-start;border-bottom:3px solid #185FA5;padding-bottom:8px;margin-bottom:12px}
+.co{font-size:18px;font-weight:800;color:#185FA5}.co-d{font-size:11px;color:#444}
+.doc{text-align:left}.doc h1{font-size:19px;font-weight:800;margin-bottom:4px}.doc .dt{font-size:11.5px;color:#444}
+h2{font-size:13.5px;margin:14px 0 6px;color:#185FA5}
+table{width:100%;border-collapse:collapse;font-size:12px}
+thead th{background:#eef2ff;padding:6px;text-align:right;font-weight:700;border:1px solid #bbb}
+td{padding:5px 6px;border:1px solid #ddd}.c{text-align:center}
+td.n{text-align:center;font-weight:800;white-space:nowrap}
+tfoot td{background:#eef2ff;font-weight:800;border:1px solid #bbb}
+table.sum{width:auto;min-width:60%}
+.ord{color:#888;font-size:10px}.pm{font-size:9.5px;color:#666}.miss{color:#b91c1c;font-weight:700}.none{color:#888;font-size:12px}
+tr{page-break-inside:avoid}thead{display:table-header-group}
+.sign{display:flex;gap:14px;margin-top:28px}.sign div{flex:1;border-top:1px solid #666;padding-top:5px;font-size:11px}
+@media print{body{padding:8mm}}
+</style></head><body>${pages}</body></html>`);
 }
 </script>
 </body>
