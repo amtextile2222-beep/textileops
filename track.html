@@ -339,10 +339,37 @@ async function loadImgs(){
     }catch(e){}finally{imgBusy.delete(k);}
   }
 }
+// 🔍 (16/11/2026) הגדלה כמו בלשונית מוצרים באפליקציה (viewImg): גלגלת / לחיצה כפולה / + − סביב העכבר, גרירה להזזה,
+// Esc לסגירה. בטלפון — הצביטה הרגילה של הדפדפן (touch-action:pinch-zoom)
 function bigImg(src,alt){
   $('imgm')?.remove();const m=document.createElement('div');m.id='imgm';m.className='cutm';
-  m.innerHTML=`<div class="imgm-b"><img src="${esc(src)}" alt="${esc(alt)}"><div>${esc(alt)}</div></div>`;
-  m.onclick=()=>m.remove();document.body.appendChild(m);
+  m.style.cssText='background:rgba(0,0,0,.88);overflow:hidden;touch-action:pinch-zoom';
+  const bs='width:38px;height:38px;border-radius:50%;border:0;background:rgba(255,255,255,.18);color:#fff;font-size:20px;cursor:pointer';
+  m.innerHTML=`<div class="imgm-b"><img draggable="false" src="${esc(src)}" alt="${esc(alt)}" style="position:relative;z-index:1;transform-origin:0 0;cursor:zoom-in;user-select:none;will-change:transform"><div>${esc(alt)}</div></div>
+    <div style="position:absolute;top:12px;left:12px;display:flex;gap:8px;z-index:2">
+      <button data-z="close" title="סגור (Esc)" style="${bs}">✕</button><button data-z="in" title="הגדל" style="${bs}">+</button><button data-z="out" title="הקטן" style="${bs}">−</button></div>
+    <div data-hint style="position:absolute;bottom:10px;left:0;right:0;text-align:center;font-size:12px;color:rgba(255,255,255,.6);pointer-events:none">גלגלת או לחיצה כפולה להגדלה · גרירה להזזה</div>`;
+  const img=m.querySelector('img'),hint=m.querySelector('[data-hint]');
+  let s=1,x=0,y=0,drag=null,moved=false;
+  const apply=()=>{img.style.transform=`translate(${x}px,${y}px) scale(${s})`;img.style.cursor=s>1?(drag?'grabbing':'grab'):'zoom-in';hint.style.display=s>1?'none':'';};
+  // זום סביב נקודה במסך — הנקודה שמתחת לעכבר נשארת במקומה
+  const zoomAt=(ns,px,py)=>{ns=Math.max(1,Math.min(8,ns));
+    const r=img.getBoundingClientRect(),ox=r.left-x,oy=r.top-y,ix=(px-r.left)/s,iy=(py-r.top)/s;
+    s=ns;if(s===1){x=0;y=0;}else{x=px-ox-ix*s;y=py-oy-iy*s;}apply();};
+  const mid=()=>{const r=img.getBoundingClientRect();return [r.left+r.width/2,r.top+r.height/2];};
+  const close=()=>{m.remove();document.removeEventListener('keydown',onKey);};
+  const onKey=e=>{if(e.key==='Escape')close();else if(e.key==='+'||e.key==='=')zoomAt(s*1.4,...mid());else if(e.key==='-')zoomAt(s/1.4,...mid());};
+  document.addEventListener('keydown',onKey);
+  m.addEventListener('wheel',e=>{e.preventDefault();zoomAt(s*(e.deltaY<0?1.2:1/1.2),e.clientX,e.clientY);},{passive:false});
+  img.addEventListener('dblclick',e=>{e.stopPropagation();zoomAt(s>1?1:2.5,e.clientX,e.clientY);});
+  img.addEventListener('pointerdown',e=>{if(s<=1||e.pointerType==='touch')return;drag={sx:e.clientX-x,sy:e.clientY-y};moved=false;img.setPointerCapture(e.pointerId);apply();});
+  img.addEventListener('pointermove',e=>{if(!drag)return;x=e.clientX-drag.sx;y=e.clientY-drag.sy;moved=true;apply();});
+  img.addEventListener('pointerup',()=>{drag=null;apply();});
+  img.addEventListener('click',e=>e.stopPropagation());
+  m.querySelectorAll('[data-z]').forEach(b=>b.addEventListener('click',e=>{e.stopPropagation();const z=b.dataset.z;
+    if(z==='close')close();else zoomAt(z==='in'?s*1.5:s/1.5,...mid());}));
+  m.onclick=()=>{if(moved){moved=false;return;}close();};
+  document.body.appendChild(m);
 }
 const outBtn=()=>'<button id="out">התנתקות</button>';
 // התנתקות ⇒ גם ביטול ההתראות במכשיר (אחרת מכשיר שהתנתק היה ממשיך לקבל עדכונים)
