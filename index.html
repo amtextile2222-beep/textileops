@@ -22961,6 +22961,7 @@ async function openTransport(){
     <div style="display:flex;align-items:center;gap:8px;margin-bottom:10px;flex-wrap:wrap"><div style="font-size:17px;font-weight:800;flex:1">🚛 הובלות — מה יצא ומה נכנס</div>
       <button class="btn primary" style="font-size:12px" onclick="trIntakeDlg()">➕ קליטת סחורה</button>
       <button class="btn" style="font-size:12px" onclick="trPrintAsk()">🖨 הדפסה</button>
+      <button class="btn" style="font-size:12px" onclick="trPrintAsk('wa')">💬 וואטסאפ</button>
       ${_trMgr()?'<button class="btn" style="font-size:12px" onclick="trCarriersDlg()">⚙ מובילים ומחירים</button>':''}
       <button class="btn" style="font-size:12px" onclick="document.getElementById('tr-wrap')?.remove()">✕</button></div>
     <div style="display:flex;gap:8px;flex-wrap:wrap;margin-bottom:12px">
@@ -23115,7 +23116,8 @@ function trCarriersDlg(){
 }
 function _trcRow(c,p){
   const fs='width:100%;min-width:60px;font-size:13px;padding:6px;border-radius:6px;border:1px solid var(--brd);background:var(--bg);color:var(--txt)';
-  return `<tr class="trc-r" data-id="${esc(c.id)}"><td style="padding:3px"><input class="trc-n" value="${esc(c.name)}" placeholder="שם" style="${fs};min-width:110px"></td>
+  return `<tr class="trc-r" data-id="${esc(c.id)}"><td style="padding:3px"><input class="trc-n" value="${esc(c.name)}" placeholder="שם" style="${fs};min-width:110px">
+    <input class="trc-ph" value="${esc(c.phone||'')}" type="tel" inputmode="tel" dir="ltr" placeholder="📱 טלפון (לוואטסאפ)" style="${fs};min-width:110px;margin-top:3px;font-size:12px"></td>
     ${TR_KINDS.map(([k])=>`<td style="padding:3px"><input class="trc-p" data-k="${k}" type="number" inputmode="decimal" min="0" step="0.01" value="${+p[k]||''}" placeholder="0" style="${fs}"></td>`).join('')}
     <td style="padding:3px"><button class="btn" style="font-size:12px;padding:4px 8px" title="הסר" onclick="this.closest('tr').remove()">🗑</button></td></tr>`;
 }
@@ -23132,7 +23134,8 @@ async function trCarriersSave(){
   for(const r of rows){const name=r.querySelector('.trc-n').value.trim();if(!name)continue;
     const id=r.dataset.id||('car_'+Date.now().toString(36)+Math.random().toString(36).slice(2,5));
     if(list.some(c=>c.name===name)){alert('המוביל "'+name+'" מופיע פעמיים');return;}
-    list.push({id,name});p[id]={};r.querySelectorAll('.trc-p').forEach(i=>{p[id][i.dataset.k]=Math.max(0,+i.value||0);});}
+    const phone=(r.querySelector('.trc-ph')?.value||'').replace(/[^\d+]/g,'').slice(0,16);
+    list.push({id,name,...(phone?{phone}:{})});p[id]={};r.querySelectorAll('.trc-p').forEach(i=>{p[id][i.dataset.k]=Math.max(0,+i.value||0);});}
   const ids=new Set(list.map(c=>c.id)),trip=[];
   for(const r of document.querySelectorAll('#trc-trips .trc-trip')){const car=r.querySelector('.trt-car').value,cust=r.querySelector('.trt-cust').value,a=Math.max(0,+r.querySelector('.trt-a').value||0);
     if(!car&&!cust&&!a)continue;if(!car||!cust||!a){alert('בתוספת להגעה — בחרו מוביל, לקוח וסכום');return;}
@@ -23146,15 +23149,17 @@ async function trCarriersSave(){
 
 // ── 🖨 דוח הובלות מודפס (16/11/2026) — דף לכל מוביל, לפי הסינון בחלון (תאריכים + מוביל) ──
 // מנהל בוחר: עם מחירים (סכום לתשלום) או בלי — עותק למוביל להשוואה מול החשבון שלו. אחראי — תמיד בלי
-async function trPrintAsk(){
-  let withPrice=false;
+// 💬 mode='wa' (16/11/2026) — אותו דוח כ-PDF (דף לכל מוביל) לוואטסאפ: חלון השיתוף בנייד / הורדה + שיחה עם המוביל
+// (טלפון מחלון המובילים; כמה מובילים ⇒ בלי טלפון). _dnPdfBlob/_waSharePdf — כמו תעודת משלוח ומדבקות
+async function trPrintAsk(mode){
+  let withPrice=false;const wa=mode==='wa';
   // showConfirm3 = z-index 9999, חלון ההובלות 10000 ⇒ השאלה נפתחה מתחתיו. הרכיב נוסף מיד (סינכרוני) ⇒ מעלים אותו
-  if(_trMgr()){const pr=showConfirm3('🖨 הדפסת דוח הובלות','לכלול את המחירים והסכום לתשלום?','💰 עם מחירים','📋 בלי מחירים — עותק למוביל','ביטול');
+  if(_trMgr()){const pr=showConfirm3(wa?'💬 דוח הובלות בוואטסאפ':'🖨 הדפסת דוח הובלות','לכלול את המחירים והסכום לתשלום?','💰 עם מחירים','📋 בלי מחירים — עותק למוביל','ביטול');
     const ov=document.body.lastElementChild;if(ov&&ov.querySelector('[onclick*="_c3res"]'))ov.style.zIndex='10005';
     const a=await pr;if(a===2||a==null)return;withPrice=a===0;}
-  trPrint(withPrice);
+  return trPrint(withPrice,mode);
 }
-function trPrint(withPrice){
+async function trPrint(withPrice,mode){
   const from=document.getElementById('tr-from')?.value||'',to=document.getElementById('tr-to')?.value||'',cf=document.getElementById('tr-car')?.value||'';
   if(cf==='_none'){showToast('⚠ בחרו מוביל או "כל המובילים"','var(--red-txt)');return;}
   const inR=d=>{d=String(d||'').slice(0,10);return(!from||d>=from)&&(!to||d<=to);};
@@ -23167,7 +23172,7 @@ function trPrint(withPrice){
   const cn=c=>S.customerNames?.[c]||(c?'לקוח '+c:'—');
   const co=S.settings?.company||{},period=(from?hd(from):'תחילת הרישום')+' — '+(to?hd(to):'היום');
   const n=v=>+v?String(+v):'—',byDate=(a,b)=>String(a).localeCompare(String(b));
-  const pages=cars.map(c=>{
+  const secs=cars.map(c=>{
     const outs=allOut.filter(r=>trCarsOf(r.s).includes(c)).sort((a,b)=>byDate(a.day,b.day)||(+a.s.no||0)-(+b.s.no||0));
     // 🗓 (16/11/2026) שורה ליום וללקוח — כל התעודות שיצאו יחד מסוכמות; בלי מספר תעודה ודגם
     const grp=[];outs.forEach(r=>{const k=r.day+'|'+r.p.cust;let g=grp.find(x=>x.k===k);if(!g){g={k,day:r.day,cust:r.p.cust,q:_trZero(),modes:new Set(),others:new Set()};grp.push(g);}
@@ -23201,8 +23206,11 @@ function trPrint(withPrice){
     <table class="sum"><thead><tr><th>פריט</th><th class="c">יצא</th><th class="c">נכנס</th><th class="c">סה"כ</th>${withPrice?'<th class="c">מחיר</th><th class="c">סכום</th>':''}</tr></thead><tbody>${priceRows}</tbody>
       ${withPrice?`<tfoot><tr><td colspan="5">לתשלום</td><td class="n">${dnMoney(tot)}</td></tr></tfoot>`:''}</table>
     <div class="sign"><div><b>חתימת המפעל</b></div><div><b>חתימת המוביל</b></div></div>
-    </section>`;}).join('');
-  printViaIframe(`<!DOCTYPE html><html dir="rtl" lang="he"><head><meta charset="UTF-8"/><title>דוח הובלות ${esc(cf?trCarName(cf):'')}</title><style>
+    </section>`;});
+  // 🖨 (16/11/2026) בלי כתובת/תאריך של הדפדפן בשולי הדף: @page בלי שוליים (הדפדפן מדפיס אותם בתוך השוליים) —
+  // והשוליים עוברים לתוך הדף (ריפוד ה-section)
+  const wrap=body=>`<!DOCTYPE html><html dir="rtl" lang="he"><head><meta charset="UTF-8"/><title>דוח הובלות ${esc(cf?trCarName(cf):'')}</title><style>
+@page{size:A4;margin:0}
 *{box-sizing:border-box;margin:0;padding:0}
 body{font-family:Arial,Helvetica,sans-serif;color:#000;background:#fff;font-size:12.5px;padding:14mm 12mm;-webkit-print-color-adjust:exact;print-color-adjust:exact}
 section+section{page-break-before:always}
@@ -23219,8 +23227,16 @@ table.sum{width:auto;min-width:60%}
 .ord{color:#888;font-size:10px}.pm{font-size:9.5px;color:#666}.miss{color:#b91c1c;font-weight:700}.none{color:#888;font-size:12px}
 tr{page-break-inside:avoid}thead{display:table-header-group}
 .sign{display:flex;gap:14px;margin-top:28px}.sign div{flex:1;border-top:1px solid #666;padding-top:5px;font-size:11px}
-@media print{body{padding:8mm}}
-</style></head><body>${pages}</body></html>`);
+@media print{body{padding:0}section{padding:12mm 12mm 10mm}}
+</style></head><body>${body}</body></html>`;
+  if(mode!=='wa'){printViaIframe(wrap(secs.join('')));return;}
+  showToast('⏳ מכין PDF…','var(--txt3)',4000);
+  let blob;try{blob=await _dnPdfBlob(secs.map(wrap));}catch(e){showToast('⚠ הכנת ה-PDF נכשלה: '+(e?.message||e),'var(--red-txt)',6000);return;}
+  // 💬 שם קובץ באנגלית (וואטסאפ במחשב מציג עברית כג'יבריש) · מוביל אחד ⇒ השיחה נפתחת אליו
+  const one=cars.length===1?trCarriers().find(x=>x.id===cars[0]):null;
+  const name='transport-'+(from||'').slice(0,7)+(one?'-'+cars[0].replace(/[^\w-]/g,''):'')+'.pdf';
+  const text='דוח הובלות'+(one?' — '+one.name:'')+' · '+period;
+  await _waSharePdf(blob,name,text,one?_waPhone(one.phone):''); // showConfirm = z-index 100000 — מעל חלון ההובלות
 }
 </script>
 </body>
