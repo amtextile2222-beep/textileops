@@ -492,6 +492,7 @@ function listenFb(){
       if(d.id==='packPrices'){S.settings.packPrices={...(S.settings.packPrices||{}),...data};saveLS();}
       if(d.id==='breakDefault'&&data.start&&data.end){S.settings.breakDefault={start:data.start,end:data.end};saveLS();}
       if(d.id==='rateW'){S.rateW=data;}
+      if(d.id==='carriers'){S.carriers=Array.isArray(data.list)?data.list:[];} // 🚛 שמות המובילים (16/11/2026)
       if(d.id==='packStock'){S.packStock=data;try{pstkBadge();if(document.getElementById('pstk-wrap'))renderPackStock();}catch(e){}}
       // 🕳 יומן הביטולים משותף לכל המכשירים — מי שמחק תעודה בנייד, והמנהל
       // שמסתכל במסך הגדול, חייבים לראות את אותו חור עם אותו הסבר.

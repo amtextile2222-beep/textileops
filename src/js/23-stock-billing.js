@@ -475,6 +475,7 @@ function renderDNotes(){
     sel.value=opts.some(c=>c.code===keep)?keep:'';
   }
   const cp=_canPricing();
+  const trb=document.getElementById('dn-tr-btn');if(trb)trb.style.display=_trCan()?'':'none'; // 🚛 הובלות — מנהל/אחראי
   const ps=document.getElementById('dn-pay');if(ps)ps.style.display=cp?'':'none';
   _pfEnsure();
   const f=dnFiltered(),rows=f.rows,voids=dnVoidRows(f);

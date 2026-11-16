@@ -252,6 +252,13 @@ service cloud.firestore {
       allow update, delete: if isMgr();
     }
 
+    // 🚛 יומן קליטת סחורה (16/11/2026) — שקים/קרטונים/גלילים/קולבים שנכנסו, לחשבון המובילים.
+    // אחראי/מנהל רושמים ורואים (בלי מחירים — המחירון ב-adminSettings/transport); מחיקה — מנהל
+    match /intake/{id} {
+      allow read, create, update: if isMgr() || isSup();
+      allow delete: if isMgr();
+    }
+
     // שאר האוספים — כל משתמש מחובר עם role
     // (stationLog נשאר כאן בכוונה — עובדים כותבים רשומות שיוך לתחנה)
     // ⚠️ כל אוסף שמקבל חוקים משלו חייב להופיע כאן ברשימת ההחרגה — Rules מאשרים
@@ -280,7 +287,8 @@ service cloud.firestore {
         && collection != 'workerWifi'
         && collection != 'workerMessages'
         && collection != 'mgrInbox'
-        && collection != 'gateOverrides';
+        && collection != 'gateOverrides'
+        && collection != 'intake';
     }
   }
 }

@@ -553,6 +553,7 @@ async function confirmShip(){
   const dnote=(document.getElementById('ship-note')?.value||'').trim();
   const orig=_shipOrigVal();
   const smp=_shipSmpVal(); // 👕 דגם לאישור
+  const car=_shipCarVal()||''; // 🚛 מוביל (16/11/2026)
   const autoPrint=!!document.getElementById('ship-autoprint')?.checked;
   // ♻ שחזור: המספר והתאריך המקוריים · 📅 בדיעבד (09/10, מנהל): תאריך שנבחר, ומספר — הבא בתור או בלי
   let rs=_shipRestore?{..._shipRestore,restore:true}:null;
@@ -602,7 +603,7 @@ async function confirmShip(){
   if(smpAct===0||smpAct===1){const now0=Date.now(),who={by:S.user?.id||'',byName:S.user?.name||S.user?.user||''};
     smpOpen.forEach(x=>{const s=list[x.i];if(!s)return;if(smpAct===0){delete s.smp;delete s.back;s.kept={at:now0,...who};}else s.back={at:now0,...who};});}
   const no=rs&&rs.no!=null?rs.no:await nextDeliveryNoteNo();
-  list.push({no:no||0,date,at:now.toISOString(),rows,total:qty,packs,note:dnote,packMode,mats,...(orig?{orig}:{}),...(smp?{smp:true}:{}),...(outer.length?{outer}:{}),
+  list.push({no:no||0,date,at:now.toISOString(),rows,total:qty,packs,note:dnote,packMode,mats,...(orig?{orig}:{}),...(smp?{smp:true}:{}),...(car?{car}:{}),...(outer.length?{outer}:{}),
     ...(rs?.restore?{restoredAt:now.toISOString(),restoredBy:S.user?.name||''}:{}),
     ...(rs?.past?{backdatedAt:now.toISOString(),backdatedBy:S.user?.name||''}:{})});
   p.shipments=list;

@@ -246,6 +246,23 @@ const EMU = (process.env.FIRESTORE_EMULATOR_HOST || '127.0.0.1:8080').split(':')
   await ok('מנהל: הפקדה', setDoc(D(mgr, 'cashbox/in2'), { id: 'in2', type: 'in', workerId: 'm1', amount: 50 }));
   await no('עובד עם הרשאת קופה: הפקדה', setDoc(D(wcb, 'cashbox/in3'), { id: 'in3', type: 'in', workerId: 'w3', amount: 50 }));
 
+  // 🚛 יומן קליטה (16/11/2026): אחראי/מנהל רושמים וקוראים; מחיקה — מנהל; עובד/עוזר/בלי role — כלום
+  await env.withSecurityRulesDisabled(async c => { await setDoc(doc(c.firestore(), 'intake/i1'), { id: 'i1', date: '2026-11-16', cust: '01', sack: 3 }); });
+  await ok('אחראי: רישום קליטה', setDoc(D(sup, 'intake/i2'), { id: 'i2', date: '2026-11-16', cust: '01', sack: 2, roll: 4 }));
+  await ok('אחראי: קריאת קליטה', getDocs(query(collection(sup, 'intake'), where('date', '>=', '2026-11-01'))));
+  await ok('אחראי: תיקון קליטה', updateDoc(D(sup, 'intake/i1'), { sack: 4 }));
+  await no('אחראי: מחיקת קליטה', deleteDoc(D(sup, 'intake/i1')));
+  await ok('מנהל: קריאה + מחיקת קליטה', Promise.all([getDocs(collection(mgr, 'intake')), deleteDoc(D(mgr, 'intake/i2'))]));
+  for (const [nm, db] of [['עובד', wrk], ['עובד עם תעודות', wdn], ['עוזר', hlp], ['לקוח', cust], ['לא מחובר', anon]]) {
+    await no(nm + ': קריאת קליטה', getDocs(collection(db, 'intake')));
+    await no(nm + ': רישום קליטה', setDoc(D(db, 'intake/x_' + nm.length), { id: 'x', sack: 1 }));
+    await no(nm + ': מחיקת קליטה', deleteDoc(D(db, 'intake/i1')));
+  }
+  await no('אחראי: מחירון מובילים', getDoc(D(sup, 'adminSettings/transport')));
+  await ok('מנהל: מחירון מובילים', setDoc(D(mgr, 'adminSettings/transport'), { p: { c1: { hang: 1.5, sack: 10 } } }, { merge: true }));
+  await ok('מנהל: רשימת מובילים', setDoc(D(mgr, 'appSettings/carriers'), { list: [{ id: 'c1', name: 'א' }] }, { merge: true }));
+  await ok('עובד: קריאת רשימת מובילים', getDoc(D(wrk, 'appSettings/carriers')));
+  await no('אחראי: שינוי רשימת מובילים', setDoc(D(sup, 'appSettings/carriers'), { list: [] }, { merge: true }));
   await env.cleanup();
   console.log('\n══ ' + pass + ' עברו · ' + fails.length + ' נכשלו ══');
   fails.forEach(f => console.log(f));

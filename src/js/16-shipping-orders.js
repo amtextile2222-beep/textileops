@@ -487,6 +487,7 @@ function openShipModal(cust,prod,orderNo){
       <div style="font-size:11px;color:var(--txt3);margin-bottom:7px">רשום מה נארז בפועל. מצב המשלוח נקבע לפי זה, והחומר מחויב ללקוח בדוח ההתחשבנות.</div>
       <div id="ship-mat-rows">${shipMatRowsHtml(p.cust,p)}</div>
     </div>
+    ${trCarSelHtml(null,p.cust)}
     <div style="margin-top:9px">
       <label style="font-size:12px;font-weight:600">📝 הערה לתעודה</label>
       <input id="ship-note" type="text" maxlength="140" placeholder="לא חובה — תודפס בתעודה" style="width:100%;margin-top:4px;font-size:13px;padding:7px;border-radius:8px;border:1px solid var(--brd);background:var(--bg);color:var(--txt)"/>
