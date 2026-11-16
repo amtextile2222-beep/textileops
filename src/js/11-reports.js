@@ -731,7 +731,7 @@ async function pipeDepart(pid,on){
   const p=(S.products||[]).find(x=>String(x.id)===String(pid));if(!p)return;
   // כמה תעודות ממתינות לסימון (A251: 0710 יצאה, 0711 עוד במפעל) ⇒ בחירה: רק הישנה או כולן.
   // "רק הישנה" = departedAt על מועד התעודה הזו — יציאה נקבעת פר תעודה לפי at ≤ departedAt (pipeStateOf)
-  let cut=on?new Date().toISOString():null;
+  let cut=on?new Date().toISOString():null,depL=null; // depL = התעודות שיוצאות עכשיו (null = כל הממתינות)
   const depT=p.departedAt?Date.parse(p.departedAt):NaN;
   const pend=on?shipsReal(p).filter(s=>{const d=String(s.date||'').slice(0,10);if(d&&d<PIPE_DEPART_FROM)return false;return isNaN(depT)||_shipAtMs(s)>depT;})
     .sort((a,b)=>(_shipAtMs(a)||0)-(_shipAtMs(b)||0)):[];
@@ -740,18 +740,25 @@ async function pipeDepart(pid,on){
     const c=await showConfirm3('יצא ללקוח',`ל-${p.cust}/${p.prod} ${p.name||''} יש ${pend.length} תעודות שעוד לא סומנו כיציאה. מה יצא מהמפעל?`,
       `🚚 רק תעודה ${no(pend[0])} (${u(pend[0])} יח')`,`🚚 כל ${pend.length} התעודות (${pend.reduce((t,s)=>t+u(s),0)} יח')`,'ביטול');
     if(c!==0&&c!==1)return;
-    if(c===0)cut=new Date(_shipAtMs(pend[0])).toISOString();
+    if(c===0){cut=new Date(_shipAtMs(pend[0])).toISOString();depL=[pend[0]];}
   }else{
     const ok=await showConfirm(on?'יצא ללקוח':'ביטול יציאה',
       on?`לסמן ש-${p.cust}/${p.prod} ${p.name||''} יצא מהמפעל?\n\nהלקוח יראה "נשלח" בדף המעקב.`
         :`לבטל את סימון היציאה של ${p.cust}/${p.prod}? ההזמנה תחזור ל"מוכן ליציאה".`);
     if(!ok)return;
   }
+  // 🚛 (16/11/2026) תאריך היציאה בפועל על כל תעודה שיצאה (shipments[].dep) — departedAt אחד להזמנה נדרס
+  // ביציאה הבאה, וההובלות צריכות את היום שבו כל תעודה עזבה את המפעל. ביטול ⇒ dep נמחק מכולן
+  const _depKey=s=>String(s.no||'')+'|'+String(s.at||'')+'|'+String(s.date||'');
+  const _depSet=new Set((on?(depL||pend):[]).map(_depKey));
+  const _dl=prodShipments(p).map(s=>{const x={...s};if(!on)delete x.dep;else if(_depSet.has(_depKey(s)))x.dep=todayStr();return x;});
+  const _depChg=Array.isArray(p.shipments)&&p.shipments.length&&JSON.stringify(_dl)!==JSON.stringify(p.shipments);
+  if(_depChg)p.shipments=_dl;
   p.departedAt=cut;
   p.departedBy=on?(S.user?.name||''):null;
   saveLS();
   if(S.fbConnected){
-    try{await fbSet('products',p.id,{departedAt:p.departedAt,departedBy:p.departedBy});}
+    try{await fbSet('products',p.id,{departedAt:p.departedAt,departedBy:p.departedBy,...(_depChg?{shipments:_dl}:{})});}
     catch(e){showToast('שמירה נכשלה: '+e.message,'var(--red-txt)',6000);return;}
   }
   showToast(on?'🚚 סומן: יצא ללקוח':'↺ סימון היציאה בוטל','var(--green-txt)',3000);

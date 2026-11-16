@@ -24,6 +24,18 @@ function trShipQty(s){
   (s?.outer||[]).forEach(o=>{if(q[o.k]!=null)q[o.k]+=+o.n||0;});
   return q;
 }
+// 🚚 היום שבו התעודה יצאה מהמפעל (16/11/2026) — התעודה מופקת בסיום ההזמנה ולא מעידה על השליחה.
+// s.dep = נכתב ב"🚚 יצא ללקוח" (pipeDepart) מ-16/11. ישנות: departedAt של ההזמנה כשהתעודה הופקה עד אליו.
+// דגם לאישור (לא עובר בלוח) / תעודה מלפני PIPE_DEPART_FROM ⇒ תאריך התעודה. '' = עוד לא יצאה — לא בהובלות
+function trShipDay(p,s){
+  if(s.dep)return String(s.dep).slice(0,10);
+  const d=String(s.date||'').slice(0,10);
+  if(s.smp||(d&&d<PIPE_DEPART_FROM))return d;
+  const depT=p.departedAt?Date.parse(p.departedAt):NaN;
+  if(isNaN(depT)||_shipAtMs(s)>depT)return '';
+  const x=new Date(depT),ld=x.getFullYear()+'-'+pad2(x.getMonth()+1)+'-'+pad2(x.getDate());
+  return ld<d?d:ld;
+}
 const _trSum=(a,b)=>{TR_KINDS.forEach(([k])=>a[k]=(a[k]||0)+(+b[k]||0));return a;};
 const _trZero=()=>({hang:0,sack:0,carton:0,roll:0});
 function _trCost(car,q){const p=_trPrices[car]||{};return TR_KINDS.reduce((t,[k])=>t+(+q[k]||0)*(+p[k]||0),0);}
@@ -92,8 +104,10 @@ async function renderTransport(force){
   const from=document.getElementById('tr-from')?.value||'0000',to=document.getElementById('tr-to')?.value||'9999',cf=document.getElementById('tr-car')?.value||'';
   try{await _trLoadIntake(from,to,force);}catch(e){box.innerHTML='<div style="color:var(--red-txt)">⚠ לא ניתן לטעון את יומן הקליטה: '+esc(e?.code||e?.message||e)+'</div>';return;}
   const okCar=x=>{const l=trCarsOf(x);return !cf||(cf==='_none'?!l.length:l.includes(cf));};
-  const outs=allDeliveryNotes().filter(r=>{const d=String(r.s.date||'').slice(0,10);return d>=from&&d<=to&&okCar(r.s);})
-    .map(r=>({...r,q:trShipQty(r.s)})).sort((a,b)=>String(b.s.date||'').localeCompare(String(a.s.date||''))||(+b.s.no||0)-(+a.s.no||0));
+  const allR=allDeliveryNotes().map(r=>({...r,day:trShipDay(r.p,r.s)}));
+  const waiting=allR.filter(r=>!r.day&&String(r.s.date||'').slice(0,10)>=from&&String(r.s.date||'').slice(0,10)<=to).length; // תעודה בטווח שעוד לא יצאה
+  const outs=allR.filter(r=>r.day&&r.day>=from&&r.day<=to&&okCar(r.s))
+    .map(r=>({...r,q:trShipQty(r.s)})).sort((a,b)=>b.day.localeCompare(a.day)||(+b.s.no||0)-(+a.s.no||0));
   const ins=_trIntake.filter(x=>okCar(x)).sort((a,b)=>String(b.date).localeCompare(String(a.date))||(+b.at||0)-(+a.at||0));
   // סיכום לפי מוביל
   const by={};const g=c=>by[c]||(by[c]={out:_trZero(),in:_trZero(),nOut:0,nIn:0});
@@ -105,7 +119,7 @@ async function renderTransport(force){
   const keys=Object.keys(by).sort((a,b)=>(a?0:1)-(b?0:1)||trCarName(a).localeCompare(trCarName(b),'he'));
   // 📍 הגעות ללקוח עם תוספת — ימים שונים שבהם המוביל מסר ללקוח או אסף ממנו
   const visits=c=>_trTrips.filter(x=>x.car===c&&+x.a>0).map(x=>{const d=new Set();
-    outs.forEach(r=>{if(String(r.p.cust)===String(x.cust)&&carsIn(r.s).includes(c))d.add(String(r.s.date||'').slice(0,10));});
+    outs.forEach(r=>{if(String(r.p.cust)===String(x.cust)&&carsIn(r.s).includes(c))d.add(r.day);});
     ins.forEach(r=>{if(String(r.cust)===String(x.cust)&&carsIn(r).includes(c))d.add(String(r.date||'').slice(0,10));});
     return{cust:x.cust,a:+x.a,n:d.size};}).filter(v=>v.n);
   let tot=0;
@@ -121,7 +135,7 @@ async function renderTransport(force){
   // פירוט
   const carSel=(cur,on,none)=>`<select onchange="${on}" style="font-size:12px;padding:3px;border-radius:6px;border:1px solid var(--brd);background:var(--bg);color:var(--txt);max-width:130px;display:block;margin:1px 0">${_trOpts(cur,none)}</select>`;
   const outHtml=outs.map(r=>{const p=r.p,s=r.s,qt=_trQtyTxt(r.q,['hang','sack','carton']);
-    return `<tr><td ${td}>${_trDM(s.date)}</td><td ${td}>${s.no?String(s.no).padStart(4,'0'):'—'}${s.smp?' <span style="font-size:11px;color:var(--blue-txt)">דגם</span>':''}</td>
+    return `<tr><td ${td}>${_trDM(r.day)}${r.day!==String(s.date||'').slice(0,10)?`<div style="font-size:10px;color:var(--txt3)">תעודה ${_trDM(s.date)}</div>`:''}</td><td ${td}>${s.no?String(s.no).padStart(4,'0'):'—'}${s.smp?' <span style="font-size:11px;color:var(--blue-txt)">דגם</span>':''}</td>
       <td ${td}>${esc(custName(p.cust))}<div style="font-size:11px;color:var(--txt3)">${esc(p.name||p.prod||'')} · ${+s.total||0} יח'</div></td>
       <td ${td}>${qt||'<span style="color:var(--amber-txt);font-size:12px">⚠ לא נרשמו קולבים/שקים</span>'}</td>
       <td ${td}>${carSel(s.car||'',`trSetShipCar('${escj(p.id)}',${r.i},'car',this.value)`,'— מוביל —')}${s.car?carSel(s.car2||'',`trSetShipCar('${escj(p.id)}',${r.i},'car2',this.value)`,'+ מוביל שני'):''}</td></tr>`;}).join('');
@@ -129,9 +143,10 @@ async function renderTransport(force){
       <td ${td}>${_trQtyTxt(x)||'—'}</td><td ${td}>${trCarsOf(x).length?trCarsOf(x).map(c=>esc(trCarName(c))).join(' ⇐ '):esc(trCarName(''))}</td>
       <td ${td} style="white-space:nowrap"><button class="btn" style="font-size:11px;padding:3px 7px" onclick="trIntakeDlg('${escj(x.id)}')">✏️</button>${mg?` <button class="btn" style="font-size:11px;padding:3px 7px" onclick="trIntakeDel('${escj(x.id)}')">🗑</button>`:''}</td></tr>`).join('');
   box.innerHTML=sum
+    +(waiting?`<div style="font-size:12px;color:var(--amber-txt);margin-bottom:8px">⏳ ${waiting} תעודות בטווח עוד לא סומנו "🚚 יצא ללקוח" — הן ייכנסו להובלות ביום שיסומנו.</div>`:'')
     +`<details open style="margin-bottom:10px"><summary style="font-weight:700;cursor:pointer;font-size:14px">📤 יצא ללקוחות (${outs.length})</summary>
-      ${outs.length?`<div style="overflow-x:auto"><table style="width:100%;border-collapse:collapse;margin-top:6px"><tr><th ${th}>תאריך</th><th ${th}>תעודה</th><th ${th}>לקוח / דגם</th><th ${th}>הובלה</th><th ${th}>מוביל</th></tr>${outHtml}</table></div>
-      <div style="font-size:11px;color:var(--txt3);margin-top:4px">קולבים — מחומר האריזה שנרשם בתעודה (כולל 👤 של הלקוח). שקים/קרטונים — מ"📦 אריזה" בחלון המשלוח.</div>`:'<div style="font-size:13px;color:var(--txt3)">אין.</div>'}</details>
+      ${outs.length?`<div style="overflow-x:auto"><table style="width:100%;border-collapse:collapse;margin-top:6px"><tr><th ${th}>יצא</th><th ${th}>תעודה</th><th ${th}>לקוח / דגם</th><th ${th}>הובלה</th><th ${th}>מוביל</th></tr>${outHtml}</table></div>
+      <div style="font-size:11px;color:var(--txt3);margin-top:4px">התאריך = היום שבו סומן "🚚 יצא ללקוח" בלוח מצב הזמנות (לא תאריך התעודה). קולבים — מחומר האריזה שנרשם בתעודה (כולל 👤 של הלקוח). שקים/קרטונים — מ"📦 אריזה" בחלון המשלוח.</div>`:'<div style="font-size:13px;color:var(--txt3)">אין.</div>'}</details>
     <details open><summary style="font-weight:700;cursor:pointer;font-size:14px">📥 נכנס למפעל (${ins.length})</summary>
       ${ins.length?`<div style="overflow-x:auto"><table style="width:100%;border-collapse:collapse;margin-top:6px"><tr><th ${th}>תאריך</th><th ${th}>לקוח</th><th ${th}>מה נכנס</th><th ${th}>מוביל</th><th ${th}></th></tr>${inHtml}</table></div>`:'<div style="font-size:13px;color:var(--txt3)">אין — רשמו ב"➕ קליטת סחורה".</div>'}</details>`;
 }
@@ -262,7 +277,7 @@ function trPrint(withPrice){
   const from=document.getElementById('tr-from')?.value||'',to=document.getElementById('tr-to')?.value||'',cf=document.getElementById('tr-car')?.value||'';
   if(cf==='_none'){showToast('⚠ בחרו מוביל או "כל המובילים"','var(--red-txt)');return;}
   const inR=d=>{d=String(d||'').slice(0,10);return(!from||d>=from)&&(!to||d<=to);};
-  const allOut=allDeliveryNotes().filter(r=>inR(r.s.date)).map(r=>({...r,q:trShipQty(r.s)}));
+  const allOut=allDeliveryNotes().map(r=>({...r,day:trShipDay(r.p,r.s)})).filter(r=>r.day&&inR(r.day)).map(r=>({...r,q:trShipQty(r.s)}));
   const allIn=_trIntake.filter(x=>inR(x.date));
   const cars=(cf?[cf]:trCarriers().map(c=>c.id)).filter(c=>allOut.some(r=>trCarsOf(r.s).includes(c))||allIn.some(x=>trCarsOf(x).includes(c)));
   if(!cars.length){showToast('⚠ אין הובלות בסינון הנוכחי','var(--red-txt)');return;}
@@ -272,12 +287,16 @@ function trPrint(withPrice){
   const co=S.settings?.company||{},period=(from?hd(from):'תחילת הרישום')+' — '+(to?hd(to):'היום');
   const n=v=>+v?String(+v):'—',byDate=(a,b)=>String(a).localeCompare(String(b));
   const pages=cars.map(c=>{
-    const outs=allOut.filter(r=>trCarsOf(r.s).includes(c)).sort((a,b)=>byDate(a.s.date,b.s.date)||(+a.s.no||0)-(+b.s.no||0));
+    const outs=allOut.filter(r=>trCarsOf(r.s).includes(c)).sort((a,b)=>byDate(a.day,b.day)||(+a.s.no||0)-(+b.s.no||0));
+    // 🗓 (16/11/2026) שורה ליום וללקוח — כל התעודות שיצאו יחד מסוכמות; בלי מספר תעודה ודגם
+    const grp=[];outs.forEach(r=>{const k=r.day+'|'+r.p.cust;let g=grp.find(x=>x.k===k);if(!g){g={k,day:r.day,cust:r.p.cust,q:_trZero(),modes:new Set(),others:new Set()};grp.push(g);}
+      _trSum(g.q,r.q);if(r.s.packMode)g.modes.add(r.s.packMode);trCarsOf(r.s).forEach(k=>g.others.add(k));});
+    const modeTxt=g=>g.modes.has('mixed')||(g.modes.has('hang')&&g.modes.has('fold'))?'תלייה וקיפול':g.modes.has('hang')?'תלייה':g.modes.has('fold')?'קיפול':'—';
     const ins=allIn.filter(x=>trCarsOf(x).includes(c)).sort((a,b)=>byDate(a.date,b.date)||(+a.at||0)-(+b.at||0));
     const qo=outs.reduce((t,r)=>_trSum(t,r.q),_trZero()),qi=ins.reduce((t,x)=>_trSum(t,x),_trZero()),qa=_trSum(_trSum(_trZero(),qo),qi);
     const other=x=>trCarsOf(x).filter(k=>k!==c).map(trCarName).join(', ')||'—';
     const vs=_trTrips.filter(x=>x.car===c&&+x.a>0).map(x=>{const d=new Set();
-      outs.forEach(r=>{if(String(r.p.cust)===String(x.cust))d.add(String(r.s.date||'').slice(0,10));});
+      outs.forEach(r=>{if(String(r.p.cust)===String(x.cust))d.add(r.day);});
       ins.forEach(r=>{if(String(r.cust)===String(x.cust))d.add(String(r.date||'').slice(0,10));});
       return{cust:x.cust,a:+x.a,n:d.size,days:[...d].sort()};}).filter(v=>v.n);
     const p=_trPrices[c]||{},lbl={hang:'קולב תלייה',sack:'שק',carton:'קרטון',roll:'גליל'};
@@ -288,12 +307,11 @@ function trPrint(withPrice){
     return `<section>
     <div class="top"><div><div class="co">${esc(co.name||'')}</div><div class="co-d">${co.phone?'טלפון: '+esc(co.phone):''}</div></div>
       <div class="doc"><h1>דוח הובלות — ${esc(trCarName(c))}</h1><div class="dt">תקופה: ${esc(period)}</div><div class="dt">הופק: ${hd(todayStr())}</div></div></div>
-    <h2>📤 יצא ללקוחות (${outs.length})</h2>
-    ${outs.length?`<table><thead><tr><th class="c">תאריך</th><th class="c">תעודה</th><th>לקוח</th><th>דגם / הזמנה</th><th class="c">קולבים</th><th class="c">שקים</th><th class="c">קרטונים</th><th>מוביל נוסף</th></tr></thead><tbody>
-      ${outs.map(r=>`<tr><td class="c">${dm(r.s.date)}</td><td class="c">${r.s.no?String(r.s.no).padStart(4,'0'):'—'}</td><td>${esc(cn(r.p.cust))}</td>
-        <td>${esc(r.p.name||r.p.prod||'')}${(parseInt(r.p.orderNo,10)||0)?` <span class="ord">#${String(r.p.orderNo).padStart(3,'0')}</span>`:''}${r.s.smp?' <span class="ord">(דגם)</span>':''}</td>
-        <td class="c">${n(r.q.hang)}</td><td class="c">${n(r.q.sack)}</td><td class="c">${n(r.q.carton)}</td><td>${esc(other(r.s))}</td></tr>`).join('')}
-      </tbody><tfoot><tr><td colspan="4">סה"כ</td><td class="c">${qo.hang}</td><td class="c">${qo.sack}</td><td class="c">${qo.carton}</td><td></td></tr></tfoot></table>`:'<div class="none">אין</div>'}
+    <h2>📤 יצא ללקוחות</h2>
+    ${grp.length?`<table><thead><tr><th class="c">תאריך יציאה</th><th>לקוח</th><th class="c">קולבים</th><th class="c">שקים</th><th class="c">קרטונים</th><th class="c">אריזה</th><th>מובילים</th></tr></thead><tbody>
+      ${grp.map(g=>`<tr><td class="c">${dm(g.day)}</td><td>${esc(cn(g.cust))}</td>
+        <td class="c">${n(g.q.hang)}</td><td class="c">${n(g.q.sack)}</td><td class="c">${n(g.q.carton)}</td><td class="c">${modeTxt(g)}</td><td>${[...g.others].map(k=>esc(trCarName(k))).join(' ⇐ ')}</td></tr>`).join('')}
+      </tbody><tfoot><tr><td colspan="2">סה"כ</td><td class="c">${qo.hang}</td><td class="c">${qo.sack}</td><td class="c">${qo.carton}</td><td colspan="2"></td></tr></tfoot></table>`:'<div class="none">אין</div>'}
     <h2>📥 נכנס למפעל (${ins.length})</h2>
     ${ins.length?`<table><thead><tr><th class="c">תאריך</th><th>לקוח</th><th class="c">שקים</th><th class="c">קרטונים</th><th class="c">גלילים</th><th class="c">קולבים</th><th>מוביל נוסף</th><th>הערה</th></tr></thead><tbody>
       ${ins.map(x=>`<tr><td class="c">${dm(x.date)}</td><td>${esc(cn(x.cust))}</td><td class="c">${n(x.sack)}</td><td class="c">${n(x.carton)}</td><td class="c">${n(x.roll)}</td><td class="c">${n(x.hang)}</td><td>${esc(other(x))}</td><td>${esc(x.note||'')}</td></tr>`).join('')}
