@@ -156,6 +156,30 @@ h1{color:var(--blue)}
 .pbar{box-shadow:var(--sh)}
 .login button:disabled{opacity:.6}
 .login .err{color:#dc2626;font-size:13px;margin-top:8px;min-height:1em}
+/* ♿ (16/11/2026) ליטוש לפי כללי UI UX Pro Max — נגישות ומגע, בלי לשנות את המבנה:
+   · ניגודיות: טקסט משני #888 על לבן = 3.5:1 (מתחת ל-4.5:1) ⇒ כהה יותר; בכהה — בהיר יותר
+   · כפתורים בגובה 44px לפחות (אצבע), טבעת פוקוס במקלדת, תגובה במעבר עכבר/לחיצה (150ms)
+   · מספרים ברוחב קבוע (טבלאות, אריחים) · טקסט שלבים בטלפון לא קטן מ-10px · prefers-reduced-motion */
+:root{--txt3:#6b6b68}
+@media (prefers-color-scheme:dark){:root{--txt3:#a3a3a0}}
+:focus-visible{outline:2px solid var(--blue);outline-offset:2px}
+button,.cutb,.smp-go,.sumt{-webkit-tap-highlight-color:transparent}
+.sumt,.smp-go,.cutb,.smpb,.pbar .pbtn,.login button,#frsh,#asx,.cutm-h button,.stk-sh button{transition:background-color .15s,border-color .15s,box-shadow .15s,transform .1s}
+@media (hover:hover){
+  .sumt:not(.zero):hover,.smp-go:hover{border-color:var(--blue);box-shadow:0 0 0 1px var(--blue),var(--sh)}
+  .cutb:hover{border-color:var(--blue)}
+  .smpb:not(:disabled):not(.rej):hover{background:var(--acc-h)}
+  .smpb.rej:hover{background:var(--red-bg)}
+  #frsh:hover,#asx:hover,.cutm-h button:not(#cutp):hover{border-color:var(--blue)}
+  .thumb:hover,.sthumb:hover{box-shadow:0 0 0 2px var(--blue)}}
+.sumt:not(.zero):active,.smp-go:active,.cutb:active,.smpb:not(:disabled):active{transform:scale(.98)}
+.smpb,.cutb,.smp-go,.login button,.pbar .pbtn{min-height:44px}
+#frsh,#asx,.cutm-h button,.stk-sh button{min-height:36px}
+.sumt b,.stk-t td,.stk-q b,.badge,.bar small{font-variant-numeric:tabular-nums}
+.bar small{font-size:10px}
+@media (max-width:420px){.bar em{font-size:10px}}
+.short{line-height:1.4}
+@media (prefers-reduced-motion:reduce){*,*::before,*::after{animation-duration:.01ms!important;transition-duration:.01ms!important;scroll-behavior:auto!important}}
 </style>
 </head>
 <body>
@@ -314,18 +338,21 @@ async function openCut(pid,nm){
 appEl.addEventListener('click',e=>{const b=e.target.closest('.cutb');if(b)openCut(b.dataset.cut,b.dataset.nm);
   const sb=e.target.closest('.smpb');if(sb&&!sb.disabled)approveSmp(sb);
   // 📊 אריח סיכום ⇒ גלילה לחלק שלו + הבהוב
-  const sm=e.target.closest('[data-sum]');if(sm){const t=$(sm.dataset.sum);if(t){t.scrollIntoView({behavior:'smooth',block:'start'});const h=t.closest('.card,.smp-top,.ord-sum')||t;h.classList.remove('hl');void h.offsetWidth;h.classList.add('hl');}}
-  const go=e.target.closest('.smp-go');if(go){const c=$('ord-'+go.dataset.go);if(c)c.scrollIntoView({behavior:'smooth',block:'start'});}
+  const sm=e.target.closest('[data-sum]');if(sm){const t=$(sm.dataset.sum);if(t){t.scrollIntoView({behavior:RM?'auto':'smooth',block:'start'});const h=t.closest('.card,.smp-top,.ord-sum')||t;h.classList.remove('hl');void h.offsetWidth;h.classList.add('hl');}}
+  const go=e.target.closest('.smp-go');if(go){const c=$('ord-'+go.dataset.go);if(c)c.scrollIntoView({behavior:RM?'auto':'smooth',block:'start'});}
   const im=e.target.closest('img[data-img][src]');if(im&&IMG_OK.test(im.src))bigImg(im.src,im.alt);});
+// ⌨ תמונה במקלדת (16/11/2026): Enter / רווח = הגדלה, כמו לחיצה
+appEl.addEventListener('keydown',e=>{if(e.key!=='Enter'&&e.key!==' ')return;const im=e.target.closest?.('img[data-img][src]');if(im&&IMG_OK.test(im.src)){e.preventDefault();bigImg(im.src,im.alt);}});
 // 🖼 תמונות (08/11/2026) — דגם בכרטיס, חומר במלאי. נטענות מהשרת (?img=) פעם אחת לכל מועד (v) ונשמרות בזיכרון,
 // כך שהרענון כל דקה לא טוען שוב. לחיצה = הגדלה
 const imgMem=new Map(),imgBusy=new Set();
 // 🔒 (12/11/2026) התמונה מגיעה מ-thumbs — אוסף שעובדים כותבים אליו. מתקבלת רק תמונת data: תקינה, ובכל מקום
 // שהיא נכנסת ל-HTML היא עוברת esc (ערך עם מירכאות היה סוגר את src ומוסיף onerror = הרצת קוד בדף)
+const RM=matchMedia('(prefers-reduced-motion: reduce)').matches; // ♿ בלי גלילה חלקה למי שביקש פחות תנועה
 const IMG_OK=/^data:image\/(jpeg|png|webp|gif);base64,[A-Za-z0-9+\/=]+$/;
 function imgTag(id,v,cls,alt){
   if(!id||!v)return '';const k=id+'@'+v,src=imgMem.get(k);
-  return `<img class="${cls}" data-img="${esc(id)}" data-v="${esc(v)}" alt="${esc(alt||'')}"${src?` src="${esc(src)}"`:' style="visibility:hidden"'}>`;
+  return `<img class="${cls}" tabindex="0" role="button" data-img="${esc(id)}" data-v="${esc(v)}" alt="${esc(alt||'')}"${src?` src="${esc(src)}"`:' style="visibility:hidden"'}>`;
 }
 async function loadImgs(){
   const u=(AS?mAuth:auth).currentUser;if(!u)return;
