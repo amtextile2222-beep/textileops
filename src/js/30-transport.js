@@ -348,9 +348,11 @@ tr{page-break-inside:avoid}thead{display:table-header-group}
 .sign{display:flex;gap:14px;margin-top:28px}.sign div{flex:1;border-top:1px solid #666;padding-top:5px;font-size:11px}
 @media print{body{padding:0}section{padding:12mm 12mm 10mm}}
 </style></head><body>${body}</body></html>`;
-  if(mode!=='wa'){printViaIframe(wrap(secs.join('')));return;}
+  if(mode!=='wa'&&!_isIOS()){printViaIframe(wrap(secs.join('')));return;}
   showToast('⏳ מכין PDF…','var(--txt3)',4000);
   let blob;try{blob=await _dnPdfBlob(secs.map(wrap));}catch(e){showToast('⚠ הכנת ה-PDF נכשלה: '+(e?.message||e),'var(--red-txt)',6000);return;}
+  // 🍎 אייפון (16/11/2026): הדפסה מ-iframe לא עושה כלום ⇒ כמו תעודת משלוח — PDF ⇒ שיתוף ⇒ "הדפסה"
+  if(mode!=='wa')return _printPdfBlob(blob,'transport-'+((from||todayStr()).slice(0,7))+'.pdf');
   // 💬 שם קובץ באנגלית (וואטסאפ במחשב מציג עברית כג'יבריש) · מוביל אחד ⇒ השיחה נפתחת אליו
   const one=cars.length===1?trCarriers().find(x=>x.id===cars[0]):null;
   const name='transport-'+((from||todayStr()).slice(0,7))+'.pdf'; // בלי מזהה המוביל (car_xxx — לא אומר כלום למקבל)
