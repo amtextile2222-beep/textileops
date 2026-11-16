@@ -315,7 +315,7 @@ function smpHtml(o){
   const sent=l.map(x=>'<div class="smp-l">'+ic('ts')+' '+x.n+" יח' · נשלח "+esc(fmtDM(x.d))+(x.b?' · '+ic('rt')+' חזר למפעל '+esc(fmtDM(x.b)):' · אצלכם')+'</div>'+(x.t?'<div class="smp-t">'+ic('no')+' '+esc(x.t)+'</div>':'')).join(''); // 📝 ההערה מהתעודה
   const why=x=>x.why?'<div class="smp-t">'+ic('no')+' '+esc(x.why)+'</div>':'';
   if(!open&&sd&&sd.k==='no')return `<div class="smp no">${ic('xc')} <b>הדגם לא אושר</b> · ${esc(fmtDM(sd.d))}${why(sd)}<div class="smp-l">המפעל קיבל את ההערות ויכין דגם מתוקן.</div>${sent}</div>`;
-  if(!open&&(sd?sd.k==='ok':o.smpOk))return `<div class="smp ok">${ic('cc')} <b>הדגם אושר</b> · ${esc(fmtDM(sd?sd.d:o.smpOk))}${sent}</div>`;
+  if(!open&&(sd?sd.k==='ok':o.smpOk))return `<div class="smp ok">${ic('cc')} <b>הדגם אושר</b> · ${esc(fmtDM(sd?sd.d:o.smpOk))}${sd?why(sd):''}${sent}</div>`;
   const nm=esc(o.name||('דגם '+o.prod));
   return `<div class="smp">${ic('ts')} <b>דגם לאישור</b>${sd&&sd.k==='no'?`<div class="smp-w">${ic('xc')} הדגם הקודם לא אושר (${esc(fmtDM(sd.d))})${sd.why?': '+esc(sd.why):''}</div>`:''}${sent}${!AS&&o.pid?`<div class="smpbr"><button class="smpb" data-pid="${esc(o.pid)}" data-nm="${nm}">${ic('ck')} אישור הדגם</button><button class="smpb rej" data-pid="${esc(o.pid)}" data-nm="${nm}" data-rej="1">${ic('xc')} לא מאושר</button></div>`:''}</div>`;
 }
@@ -323,10 +323,11 @@ async function approveSmp(b){
   const u=auth.currentUser;if(!u||AS)return;
   const rej=!!b.dataset.rej,lbl=b.innerHTML;let why='';
   if(rej){why=(prompt('מה צריך לתקן בדגם של '+b.dataset.nm+'?\nההערה תישלח למפעל.')||'').trim();if(!why)return;}
-  else if(!confirm('לאשר את הדגם של '+b.dataset.nm+'?\nהמפעל יקבל הודעה שהדגם אושר.'))return;
+  // 📝 הערה לא חובה גם באישור (16/11/2026) — למשל "מאושר, לקצר שרוול 1 ס"מ". ביטול = לא מאשרים
+  else{const x=prompt('לאשר את הדגם של '+b.dataset.nm+'?\nהמפעל יקבל הודעה שהדגם אושר.\n\nהערה למפעל (לא חובה):','');if(x==null)return;why=x.trim();}
   b.disabled=true;b.innerHTML=ic('hg')+' שולח…';
   try{
-    const r=await fetch(URL_FN,{method:'POST',cache:'no-store',headers:{Authorization:'Bearer '+await u.getIdToken(),'X-Dev':devId(),'Content-Type':'application/json'},body:JSON.stringify(rej?{reject:b.dataset.pid,why:why.slice(0,300)}:{approve:b.dataset.pid})});
+    const r=await fetch(URL_FN,{method:'POST',cache:'no-store',headers:{Authorization:'Bearer '+await u.getIdToken(),'X-Dev':devId(),'Content-Type':'application/json'},body:JSON.stringify(rej?{reject:b.dataset.pid,why:why.slice(0,300)}:{approve:b.dataset.pid,...(why?{why:why.slice(0,300)}:{})})});
     if(!r.ok)throw new Error(r.status);
     await load();
   }catch(e){b.disabled=false;b.innerHTML=lbl;alert('ההודעה לא נשלחה. נסו שוב בעוד רגע.');}

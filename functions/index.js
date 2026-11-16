@@ -2146,7 +2146,7 @@ exports.customerTrack = functions.runWith({ memory: '1GB' }).https.onRequest(asy
     const a = await trackAuth(req, res);
     if (!a) return;
     const { cust } = a;
-    // 👕 החלטה על דגם (15/11/2026) — POST {approve: מזהה} או {reject: מזהה, why: מה לתקן}. רק לקוח (לא תצוגת
+    // 👕 החלטה על דגם (15/11/2026) — POST {approve: מזהה, why?: הערה לא חובה (16/11/2026)} או {reject: מזהה, why: מה לתקן}. רק לקוח (לא תצוגת
     // מנהל — המנהל מסמן באפליקציה), רק הזמנה של הלקוח הזה עם תעודת דגם. אין דגם שמחכה להחלטה (calc.smpState) ⇒
     // מחזיר את ההחלטה הקיימת בלי לכתוב ובלי טלגרם. דגם חדש אחרי "לא אושר" ⇒ שוב פתוח
     if (req.method === 'POST') {
@@ -2163,7 +2163,7 @@ exports.customerTrack = functions.runWith({ memory: '1GB' }).https.onRequest(asy
         const st = calc.smpState(p);
         if (!st.l.length) return null;
         if (!st.open) return { p, already: true };
-        const rec = { at: Date.now(), by: a.email, via: 'cust', ...(rej ? { why } : {}) };
+        const rec = { at: Date.now(), by: a.email, via: 'cust', ...(why ? { why } : {}) };
         tx.update(ref, { [rej ? 'smpNo' : 'smpOk']: rec });
         return { p: { ...p, [rej ? 'smpNo' : 'smpOk']: rec } };
       });
@@ -2178,7 +2178,7 @@ exports.customerTrack = functions.runWith({ memory: '1GB' }).https.onRequest(asy
         const { token: tgToken, chatId: tgChatId } = tgCfg();
         const nm = (hit && hit.body.name) || ((await db.doc('appSettings/customerNames').get()).data() || {})[cust] || ('לקוח ' + cust);
         const no = parseInt(r.p.orderNo, 10) || 0;
-        if (tgToken && tgChatId) await sendTelegram(tgToken, tgChatId, (rej ? '👕✖ TextileOps — הלקוח <b>לא אישר</b> את הדגם' : '👕✅ TextileOps — הלקוח אישר את הדגם') + '\n👤 ' + escTg(nm) + '\n📦 ' + escTg(r.p.name || r.p.prod) + (no ? ' · הזמנה #' + String(no).padStart(3, '0') : '') + (rej ? '\n📝 מה לתקן: ' + escTg(why) : '') + '\n📧 ' + escTg(a.email) + '\n🕐 ' + ilTime()).catch(() => {});
+        if (tgToken && tgChatId) await sendTelegram(tgToken, tgChatId, (rej ? '👕✖ TextileOps — הלקוח <b>לא אישר</b> את הדגם' : '👕✅ TextileOps — הלקוח אישר את הדגם') + '\n👤 ' + escTg(nm) + '\n📦 ' + escTg(r.p.name || r.p.prod) + (no ? ' · הזמנה #' + String(no).padStart(3, '0') : '') + (why ? (rej ? '\n📝 מה לתקן: ' : '\n📝 הערה: ') + escTg(why) : '') + '\n📧 ' + escTg(a.email) + '\n🕐 ' + ilTime()).catch(() => {});
       }
       res.json({ ok: true, ...trackSmp(r.p) }); return;
     }
