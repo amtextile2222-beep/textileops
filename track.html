@@ -179,12 +179,40 @@ button,.cutb,.smp-go,.sumt{-webkit-tap-highlight-color:transparent}
 .bar small{font-size:10px}
 @media (max-width:420px){.bar em{font-size:10px}}
 .short{line-height:1.4}
+/* 🎨 (16/11/2026) עיצוב לפי UI UX Pro Max — קטגוריה Logistics/Delivery: Minimalism + Flat, כחול-ירקרק (בתהליך) /
+   כתום (פעולה) / ירוק (נשלח), "Order status stepper" עם "Status pulse" לשלב הנוכחי */
+:root{--brand:#2D6470;--brand-2:#3b7f8c}
+header.brand{background:linear-gradient(135deg,var(--brand),var(--brand-2));color:#fff;border-radius:18px;padding:14px 16px;margin:0 0 16px;box-shadow:var(--sh)}
+header.brand h1{color:#fff;font-size:21px}
+header.brand .sub{color:rgba(255,255,255,.82);font-size:14px}
+header.brand .logo{width:44px;height:44px;flex:0 0 auto;display:flex;align-items:center;justify-content:center;border-radius:12px;background:rgba(255,255,255,.16);font-size:24px}
+header.brand #asx{background:rgba(255,255,255,.14);color:#fff;border-color:rgba(255,255,255,.3)}
+/* פס שלבים = עיגולים מחוברים בקו. ✓ = הסתיים · מספר = עוד לא · ! = חוסר פתוח */
+.bar{gap:0;margin:16px 0 8px}
+.bar span{position:relative}
+.bar span:not(:last-child)::after{content:"";position:absolute;top:11px;right:50%;width:100%;height:3px;background:var(--track);z-index:0}
+.bar span.ok:not(:last-child)::after,.bar.done span:not(:last-child)::after{background:var(--green)}
+.bar i{position:relative;z-index:1;width:24px;height:24px;margin:0 auto;border-radius:50%;background:var(--card);border:2px solid var(--track);display:flex;align-items:center;justify-content:center;font-style:normal;font-size:11px;font-weight:700;color:var(--txt3);line-height:1;font-variant-numeric:tabular-nums}
+.bar .ok i,.bar.done i{background:var(--green);border-color:var(--green);color:#fff}
+.bar .on i{background:var(--blue);border-color:var(--blue);color:#fff}
+.bar .bad i{background:var(--red);border-color:var(--red);color:#fff}
+.bar .cur:not(.bad) i{animation:pulse 2s ease-out infinite}
+.bar.done .cur i{animation:none}
+@keyframes pulse{0%{box-shadow:0 0 0 0 color-mix(in srgb,var(--blue) 45%,transparent)}70%{box-shadow:0 0 0 8px transparent}100%{box-shadow:0 0 0 0 transparent}}
+.bar em{margin-top:6px}
+@media (max-width:420px){.bar i{width:20px;height:20px;font-size:10px}.bar span:not(:last-child)::after{top:9px}}
+/* פס צבע בצד הכרטיס לפי המצב: בייצור · מחכה לאישורכם · חוסר פתוח · נשלח */
+.card.st-act{border-inline-start:4px solid var(--blue)}
+.card.st-smp{border-inline-start:4px solid var(--acc)}
+.card.st-bad{border-inline-start:4px solid var(--red)}
+.card.st-shp{border-inline-start:4px solid var(--green)}
+@media (prefers-color-scheme:dark){header.brand{background:linear-gradient(135deg,#24525c,#2D6470)}}
 @media (prefers-reduced-motion:reduce){*,*::before,*::after{animation-duration:.01ms!important;transition-duration:.01ms!important;scroll-behavior:auto!important}}
 </style>
 </head>
 <body>
 <div class="wrap">
-  <header><span class="logo">✂️</span><div><h1 id="ttl">מעקב הזמנות</h1><div class="sub" id="sub"></div></div></header>
+  <header class="brand"><span class="logo">✂️</span><div><h1 id="ttl">מעקב הזמנות</h1><div class="sub" id="sub"></div></div></header>
   <div id="pushbar"></div>
   <div id="app"><div class="msg">⏳ טוען…</div></div>
   <footer id="ft"></footer>
@@ -235,12 +263,13 @@ function card(o){
   // ⚠ חוסרים (25/10/2026): פתוחים צובעים את השלב שלהם באדום; שלב שעבר — ירוק, הנוכחי — כחול
   const sh=Array.isArray(o.short)?o.short:[],openSt=new Set(sh.filter(x=>!x.res).map(x=>x.st));
   const segCls=i=>openSt.has(i)?'bad':!(i<=o.stage&&!(sp&&i===4))?'':(i<o.stage||done)?'ok':'on';
-  const segs=STAGES.map((s,i)=>`<span class="${segCls(i)}${i===o.stage?' cur':''}"><i></i><em>${esc(s)}</em>${o.dates&&o.dates[i]?`<small>${esc(fmtDM(o.dates[i]))}</small>`:''}</span>`).join('');
+  const segs=STAGES.map((s,i)=>`<span class="${segCls(i)}${i===o.stage?' cur':''}"><i aria-hidden="true">${openSt.has(i)?'!':(i<o.stage||done)&&!(sp&&i===4)?'✓':i+1}</i><em>${esc(s)}</em>${o.dates&&o.dates[i]?`<small>${esc(fmtDM(o.dates[i]))}</small>`:''}</span>`).join('');
   const dm=ms=>{const d=new Date(+ms);return String(d.getDate()).padStart(2,'0')+'/'+String(d.getMonth()+1).padStart(2,'0');}; // תאריך מקומי
   const shHtml=sh.slice().sort((a,b)=>(!!a.res-!!b.res)||(b.at-a.at)).map(x=>x.res
     ?`<div class="short res">✓ ${esc(STAGES[x.st]||'')}: ${esc(x.txt)} · ${dm(x.at)} · נפתר ${dm(x.res)}</div>`
     :`<div class="short">⚠ חוסר · ${esc(STAGES[x.st]||'')}: ${esc(x.txt)} · ${dm(x.at)}</div>`).join('');
-  return `<div class="card"${o.pid?' id="ord-'+esc(o.pid)+'"':''}>
+  const stc=done?'st-shp':Array.isArray(o.smp)&&o.smp.length&&('so' in o?o.so:!o.smpOk)?'st-smp':openSt.size?'st-bad':'st-act';
+  return `<div class="card ${stc}"${o.pid?' id="ord-'+esc(o.pid)+'"':''}>
     <div class="top">${imgTag(o.img,o.iv,'thumb',o.name||('דגם '+o.prod))}<div style="flex:1;min-width:0"><div class="nm">${esc(o.name||('דגם '+o.prod))}</div>
       <div class="meta">${no}${o.qty?o.qty+" יח' · ":o.est?'~'+o.est+" יח' (משוער) · ":''}${done?'נשלח '+fmtD(o.ship):'התקבל '+fmtD(o.entry)}</div></div>
       <span class="badge ${done?'done':''}">${esc(STAGES[o.stage]||'')}${pct!=null?' '+pct+'%':''}</span></div>
