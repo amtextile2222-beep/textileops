@@ -567,7 +567,7 @@ async function load(fresh){
     // 📦 חומר האריזה שהלקוח סיפק ונמצא במפעל (23/10/2026) — רק חומר שהמפעל סופר; שרת ישן = אין stock
     const stk=Array.isArray(d.stock)?d.stock:[];
     // 🧵 (23/10/2026) גם פריטי גזירה/תפירה (תוויות, פלזלין…) — מקובצים לפי מחלקה, עם יחידה (מטר/גליל…)
-    const DEPT={cut:ic('sc')+' גזירה',sew:ic('nd')+' תפירה',pack:ic('pk')+' אריזה'},multi=new Set(stk.map(s=>s.dept||'pack')).size>1;
+    const DEPT_N={cut:'גזירה',sew:'תפירה',pack:'אריזה'},DEPT={cut:ic('sc')+' גזירה',sew:ic('nd')+' תפירה',pack:ic('pk')+' אריזה'},multi=new Set(stk.map(s=>s.dept||'pack')).size>1;
     // 📋 (25/10/2026) נדרש להזמנות שלכם שבמפעל וכמה חסר — מהשרת (need); בלי need — כמו קודם
     // 📋 (02/11/2026) נוסח ברור יותר: כל חומר — שם בשורה משלו ומתחתיו "במפעל / נדרש / חסר";
     // פריט לפי מידה (מפתח פריט|מידה) — טבלה אחת במקום שורה לכל מידה; למעלה — סיכום כמה חומרים כדאי לשלוח
@@ -592,12 +592,12 @@ async function load(fresh){
     // 🖨 ריכוז חוסרים (11/11/2026): כל חומר שחסר — כמה לשלוח, בראש החלון + דף הדפסה. מתחת למינימום בלי "נדרש" ⇒ בלי כמות
     // כמות לשלוח = הגדול מבין: חסר לנדרש · חסר עד המינימום (min — מהשרת מ-11/11) · כמות שלילית
     const shortL=stk.filter(s=>stOf(s).bad).map(s=>{const{nd,n}=stOf(s),u=unitOf(s),{nq,mq,mn}=qOf(s);
-      return{s,u,nd,n,mn,nq,mq,dept:DEPT[s.dept||'pack']||''};});
+      return{s,u,nd,n,mn,nq,mq,dept:DEPT_N[s.dept||'pack']||'' /* טקסט בלבד — להדפסה */};});
     const shortHtml='<ul class="stk-sl">'+shortL.map(x=>`<li>${esc(x.s.name)}: ${qTxt(x.s,x.u,' · ')}</li>`).join('')+'</ul>';
     const printShort=()=>{let p=$('stkpr');if(!p){p=document.createElement('div');p.id='stkpr';p.className='stkpdf';document.body.appendChild(p);}
       const nm=d.name||'',dt=new Date().toLocaleString('he-IL',{day:'2-digit',month:'2-digit',year:'numeric',hour:'2-digit',minute:'2-digit'});
       p.innerHTML=`<h3>ריכוז חוסרים — חומרים לשלוח למפעל</h3><div class="d">${esc(nm)} · ${dt}</div><table><tr>${multi?'<th>מחלקה</th>':''}<th>חומר</th><th>במפעל</th><th>נדרש</th><th>חסר להזמנות</th><th>להשלמת מינימום</th></tr>`+
-        shortL.map(x=>`<tr>${multi?'<td>'+esc(x.dept.replace(/^\S+\s/,''))+'</td>':''}<td>${esc(x.s.name)}</td><td><bdi dir="ltr">${x.n}</bdi>${x.u}</td><td>${x.nd>0?r2(x.nd)+x.u:'—'}</td><td class="x">${x.nq>0?r2(x.nq)+x.u:'—'}</td><td>${x.mq>0?'<b>'+r2(x.mq)+x.u+'</b> <small>(מינימום '+r2(x.mn)+x.u+')</small>':'—'}</td></tr>`).join('')+'</table>';
+        shortL.map(x=>`<tr>${multi?'<td>'+esc(x.dept)+'</td>':''}<td>${esc(x.s.name)}</td><td><bdi dir="ltr">${x.n}</bdi>${x.u}</td><td>${x.nd>0?r2(x.nd)+x.u:'—'}</td><td class="x">${x.nq>0?r2(x.nq)+x.u:'—'}</td><td>${x.mq>0?'<b>'+r2(x.mq)+x.u+'</b> <small>(מינימום '+r2(x.mn)+x.u+')</small>':'—'}</td></tr>`).join('')+'</table>';
       if(IOS){stkPdf(p.innerHTML);return;} // 🍎 באייפון (אפליקציה במסך הבית) window.print לא עושה כלום
       window.print();};
     window._stkPrint=printShort;
