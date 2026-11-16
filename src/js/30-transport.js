@@ -252,7 +252,10 @@ async function trCarriersSave(){
 // מנהל בוחר: עם מחירים (סכום לתשלום) או בלי — עותק למוביל להשוואה מול החשבון שלו. אחראי — תמיד בלי
 async function trPrintAsk(){
   let withPrice=false;
-  if(_trMgr()){const a=await showConfirm3('🖨 הדפסת דוח הובלות','לכלול את המחירים והסכום לתשלום?','💰 עם מחירים','📋 בלי מחירים — עותק למוביל','ביטול');if(a===2||a==null)return;withPrice=a===0;}
+  // showConfirm3 = z-index 9999, חלון ההובלות 10000 ⇒ השאלה נפתחה מתחתיו. הרכיב נוסף מיד (סינכרוני) ⇒ מעלים אותו
+  if(_trMgr()){const pr=showConfirm3('🖨 הדפסת דוח הובלות','לכלול את המחירים והסכום לתשלום?','💰 עם מחירים','📋 בלי מחירים — עותק למוביל','ביטול');
+    const ov=document.body.lastElementChild;if(ov&&ov.querySelector('[onclick*="_c3res"]'))ov.style.zIndex='10005';
+    const a=await pr;if(a===2||a==null)return;withPrice=a===0;}
   trPrint(withPrice);
 }
 function trPrint(withPrice){
