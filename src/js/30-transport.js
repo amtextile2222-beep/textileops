@@ -353,7 +353,7 @@ tr{page-break-inside:avoid}thead{display:table-header-group}
   let blob;try{blob=await _dnPdfBlob(secs.map(wrap));}catch(e){showToast('⚠ הכנת ה-PDF נכשלה: '+(e?.message||e),'var(--red-txt)',6000);return;}
   // 💬 שם קובץ באנגלית (וואטסאפ במחשב מציג עברית כג'יבריש) · מוביל אחד ⇒ השיחה נפתחת אליו
   const one=cars.length===1?trCarriers().find(x=>x.id===cars[0]):null;
-  const name='transport-'+(from||'').slice(0,7)+(one?'-'+cars[0].replace(/[^\w-]/g,''):'')+'.pdf';
+  const name='transport-'+((from||todayStr()).slice(0,7))+'.pdf'; // בלי מזהה המוביל (car_xxx — לא אומר כלום למקבל)
   const text='דוח הובלות'+(one?' — '+one.name:'')+' · '+period;
   await _waSharePdf(blob,name,text,one?_waPhone(one.phone):''); // showConfirm = z-index 100000 — מעל חלון ההובלות
 }
