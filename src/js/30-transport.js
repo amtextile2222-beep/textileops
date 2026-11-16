@@ -9,6 +9,9 @@
 // אותו מחיר ליחידה ביציאה ובכניסה.
 const TR_KINDS=[['hang','קולבים'],['sack','שקים'],['carton','קרטונים'],['roll','גלילים']];
 let _trPrices={}; // מ-adminSettings/transport (מנהל)
+// 📍 תוספת לכל הגעה ללקוח (16/11/2026) — למשל חמודי: +₪60 בכל פעם שהוא מגיע לרעומה. adminSettings/transport.trip=[{car,cust,a}].
+// "הגעה" = יום: כל התעודות של אותו לקוח עם אותו מוביל באותו יום + קליטה ממנו באותו יום (מסר ואסף) = הגעה אחת
+let _trTrips=[];
 let _trIntake=[],_trIntakeKey=''; // הקליטה שנטענה לטווח הנוכחי
 const _trMgr=()=>S.user?.role==='manager';
 const _trCan=()=>_trMgr()||S.user?.role==='supervisor';
@@ -73,7 +76,7 @@ async function openTransport(){
     </div>
     <div id="tr-body"><div style="color:var(--txt3);font-size:13px">⏳ טוען…</div></div></div>`;
   document.body.appendChild(w);
-  if(_trMgr()&&S.fbConnected)try{const d=await fbGet('adminSettings','transport');_trPrices=d?.p||{};}catch(e){}
+  if(_trMgr()&&S.fbConnected)try{const d=await fbGet('adminSettings','transport');_trPrices=d?.p||{};_trTrips=Array.isArray(d?.trip)?d.trip:[];}catch(e){}
   renderTransport();
 }
 async function _trLoadIntake(from,to,force){
@@ -99,13 +102,18 @@ async function renderTransport(force){
   ins.forEach(r=>carsIn(r).forEach(c=>{const x=g(c);_trSum(x.in,r);x.nIn++;}));
   const mg=_trMgr(),th='style="text-align:right;padding:6px 8px;font-size:12px;color:var(--txt3);font-weight:600;border-bottom:1px solid var(--brd)"',td='style="padding:6px 8px;border-bottom:1px solid var(--brd);font-size:13px"';
   const keys=Object.keys(by).sort((a,b)=>(a?0:1)-(b?0:1)||trCarName(a).localeCompare(trCarName(b),'he'));
+  // 📍 הגעות ללקוח עם תוספת — ימים שונים שבהם המוביל מסר ללקוח או אסף ממנו
+  const visits=c=>_trTrips.filter(x=>x.car===c&&+x.a>0).map(x=>{const d=new Set();
+    outs.forEach(r=>{if(String(r.p.cust)===String(x.cust)&&carsIn(r.s).includes(c))d.add(String(r.s.date||'').slice(0,10));});
+    ins.forEach(r=>{if(String(r.cust)===String(x.cust)&&carsIn(r).includes(c))d.add(String(r.date||'').slice(0,10));});
+    return{cust:x.cust,a:+x.a,n:d.size};}).filter(v=>v.n);
   let tot=0;
-  const sumRows=keys.map(c=>{const x=by[c],all=_trSum(_trSum(_trZero(),x.out),x.in),cost=c?_trCost(c,all):0;tot+=cost;
+  const sumRows=keys.map(c=>{const x=by[c],all=_trSum(_trSum(_trZero(),x.out),x.in),vs=c?visits(c):[],cost=c?_trCost(c,all)+vs.reduce((s,v)=>s+v.n*v.a,0):0;tot+=cost;
     const noPrice=mg&&c&&TR_KINDS.some(([k])=>all[k]>0&&!(+(_trPrices[c]||{})[k]));
     return `<tr><td ${td}><b>${esc(trCarName(c))}</b></td>
       <td ${td}>${_trQtyTxt(x.out,['hang','sack','carton'])||'—'}<div style="font-size:11px;color:var(--txt3)">${x.nOut} תעודות</div></td>
       <td ${td}>${_trQtyTxt(x.in)||'—'}<div style="font-size:11px;color:var(--txt3)">${x.nIn} קליטות</div></td>
-      ${mg?`<td ${td}>${c?'<b>'+dnMoney(cost)+'</b>'+(noPrice?'<div style="font-size:11px;color:var(--amber-txt)">⚠ חסר מחיר</div>':''):'<span style="font-size:11px;color:var(--txt3)">בחרו מוביל בתעודות</span>'}</td>`:''}</tr>`;}).join('');
+      ${mg?`<td ${td}>${c?'<b>'+dnMoney(cost)+'</b>'+vs.map(v=>`<div style="font-size:11px;color:var(--txt3)">כולל ${v.n} הגעות ל${esc(S.customerNames?.[v.cust]||v.cust)} × ${dnMoney(v.a)}</div>`).join('')+(noPrice?'<div style="font-size:11px;color:var(--amber-txt)">⚠ חסר מחיר</div>':''):'<span style="font-size:11px;color:var(--txt3)">בחרו מוביל בתעודות</span>'}</td>`:''}</tr>`;}).join('');
   const sum=keys.length?`<table style="width:100%;border-collapse:collapse;margin-bottom:14px"><tr><th ${th}>מוביל</th><th ${th}>יצא ללקוחות</th><th ${th}>נכנס למפעל</th>${mg?`<th ${th}>לתשלום</th>`:''}</tr>${sumRows}
     ${mg&&keys.filter(Boolean).length>1?`<tr><td ${td} colspan="3"><b>סה"כ</b></td><td ${td}><b>${dnMoney(tot)}</b></td></tr>`:''}</table>`
     :'<div style="color:var(--txt3);font-size:13px;margin-bottom:12px">אין הובלות בטווח הזה.</div>';
@@ -200,6 +208,10 @@ function trCarriersDlg(){
     <div style="overflow-x:auto"><table style="width:100%;border-collapse:collapse" id="trc-t"><tr style="font-size:12px;color:var(--txt3)"><th style="text-align:right;padding:4px">שם המוביל</th>${TR_KINDS.map(([,l])=>`<th style="text-align:right;padding:4px">${l==='קולבים'?'קולב תלייה':l.replace(/ים$/,'')}</th>`).join('')}<th></th></tr>
       ${trCarriers().map(c=>_trcRow(c,_trPrices[c.id]||{})).join('')}</table></div>
     <button class="btn" style="width:100%;font-size:13px;margin-top:6px" onclick="document.getElementById('trc-t').insertAdjacentHTML('beforeend',_trcRow({id:'',name:''},{}))">➕ מוביל חדש</button>
+    <div style="font-size:14px;font-weight:700;margin-top:16px">📍 תוספת לכל הגעה ללקוח</div>
+    <div style="font-size:12px;color:var(--txt3);margin-bottom:6px">סכום קבוע בכל פעם שהמוביל מגיע ללקוח — למסור או לאסוף. כמה תעודות / מסירה ואיסוף באותו יום = הגעה אחת.${trCarriers().length?'':' שמרו קודם את המובילים.'}</div>
+    <div id="trc-trips">${_trTrips.map(x=>_trcTripRow(x)).join('')}</div>
+    ${trCarriers().length?`<button class="btn" style="width:100%;font-size:13px;margin-top:4px" onclick="document.getElementById('trc-trips').insertAdjacentHTML('beforeend',_trcTripRow({}))">➕ תוספת</button>`:''}
     <div style="display:flex;gap:8px;margin-top:12px"><button class="btn primary" style="flex:1;font-size:14px" onclick="trCarriersSave()">שמור</button>
       <button class="btn" style="flex:1;font-size:14px" onclick="document.getElementById('trc-wrap')?.remove()">ביטול</button></div></div>`;
   document.body.appendChild(w);
@@ -210,14 +222,27 @@ function _trcRow(c,p){
     ${TR_KINDS.map(([k])=>`<td style="padding:3px"><input class="trc-p" data-k="${k}" type="number" inputmode="decimal" min="0" step="0.01" value="${+p[k]||''}" placeholder="0" style="${fs}"></td>`).join('')}
     <td style="padding:3px"><button class="btn" style="font-size:12px;padding:4px 8px" title="הסר" onclick="this.closest('tr').remove()">🗑</button></td></tr>`;
 }
+function _trcTripRow(x){
+  const fs='font-size:13px;padding:6px;border-radius:6px;border:1px solid var(--brd);background:var(--bg);color:var(--txt)';
+  const custs=Object.keys(S.customerNames||{}).sort();
+  return `<div class="trc-trip" style="display:flex;gap:6px;align-items:center;margin-bottom:5px"><select class="trt-car" style="flex:1;min-width:0;${fs}">${_trOpts(x.car||'','— מוביל —')}</select>
+    <select class="trt-cust" style="flex:1;min-width:0;${fs}"><option value="">— לקוח —</option>${custs.map(c=>`<option value="${esc(c)}"${c===x.cust?' selected':''}>${esc(custName(c))}</option>`).join('')}</select>
+    <input class="trt-a" type="number" inputmode="decimal" min="0" step="0.01" value="${+x.a||''}" placeholder="₪" style="width:80px;${fs}">
+    <button class="btn" style="font-size:12px;padding:4px 8px" title="הסר" onclick="this.closest('.trc-trip').remove()">🗑</button></div>`;
+}
 async function trCarriersSave(){
   const rows=[...document.querySelectorAll('#trc-t .trc-r')],list=[],p={};
   for(const r of rows){const name=r.querySelector('.trc-n').value.trim();if(!name)continue;
     const id=r.dataset.id||('car_'+Date.now().toString(36)+Math.random().toString(36).slice(2,5));
     if(list.some(c=>c.name===name)){alert('המוביל "'+name+'" מופיע פעמיים');return;}
     list.push({id,name});p[id]={};r.querySelectorAll('.trc-p').forEach(i=>{p[id][i.dataset.k]=Math.max(0,+i.value||0);});}
-  try{await fbSet('appSettings','carriers',{list});await fbSet('adminSettings','transport',{p});}catch(e){alert('השמירה נכשלה: '+(e?.code||e?.message||e));return;}
-  S.carriers=list;_trPrices={..._trPrices,...p};saveLS();
+  const ids=new Set(list.map(c=>c.id)),trip=[];
+  for(const r of document.querySelectorAll('#trc-trips .trc-trip')){const car=r.querySelector('.trt-car').value,cust=r.querySelector('.trt-cust').value,a=Math.max(0,+r.querySelector('.trt-a').value||0);
+    if(!car&&!cust&&!a)continue;if(!car||!cust||!a){alert('בתוספת להגעה — בחרו מוביל, לקוח וסכום');return;}
+    if(!ids.has(car))continue; // המוביל הוסר
+    if(trip.some(x=>x.car===car&&x.cust===cust)){alert('אותה תוספת (מוביל + לקוח) מופיעה פעמיים');return;}trip.push({car,cust,a});}
+  try{await fbSet('appSettings','carriers',{list});await fbSet('adminSettings','transport',{p,trip});}catch(e){alert('השמירה נכשלה: '+(e?.code||e?.message||e));return;}
+  S.carriers=list;_trPrices={..._trPrices,...p};_trTrips=trip;saveLS();
   document.getElementById('trc-wrap')?.remove();showToast('🚛 נשמרו '+list.length+' מובילים');
   if(document.getElementById('tr-wrap'))openTransport();
 }
