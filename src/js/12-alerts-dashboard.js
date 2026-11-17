@@ -27,7 +27,10 @@ function checkAlerts(){
   if(ws.waEnabled&&cnt>0&&waInWorkingHours()&&_activeTasksReady&&_workersReady&&!_tgClaimBusy&&db){
     const longs=ws.waLong?S.alerts.filter(a=>a.type==='long'&&!a.hasExp&&!S.tgSentAlerts[a.key]):[];
     longs.forEach(a=>{S.tgSentAlerts[a.key]=true;});
-    const absAlert=ws.waAbsent?S.alerts.find(a=>a.type==='absent'&&a.sig!==S.tgAbsentSig):null;
+    // 👤 נעדרים — רק אחרי שמישהו החתים היום (17/11/2026, החלטת המשתמש): מכשיר שנשאר פתוח בלילה שלח
+    // ב-06:26 "23 נעדרים" לפני שמישהו הגיע, וגם בימים בלי עבודה
+    const anyIn=S.workers.some(w=>w.status==='in'||(Array.isArray(w.sessions)&&w.sessions.length)); // sessions מתאפס בחצות; יציאה ⇒ status=out אבל sessions נשאר
+    const absAlert=ws.waAbsent&&anyIn?S.alerts.find(a=>a.type==='absent'&&a.sig!==S.tgAbsentSig):null;
     if(absAlert)S.tgAbsentSig=absAlert.sig;
     if(longs.length||absAlert){
       _tgClaimBusy=true;
