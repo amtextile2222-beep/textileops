@@ -7,7 +7,7 @@ function checkAlerts(){
     // משימה מושהית אינה "רצה הרבה זמן" — עד 26/09 נספרה עם כל הזמן שצברה
     if(!t.paused&&t.elapsed>thresh)S.alerts.push({type:'long',key:'long:'+t.id,hasExp:+t.expectedMin>0,msg:`${t.workerName} — ${fmtM(t.elapsed)} על לקוח ${t.cust} מוצר ${t.prod}`,sev:'warn'});
   });
-  const absW=S.workers.filter(w=>w.status==='out');
+  const absW=S.workers.filter(w=>w.status==='out'&&!(Array.isArray(w.sessions)&&w.sessions.length)); // החתים ויצא ≠ נעדר (17/11: יציאה ב-14:06 שלחה שוב "23 נעדרים" עם העובד שיצא)
   const abs=absW.length;
   if(abs>=absThresh)S.alerts.push({type:'absent',sig:absW.map(w=>w.id).sort().join(','),msg:`${abs} עובדים נעדרים היום: ${absW.map(w=>w.name).join(', ')}`,sev:'err'});
   const cnt=S.alerts.length;
