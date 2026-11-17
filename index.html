@@ -6914,9 +6914,14 @@ async function waitForActiveTasks(timeoutMs=10000){
   return _activeTasksReady;
 }
 // כניסה אוטומטית אחרי זיהוי פנים (ללא תלות ב-DOM של דף נוכחות)
+// ⚠️ (17/11/2026) מחמד נכנס ב-14:06 ולחץ מיד "יציאה": autoPunchIn עוד חיכה לנתונים, ראה שהיציאה סגרה את ה-session
+// ופתח חדש 3ms אחריה ⇒ "בעבודה" עד הערב. יציאה אחרי תחילת הכניסה האוטומטית = לא לחתום כניסה.
+let _punchOutAt=0;
 async function autoPunchIn(){
   if(!S.user)return;
+  const t0=Date.now();
   const w=await waitForWorker(S.user.id);
+  if(_punchOutAt>=t0)return;
   if(!w){showToast('⏳ הנתונים עדיין נטענים — חתום כניסה ידנית בלשונית נוכחות','var(--red-txt)');return;}
   if(!w.sessions)w.sessions=[];
   // נקה sessions מימים קודמים — Firebase עלול לטעון נתונים ישנים לפני שהאיפוס היומי רץ
@@ -6998,6 +7003,7 @@ async function punchOut(){
   if(openIdx===-1){document.getElementById('att-msg').textContent='כבר רשום/ת כיצא/ה';return;}
   const nowRaw=srvNow();
   const now=roundAttTime(nowRaw,false);
+  _punchOutAt=Date.now();
   const prevOut=w.sessions[openIdx].out,prevStatus=w.status,prevCheckout=w.checkout;
   w.sessions[openIdx].out=now.toISOString();
   w.status='out';
