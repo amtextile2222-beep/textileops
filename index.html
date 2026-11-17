@@ -3173,10 +3173,23 @@ function repairPick(raw){
     };
   });
 }
+// 📍 תיקון מחייב תחנה סרוקה (17/11/2026, החלטת המשתמש) — כמו משימה רגילה כשנעילת התחנה דלוקה: רק "יש תחנה
+// היום", בלי בדיקת משפחת השלב (תיקון אינו שלב של המוצר). עובד/עוזר נחסם; מנהל/אחראי — אישור עקיפה (gateMode)
+async function repairStationGate(workerId,raw){
+  if(!stationLockOn()||!(S.workStations||[]).length)return true;
+  const w=(S.workers||[]).find(x=>x.id===workerId)||(S.user?.id===workerId?S.user:null);
+  if(!w||curStation(w))return true;
+  const T=LANGS[currentLang]||{},msg=T.st_need_scan||'📍 חובה לסרוק ברקוד תחנה לפני התחלת משימה';
+  const info={cust:raw.slice(0,2),prod:raw.slice(2,7),bc:raw,steps:[REPAIR_STEP],blocked:[{step:REPAIR_STEP,need:[]}]};
+  if(gateMode('station')!=='override'){logGateEvent('station','blocked',info);showToast(msg,'var(--red-txt)',8000);return false;}
+  const ok=await showConfirm(T.st_override_title||'עקיפת נעילת תחנה',esc((w.name?w.name+': ':'')+msg+'\n\n'+(T.st_override_msg||'להתחיל בכל זאת?')),T.st_override_ok||'התחל בכל זאת',T.cancel||'ביטול');
+  logGateEvent('station',ok?'override':'cancel',info);
+  return ok;
+}
 // פריט סל לדגם/תיקון בכל הסורקים. null = בוטל (בלי הודעה) · false = כפילות (ההודעה הוצגה)
 async function openScanItem(workerId,raw,cart,taskDept){
   let rp=null;
-  if(isRepairBc(raw)){rp=await repairPick(raw);if(!rp)return null;}
+  if(isRepairBc(raw)){if(!await repairStationGate(workerId,raw))return null;rp=await repairPick(raw);if(!rp)return null;}
   const dup=sampleDupFor(workerId,raw,cart,rp);
   if(dup){showToast((rp?(LANGS[currentLang]?.rp_label||REPAIR_STEP):SAMPLE_STEP)+' — '+dup,'var(--red-txt)',6000);return false;}
   return sampleBase(raw,taskDept,rp);
