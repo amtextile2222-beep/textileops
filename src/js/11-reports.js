@@ -328,6 +328,10 @@ async function buildRep(){
   buildExpectedByProduct(fl);
   buildStageReport();
   buildStepQtyReport(cf,pf);
+  // 🕐 (17/11/2026) התקורה לשעה = הוצאות ÷ שעות הנוכחות בפועל, שנטענות ברקע. בלי להמתין — הדוחות שנבנו
+  // לפני הטעינה חישבו לפי ההערכה התיאורטית (עובדים × ימים × 8) ⇒ תקורה אחרת לגמרי ("רווח מול יעד" ₪977
+  // מול "רווח אמיתי" ₪836 על אותה הזמנה). מחכים פעם אחת, רק למי שרואה תמחור
+  if(_pricingCtx())try{await ohReady();}catch(e){}
   buildBudgetReport(fl);
   buildCutReport(fl);
   buildProfitReport(fl);
@@ -1305,11 +1309,12 @@ function rrToggleOpen(){
 async function buildRealProfitReport(force){
   const card=document.getElementById('rp-real-card'),el=document.getElementById('rp-real-body');
   if(!card||!el)return;
-  const ctx=_pricingCtx();
+  let ctx=_pricingCtx();
   if(!ctx){card.classList.add('hidden');return;}
   card.classList.remove('hidden');
   if(!_rr.open)return;
   await ohReady();
+  ctx=_pricingCtx()||ctx; // 🕐 (17/11/2026) אחרי טעינת שעות הנוכחות — ה-ctx שלפני הטעינה נושא תקורה תיאורטית
   if(!force&&_rr.ts&&Date.now()-_rr.ts<5*60000){rrRender();return;}
   el.innerHTML='<div style="color:var(--txt3);font-size:12px;padding:.5rem 0">טוען את כל היסטוריית המשימות...</div>';
   if(force)_histRangeCache.ts=0;
