@@ -15,7 +15,7 @@ function initCostsPage(){
   document.getElementById('cost-tax-pct').value=S.costs.taxPct||0;
   document.getElementById('cost-bank-pct').value=S.costs.bankPct||0;
   // שעה עמוסה + תקורה (שלב ג')
-  const lhSev=document.getElementById('lh-sev');if(lhSev)lhSev.value=S.costs.severancePct??8.33;
+  const lhSev=document.getElementById('lh-sevdays');if(lhSev)lhSev.value=_sevDays();
   const lhHol=document.getElementById('lh-hol');if(lhHol)lhHol.value=S.costs.holidayDays??4;
   const lhGifts=document.getElementById('lh-gifts');if(lhGifts)lhGifts.value=S.costs.giftsAnnual||0;
   const lhTrip=document.getElementById('lh-trip');if(lhTrip)lhTrip.value=S.costs.tripAnnual||0;
@@ -604,7 +604,7 @@ function loadedHourBreakdown(wid,d){
   const nW=_costWorkers().length||1;
   const base=daily/8;
   const transport=(+wc.transport||0)/8;
-  const severance=daily*((c.severancePct??8.33)/100)/8;
+  const severance=daily*_sevDays()/12*_sevK(wid);   // 📑 חודשי קבוע ÷ שעות בפועל (_sevK)
   const holidays=daily*((c.holidayDays??4)/wdy)/8;
   // 🎁 מתנות+טיול: סכום שנתי לעובד מכרטיס העובד; בלי סכום משלו ⇒ ההגדרה הכללית
   //    (הטיול הכללי מתחלק רק בין העובדים שאין להם סכום משלהם)
@@ -628,16 +628,14 @@ function setWorkerGiftsTrip(wid,val){
 function overheadBreakdown(){
   const c=S.costs;
   const fixedMonthly=(c.fixedDaily||0)*(c.workDaysMonth||22)+(c.fixedMonthly||0)+(c.fixedAnnual||0)/12;
-  const win=Math.max(1,Math.min(3,parseInt(c.overheadMonthsWindow)||3));
-  const months=(c.costMonths||[]).slice().sort((a,b)=>b.month.localeCompare(a.month)).slice(0,win);
+  const {win,months}=_ohWin();
   const varAvg=months.length?months.reduce((s,m)=>s+(m.variableTotal||0),0)/months.length:0;
   const buffer=(c.overheadBufferPct??10)/100;
   const varEst=varAvg*(1+buffer);
   // 🏦 מסים + עמלות בנק = אחוז מההכנסות ⇒ ממוצע ההכנסות של **אותם חודשים** של ממוצע המשתנות
   //    (אין חודשים סגורים ⇒ החודשים המלאים האחרונים). הכנסה = משלוחים × (מחיר + מחיר גזירה).
   const tbPct=(+c.taxPct||0)+(+c.bankPct||0);
-  let incMonths=months.map(m=>m.month);
-  if(!incMonths.length){const d=new Date();for(let i=1;i<=win;i++){const x=new Date(d.getFullYear(),d.getMonth()-i,1);incMonths.push(x.getFullYear()+'-'+pad2(x.getMonth()+1));}}
+  const incMonths=_ohMonths();
   const incAvg=tbPct?incMonths.reduce((s,m)=>s+_incomeOfMonth(m),0)/incMonths.length:0;
   const taxBank=incAvg*tbPct/100;
   // 🕐 המכנה = **שעות הנוכחות בפועל** (נטו, בלי מנהלים) — ממוצע של אותם חודשים.
@@ -653,6 +651,62 @@ function overheadBreakdown(){
 }
 // שעות נוכחות נטו בפועל לחודש (YYYY-MM), בלי מנהלים — המכנה של התקורה לשעה. נטען פעם אחת לחודש.
 var _ohAttH={}, _ohAttP=null;
+// חלון חודשי התקורה (החודשים הסגורים האחרונים; אין ⇒ החודשים המלאים האחרונים) — גם לפיצויים
+function _ohWin(){const c=S.costs;const win=Math.max(1,Math.min(3,parseInt(c.overheadMonthsWindow)||3));
+  return {win,months:(c.costMonths||[]).slice().sort((a,b)=>b.month.localeCompare(a.month)).slice(0,win)};}
+function _ohMonths(){const{win,months}=_ohWin();const r=months.map(m=>m.month);
+  if(!r.length){const d=new Date();for(let i=1;i<=win;i++){const x=new Date(d.getFullYear(),d.getMonth()-i,1);r.push(x.getFullYear()+'-'+pad2(x.getMonth()+1));}}
+  return r;}
+// ─── 📑 פיצויים (18/11/2026, החלטת המשתמש) ─────────────────────────────────
+// לכל חודש שהעובד מועסק: תעריף יומי × sevDays (26) ÷ 12 — **קבוע, לא לפי ימים שעבד** (150×26÷12=₪325).
+// התחיל/עזב באמצע החודש ⇒ רק החלק שהיה מועסק: התחלה = היום הראשון שהגיע אם בחודש הקודם לא הגיע בכלל,
+// סוף = היום האחרון שהגיע אם בחודש הבא (שכבר עבר) לא הגיע. חודש בלי שום נוכחות = לא מועסק.
+// לשעה (תמחור/רווח): הפיצויים של חלון התקורה ÷ שעות הנוכחות שלו באותם חודשים (_sevK) — עבד פחות ⇒ שעה יקרה יותר.
+// בלי נתוני נוכחות ⇒ 1/(26×8) = בדיוק החישוב הישן (8.33% לשעה).
+var _ohW={}, _sevV=0, _sevKc={};   // _ohW[YYYY-MM][wid]={h,f,l}
+function _sevDays(){return +S.costs?.sevDays>0?+S.costs.sevDays:26;}
+function _ymAdd(m,n){const x=new Date(+m.slice(0,4),+m.slice(5,7)-1+n,1);return x.getFullYear()+'-'+pad2(x.getMonth()+1);}
+function _ymNow(){const x=new Date();return x.getFullYear()+'-'+pad2(x.getMonth()+1);}
+function _dim(m){return new Date(+m.slice(0,4),+m.slice(5,7),0).getDate();}
+// החודשים + השכנים שלהם (לזיהוי התחלה/עזיבה), לא אחרי החודש הנוכחי
+function _sevMonths(ms){const s=new Set(ms),now=_ymNow();ms.forEach(m=>{s.add(_ymAdd(m,-1));const n=_ymAdd(m,1);if(n<now)s.add(n);});return [...s].filter(m=>m<=now).sort();}
+// [יום התחלה, יום סוף, ימים בחודש] של העסקה בחודש m, או null
+function _sevSpan(wid,m){
+  const s=_ohW[m]?.[wid];if(!s)return null;
+  const D=_dim(m),p=_ohW[_ymAdd(m,-1)],nm=_ymAdd(m,1),n=_ohW[nm];
+  return [(p&&!p[wid])?s.f:1,(nm<_ymNow()&&n&&!n[wid])?s.l:D,D];
+}
+// חלקי חודש לשעה (הפיצויים לשעה = תעריף יומי × 26 ÷ 12 × k)
+function _sevK(wid){
+  const ms=_ohMonths(),key=_sevV+'|'+ms.join();
+  if(_sevKc.key!==key)_sevKc={key};
+  if(wid in _sevKc)return _sevKc[wid];
+  let fr=0,h=0;ms.forEach(m=>{const sp=_sevSpan(wid,m);if(sp){fr+=(sp[1]-sp[0]+1)/sp[2];h+=_ohW[m][wid].h;}});
+  return _sevKc[wid]=(fr>0&&h>0)?fr/h:1/(_sevDays()*8);
+}
+// סכום הפיצויים בטווח (לכרטיס בלשונית עלויות). ok=false ⇒ הנוכחות לא נטענה
+function _sevRange(from,to){
+  let sum=0,ok=true;const sd=_sevDays(),ms=[];
+  for(let m=from.slice(0,7);m<=to.slice(0,7);m=_ymAdd(m,1))ms.push(m);
+  const ws=(S.workers||[]).filter(w=>w.role!=='manager');
+  ms.forEach(m=>{
+    if(!_ohW[m]){ok=false;return;}
+    const D=_dim(m),a0=m===from.slice(0,7)?+from.slice(8,10):1,b0=m===to.slice(0,7)?+to.slice(8,10):D;
+    ws.forEach(w=>{
+      if(+(S.costs.workerUnitRates||{})[w.id]>0)return; // ליחידה — אין שעה עמוסה (כמו קודם)
+      const sp=_sevSpan(w.id,m);if(!sp)return;
+      const a=Math.max(sp[0],a0),b=Math.min(sp[1],b0);if(b<a)return;
+      sum+=wRate(w.id,m+'-'+pad2(a))*sd/12*(b-a+1)/D;
+    });
+  });
+  return {sum,ok};
+}
+async function _sevEnsure(from,to){
+  const ms=[];for(let m=from.slice(0,7);m<=to.slice(0,7);m=_ymAdd(m,1))ms.push(m);
+  const now=_ymNow();if(ms.includes(now)&&!_ohAttP){delete _ohAttH[now];delete _ohW[now];}  // החודש הנוכחי — תמיד טרי
+  const all=_sevMonths(ms);
+  await _ensureOhHours(all);await _ensureOhHours(all); // פעמיים: אם רצה טעינה אחרת — היא חוזרת בלי החודשים שלנו
+}
 // 💱 (08/11/2026) עלות השעה של כל עובד + התקורה **כפי שהלקוח מחשב אותן** ⇒ adminSettings/costs.rateCache,
 // ו-calcTaskExpected בשרת משתמש בהן. עד היום השרת חישב בנוסחה ישנה (בלי מתנות/טיול לעובד, בלי מסים
 // ועמלות בתקורה, תקורה לפי שעות תיאורטיות) ⇒ שעה זולה ב-~22% והצפי בסריקה גבוה ב-~28% מהדוחות
@@ -713,9 +767,12 @@ function _ensureOhHours(months){
   const s=miss.slice().sort(), from=s[0]+'-01', to=s[s.length-1]+'-31';
   _ohAttP=loadAttRange(from,to).then(recs=>{
     const mgr={};(S.workers||[]).forEach(w=>{if(w.role==='manager')mgr[w.id]=1;});
-    const h={};miss.forEach(m=>h[m]=0);
-    (recs||[]).forEach(r=>{const m=String(r.date||'').slice(0,7);if(m in h&&!mgr[r.workerId])h[m]+=(r.netMs||0)/3600000;});
-    Object.assign(_ohAttH,h);
+    const h={},w={};miss.forEach(m=>{h[m]=0;w[m]={};});
+    (recs||[]).forEach(r=>{const dt=String(r.date||''),m=dt.slice(0,7);if(!(m in h)||mgr[r.workerId])return;
+      const hr=(r.netMs||0)/3600000;h[m]+=hr;
+      // 📑 לפיצויים — לכל עובד: שעות + היום הראשון/האחרון שהגיע בחודש
+      const dd=+dt.slice(8,10),o=w[m][r.workerId]||(w[m][r.workerId]={h:0,f:dd,l:dd});o.h+=hr;if(dd<o.f)o.f=dd;if(dd>o.l)o.l=dd;});
+    Object.assign(_ohAttH,h);Object.assign(_ohW,w);_sevV++;
   }).catch(e=>console.error('_ensureOhHours:',e)).finally(()=>{
     _ohAttP=null;
     try{renderOverheadResult();renderLoadedHourTable();}catch(e){}
@@ -724,7 +781,7 @@ function _ensureOhHours(months){
   return _ohAttP;
 }
 // לקוראים אסינכרוניים: מוודא שהשעות בפועל נטענו לפני חישוב התקורה
-function ohReady(){return _ensureOhHours(overheadBreakdown().incMonths);}
+async function ohReady(){const ms=_sevMonths(_ohMonths());await _ensureOhHours(ms);await _ensureOhHours(ms);}
 // 🧾 הכנסה של תעודה (06/11/2026) = **בדיוק כמו בלשונית תעודות משלוח** (dnFiltered): עבודה
 // (dnUnitPrice × total; בלי מחיר תפירה ⇒ 0) + חומר אריזה שנצרב על התעודה (shipPackCost).
 // 📅 חודש ההכנסה = **חודש ההתחשבנות**: תעודה שבחשבונית עסקה ⇒ החודש של החשבונית (pfMonth) —
@@ -755,7 +812,7 @@ function _incomeOfMonth(ym){
 }
 function saveLoadedHourSettings(){
   const c=S.costs;
-  c.severancePct=parseFloat(document.getElementById('lh-sev')?.value);if(isNaN(c.severancePct))c.severancePct=8.33;
+  c.sevDays=parseFloat(document.getElementById('lh-sevdays')?.value);if(!(c.sevDays>0))c.sevDays=26;_sevV++;
   c.holidayDays=parseInt(document.getElementById('lh-hol')?.value)||0;
   c.giftsAnnual=parseFloat(document.getElementById('lh-gifts')?.value)||0;
   c.tripAnnual=parseFloat(document.getElementById('lh-trip')?.value)||0;
@@ -1287,6 +1344,8 @@ async function calcCosts(){
   document.getElementById('cost-wages').textContent='₪'+Math.round(totalWages).toLocaleString();
   document.getElementById('cost-overhead').textContent='₪'+Math.round(totalOverhead).toLocaleString();
   document.getElementById('cost-avg').textContent=enriched.length?'₪'+Math.round(grandTotal/enriched.length).toLocaleString():'—';
+  // 📑 פיצויים = חודשי קבוע לכל עובד מועסק (לא לפי השעות שנכנסו לחישוב) ⇒ מחליף את החלק השעתי גם ב"עלות מלאה"
+  try{await _sevEnsure(from,to);const sr=_sevRange(from,to);if(sr.ok){fullLoaded+=sr.sum-_ld.severance;_ld.severance=sr.sum;_ld.sevMonthly=1;}}catch(e){console.warn('sev:',e);}
   const fEl=document.getElementById('cost-full');
   if(fEl){
     const full=fullLoaded+fullOh;
@@ -1441,7 +1500,7 @@ function renderCostTab(){
     const extra=`
       <div class="sec" style="font-size:13px;margin-top:1.25rem">👷 עלויות עובד נלוות</div>
       <div style="font-size:11px;color:var(--txt3);margin-bottom:6px">לפי שעות העבודה בטווח והגדרות "שעה עמוסה". נכללות ב"עלות מלאה" (שכר עמוס) — לא ב"עלות הוצאות".</div>
-      <div style="${grid}">${LDL.map(([k,l])=>card(l,fmt(ld[k]||0))).join('')}${card('סה"כ נלוות',fmt(ldTot),'','--blue-txt')}</div>
+      <div style="${grid}">${LDL.map(([k,l])=>card(l,fmt(ld[k]||0),k==='severance'&&ld.sevMonthly?'יומי × '+_sevDays()+' ÷ 12 לחודש':'')).join('')}${card('סה"כ נלוות',fmt(ldTot),'','--blue-txt')}</div>
       <div class="sec" style="font-size:13px">🏦 מסים ועמלות בנק</div>
       <div style="font-size:11px;color:var(--txt3);margin-bottom:6px">הכנסות = תעודות משלוח: עבודה (מחיר יחידה + גזירה) + חומר אריזה — כמו בלשונית תעודות משלוח. ${X.bySettle?'חודש שלם ⇒ לפי <b>חודש ההתחשבנות</b> של החשבונית (תעודה בלי חשבונית — לפי תאריכה).':'טווח חלקי ⇒ לפי תאריך התעודה.'} האחוזים נקבעים בכרטיס "הוצאות קבועות".</div>
       <div style="${grid}">
