@@ -719,7 +719,7 @@ async function printWorkSteps(share){
   // ⏱ (18/11/2026, בקשת המשתמש) זמן לכל שלב: דקות ליחידה (מוזנות, או מהתקציב) ובקטן — להזמנה כולה
   const{n:units,est}=_pmUnitsForTime();
   const minOf={};for(const x of _pmOrdMin)if(x.ri!=null)minOf[x.ri]=x.min;
-  const tCell=s=>{const m=minOf[s.ri];if(!(m>0))return'<td class="t">—</td>';return`<td class="t"><b>${+m.toFixed(2)} דק' ליח'</b>${units?`<div class="alt">${est?'~':''}${units} יח': <b>${fmtExpMin(m*units)}</b></div>`:''}</td>`;};
+  const tCell=s=>{const m=minOf[s.ri];if(!(m>0))return'<td class="t">—</td>';return`<td class="t" style="white-space:nowrap"><b>${+m.toFixed(2)} דק'</b>${units?` · ${fmtExpMin(m*units)}`:''}</td>`;}; // שורה אחת — שהדף לא יגלוש לעמוד שני
   const rows=steps.map((s,i)=>`<tr><td class="n">${i+1}</td><td><b>${s.cut?'✂ ':''}${esc(s.name)}</b>${s.nameAr?`<div class="ar" dir="rtl">${esc(s.nameAr)}</div>`:''}</td>
     <td><b>${esc(stn(s.station))}</b>${s.alt.length?`<div class="alt">+ ${s.alt.map(a=>esc(stn(a))).join(' · ')}</div>`:''}</td>
     <td>${esc(dpt(s.station))}${(()=>{const o=[...new Set(s.alt.map(dpt))].filter(d=>d!==dpt(s.station));return o.length?`<div class="alt">+ ${o.map(esc).join(' · ')}</div>`:'';})()}</td>${tCell(s)}</tr>`).join('');
@@ -740,7 +740,7 @@ async function printWorkSteps(share){
     table.d td.t{width:130px;font-weight:700;white-space:nowrap}tr.tot td{background:#eee;font-weight:700}.note{margin-top:14px;font-size:12px;color:#555}
     tr{page-break-inside:avoid}.keep{page-break-inside:avoid;break-inside:avoid}</style></head><body>
     <h2>${esc(title)}</h2><div class="sub">${name?esc(name)+' · ':''}${steps.length} שלבים · הודפס ${new Date().toLocaleDateString('he-IL')}</div>
-    <table><thead><tr><th>#</th><th>שלב</th><th>תחנה</th><th>מחלקה</th><th>זמן${units?` — ליחידה ולכל הכמות`:' ליחידה'}</th></tr></thead><tbody>${rows}</tbody></table>
+    <table><thead><tr><th>#</th><th>שלב</th><th>תחנה</th><th>מחלקה</th><th>זמן ליח'${units?` · ל-${est?'~':''}${units} יח'`:''}</th></tr></thead><tbody>${rows}</tbody></table>
     ${dept}</body></html>`;
   if(share){ // 💬 (03/11/2026) וואטסאפ — אותו דף כ-PDF
     showToast('⏳ מכין PDF…','var(--txt3)',4000);
