@@ -278,6 +278,7 @@ function openProductModal(id){
     <button type="button" class="btn" onclick="addTaskStepRow()" style="font-size:12px">+ הוסף שלב עבודה</button>
     <button type="button" class="btn" onclick="printWorkSteps()" style="font-size:12px" title="דף שלבים ותחנות לרצפה — בלי זמן לשלב; למטה הזמן להזמנה לפי מחלקה">🖨 הדפס שלבים</button>
     <button type="button" class="btn" onclick="printWorkSteps(true)" style="font-size:12px" title="אותו דף שלבים כ-PDF — נשלח בוואטסאפ">💬 וואטסאפ</button>
+    <button type="button" class="btn" onclick="openStepMap()" style="font-size:12px" title="סימון מיקום כל שלב על תמונת הדגם (קדימה / גב) — מופיע בדף השלבים ובסריקה">📍 מפת שלבים</button>
     <button type="button" class="btn" onclick="printWorkSteps(false,true)" style="font-size:12px" title="הצעת מחיר ללקוח: דקות לשלב × מחיר דקה (בתמחור למטה) — בלי תחנות">💰 הצעת מחיר</button>
     <button type="button" class="btn" onclick="printWorkSteps(true,true)" style="font-size:12px" title="הצעת המחיר כ-PDF — נשלחת בוואטסאפ">💬 הצעה בוואטסאפ</button>
 
@@ -301,6 +302,7 @@ function openProductModal(id){
   // ⚠️ אסור לשמור מוצר לפני שהן הגיעו — נשמר דגל שחוסם את saveProduct.
   _prodImgs=p?[...(p.images||[])]:[];
   _prodDocs=p?[...(p.docs||[])]:[];
+  _pmStepMap=_smClone(p?.stepMap);_smView=0;_smSel=''; // 📍 מפת שלבים
   _prodImgsLoading=false;
   if(p&&!_prodImgs.length&&prodImgCount(p)){
     _prodImgsLoading=true;
@@ -746,7 +748,7 @@ async function printWorkSteps(share,quote){
     tr{page-break-inside:avoid}.keep{page-break-inside:avoid;break-inside:avoid}</style></head><body>
     <h2>${esc(title)}</h2><div class="sub">${name?esc(name)+' · ':''}${steps.length} שלבים · הודפס ${new Date().toLocaleDateString('he-IL')}</div>
     <table><thead><tr><th>#</th><th>שלב</th><th>תחנה</th><th>מחלקה</th></tr></thead><tbody>${rows}</tbody></table>
-    ${dept}</body></html>`;
+    ${_smPrintBlock(steps.map(s=>s.name))}${dept}</body></html>`;
   return _printStepsOut(html,share,'work-steps-'+(prod||'0')+'.pdf',title+(name?' · '+name:''));
 }
 // הדפסה / וואטסאפ / אייפון — משותף לדף הרצפה ולהצעת המחיר

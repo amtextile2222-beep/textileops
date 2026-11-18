@@ -580,11 +580,13 @@ function renderStepChecks(prefix,cust,prod,steps,bc,keepMode){
         <span style="color:var(--txt3)">${atStn.length} ${esc(T.st_of||'מתוך')} ${steps.length}</span>
         ${mayAll&&atStn.length<steps.length?`<button type="button" class="btn" style="font-size:11px;padding:3px 10px" onclick="toggleStepStationFilter('${escj(prefix)}')">${esc(showAll?(T.st_only||'📍 רק שלבי התחנה'):(T.st_all_steps||'📋 כל השלבים'))}</button>`:''}
       </div>`:'';
+  const _smP=bcOrderProd(bc||'')||findProd(cust,prod); // 📍 מפת שלבים של ההזמנה
   listEl.innerHTML=noteHtml+bar+rows.map(s=>{
     const nm=stepName(s);
+    const pin=stepHasPin(_smP,nm)?`<button type="button" class="btn" style="margin-inline-start:auto;font-size:13px;padding:2px 8px" title="איפה בדגם · مكان المرحلة" onclick="event.preventDefault();event.stopPropagation();showStepPin('${escj(String(_smP.id))}','${escj(nm)}')">📍</button>`:'';
     // שלב מחוץ לתחנה מסומן ויזואלית — מוצג רק למנהל/אחראי (עקיפה) או כשכבר היה מסומן
     const off=!!fam&&stepFamily(s)!==fam;
-    return`<label style="display:flex;align-items:center;gap:8px;padding:6px 8px;margin-bottom:4px;background:var(--bg2);border-radius:8px;cursor:pointer;font-size:13px${off?';opacity:.62':''}"><input type="checkbox" data-step="${esc(nm)}"${keep.has(nm)?' checked':''} style="width:16px;height:16px" onchange="${onch}"> ${esc(stepDisplay(s))}${stepBadge(s)}${off?` <span style="font-size:11px;padding:1px 7px;border-radius:8px;background:var(--amber-bg);color:var(--amber-txt);border:1px solid var(--brd)">🔒 ${esc(stepStationKeys(s).map(stationNameOfKey).join(' / ')||(T.st_no_station||'אין תחנה'))}</span>`:''}</label>`;
+    return`<label style="display:flex;align-items:center;gap:8px;padding:6px 8px;margin-bottom:4px;background:var(--bg2);border-radius:8px;cursor:pointer;font-size:13px${off?';opacity:.62':''}"><input type="checkbox" data-step="${esc(nm)}"${keep.has(nm)?' checked':''} style="width:16px;height:16px" onchange="${onch}"> ${esc(stepDisplay(s))}${stepBadge(s)}${off?` <span style="font-size:11px;padding:1px 7px;border-radius:8px;background:var(--amber-bg);color:var(--amber-txt);border:1px solid var(--brd)">🔒 ${esc(stepStationKeys(s).map(stationNameOfKey).join(' / ')||(T.st_no_station||'אין תחנה'))}</span>`:''}${pin}</label>`;
   }).join('');
 }
 function toggleStepStationFilter(prefix){

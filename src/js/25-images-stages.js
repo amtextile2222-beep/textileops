@@ -114,8 +114,8 @@ function refreshImgPreview(){
 }
 
 // ⭐ תמונה ראשית (08/11/2026) — הראשונה ברשימה היא תמונת הדגם בדף הלקוח (_prodThumb בשמירה)
-function mainProdImg(i){if(i>0&&i<_prodImgs.length){_prodImgs.unshift(..._prodImgs.splice(i,1));refreshImgPreview();}}
-function removeProdImg(i){_prodImgs.splice(i,1);refreshImgPreview();}
+function mainProdImg(i){if(i>0&&i<_prodImgs.length){_prodImgs.unshift(..._prodImgs.splice(i,1));_smRemap(o=>o===i?0:o<i?o+1:o);refreshImgPreview();}}
+function removeProdImg(i){_prodImgs.splice(i,1);_smRemap(o=>o===i?null:o>i?o-1:o);refreshImgPreview();}
 
 async function addProdDocs(input){
   for(const file of input.files){
@@ -340,7 +340,7 @@ async function saveProduct(){
         const{orderNo}=await newProdOrderFields(cust,prod);
         if(orderNo!==_oNo){p.orderNo=orderNo;showToast('🔢 מספר ההזמנה עודכן ל-#'+String(orderNo).padStart(3,'0')+' — אם כבר הודפסו ברקודים, יש להדפיס מחדש','var(--amber-txt)',8000);}
       }
-      Object.assign(p,{prod,cust,name,images:_prodImgs,imgCount:_prodImgs.length,docs:_prodDocs,quantities,stageLog,stageSkipped,workSteps,unitPrice,targetProfitPct,directMaterialsCost,cutPrice,cutProfitPct,extraMatPrice,quoteMinRate,isSample,estQty,cons,szLetters});
+      Object.assign(p,{prod,cust,name,images:_prodImgs,imgCount:_prodImgs.length,docs:_prodDocs,quantities,stageLog,stageSkipped,workSteps,unitPrice,targetProfitPct,directMaterialsCost,cutPrice,cutProfitPct,extraMatPrice,quoteMinRate,isSample,estQty,cons,szLetters,stepMap:_smClean(workSteps.map(s=>stepName(s)))});
     }
   }else{
     const id='p'+Date.now();
@@ -351,7 +351,7 @@ async function saveProduct(){
       stageLog.sort((a,b)=>PROD_STAGES.findIndex(x=>x.id===a.id)-PROD_STAGES.findIndex(x=>x.id===b.id));
     }
     const _ordF=await newProdOrderFields(cust,prod);
-    S.products.push({id,createdAt:Date.now(),..._ordF,prod,cust,name,images:_prodImgs,imgCount:_prodImgs.length,docs:_prodDocs,quantities,stageLog,stageSkipped,workSteps,unitPrice,targetProfitPct,directMaterialsCost,cutPrice,cutProfitPct,extraMatPrice,quoteMinRate,isSample,estQty,cons,szLetters});
+    S.products.push({id,createdAt:Date.now(),..._ordF,prod,cust,name,images:_prodImgs,imgCount:_prodImgs.length,docs:_prodDocs,quantities,stageLog,stageSkipped,workSteps,unitPrice,targetProfitPct,directMaterialsCost,cutPrice,cutProfitPct,extraMatPrice,quoteMinRate,isSample,estQty,cons,szLetters,stepMap:_smClean(workSteps.map(s=>stepName(s)))});
   }
   saveLS();
   if(S.fbConnected){
