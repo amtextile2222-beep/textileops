@@ -238,7 +238,7 @@ function _syncWatchStart(){
 // כתיבה: העוטפים (fbSet וכו') מפצלים אוטומטית כל כתיבה ל-products — השדות לא חוזרים לשם.
 // ⚠️ עובדת בלי תמחור עדיין צריכה לדעת "יש למוצר תמחור?" לצפי בסריקה ⇒ הדגל priced
 // (כן/לא, בלי מספרים) נשמר במסמך המוצר. ראה _isPriced.
-const PRICING_FIELDS=['unitPrice','targetProfitPct','directMaterialsCost','cutPrice','cutProfitPct','extraMatPrice'];
+const PRICING_FIELDS=['unitPrice','targetProfitPct','directMaterialsCost','cutPrice','cutProfitPct','extraMatPrice','quoteMinRate']; // 💬 quoteMinRate — מחיר דקה להצעת מחיר (18/11/2026)
 let _pricingMap={};
 // ⚠️ חייב להישאר זהה ל-canPricing ב-firestore.rules: מנהל · permissions מפורש עם products/dnotes ·
 // אחראי בלי permissions (ברירת המחדל שלו כוללת products; dnotes דורש סימון מפורש — OPTIN_PAGES)

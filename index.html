@@ -5262,7 +5262,7 @@ function _syncWatchStart(){
 // כתיבה: העוטפים (fbSet וכו') מפצלים אוטומטית כל כתיבה ל-products — השדות לא חוזרים לשם.
 // ⚠️ עובדת בלי תמחור עדיין צריכה לדעת "יש למוצר תמחור?" לצפי בסריקה ⇒ הדגל priced
 // (כן/לא, בלי מספרים) נשמר במסמך המוצר. ראה _isPriced.
-const PRICING_FIELDS=['unitPrice','targetProfitPct','directMaterialsCost','cutPrice','cutProfitPct','extraMatPrice'];
+const PRICING_FIELDS=['unitPrice','targetProfitPct','directMaterialsCost','cutPrice','cutProfitPct','extraMatPrice','quoteMinRate']; // 💬 quoteMinRate — מחיר דקה להצעת מחיר (18/11/2026)
 let _pricingMap={};
 // ⚠️ חייב להישאר זהה ל-canPricing ב-firestore.rules: מנהל · permissions מפורש עם products/dnotes ·
 // אחראי בלי permissions (ברירת המחדל שלו כוללת products; dnotes דורש סימון מפורש — OPTIN_PAGES)
@@ -20744,6 +20744,8 @@ function openProductModal(id){
     <button type="button" class="btn" onclick="addTaskStepRow()" style="font-size:12px">+ הוסף שלב עבודה</button>
     <button type="button" class="btn" onclick="printWorkSteps()" style="font-size:12px" title="דף שלבים ותחנות לרצפה — בלי זמן לשלב; למטה הזמן להזמנה לפי מחלקה">🖨 הדפס שלבים</button>
     <button type="button" class="btn" onclick="printWorkSteps(true)" style="font-size:12px" title="אותו דף שלבים כ-PDF — נשלח בוואטסאפ">💬 וואטסאפ</button>
+    <button type="button" class="btn" onclick="printWorkSteps(false,true)" style="font-size:12px" title="הצעת מחיר ללקוח: דקות לשלב × מחיר דקה (בתמחור למטה) — בלי תחנות">💰 הצעת מחיר</button>
+    <button type="button" class="btn" onclick="printWorkSteps(true,true)" style="font-size:12px" title="הצעת המחיר כ-PDF — נשלחת בוואטסאפ">💬 הצעה בוואטסאפ</button>
 
     <div class="sec" style="margin-top:14px;margin-bottom:6px">💰 תמחור ליחידה</div>
     <label style="display:flex;align-items:center;gap:6px;font-size:13px;margin-bottom:8px;cursor:pointer;flex-wrap:wrap"><input id="pm-sample" type="checkbox" style="width:auto" ${p?.isSample?'checked':''} onchange="pmSampleToggle(this)"/> <b>👕 דגם ראשון</b> <span style="font-size:11px;color:var(--txt3)">₪${SAMPLE_UNIT_PRICE} ליחידה · ברקוד דגם אחד · בלי שלבים, פתוח לכל התחנות · העלות לפי זמן העבודה</span></label>
@@ -20755,6 +20757,7 @@ function openProductModal(id){
       <div class="field"><label>🧵 חומרים בתוספת ₪ <span style="font-size:10px;color:var(--txt3)">(מעבר למחיר)</span></label><input id="pm-extramat" type="number" min="0" step="0.1" value="${p?.extraMatPrice||''}" placeholder="0" title="חומרים שהלקוח משלם בנוסף למחיר התפירה והגזירה — נכנסים להתחשבנות, לא יורדים מתקציב העבודה" style="font-size:13px" oninput="renderProductPricing()"/></div>
       <div class="field"><label>✂ עלות גזירה ₪ <span style="font-size:10px;color:var(--txt3)">(ליחידה)</span></label><input id="pm-cutprice" type="number" min="0" step="0.1" value="${p?.cutPrice||''}" placeholder="0" title="מחיר הגזירה ליחידה — נוסף למחיר המכירה. מוזן בהקמת המוצר, לפני שהכמות ידועה. סמן ✂ על שלבי הגזירה כדי שייספרו מולו." style="font-size:13px" oninput="renderProductPricing()"/></div>
       <div class="field"><label>✂ רווח יעד גזירה %</label><input id="pm-cutprofit" type="number" min="0" max="99" step="1" value="${p?.cutProfitPct??''}" placeholder="לפי התפירה" title="אחוז רווח היעד של הגזירה — נפרד מאחוז התפירה. כל עוד ריק, החישוב משתמש באחוז התפירה." style="font-size:13px" oninput="renderProductPricing()"/></div>
+      <div class="field"><label>💬 מחיר דקה להצעת מחיר ₪ <span style="font-size:10px;color:var(--txt3)">(רק להצעה ללקוח — לא נוגע במחיר)</span></label><input id="pm-quoterate" type="number" min="0" step="0.01" value="${p?.quoteMinRate||''}" placeholder="0" title="דקות ליחידה × מחיר הדקה = הצעת מחיר ליחידה. לא משנה את מחיר המוצר ולא את תקצוב הזמן במפעל" style="font-size:13px"/></div>
     </div>
     <div id="pm-pricing-result" style="margin-bottom:8px"></div>
     ${p&&S.user?.role==='manager'?'<div id="pm-repairs" style="margin-bottom:8px"></div>':''}`;
@@ -20891,6 +20894,7 @@ function pmCopyFromPrev(pid){
   set('pm-profit',p.targetProfitPct!=null?+p.targetProfitPct:'');
   set('pm-materials',+p.directMaterialsCost||'');
   set('pm-extramat',+p.extraMatPrice||'');
+  set('pm-quoterate',+p.quoteMinRate||'');
   set('pm-cutprice',+p.cutPrice||''); // ✂ מחיר הגזירה הוא חלק מהתמחור ומועתק איתו (הכמות עדיין לא)
   set('pm-cutprofit',hasCutProfitPct(p)?+p.cutProfitPct:''); // ✂ אחוז רווח הגזירה נוסע יחד עם המחיר
   const pr=+p.unitPrice||0,pc=+p.targetProfitPct||0;
@@ -21169,8 +21173,12 @@ function _orderDeptTimeHtml(list){
 // 🖨 דף שלבי עבודה לרצפה (19/10/2026 — בקשת המשתמש): שלב + תחנה (ראשית, ונוספות בקטן),
 // **בלי זמן לשלב**. למטה — הזמן להזמנה כולה לפי מחלקה, אותו חישוב בדיוק כמו בבלוק שבחלון
 // (_pmOrdMin מהרינדור האחרון × היחידות בטבלת הכמויות). נקרא מהחלון הפתוח — כולל שינויים שלא נשמרו.
-async function printWorkSteps(share){
+// 💬 quote=true (18/11/2026, החלטת המשתמש) — דף נפרד: **הצעת מחיר ללקוח** לפני העבודה. דקות ליחידה לכל שלב +
+// לכל הכמות, ובסוף: סה"כ דקות × "מחיר דקה להצעת מחיר" (quoteMinRate) = מחיר ליחידה. בלי תחנות/מחלקות (ללקוח).
+// לא נוגע במחיר המוצר — מחיר המכירה ממשיך לשמש לתקצוב הזמן במפעל. דף הרצפה (בלי quote) נשאר כמו שהיה.
+async function printWorkSteps(share,quote){
   try{renderProductPricing();}catch(_){}
+  if(quote)return _printQuote(share);
   const v=id=>(document.getElementById(id)?.value||'').trim();
   const steps=[...document.querySelectorAll('#pm-tasksteps-list .ts-row')].map((r,ri)=>({ri,
     name:r.querySelector('[data-f="name"]')?.value.trim()||'',
@@ -21182,13 +21190,10 @@ async function printWorkSteps(share){
   if(!steps.length){showToast('⚠ אין שלבי עבודה להדפסה','var(--red-txt)');return;}
   const stn=k=>k?stationNameOfKey(k):'—';
   const dpt=k=>k?String(k).split('::')[0]||'—':'—'; // 🏭 המחלקה מתוך מפתח התחנה ("מחלקה::תחנה")
-  // ⏱ (18/11/2026, בקשת המשתמש) זמן לכל שלב: דקות ליחידה (מוזנות, או מהתקציב) ובקטן — להזמנה כולה
   const{n:units,est}=_pmUnitsForTime();
-  const minOf={};for(const x of _pmOrdMin)if(x.ri!=null)minOf[x.ri]=x.min;
-  const tCell=s=>{const m=minOf[s.ri];if(!(m>0))return'<td class="t">—</td>';return`<td class="t" style="white-space:nowrap"><b>${+m.toFixed(2)} דק'</b>${units?` · ${fmtExpMin(m*units)}`:''}</td>`;}; // שורה אחת — שהדף לא יגלוש לעמוד שני
   const rows=steps.map((s,i)=>`<tr><td class="n">${i+1}</td><td><b>${s.cut?'✂ ':''}${esc(s.name)}</b>${s.nameAr?`<div class="ar" dir="rtl">${esc(s.nameAr)}</div>`:''}</td>
     <td><b>${esc(stn(s.station))}</b>${s.alt.length?`<div class="alt">+ ${s.alt.map(a=>esc(stn(a))).join(' · ')}</div>`:''}</td>
-    <td>${esc(dpt(s.station))}${(()=>{const o=[...new Set(s.alt.map(dpt))].filter(d=>d!==dpt(s.station));return o.length?`<div class="alt">+ ${o.map(esc).join(' · ')}</div>`:'';})()}</td>${tCell(s)}</tr>`).join('');
+    <td>${esc(dpt(s.station))}${(()=>{const o=[...new Set(s.alt.map(dpt))].filter(d=>d!==dpt(s.station));return o.length?`<div class="alt">+ ${o.map(esc).join(' · ')}</div>`:'';})()}</td></tr>`).join('');
   let dept='';
   if(_pmOrdMin.length&&units){
     const{by,order}=_orderDeptAgg(_pmOrdMin);let tot=0;
@@ -21206,18 +21211,60 @@ async function printWorkSteps(share){
     table.d td.t{width:130px;font-weight:700;white-space:nowrap}tr.tot td{background:#eee;font-weight:700}.note{margin-top:14px;font-size:12px;color:#555}
     tr{page-break-inside:avoid}.keep{page-break-inside:avoid;break-inside:avoid}</style></head><body>
     <h2>${esc(title)}</h2><div class="sub">${name?esc(name)+' · ':''}${steps.length} שלבים · הודפס ${new Date().toLocaleDateString('he-IL')}</div>
-    <table><thead><tr><th>#</th><th>שלב</th><th>תחנה</th><th>מחלקה</th><th>זמן ליח'${units?` · ל-${est?'~':''}${units} יח'`:''}</th></tr></thead><tbody>${rows}</tbody></table>
+    <table><thead><tr><th>#</th><th>שלב</th><th>תחנה</th><th>מחלקה</th></tr></thead><tbody>${rows}</tbody></table>
     ${dept}</body></html>`;
+  return _printStepsOut(html,share,'work-steps-'+(prod||'0')+'.pdf',title+(name?' · '+name:''));
+}
+// הדפסה / וואטסאפ / אייפון — משותף לדף הרצפה ולהצעת המחיר
+async function _printStepsOut(html,share,fname,caption){
   if(share){ // 💬 (03/11/2026) וואטסאפ — אותו דף כ-PDF
     showToast('⏳ מכין PDF…','var(--txt3)',4000);
     let b;try{b=await _dnPdfBlob(html);}catch(e){alert('הכנת ה-PDF נכשלה: '+(e?.message||e));return;}
-    await _waSharePdf(b,'work-steps-'+(prod||'0')+'.pdf',title+(name?' · '+name:''),'');return;
+    await _waSharePdf(b,fname,caption,'');return;
   }
   if(!_isIOS()){printViaIframe(html);return;}
   // 🍎 אייפון: כמו תעודת המשלוח — PDF (עד 15% מעל עמוד מתכווץ לעמוד אחד) ⇒ שיתוף ⇒ הדפסה
   showToast('⏳ מכין PDF…','var(--txt3)',4000);
   let blob;try{blob=await _dnPdfBlob(html);}catch(e){alert('הכנת ה-PDF נכשלה: '+(e?.message||e));return;}
-  await _printPdfBlob(blob,'work-steps-'+(prod||'0')+'.pdf');
+  await _printPdfBlob(blob,fname);
+}
+// 💬 הצעת מחיר ללקוח (ראה printWorkSteps). דקות לשלב = מה שחושב בחלון (_pmOrdMin, ri = השורה):
+// "דק' ידני" או, כשיש מחיר מכירה, הנגזר מהתקציב. כל השלבים חייבים זמן — אחרת ההצעה חסרה.
+async function _printQuote(share){
+  const v=id=>(document.getElementById(id)?.value||'').trim();
+  const rate=parseFloat(v('pm-quoterate'))||0;
+  if(!(rate>0)){alert('הזן "מחיר דקה להצעת מחיר" בתמחור המוצר');document.getElementById('pm-quoterate')?.focus();return;}
+  const steps=[...document.querySelectorAll('#pm-tasksteps-list .ts-row')].map((r,ri)=>({ri,
+    name:r.querySelector('[data-f="name"]')?.value.trim()||'',nameAr:r.querySelector('[data-f="nameAr"]')?.value.trim()||''})).filter(s=>s.name);
+  if(!steps.length){showToast('⚠ אין שלבי עבודה','var(--red-txt)');return;}
+  const minOf={};for(const x of _pmOrdMin)if(x.ri!=null)minOf[x.ri]=x.min;
+  const miss=steps.filter(s=>!(minOf[s.ri]>0));
+  if(miss.length){alert('חסר זמן ל-'+miss.length+' שלבים — הזן "דק\' ידני" (או מחיר מכירה + רמת קושי):\n'+miss.slice(0,8).map(s=>'• '+s.name).join('\n'));return;}
+  const{n:units,est}=_pmUnitsForTime();
+  const perUnit=steps.reduce((t,s)=>t+minOf[s.ri],0),price=perUnit*rate;
+  const prod=v('pm-prod'),cust=v('pm-cust'),name=v('pm-name');
+  const title=`הצעת מחיר — מוצר ${prod}`;
+  const rows=steps.map((s,i)=>{const m=minOf[s.ri];return`<tr><td class="n">${i+1}</td><td><b>${esc(s.name)}</b>${s.nameAr?`<div class="ar">${esc(s.nameAr)}</div>`:''}</td>
+    <td class="t">${+m.toFixed(2)} דק'</td>${units?`<td class="t">${fmtExpMin(m*units)}</td>`:''}</tr>`;}).join('');
+  const sum=`<table class="d">
+    <tr><td>זמן עבודה מוערך ליחידה</td><td class="t">${+perUnit.toFixed(2)} דק'</td></tr>
+    <tr><td>מחיר דקה</td><td class="t">₪${rate.toFixed(2)}</td></tr>
+    <tr class="tot"><td>הצעת מחיר ליחידה</td><td class="t">₪${price.toFixed(2)}</td></tr>
+    ${units?`<tr><td>כמות${est?' משוערת':''}</td><td class="t">${est?'~':''}${units} יח'</td></tr>
+    <tr><td>זמן עבודה מוערך להזמנה</td><td class="t">${fmtExpMin(perUnit*units)}</td></tr>
+    <tr class="tot"><td>סה"כ להזמנה</td><td class="t">₪${(price*units).toFixed(2)}</td></tr>`:''}</table>`;
+  const html=`<!DOCTYPE html><html dir="rtl" lang="he"><head><meta charset="utf-8"><title>${esc(title)}</title><style>
+    @page{size:A4;margin:0}body{font-family:Arial,sans-serif;color:#000;margin:0;padding:12mm;font-size:13px}
+    h2{margin:0 0 2px;font-size:19px}h3{font-size:15px;margin:18px 0 6px}.sub{color:#444;font-size:12px;margin-bottom:10px}
+    table{width:100%;border-collapse:collapse}td,th{border:1px solid #888;padding:5px 8px;text-align:right;vertical-align:top}
+    th{background:#eee}td.n{width:28px;text-align:center;color:#555}.ar{font-size:12px;color:#333;margin-top:2px}
+    td.t{width:120px;white-space:nowrap}table.d td.t{width:150px;font-weight:700}tr.tot td{background:#eee;font-weight:700;font-size:15px}
+    .note{margin-top:12px;font-size:11px;color:#555}tr{page-break-inside:avoid}.keep{page-break-inside:avoid;break-inside:avoid}</style></head><body>
+    <h2>${esc(title)}</h2><div class="sub">${cust?esc(custName(cust))+' · ':''}${name?esc(name)+' · ':''}${new Date().toLocaleDateString('he-IL')}</div>
+    <table><thead><tr><th>#</th><th>שלב עבודה</th><th>דק' ליחידה</th>${units?`<th>ל-${est?'~':''}${units} יח'</th>`:''}</tr></thead><tbody>${rows}</tbody></table>
+    <div class="keep"><h3>💰 סיכום</h3>${sum}</div>
+    <div class="note">הזמנים הם הערכה לפני תחילת העבודה. המחיר לעבודה בלבד.</div></body></html>`;
+  return _printStepsOut(html,share,'quote-'+(prod||'0')+'.pdf',title+(name?' · '+name:''));
 }
 // שינוי כמות בטבלה מעדכן את הבלוק מיד (הטבלה נבנית מחדש בכל פתיחה — האזנה אחת על המסמך)
 document.addEventListener("input",e=>{if(e.target?.matches?.("#pm-qty-body [data-qf=\"qty\"]"))try{renderProductPricing();}catch(_){}});
@@ -21687,6 +21734,7 @@ async function saveProduct(){
   const directMaterialsCost=parseFloat(document.getElementById('pm-materials')?.value)||0;
   // 🧵 חומרים בתוספת — הלקוח משלם אותם מעבר למחיר; **לא** נכנסים לחישוב תקציב העבודה
   const extraMatPrice=parseFloat(document.getElementById('pm-extramat')?.value)||0;
+  const quoteMinRate=parseFloat(document.getElementById('pm-quoterate')?.value)||0; // 💬 רק להצעת מחיר
   // ✂ מחיר הגזירה — הכנסה נוספת ליחידה, נפרדת ממחיר המכירה, עם **אחוז רווח יעד משלה**.
   // ריק נשמר כ-`null` ולא כ-0: 0 הוא "גזירה בלי רווח", null הוא "לא הוזן ⇒ לפי התפירה".
   const cutPrice=parseFloat(document.getElementById('pm-cutprice')?.value)||0;
@@ -21716,7 +21764,7 @@ async function saveProduct(){
         const{orderNo}=await newProdOrderFields(cust,prod);
         if(orderNo!==_oNo){p.orderNo=orderNo;showToast('🔢 מספר ההזמנה עודכן ל-#'+String(orderNo).padStart(3,'0')+' — אם כבר הודפסו ברקודים, יש להדפיס מחדש','var(--amber-txt)',8000);}
       }
-      Object.assign(p,{prod,cust,name,images:_prodImgs,imgCount:_prodImgs.length,docs:_prodDocs,quantities,stageLog,stageSkipped,workSteps,unitPrice,targetProfitPct,directMaterialsCost,cutPrice,cutProfitPct,extraMatPrice,isSample,estQty,cons,szLetters});
+      Object.assign(p,{prod,cust,name,images:_prodImgs,imgCount:_prodImgs.length,docs:_prodDocs,quantities,stageLog,stageSkipped,workSteps,unitPrice,targetProfitPct,directMaterialsCost,cutPrice,cutProfitPct,extraMatPrice,quoteMinRate,isSample,estQty,cons,szLetters});
     }
   }else{
     const id='p'+Date.now();
@@ -21727,7 +21775,7 @@ async function saveProduct(){
       stageLog.sort((a,b)=>PROD_STAGES.findIndex(x=>x.id===a.id)-PROD_STAGES.findIndex(x=>x.id===b.id));
     }
     const _ordF=await newProdOrderFields(cust,prod);
-    S.products.push({id,createdAt:Date.now(),..._ordF,prod,cust,name,images:_prodImgs,imgCount:_prodImgs.length,docs:_prodDocs,quantities,stageLog,stageSkipped,workSteps,unitPrice,targetProfitPct,directMaterialsCost,cutPrice,cutProfitPct,extraMatPrice,isSample,estQty,cons,szLetters});
+    S.products.push({id,createdAt:Date.now(),..._ordF,prod,cust,name,images:_prodImgs,imgCount:_prodImgs.length,docs:_prodDocs,quantities,stageLog,stageSkipped,workSteps,unitPrice,targetProfitPct,directMaterialsCost,cutPrice,cutProfitPct,extraMatPrice,quoteMinRate,isSample,estQty,cons,szLetters});
   }
   saveLS();
   if(S.fbConnected){

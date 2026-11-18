@@ -307,6 +307,7 @@ async function saveProduct(){
   const directMaterialsCost=parseFloat(document.getElementById('pm-materials')?.value)||0;
   // 🧵 חומרים בתוספת — הלקוח משלם אותם מעבר למחיר; **לא** נכנסים לחישוב תקציב העבודה
   const extraMatPrice=parseFloat(document.getElementById('pm-extramat')?.value)||0;
+  const quoteMinRate=parseFloat(document.getElementById('pm-quoterate')?.value)||0; // 💬 רק להצעת מחיר
   // ✂ מחיר הגזירה — הכנסה נוספת ליחידה, נפרדת ממחיר המכירה, עם **אחוז רווח יעד משלה**.
   // ריק נשמר כ-`null` ולא כ-0: 0 הוא "גזירה בלי רווח", null הוא "לא הוזן ⇒ לפי התפירה".
   const cutPrice=parseFloat(document.getElementById('pm-cutprice')?.value)||0;
@@ -336,7 +337,7 @@ async function saveProduct(){
         const{orderNo}=await newProdOrderFields(cust,prod);
         if(orderNo!==_oNo){p.orderNo=orderNo;showToast('🔢 מספר ההזמנה עודכן ל-#'+String(orderNo).padStart(3,'0')+' — אם כבר הודפסו ברקודים, יש להדפיס מחדש','var(--amber-txt)',8000);}
       }
-      Object.assign(p,{prod,cust,name,images:_prodImgs,imgCount:_prodImgs.length,docs:_prodDocs,quantities,stageLog,stageSkipped,workSteps,unitPrice,targetProfitPct,directMaterialsCost,cutPrice,cutProfitPct,extraMatPrice,isSample,estQty,cons,szLetters});
+      Object.assign(p,{prod,cust,name,images:_prodImgs,imgCount:_prodImgs.length,docs:_prodDocs,quantities,stageLog,stageSkipped,workSteps,unitPrice,targetProfitPct,directMaterialsCost,cutPrice,cutProfitPct,extraMatPrice,quoteMinRate,isSample,estQty,cons,szLetters});
     }
   }else{
     const id='p'+Date.now();
@@ -347,7 +348,7 @@ async function saveProduct(){
       stageLog.sort((a,b)=>PROD_STAGES.findIndex(x=>x.id===a.id)-PROD_STAGES.findIndex(x=>x.id===b.id));
     }
     const _ordF=await newProdOrderFields(cust,prod);
-    S.products.push({id,createdAt:Date.now(),..._ordF,prod,cust,name,images:_prodImgs,imgCount:_prodImgs.length,docs:_prodDocs,quantities,stageLog,stageSkipped,workSteps,unitPrice,targetProfitPct,directMaterialsCost,cutPrice,cutProfitPct,extraMatPrice,isSample,estQty,cons,szLetters});
+    S.products.push({id,createdAt:Date.now(),..._ordF,prod,cust,name,images:_prodImgs,imgCount:_prodImgs.length,docs:_prodDocs,quantities,stageLog,stageSkipped,workSteps,unitPrice,targetProfitPct,directMaterialsCost,cutPrice,cutProfitPct,extraMatPrice,quoteMinRate,isSample,estQty,cons,szLetters});
   }
   saveLS();
   if(S.fbConnected){
