@@ -20987,7 +20987,20 @@ function renderProductPricing(){
   const price=parseFloat(document.getElementById('pm-price')?.value)||0;
   const profitPct=parseFloat(document.getElementById('pm-profit')?.value)||0;
   const materials=parseFloat(document.getElementById('pm-materials')?.value)||0;
-  if(!price){box.innerHTML='<div style="font-size:11px;color:var(--txt3)">הזן מחיר מכירה כדי לראות תקצוב זמן לשלבים</div>';return;}
+  if(!price){
+    const note='<div style="font-size:11px;color:var(--txt3)">הזן מחיר מכירה כדי לראות תקצוב זמן לשלבים</div>';
+    // ⏱ (18/11/2026) בלי מחיר — כשלכל השלבים הוזנו דקות, הזמן להזמנה לפי מחלקה (בחלון ובהדפסת השלבים) מחושב
+    // מהדקות עצמן, כמו הצפי לעובדת בשרת. חלק מהשלבים בלי דקות ⇒ לא מציגים סכום חלקי ומטעה.
+    const st=[...document.querySelectorAll('#pm-tasksteps-list .ts-row')].map(r=>({
+      name:r.querySelector('[data-f="name"]')?.value.trim()||'',station:r.querySelector('[data-f="station"]')?.value||'',
+      manualMin:parseFloat(r.querySelector('[data-f="manualMin"]')?.value)||0,cut:!!r.querySelector('[data-f="cut"]')?.checked
+    })).filter(s=>s.name);
+    if(st.length&&st.every(s=>s.manualMin>0)){
+      _pmOrdMin=st.map(s=>s.cut?{station:s.station,min:s.manualMin,cut:true}:{station:s.station,min:s.manualMin});
+      box.innerHTML=note+_orderDeptTimeHtml(_pmOrdMin);return;
+    }
+    box.innerHTML=note;return;
+  }
   const budget=price*(1-profitPct/100)-materials;
   const profitILS=price*profitPct/100;
   const extraMat=parseFloat(document.getElementById('pm-extramat')?.value)||0;
