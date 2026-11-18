@@ -739,29 +739,31 @@ async function printWorkSteps(share,quote){
   }else dept=`<div class="note">⏱ זמן לפי מחלקה לא חושב — ${units?'חסרים מחיר / רמות קושי / דקות לשלבים':'לא הוזנו כמויות או כמות משוערת'}</div>`;
   const prod=v('pm-prod'),cust=v('pm-cust'),name=v('pm-name');
   const title=`שלבי עבודה — מוצר ${prod}${cust?' · לקוח '+cust:''}`;
-  const html=`<!DOCTYPE html><html dir="rtl" lang="he"><head><meta charset="utf-8"><title>${esc(title)}</title><style>
+  const doc=body=>`<!DOCTYPE html><html dir="rtl" lang="he"><head><meta charset="utf-8"><title>${esc(title)}</title><style>
     @page{size:A4;margin:0}body{font-family:Arial,sans-serif;color:#000;margin:0;padding:12mm;font-size:13px}
     h2{margin:0 0 2px;font-size:19px}h3{font-size:15px;margin:18px 0 6px}.sub{color:#444;font-size:12px;margin-bottom:10px}
     table{width:100%;border-collapse:collapse}td,th{border:1px solid #888;padding:6px 8px;text-align:right;vertical-align:top}
     th{background:#eee}td.n{width:28px;text-align:center;color:#555}.ar{font-size:12px;color:#333;margin-top:2px}.alt{font-size:11px;color:#555;margin-top:2px}
     table.d td.t{width:130px;font-weight:700;white-space:nowrap}tr.tot td{background:#eee;font-weight:700}.note{margin-top:14px;font-size:12px;color:#555}
-    tr{page-break-inside:avoid}.keep{page-break-inside:avoid;break-inside:avoid}</style></head><body>
-    <h2>${esc(title)}</h2><div class="sub">${name?esc(name)+' · ':''}${steps.length} שלבים · הודפס ${new Date().toLocaleDateString('he-IL')}</div>
-    <table><thead><tr><th>#</th><th>שלב</th><th>תחנה</th><th>מחלקה</th></tr></thead><tbody>${rows}</tbody></table>
-    ${_smPrintBlock(steps.map(s=>s.name))}${dept}</body></html>`;
-  return _printStepsOut(html,share,'work-steps-'+(prod||'0')+'.pdf',title+(name?' · '+name:''));
+    tr{page-break-inside:avoid}.keep{page-break-inside:avoid;break-inside:avoid}.pb{page-break-before:always;break-before:page}</style></head><body>${body}</body></html>`;
+  const sub=`<h2>${esc(title)}</h2><div class="sub">${name?esc(name)+' · ':''}${steps.length} שלבים · הודפס ${new Date().toLocaleDateString('he-IL')}</div>`;
+  const main=`${sub}<table><thead><tr><th>#</th><th>שלב</th><th>תחנה</th><th>מחלקה</th></tr></thead><tbody>${rows}</tbody></table>${dept}`;
+  // 📍 מפת השלבים — בעמוד נפרד ובגדול (בתוך הדף היא נחתכה בין עמודים ב-PDF). PDF = שני מסמכים (עמוד לכל אחד)
+  const map=_smPrintBlock(steps.map(s=>s.name));
+  const html=doc(main+(map?`<div class="pb"></div>${sub}${map}`:''));
+  return _printStepsOut(html,share,'work-steps-'+(prod||'0')+'.pdf',title+(name?' · '+name:''),map?[doc(main),doc(sub+map)]:null);
 }
-// הדפסה / וואטסאפ / אייפון — משותף לדף הרצפה ולהצעת המחיר
-async function _printStepsOut(html,share,fname,caption){
+// הדפסה / וואטסאפ / אייפון — משותף לדף הרצפה ולהצעת המחיר. pdfParts = מסמכים נפרדים ל-PDF (כל אחד מעמוד חדש)
+async function _printStepsOut(html,share,fname,caption,pdfParts){
   if(share){ // 💬 (03/11/2026) וואטסאפ — אותו דף כ-PDF
     showToast('⏳ מכין PDF…','var(--txt3)',4000);
-    let b;try{b=await _dnPdfBlob(html);}catch(e){alert('הכנת ה-PDF נכשלה: '+(e?.message||e));return;}
+    let b;try{b=await _dnPdfBlob(pdfParts||html);}catch(e){alert('הכנת ה-PDF נכשלה: '+(e?.message||e));return;}
     await _waSharePdf(b,fname,caption,'');return;
   }
   if(!_isIOS()){printViaIframe(html);return;}
   // 🍎 אייפון: כמו תעודת המשלוח — PDF (עד 15% מעל עמוד מתכווץ לעמוד אחד) ⇒ שיתוף ⇒ הדפסה
   showToast('⏳ מכין PDF…','var(--txt3)',4000);
-  let blob;try{blob=await _dnPdfBlob(html);}catch(e){alert('הכנת ה-PDF נכשלה: '+(e?.message||e));return;}
+  let blob;try{blob=await _dnPdfBlob(pdfParts||html);}catch(e){alert('הכנת ה-PDF נכשלה: '+(e?.message||e));return;}
   await _printPdfBlob(blob,fname);
 }
 // 💬 הצעת מחיר ללקוח (ראה printWorkSteps). דקות לשלב = מה שחושב בחלון (_pmOrdMin, ri = השורה):

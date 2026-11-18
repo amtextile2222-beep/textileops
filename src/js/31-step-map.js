@@ -94,9 +94,10 @@ function _smPrintBlock(names){
   const num=n=>names.indexOf(n)+1;
   const views=[0,1].filter(i=>m.v[i]!=null&&m.pins.some(p=>p.v===i));
   if(!views.length)return'';
-  return`<div class="keep" style="margin-top:14px"><h3>📍 מיקום השלבים בדגם</h3><div style="display:flex;gap:10px;justify-content:center">${views.map(i=>
-    `<div style="flex:1;text-align:center;max-width:${views.length>1?'49%':'70%'}"><div style="position:relative;display:inline-block;line-height:0">
-      <img src="${_prodImgs[m.v[i]]}" style="max-width:100%;max-height:120mm;display:block;border:1px solid #888">
+  // עמוד משלו (printWorkSteps) ⇒ גבוה ככל שנכנס: ~235 מ"מ לתמונה אחת, ~215 לשתיים זו לצד זו
+  return`<div class="keep" style="margin-top:8px"><h3>📍 מיקום השלבים בדגם</h3><div style="display:flex;gap:10px;justify-content:center">${views.map(i=>
+    `<div style="flex:1;text-align:center;max-width:${views.length>1?'49%':'100%'}"><div style="position:relative;display:inline-block;line-height:0">
+      <img src="${_prodImgs[m.v[i]]}" style="max-width:100%;max-height:${views.length>1?215:235}mm;display:block;border:1px solid #888">
       ${m.pins.filter(p=>p.v===i).map(p=>_smPinHtml(num(p.s),p.x,p.y,false,false)).join('')}</div>
       <div style="font-size:12px;margin-top:3px">${SM_VIEWS[i]}</div></div>`).join('')}</div></div>`;
 }
