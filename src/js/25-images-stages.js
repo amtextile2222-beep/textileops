@@ -23,7 +23,10 @@ function _imgChunks(imgs){
 }
 // strict = לפני שמירה: כשל בקריאה (רשת/חלק חסר) זורק במקום להחזיר [] — אחרת השמירה דורסת את התמונות הקיימות (02/11/2026)
 async function fetchProdImgs(id,strict){
-  if(_prodImgCache[id])return _prodImgCache[id];
+  // 🖼 (18/11/2026) העותק בזיכרון תקף רק כשמספר התמונות בו = imgCount של המוצר (שמתעדכן חי מהמאזין).
+  // אחרת — תמונות שאחראי העלה ממכשיר אחר (חלון הספירה) לא הופיעו אצל המנהל עד רענון ("4 תמונות" + "אין תמונות").
+  const _c=_prodImgCache[id];
+  if(_c){const p=(S.products||[]).find(x=>String(x.id)===String(id));if(!(p&&typeof p.imgCount==='number'&&p.imgCount!==_c.length))return _c;delete _prodImgCache[id];}
   if(!S.fbConnected){if(strict)throw new Error('אין חיבור');return [];}
   try{const d=await fbGet('productImages',String(id));
     let arr=(d&&Array.isArray(d.images))?d.images:[];

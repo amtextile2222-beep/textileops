@@ -3243,7 +3243,7 @@ function bcRetiredWhy(raw){
 // • שלבים: רואה את הקיימים ומוסיף שלבים **בשם בלבד** (בלי תחנה/רמה/דקות) — המנהל משלים בכרטיס המוצר
 //   (stepPending: שלב בלי תחנה, רמה ודקות ⇒ "⚠ ממתין לתחנה וזמן" בכרטיס).
 // כתיבה: fbUpdateOnly של quantities/workSteps בלבד (Rules: products update פתוח לכל מחובר) + טלגרם למנהל.
-// ⚠️ ברגע שהוזנה כמות, ברקוד הספירה/גזירה "נסגר" (bcRetiredWhy 'cut') — כמו היום, כשהמנהל מזין כמות.
+// ⚠️ ברקוד הספירה/גזירה נסגר (bcRetiredWhy 'cut') כשההזמנה נכנסת לתפירה (orderInSewing) — לא בהזנת כמות (26/10/2026).
 const stepPending=s=>!stepStation(s)&&!(stepManualMin(s)>0)&&!stepLevel(s);
 // ההזמנה בתפירה ומעלה: משימה במחלקת תפירה/אריזה על **ההזמנה הזו** (activeTasks + histTasks של 14 יום — נטענים
 // בכל מכשיר), או סימון ידני/משלוח שאחרי התפירה (הזמנה ישנה שהמשימות שלה כבר מחוץ לחלון)
@@ -21450,7 +21450,10 @@ function _imgChunks(imgs){
 }
 // strict = לפני שמירה: כשל בקריאה (רשת/חלק חסר) זורק במקום להחזיר [] — אחרת השמירה דורסת את התמונות הקיימות (02/11/2026)
 async function fetchProdImgs(id,strict){
-  if(_prodImgCache[id])return _prodImgCache[id];
+  // 🖼 (18/11/2026) העותק בזיכרון תקף רק כשמספר התמונות בו = imgCount של המוצר (שמתעדכן חי מהמאזין).
+  // אחרת — תמונות שאחראי העלה ממכשיר אחר (חלון הספירה) לא הופיעו אצל המנהל עד רענון ("4 תמונות" + "אין תמונות").
+  const _c=_prodImgCache[id];
+  if(_c){const p=(S.products||[]).find(x=>String(x.id)===String(id));if(!(p&&typeof p.imgCount==='number'&&p.imgCount!==_c.length))return _c;delete _prodImgCache[id];}
   if(!S.fbConnected){if(strict)throw new Error('אין חיבור');return [];}
   try{const d=await fbGet('productImages',String(id));
     let arr=(d&&Array.isArray(d.images))?d.images:[];
