@@ -749,7 +749,7 @@ async function printWorkSteps(share,quote){
   const sub=`<h2>${esc(title)}</h2><div class="sub">${name?esc(name)+' · ':''}${steps.length} שלבים · הודפס ${new Date().toLocaleDateString('he-IL')}</div>`;
   const main=`${sub}<table><thead><tr><th>#</th><th>שלב</th><th>תחנה</th><th>מחלקה</th></tr></thead><tbody>${rows}</tbody></table>${dept}`;
   // 📍 מפת השלבים — בעמוד נפרד ובגדול (בתוך הדף היא נחתכה בין עמודים ב-PDF). PDF = שני מסמכים (עמוד לכל אחד)
-  const map=_smPrintBlock(steps.map(s=>s.name));
+  const map=await _smPrintBlock(steps.map(s=>s.name));
   const html=doc(main+(map?`<div class="pb"></div>${sub}${map}`:''));
   return _printStepsOut(html,share,'work-steps-'+(prod||'0')+'.pdf',title+(name?' · '+name:''),map?[doc(main),doc(sub+map)]:null);
 }

@@ -89,15 +89,29 @@ function _smPlace(e,box){
   _smRender();
 }
 // ── דף השלבים לרצפה: התמונות עם המספרים (names = השלבים לפי סדר הטבלה) ──
-function _smPrintBlock(names){
+// 🖨 חיסכון בדיו (18/11/2026): בהדפסה התמונה הופכת לאפור בהיר — לכל היותר ~30% כהות (בגד שחור = אפור בהיר),
+// הצורה נשארת והנקודות הכחולות בולטות. התמונה במוצר לא משתנה. עד 1200px לצלע (מספיק לעמוד A4).
+const _smLightCache={};
+function _smLight(src){
+  const k=src.length+'|'+src.slice(-60);if(_smLightCache[k])return Promise.resolve(_smLightCache[k]);
+  return new Promise(res=>{const im=new Image();im.onload=()=>{try{
+    const s=Math.min(1,1200/Math.max(im.width,im.height)),c=document.createElement('canvas');
+    c.width=Math.round(im.width*s);c.height=Math.round(im.height*s);const x=c.getContext('2d');x.drawImage(im,0,0,c.width,c.height);
+    const d=x.getImageData(0,0,c.width,c.height),a=d.data;
+    for(let i=0;i<a.length;i+=4){const g=.299*a[i]+.587*a[i+1]+.114*a[i+2],v=255-(255-g)*.3;a[i]=a[i+1]=a[i+2]=v;}
+    x.putImageData(d,0,0);res(_smLightCache[k]=c.toDataURL('image/jpeg',.8));
+  }catch(e){res(src);}};im.onerror=()=>res(src);im.src=src;});
+}
+async function _smPrintBlock(names){
   const m=_smClean(names);if(!m)return'';
+  const light={};for(const i of [0,1])if(m.v[i]!=null&&_prodImgs[m.v[i]])light[i]=await _smLight(_prodImgs[m.v[i]]);
   const num=n=>names.indexOf(n)+1;
   const views=[0,1].filter(i=>m.v[i]!=null&&m.pins.some(p=>p.v===i));
   if(!views.length)return'';
   // עמוד משלו (printWorkSteps) ⇒ גבוה ככל שנכנס: ~235 מ"מ לתמונה אחת, ~215 לשתיים זו לצד זו
   return`<div class="keep" style="margin-top:8px"><h3>📍 מיקום השלבים בדגם</h3><div style="display:flex;gap:10px;justify-content:center">${views.map(i=>
     `<div style="flex:1;text-align:center;max-width:${views.length>1?'49%':'100%'}"><div style="position:relative;display:inline-block;line-height:0">
-      <img src="${_prodImgs[m.v[i]]}" style="max-width:100%;max-height:${views.length>1?215:235}mm;display:block;border:1px solid #888">
+      <img src="${light[i]||_prodImgs[m.v[i]]}" style="max-width:100%;max-height:${views.length>1?215:235}mm;display:block;border:1px solid #888">
       ${m.pins.filter(p=>p.v===i).map(p=>_smPinHtml(num(p.s),p.x,p.y,false,false)).join('')}</div>
       <div style="font-size:12px;margin-top:3px">${SM_VIEWS[i]}</div></div>`).join('')}</div></div>`;
 }
