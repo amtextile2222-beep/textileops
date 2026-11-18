@@ -274,6 +274,7 @@ function finishLogin(w,autoPunch){
   // מדידת ריבוי טאבים — 9 שנ' כדי שהדופק הראשון של הטאב הזה (4 שנ') כבר ייכתב.
   // כאן ולא ב-tabBeat: זו הנקודה שבה בוודאות יש S.user, והיא משותפת לכניסה ולשחזור.
   setTimeout(()=>{_checkMultiTab();},9000);
+  setTimeout(()=>{try{_ceDraftOffer();}catch(e){}},2500); // 📝 טיוטת חלון ספירה שלא נשמרה (האפליקציה נסגרה ברקע)
   listenWorkerMessages();
   listenMgrInbox();
   listenVoice();

@@ -3264,14 +3264,65 @@ async function ceAddImgs(input){
   const files=[...input.files];input.value='';
   for(const f of files){const out=await _imgPipeline(await _readFileUrl(f));if(out){_ceImgs.push(out);renderCountEntry();}}
 }
-function openCountEntry(raw){
+// ─── 📝 טיוטה לחלון הספירה (18/11/2026) ───
+// טלפון שסוגר את האפליקציה ברקע (יציאה לוואטסאפ, למצלמה) טוען אותה מחדש ⇒ כל מה שהוזן ולא נשמר נמחק.
+// כל שינוי נשמר בטלפון בלבד (לא בשרת): שורות+שלבים ב-localStorage (txops_ce_draft), התמונות ב-IndexedDB
+// (גדולות מדי ל-localStorage). שחזור — בפתיחה חוזרת של אותה הזמנה, או אחרי טעינה מחדש (_ceDraftOffer
+// מ-finishLogin). נמחקת בשמירה מוצלחת / סגירה מכוונת (✕ עם אישור). טיוטה אחת למכשיר, למשתמש שהזין, 48 שע'.
+const CE_DRAFT_K='txops_ce_draft',CE_DRAFT_TTL=48*3600e3;
+let _ceRaw='',_ceDraftT=null;
+function _ceIdb(){return new Promise((res,rej)=>{const r=indexedDB.open('txops_drafts',1);r.onupgradeneeded=()=>r.result.createObjectStore('kv');r.onsuccess=()=>res(r.result);r.onerror=()=>rej(r.error);});}
+async function _ceIdbDo(mode,fn){const d=await _ceIdb();return new Promise((res,rej)=>{const tx=d.transaction('kv',mode),q=fn(tx.objectStore('kv'));tx.oncomplete=()=>{d.close();res(q&&q.result);};tx.onerror=()=>{d.close();rej(tx.error);};});}
+function _ceDraftGet(){try{const d=JSON.parse(localStorage.getItem(CE_DRAFT_K)||'null');if(!d||Date.now()-d.at>CE_DRAFT_TTL||!S.user||d.uid!==S.user.id)return null;return d;}catch(e){return null;}}
+function _ceProd(){const w=document.getElementById('ce-wrap');return w?(S.products||[]).find(x=>String(x.id)===String(w.dataset.pid)):null;}
+// יש מה לאבד? שלבים/תמונות, או כמויות שונות ממה שבמוצר
+function _ceDirty(){
+  const p=_ceProd();if(!p)return false;
+  if(_ceSteps.some(s=>String(s||'').trim())||_ceImgs.length)return true;
+  const a=JSON.stringify(_ceRows.filter(r=>r.size||r.color||+r.qty).map(r=>[String(r.size),String(r.color),+r.qty||0]));
+  return a!==JSON.stringify((p.quantities||[]).map(q=>[String(q.size||''),String(q.color||''),parseInt(q.qty)||0]));
+}
+// imgs=true רק כשהתמונות השתנו (renderCountEntry) — הקלדה לא כותבת שוב מגה-בייטים
+function _ceDraftSave(imgs){clearTimeout(_ceDraftT);_ceDraftT=setTimeout(()=>_ceDraftSaveNow(imgs),300);}
+async function _ceDraftSaveNow(imgs){
+  const p=_ceProd();if(!p||!S.user)return;
+  const old=_ceDraftGet();
+  if(!_ceDirty()){if(old&&String(old.pid)===String(p.id))_ceDraftClear();return;}
+  try{localStorage.setItem(CE_DRAFT_K,JSON.stringify({pid:p.id,raw:_ceRaw,name:p.cust+'/'+p.prod,uid:S.user.id,rows:_ceRows,steps:_ceSteps,nImg:_ceImgs.length,at:Date.now()}));}catch(e){}
+  if(imgs||!old||String(old.pid)!==String(p.id)){try{await _ceIdbDo('readwrite',st=>st.put(_ceImgs.slice(),'ce_imgs'));}catch(e){}}
+}
+function _ceDraftClear(){clearTimeout(_ceDraftT);try{localStorage.removeItem(CE_DRAFT_K);}catch(e){}_ceIdbDo('readwrite',st=>st.delete('ce_imgs')).catch(()=>{});}
+async function _ceDraftLoad(d){_ceRows=d.rows||[];_ceSteps=d.steps||[];_ceImgs=[];if(d.nImg){try{_ceImgs=(await _ceIdbDo('readonly',st=>st.get('ce_imgs')))||[];}catch(e){}}}
+const _ceHM=t=>new Date(t).toLocaleTimeString('he-IL',{hour:'2-digit',minute:'2-digit'});
+// ✕ — סגירה מכוונת: אם יש הזנה שלא נשמרה שואלים, ואז הטיוטה נמחקת
+function ceClose(){
+  if(_ceDirty()&&!confirm('לסגור בלי לשמור? מה שהוזן יימחק.\nإغلاق بدون حفظ؟ سيتم حذف ما أُدخل.'))return;
+  _ceDraftClear();document.getElementById('ce-wrap')?.remove();
+}
+// אחרי טעינה מחדש של האפליקציה (finishLogin): מציעים לחזור לטיוטה — פעם אחת; אחר כך רק בפתיחת אותה הזמנה
+async function _ceDraftOffer(){
+  const d=_ceDraftGet();if(!d||d.offered||!d.raw)return;
+  for(let i=0;i<30&&!bcOrderProd(d.raw);i++)await new Promise(r=>setTimeout(r,1000)); // המוצרים עוד נטענים
+  if(!bcOrderProd(d.raw)||document.getElementById('ce-wrap'))return;
+  try{localStorage.setItem(CE_DRAFT_K,JSON.stringify({...d,offered:true}));}catch(e){}
+  if(confirm('📝 יש הזנה שלא נשמרה — '+d.name+' ('+_ceHM(d.at)+')\nלפתוח ולהמשיך?\n\n📝 يوجد إدخال لم يُحفظ — فتح ومتابعة؟'))openCountEntry(d.raw,d);
+}
+async function openCountEntry(raw,draft){
   const p=bcOrderProd(raw);if(!p){showToast('⚠ ההזמנה לא נמצאה','var(--red-txt)');return;}
+  _ceRaw=raw;
   // fromMgr = שורה שהמנהל הקים — מידה וצבע קבועים, רק הכמות נפתחת. lock = כבר יש כמות — קריאה בלבד
   _ceRows=(p.quantities||[]).map(q=>({size:String(q.size||''),color:String(q.color||''),qty:parseInt(q.qty)||0,lock:(parseInt(q.qty)||0)>0,fromMgr:true}));
   _ceSteps=[];_ceImgs=[];
+  const d=draft||_ceDraftGet();
+  if(d&&String(d.pid)===String(p.id)){
+    if(draft||confirm('📝 יש הזנה שלא נשמרה מ-'+_ceHM(d.at)+' — לשחזר?\n📝 يوجد إدخال لم يُحفظ — استرجاع؟'))await _ceDraftLoad(d);
+    else _ceDraftClear();
+  }
   document.getElementById('ce-wrap')?.remove();
   const wrap=document.createElement('div');wrap.id='ce-wrap';wrap.dataset.pid=p.id;
   wrap.style.cssText='position:fixed;inset:0;background:rgba(0,0,0,.5);display:flex;align-items:flex-start;justify-content:center;z-index:9999;padding:12px;overflow-y:auto';
+  // כל הקלדה ⇒ טיוטה (ה-oninput של השדה כבר עדכן את _ceRows/_ceSteps לפני שהאירוע מגיע לכאן)
+  wrap.addEventListener('input',()=>_ceDraftSave());wrap.addEventListener('change',()=>_ceDraftSave());
   document.body.appendChild(wrap);
   renderCountEntry();
 }
@@ -3285,7 +3336,7 @@ function renderCountEntry(){
   wrap.innerHTML=`<div style="background:var(--card);border-radius:14px;padding:16px;max-width:460px;width:100%;box-shadow:0 10px 40px rgba(0,0,0,.3);margin:auto">
     <div style="display:flex;justify-content:space-between;align-items:center">
       <div style="font-size:16px;font-weight:800">📝 ${esc(p.cust)}/${esc(p.prod)}${(parseInt(p.orderNo,10)||0)?' #'+String(p.orderNo).padStart(3,'0'):''}</div>
-      <button class="btn" style="font-size:12px;padding:4px 10px" onclick="document.getElementById('ce-wrap')?.remove()">✕</button>
+      <button class="btn" style="font-size:12px;padding:4px 10px" onclick="ceClose()">✕</button>
     </div>
     <div style="font-size:12px;color:var(--txt3);margin-bottom:10px">${esc(p.name||'')}</div>
     <div style="font-size:14px;font-weight:700;margin-bottom:6px">📦 כמויות · الكميات <span style="font-weight:400;color:var(--txt3);font-size:12px">— סה"כ <span id="ce-tot">${tot}</span></span></div>
@@ -3310,6 +3361,7 @@ function renderCountEntry(){
     </div>
     <button class="btn primary" style="width:100%;margin-top:14px;font-size:15px" onclick="saveCountEntry()">💾 שמור · حفظ</button>
   </div>`;
+  _ceDraftSave(true);
 }
 function renderCountEntryTot(){const el=document.getElementById('ce-tot');if(el)el.textContent=_ceRows.reduce((t,r)=>t+(+r.qty||0),0);}
 async function saveCountEntry(){
@@ -3336,7 +3388,7 @@ async function saveCountEntry(){
   const before=_prodQty(p);
   const qChanged=JSON.stringify(quantities)!==JSON.stringify((p.quantities||[]).map(q=>({size:String(q.size||''),color:String(q.color||''),qty:parseInt(q.qty)||0})));
   const nImg=_ceImgs.length;
-  if(!qChanged&&!addSteps.length&&!nImg){wrap.remove();return;}
+  if(!qChanged&&!addSteps.length&&!nImg){_ceDraftClear();wrap.remove();return;}
   const workSteps=(p.workSteps||[]).concat(addSteps.map(n=>({name:n,nameAr:'',level:0,station:'',altStations:[],manualMin:0,quick:false,merge:false,cut:false})));
   const upd={...(qChanged?{quantities}:{}),...(addSteps.length?{workSteps}:{}),countBy:S.user?.name||'',countAt:Date.now()};
   // 📷 התמונות מצטרפות לקיימות ב-productImages (נקרא קודם מהשרת — לא לדרוס תמונות שהמנהל העלה)
@@ -3351,7 +3403,7 @@ async function saveCountEntry(){
   }
   if(S.fbConnected&&!await fbUpdateOnly('products',p.id,upd)){alert('השמירה נכשלה — בדוק חיבור · فشل الحفظ');return;}
   Object.assign(p,upd);saveLS();
-  wrap.remove();
+  _ceDraftClear();wrap.remove();
   const after=_prodQty(p);
   showToast('✅ נשמר · تم الحفظ'+(after?' · '+after+" יח'":'')+(addSteps.length?' · '+addSteps.length+' שלבים':'')+(nImg?' · '+(nImg===1?'תמונה אחת':nImg+' תמונות'):''),'var(--green-txt)',4000);
   try{renderProducts();}catch(e){}
@@ -6345,6 +6397,7 @@ function finishLogin(w,autoPunch){
   // מדידת ריבוי טאבים — 9 שנ' כדי שהדופק הראשון של הטאב הזה (4 שנ') כבר ייכתב.
   // כאן ולא ב-tabBeat: זו הנקודה שבה בוודאות יש S.user, והיא משותפת לכניסה ולשחזור.
   setTimeout(()=>{_checkMultiTab();},9000);
+  setTimeout(()=>{try{_ceDraftOffer();}catch(e){}},2500); // 📝 טיוטת חלון ספירה שלא נשמרה (האפליקציה נסגרה ברקע)
   listenWorkerMessages();
   listenMgrInbox();
   listenVoice();
