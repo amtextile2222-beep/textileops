@@ -3315,8 +3315,18 @@ function renderCountEntryTot(){const el=document.getElementById('ce-tot');if(el)
 async function saveCountEntry(){
   const wrap=document.getElementById('ce-wrap');
   const p=(S.products||[]).find(x=>String(x.id)===String(wrap?.dataset.pid));if(!p)return;
-  const rows=_ceRows.filter(r=>r.size||r.color);
-  if(rows.some(r=>!/^\d$/.test(r.size)||!r.color)){alert('לכל שורה צריך מידה (ספרה אחת) וצבע · لكل سطر مقاس ولون');return;}
+  let rows=_ceRows.filter(r=>r.size||r.color);
+  // 🛑 (18/11/2026) שורה שהמנהל הקים (fromMgr) — המידה והצבע נעולים כאן, ולכן לא נבדקים: שורה כזו בלי צבע חסמה
+  // את כל השמירה, והאחראי איבד שלבים ותמונות. נבדקות רק שורות שהאחראי הוסיף; ההודעה אומרת איזו שורה ומה חסר,
+  // ויש שלבים/תמונות ⇒ אפשר לשמור אותם בלי השורות החסרות.
+  const bad=rows.filter(r=>!r.fromMgr&&(!/^\d$/.test(r.size)||!r.color));
+  if(bad.length){
+    const why=bad.map(r=>'• שורה '+(rows.indexOf(r)+1)+': '+[!/^\d$/.test(r.size)?'חסרה מידה (ספרה אחת) · المقاس':'',!r.color?'חסר צבע · اللون':''].filter(Boolean).join(' + ')).join('\n');
+    const other=_ceSteps.some(x=>String(x||'').trim())||_ceImgs.length;
+    if(!other){alert('לא נשמר · لم يُحفظ\n'+why);return;}
+    if(!confirm(why+'\n\nלשמור עכשיו את השלבים והתמונות, בלי השורות האלה?\nحفظ المراحل والصور الآن بدون هذه الأسطر؟'))return;
+    rows=rows.filter(r=>!bad.includes(r));
+  }
   const keys=rows.map(r=>r.size+'|'+r.color);
   if(new Set(keys).size!==keys.length){alert('מידה+צבע כפולים · مقاس ولون مكرر');return;}
   const newSteps=[...new Set(_ceSteps.map(s=>String(s||'').trim()).filter(Boolean))];
