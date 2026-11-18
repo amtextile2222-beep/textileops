@@ -16598,23 +16598,28 @@ function loadedHourBreakdown(wid,d){
   const wc=wCostAt(wid,d);
   const daily=+wc.daily||0;
   if(!daily)return null;
-  const wdy=c.workDaysYear||250;
-  const nW=_costWorkers().length||1;
   const base=daily/8;
-  const transport=(+wc.transport||0)/8;
-  const severance=daily*_sevDays()/12*_sevK(wid);   // 📑 חודשי קבוע ÷ שעות בפועל (_sevK)
-  const holidays=daily*((c.holidayDays??4)/wdy)/8;
-  // 🎁 מתנות+טיול: סכום שנתי לעובד מכרטיס העובד; בלי סכום משלו ⇒ ההגדרה הכללית
-  //    (הטיול הכללי מתחלק רק בין העובדים שאין להם סכום משלהם)
-  const own=_ownGiftsTrip(wid,d);
-  const nGen=own==null?(_costWorkers().filter(w=>_ownGiftsTrip(w.id,d)==null).length||nW):1;
-  const gifts=own!=null?own/wdy/8:(c.giftsAnnual||0)/wdy/8;
-  const trip=own!=null?0:(c.tripAnnual||0)/nGen/wdy/8;
-  const insurance=(+wc.insurance||0)/wdy/8;
+  const transport=(+wc.transport||0)/8;   // 🚌 הסעה — לפי ימים שהגיע (נשאר שעתי)
+  // 📑🎉🎁🛡 סכום חודשי קבוע (_ldMonthly) ÷ שעות בפועל (_sevK)
+  const mo=_ldMonthly(wid,d,wc),k=_sevK(wid);
+  const severance=mo.severance*k,holidays=mo.holidays*k,gifts=mo.gifts*k,trip=mo.trip*k,insurance=mo.insurance*k;
   const loaded=base+transport+severance+holidays+gifts+trip+insurance;
   return {base,transport,severance,holidays,gifts,trip,insurance,loaded};
 }
 function loadedHourlyRate(wid,d){return loadedHourBreakdown(wid,d)?.loaded||0;}
+// 📅 (18/11/2026, החלטת המשתמש) הנלוות הקבועות — סכום לכל חודש שהעובד מועסק, לא לפי ימים שעבד:
+// פיצויים = יומי × 26 ÷ 12 · חגים = יומי × ימי חג ÷ 12 · מתנות/טיול/ביטוח = הסכום השנתי ÷ 12.
+// 🎁 מתנות+טיול: סכום שנתי לעובד מכרטיס העובד; בלי סכום משלו ⇒ ההגדרה הכללית
+//    (הטיול הכללי מתחלק רק בין העובדים שאין להם סכום משלהם)
+function _ldMonthly(wid,d,wc){
+  const c=S.costs;wc=wc||wCostAt(wid,d);const daily=+wc.daily||0;
+  const own=_ownGiftsTrip(wid,d);
+  const nGen=own==null?(_costWorkers().filter(w=>_ownGiftsTrip(w.id,d)==null).length||_costWorkers().length||1):1;
+  return {severance:daily*_sevDays()/12,holidays:daily*(c.holidayDays??4)/12,
+    gifts:own!=null?own/12:(c.giftsAnnual||0)/12,trip:own!=null?0:(c.tripAnnual||0)/nGen/12,
+    insurance:(+wc.insurance||0)/12};
+}
+var LD_MO=['severance','holidays','gifts','trip','insurance'];
 // סכום שנתי למתנות+טיול שהוזן לעובד (null = לא הוזן ⇒ כללי). 0 שהוזן = באמת 0.
 function _ownGiftsTrip(wid,d){const v=wCostAt(wid,d).giftsTrip;return v==null||v===''?null:+v||0;}
 function setWorkerGiftsTrip(wid,val){
@@ -16682,9 +16687,9 @@ function _sevK(wid){
   let fr=0,h=0;ms.forEach(m=>{const sp=_sevSpan(wid,m);if(sp){fr+=(sp[1]-sp[0]+1)/sp[2];h+=_ohW[m][wid].h;}});
   return _sevKc[wid]=(fr>0&&h>0)?fr/h:1/(_sevDays()*8);
 }
-// סכום הפיצויים בטווח (לכרטיס בלשונית עלויות). ok=false ⇒ הנוכחות לא נטענה
+// סכום הנלוות החודשיות בטווח (LD_MO — לכרטיסים בלשונית עלויות). ok=false ⇒ הנוכחות לא נטענה
 function _sevRange(from,to){
-  let sum=0,ok=true;const sd=_sevDays(),ms=[];
+  let ok=true;const sum={},ms=[];LD_MO.forEach(k=>sum[k]=0);
   for(let m=from.slice(0,7);m<=to.slice(0,7);m=_ymAdd(m,1))ms.push(m);
   const ws=(S.workers||[]).filter(w=>w.role!=='manager');
   ms.forEach(m=>{
@@ -16694,7 +16699,8 @@ function _sevRange(from,to){
       if(+(S.costs.workerUnitRates||{})[w.id]>0)return; // ליחידה — אין שעה עמוסה (כמו קודם)
       const sp=_sevSpan(w.id,m);if(!sp)return;
       const a=Math.max(sp[0],a0),b=Math.min(sp[1],b0);if(b<a)return;
-      sum+=wRate(w.id,m+'-'+pad2(a))*sd/12*(b-a+1)/D;
+      const d=m+'-'+pad2(a),wc=wCostAt(w.id,d);if(!(+wc.daily>0))return; // בלי שכר יומי — אין שעה עמוסה (כמו קודם)
+      const mo=_ldMonthly(w.id,d,wc),f=(b-a+1)/D;LD_MO.forEach(k=>sum[k]+=mo[k]*f);
     });
   });
   return {sum,ok};
@@ -17342,8 +17348,10 @@ async function calcCosts(){
   document.getElementById('cost-wages').textContent='₪'+Math.round(totalWages).toLocaleString();
   document.getElementById('cost-overhead').textContent='₪'+Math.round(totalOverhead).toLocaleString();
   document.getElementById('cost-avg').textContent=enriched.length?'₪'+Math.round(grandTotal/enriched.length).toLocaleString():'—';
-  // 📑 פיצויים = חודשי קבוע לכל עובד מועסק (לא לפי השעות שנכנסו לחישוב) ⇒ מחליף את החלק השעתי גם ב"עלות מלאה"
-  try{await _sevEnsure(from,to);const sr=_sevRange(from,to);if(sr.ok){fullLoaded+=sr.sum-_ld.severance;_ld.severance=sr.sum;_ld.sevMonthly=1;}}catch(e){console.warn('sev:',e);}
+  // 📑🎉🎁🛡 פיצויים/חגים/מתנות/טיול/ביטוח = חודשי קבוע לכל עובד מועסק (לא לפי השעות שנכנסו לחישוב)
+  //    ⇒ מחליף את החלק השעתי גם ב"עלות מלאה"
+  try{await _sevEnsure(from,to);const sr=_sevRange(from,to);
+    if(sr.ok){LD_MO.forEach(k=>{fullLoaded+=sr.sum[k]-_ld[k];_ld[k]=sr.sum[k];});_ld.sevMonthly=1;}}catch(e){console.warn('sev:',e);}
   const fEl=document.getElementById('cost-full');
   if(fEl){
     const full=fullLoaded+fullOh;
@@ -17498,7 +17506,7 @@ function renderCostTab(){
     const extra=`
       <div class="sec" style="font-size:13px;margin-top:1.25rem">👷 עלויות עובד נלוות</div>
       <div style="font-size:11px;color:var(--txt3);margin-bottom:6px">לפי שעות העבודה בטווח והגדרות "שעה עמוסה". נכללות ב"עלות מלאה" (שכר עמוס) — לא ב"עלות הוצאות".</div>
-      <div style="${grid}">${LDL.map(([k,l])=>card(l,fmt(ld[k]||0),k==='severance'&&ld.sevMonthly?'יומי × '+_sevDays()+' ÷ 12 לחודש':'')).join('')}${card('סה"כ נלוות',fmt(ldTot),'','--blue-txt')}</div>
+      <div style="${grid}">${LDL.map(([k,l])=>card(l,fmt(ld[k]||0),!ld.sevMonthly?'':k==='severance'?'יומי × '+_sevDays()+' ÷ 12 לחודש':k==='holidays'?'יומי × '+(S.costs.holidayDays??4)+' ÷ 12 לחודש':k==='transport'?'לפי ימים שהגיע':'שנתי ÷ 12 לחודש')).join('')}${card('סה"כ נלוות',fmt(ldTot),'','--blue-txt')}</div>
       <div class="sec" style="font-size:13px">🏦 מסים ועמלות בנק</div>
       <div style="font-size:11px;color:var(--txt3);margin-bottom:6px">הכנסות = תעודות משלוח: עבודה (מחיר יחידה + גזירה) + חומר אריזה — כמו בלשונית תעודות משלוח. ${X.bySettle?'חודש שלם ⇒ לפי <b>חודש ההתחשבנות</b> של החשבונית (תעודה בלי חשבונית — לפי תאריכה).':'טווח חלקי ⇒ לפי תאריך התעודה.'} האחוזים נקבעים בכרטיס "הוצאות קבועות".</div>
       <div style="${grid}">
