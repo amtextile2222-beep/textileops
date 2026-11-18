@@ -20991,12 +20991,12 @@ function renderProductPricing(){
     const note='<div style="font-size:11px;color:var(--txt3)">הזן מחיר מכירה כדי לראות תקצוב זמן לשלבים</div>';
     // ⏱ (18/11/2026) בלי מחיר — כשלכל השלבים הוזנו דקות, הזמן להזמנה לפי מחלקה (בחלון ובהדפסת השלבים) מחושב
     // מהדקות עצמן, כמו הצפי לעובדת בשרת. חלק מהשלבים בלי דקות ⇒ לא מציגים סכום חלקי ומטעה.
-    const st=[...document.querySelectorAll('#pm-tasksteps-list .ts-row')].map(r=>({
+    const st=[...document.querySelectorAll('#pm-tasksteps-list .ts-row')].map((r,ri)=>({ri,
       name:r.querySelector('[data-f="name"]')?.value.trim()||'',station:r.querySelector('[data-f="station"]')?.value||'',
       manualMin:parseFloat(r.querySelector('[data-f="manualMin"]')?.value)||0,cut:!!r.querySelector('[data-f="cut"]')?.checked
     })).filter(s=>s.name);
     if(st.length&&st.every(s=>s.manualMin>0)){
-      _pmOrdMin=st.map(s=>s.cut?{station:s.station,min:s.manualMin,cut:true}:{station:s.station,min:s.manualMin});
+      _pmOrdMin=st.map(s=>s.cut?{ri:s.ri,station:s.station,min:s.manualMin,cut:true}:{ri:s.ri,station:s.station,min:s.manualMin});
       box.innerHTML=note+_orderDeptTimeHtml(_pmOrdMin);return;
     }
     box.innerHTML=note;return;
@@ -21012,7 +21012,7 @@ function renderProductPricing(){
       <div style="font-size:12px;color:var(--red-txt);font-weight:700;margin-top:4px">❌ המחיר לא מחזיק את יעד הרווח — לא נשאר תקציב לעבודה</div></div>`;
     return;
   }
-  const steps=[...document.querySelectorAll('#pm-tasksteps-list .ts-row')].map(r=>({
+  const steps=[...document.querySelectorAll('#pm-tasksteps-list .ts-row')].map((r,ri)=>({ri,
     name:r.querySelector('[data-f="name"]')?.value.trim()||'',
     level:parseInt(r.querySelector('[data-f="level"]')?.value)||0,
     station:r.querySelector('[data-f="station"]')?.value||'',
@@ -21058,7 +21058,7 @@ function renderProductPricing(){
     const min=manual?s.manualMin:bud[i].min; // בשורה מוצגות הדקות שהוזנו, לא הנגזרות
     derivedMin+=bud[i].min;
     totalMin+=min;totalCost+=share;
-    _ordMin.push({station:s.station,min});
+    _ordMin.push({ri:s.ri,station:s.station,min});
     const tooShort=!manual&&min*60<s.level*30; // היוריסטיקה: פחות מ-30 שנ' לרמת קושי = לא ריאלי
     if(tooShort)tooShortCnt++;
     const tag=manual?` <span style="font-size:10px;color:var(--txt3)">✎ ידני</span>`:(s.level?` <span style="font-size:10px;color:var(--txt3)">(${levelName(s.level,'he')})</span>`:'');
@@ -21101,7 +21101,7 @@ function renderProductPricing(){
     let cutMin=0;
     const cutRows=cutPriced.map((s,i)=>{
       const manual=s.manualMin>0,min=manual?s.manualMin:cBud[i].min;
-      cutMin+=min;_ordMin.push({station:s.station,min,cut:true});
+      cutMin+=min;_ordMin.push({ri:s.ri,station:s.station,min,cut:true});
       return`<div style="display:flex;align-items:center;gap:8px;padding:3px 0;border-bottom:0.5px solid var(--brd);font-size:12px">
         <span style="flex:1;min-width:110px">✂ ${esc(s.name)}${manual?' <span style="font-size:10px;color:var(--txt3)">✎ ידני</span>':''}</span>
         <span style="color:var(--txt3)">₪${cBud[i].ils.toFixed(2)}</span>
@@ -21172,7 +21172,7 @@ function _orderDeptTimeHtml(list){
 async function printWorkSteps(share){
   try{renderProductPricing();}catch(_){}
   const v=id=>(document.getElementById(id)?.value||'').trim();
-  const steps=[...document.querySelectorAll('#pm-tasksteps-list .ts-row')].map(r=>({
+  const steps=[...document.querySelectorAll('#pm-tasksteps-list .ts-row')].map((r,ri)=>({ri,
     name:r.querySelector('[data-f="name"]')?.value.trim()||'',
     nameAr:r.querySelector('[data-f="nameAr"]')?.value.trim()||'',
     station:r.querySelector('[data-f="station"]')?.value||'',
@@ -21182,10 +21182,13 @@ async function printWorkSteps(share){
   if(!steps.length){showToast('⚠ אין שלבי עבודה להדפסה','var(--red-txt)');return;}
   const stn=k=>k?stationNameOfKey(k):'—';
   const dpt=k=>k?String(k).split('::')[0]||'—':'—'; // 🏭 המחלקה מתוך מפתח התחנה ("מחלקה::תחנה")
+  // ⏱ (18/11/2026, בקשת המשתמש) זמן לכל שלב: דקות ליחידה (מוזנות, או מהתקציב) ובקטן — להזמנה כולה
+  const{n:units,est}=_pmUnitsForTime();
+  const minOf={};for(const x of _pmOrdMin)if(x.ri!=null)minOf[x.ri]=x.min;
+  const tCell=s=>{const m=minOf[s.ri];if(!(m>0))return'<td class="t">—</td>';return`<td class="t"><b>${+m.toFixed(2)} דק' ליח'</b>${units?`<div class="alt">${est?'~':''}${units} יח': <b>${fmtExpMin(m*units)}</b></div>`:''}</td>`;};
   const rows=steps.map((s,i)=>`<tr><td class="n">${i+1}</td><td><b>${s.cut?'✂ ':''}${esc(s.name)}</b>${s.nameAr?`<div class="ar" dir="rtl">${esc(s.nameAr)}</div>`:''}</td>
     <td><b>${esc(stn(s.station))}</b>${s.alt.length?`<div class="alt">+ ${s.alt.map(a=>esc(stn(a))).join(' · ')}</div>`:''}</td>
-    <td>${esc(dpt(s.station))}${(()=>{const o=[...new Set(s.alt.map(dpt))].filter(d=>d!==dpt(s.station));return o.length?`<div class="alt">+ ${o.map(esc).join(' · ')}</div>`:'';})()}</td></tr>`).join('');
-  const{n:units,est}=_pmUnitsForTime();
+    <td>${esc(dpt(s.station))}${(()=>{const o=[...new Set(s.alt.map(dpt))].filter(d=>d!==dpt(s.station));return o.length?`<div class="alt">+ ${o.map(esc).join(' · ')}</div>`:'';})()}</td>${tCell(s)}</tr>`).join('');
   let dept='';
   if(_pmOrdMin.length&&units){
     const{by,order}=_orderDeptAgg(_pmOrdMin);let tot=0;
@@ -21203,7 +21206,7 @@ async function printWorkSteps(share){
     table.d td.t{width:130px;font-weight:700;white-space:nowrap}tr.tot td{background:#eee;font-weight:700}.note{margin-top:14px;font-size:12px;color:#555}
     tr{page-break-inside:avoid}.keep{page-break-inside:avoid;break-inside:avoid}</style></head><body>
     <h2>${esc(title)}</h2><div class="sub">${name?esc(name)+' · ':''}${steps.length} שלבים · הודפס ${new Date().toLocaleDateString('he-IL')}</div>
-    <table><thead><tr><th>#</th><th>שלב</th><th>תחנה</th><th>מחלקה</th></tr></thead><tbody>${rows}</tbody></table>
+    <table><thead><tr><th>#</th><th>שלב</th><th>תחנה</th><th>מחלקה</th><th>זמן${units?` — ליחידה ולכל הכמות`:' ליחידה'}</th></tr></thead><tbody>${rows}</tbody></table>
     ${dept}</body></html>`;
   if(share){ // 💬 (03/11/2026) וואטסאפ — אותו דף כ-PDF
     showToast('⏳ מכין PDF…','var(--txt3)',4000);
