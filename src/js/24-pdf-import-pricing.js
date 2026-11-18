@@ -801,7 +801,8 @@ async function _printQuote(share){
     <h2>${esc(title)}</h2><div class="sub">${cust?esc(custName(cust))+' · ':''}${name?esc(name)+' · ':''}${new Date().toLocaleDateString('he-IL')}</div>
     <table><thead><tr><th>#</th><th>שלב עבודה</th><th>דק' ליחידה</th>${units?`<th>ל-${est?'~':''}${units} יח'</th>`:''}</tr></thead><tbody>${rows}</tbody></table>
     <div class="keep"><h3>💰 סיכום</h3>${sum}</div>
-    <div class="note">הזמנים הם הערכה לפני תחילת העבודה. המחיר לעבודה בלבד.</div></body></html>`;
+    <div class="note" style="font-size:13px;color:#000;font-weight:700">⚠ מחיר מוערך — לא סופי. ייתכן שישתנה, ובמקרה כזה נעדכן אתכם.</div>
+    <div class="note" style="margin-top:4px">הזמנים מוערכים לפני תחילת העבודה. המחיר לעבודה בלבד.</div></body></html>`;
   return _printStepsOut(html,share,'quote-'+(prod||'0')+'.pdf',title+(name?' · '+name:''));
 }
 // שינוי כמות בטבלה מעדכן את הבלוק מיד (הטבלה נבנית מחדש בכל פתיחה — האזנה אחת על המסמך)
