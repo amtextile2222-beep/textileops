@@ -323,7 +323,15 @@ function roundAttTime(now, isIn){
   if(Math.abs(diffMin)<=rm)return target;
   return now;
 }
-async function punchIn(){
+// 💾 אחרי רענון של ניתוק IndexedDB (_idbRecover): חתימה שנכשלה מתבצעת שוב — רק לאותו משתמש,
+// עד 15 דק' אחרי, בשעה המקורית. punchIn/punchOut בודקות בעצמן "כבר נוכח/ת / כבר יצא/ה".
+async function _idbRetry(){
+  let r=null;try{r=JSON.parse(localStorage.getItem('txops_idb_retry')||'null');localStorage.removeItem('txops_idb_retry');}catch(e){}
+  if(!r||!S.user||r.u!==S.user.id||Date.now()-r.at0>15*60000||typeof r.t!=='number')return;
+  if(r.a==='out')await punchOut(r.t);else if(r.a==='in')await punchIn(r.t);
+}
+// atMs = ניסיון חוזר אחרי רענון (_idbRetry) — השעה המקורית של הלחיצה
+async function punchIn(atMs){
   if(!S.user)return;
   if(await checkVersion()){document.getElementById('att-msg').textContent='🔄 יש גרסה חדשה — לחץ "עדכן עכשיו" למעלה ונסה שוב';return;}
   const w=await waitForWorker(S.user.id,15000);
@@ -332,7 +340,7 @@ async function punchIn(){
   const today=todayStr();
   w.sessions=w.sessions.filter(s=>{if(!s.in)return false;const d=new Date(s.in);return d.getFullYear()+'-'+pad2(d.getMonth()+1)+'-'+pad2(d.getDate())>=today;});
   if(w.sessions.find(s=>!s.out)){document.getElementById('att-msg').textContent='כבר רשום/ת כנוכח/ת';return;}
-  const nowRaw=srvNow();
+  const nowRaw=typeof atMs==='number'?new Date(atMs):srvNow();
   const now=roundAttTime(nowRaw,true);
   const prevSessions=w.sessions.slice(),prevStatus=w.status,prevCheckin=w.checkin;
   w.sessions.push({in:now.toISOString(),out:null});
@@ -346,8 +354,10 @@ async function punchIn(){
     }catch(e){
       w.sessions=prevSessions;w.status=prevStatus;w.checkin=prevCheckin;
       console.error('punchIn: fbSet workers failed:',e.message);
-      document.getElementById('att-msg').textContent='⚠️ חתימת הכניסה לא נשמרה בשרת — נסה שוב';
-      sendTelegram('⚠️ חתימת כניסה נכשלה!\n👤 עובד: '+w.name+'\n🏭 מחלקה: '+w.dept+'\n🕐 שעה: '+pad2(now.getHours())+':'+pad2(now.getMinutes())+'\nשגיאה: '+(e.message||'')).catch(()=>{});
+      const _idb=_idbLost(e); // 💾 ⇒ רענון אוטומטי וניסיון חוזר בשעה המקורית
+      document.getElementById('att-msg').textContent=_idb?'🔄 מרענן ומנסה שוב…':'⚠️ חתימת הכניסה לא נשמרה בשרת — נסה שוב';
+      sendTelegram('⚠️ חתימת כניסה נכשלה!\n👤 עובד: '+w.name+'\n🏭 מחלקה: '+w.dept+'\n🕐 שעה: '+pad2(now.getHours())+':'+pad2(now.getMinutes())+'\nשגיאה: '+(e.message||'')+(_idb?'\n🔄 מרענן ומנסה שוב אוטומטית':'')).catch(()=>{});
+      if(_idb)_idbRecover({a:'in',t:nowRaw.getTime()});
       renderAtt();
       return;
     }
@@ -360,7 +370,7 @@ async function punchIn(){
   const T2=LANGS[currentLang];
   document.getElementById('att-msg').textContent='✅ כניסה '+(w.sessions.length>1?w.sessions.length+': ':'')+pad2(now.getHours())+':'+pad2(now.getMinutes())+(rounded?' (עוגל)':'')+(resumedCount?' | ▶ '+resumedCount+' '+(T2.tasks_resumed_msg||'משימות חודשו אוטומטית'):'');
 }
-async function punchOut(){
+async function punchOut(atMs){
   if(!S.user)return;
   if(await checkVersion()){document.getElementById('att-msg').textContent='🔄 יש גרסה חדשה — לחץ "עדכן עכשיו" למעלה ונסה שוב';return;}
   const T=LANGS[currentLang];
@@ -369,7 +379,7 @@ async function punchOut(){
   if(!w.sessions)w.sessions=[];
   const openIdx=w.sessions.findIndex(s=>!s.out);
   if(openIdx===-1){document.getElementById('att-msg').textContent='כבר רשום/ת כיצא/ה';return;}
-  const nowRaw=srvNow();
+  const nowRaw=typeof atMs==='number'?new Date(atMs):srvNow();
   const now=roundAttTime(nowRaw,false);
   _punchOutAt=Date.now();
   const prevOut=w.sessions[openIdx].out,prevStatus=w.status,prevCheckout=w.checkout;
@@ -383,8 +393,10 @@ async function punchOut(){
       // הכתיבה נדחתה/נכשלה בשרת — לבטל את השינוי המקומי כדי שהמסך לא ישקר שחתמה יציאה בזמן שהשרת עדיין מראה 'נוכח'
       w.sessions[openIdx].out=prevOut;w.status=prevStatus;w.checkout=prevCheckout;
       console.error('punchOut: fbSet workers failed:',e.message);
-      document.getElementById('att-msg').textContent='⚠️ '+T.att_out_fail;
-      sendTelegram('⚠️ חתימת יציאה נכשלה!\n👤 עובד: '+w.name+'\n🏭 מחלקה: '+w.dept+'\n🕐 שעה: '+pad2(now.getHours())+':'+pad2(now.getMinutes())+'\nשגיאה: '+(e.message||'')).catch(()=>{});
+      const _idb=_idbLost(e); // 💾 ⇒ רענון אוטומטי וניסיון חוזר בשעה המקורית
+      document.getElementById('att-msg').textContent=_idb?'🔄 מרענן ומנסה שוב…':'⚠️ '+T.att_out_fail;
+      sendTelegram('⚠️ חתימת יציאה נכשלה!\n👤 עובד: '+w.name+'\n🏭 מחלקה: '+w.dept+'\n🕐 שעה: '+pad2(now.getHours())+':'+pad2(now.getMinutes())+'\nשגיאה: '+(e.message||'')+(_idb?'\n🔄 מרענן ומנסה שוב אוטומטית':'')).catch(()=>{});
+      if(_idb)_idbRecover({a:'out',t:nowRaw.getTime()});
       renderAtt();
       return;
     }

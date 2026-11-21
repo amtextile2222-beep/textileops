@@ -275,6 +275,7 @@ function finishLogin(w,autoPunch){
   // כאן ולא ב-tabBeat: זו הנקודה שבה בוודאות יש S.user, והיא משותפת לכניסה ולשחזור.
   setTimeout(()=>{_checkMultiTab();},9000);
   setTimeout(()=>{try{_ceDraftOffer();}catch(e){}},2500); // 📝 טיוטת חלון ספירה שלא נשמרה (האפליקציה נסגרה ברקע)
+  setTimeout(()=>{_idbRetry().catch(e=>console.warn('💾 ניסיון חוזר לחתימה:',e&&e.message));},1500); // 💾 חתימה שנכשלה בניתוק IndexedDB
   listenWorkerMessages();
   listenMgrInbox();
   listenVoice();

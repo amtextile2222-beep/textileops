@@ -5174,6 +5174,7 @@ function _live(name,refFn,cb,opts,when){
   const onErr=err=>{
     st.unsub=null;
     console.warn('📡 מאזין '+name+' נפל:',err&&err.code,err&&err.message);
+    if(_idbLost(err)){_idbRecover();return;} // 💾 המופע מת — ניסיון חוזר לא יעזור
     // אחרי יציאה, או כשהמשתמש הנוכחי לא רשאי (when) — לא מנסים; הכניסה הבאה תחייה אם מותר
     if(!S.user||(st.when&&!st.when())){st.dead=true;return;}
     st.fails++;_liveBanner();
@@ -5207,7 +5208,25 @@ function _liveBanner(){
 // setDoc/updateDoc מחזירים promise שמתממש רק כשהשרת אישר ⇒ מונה מדויק לכתיבות דרך העוטפים.
 // ⏳ מוצג רק לכתיבה שממתינה מעל 2 שנ' (או כשאין קשר) — אחרת כל סריקה הייתה מהבהבת.
 const _pwSet=new Set();let _syncOnline=true,_syncTimer=null,_syncWatchOn=false;
-function _pw(p){const t={ts:Date.now()};_pwSet.add(t);_syncDot();return Promise.resolve(p).finally(()=>{_pwSet.delete(t);_syncDot();});}
+function _pw(p){const t={ts:Date.now()};_pwSet.add(t);_syncDot();return Promise.resolve(p).finally(()=>{_pwSet.delete(t);_syncDot();}).catch(e=>{if(_idbLost(e))_idbRecover();throw e;});}
+// 💾 ניתוק IndexedDB (21/11/2026): הדפדפן (בעיקר אייפון ברקע) סוגר את החיבור למטמון המקומי ⇒
+// "Failed to persist write: IndexedDbTransactionError … Connection to Indexed Database server lost".
+// מאותו רגע **כל** כתיבה מהמופע נכשלת עד רענון (ميرفت 21/11 14:40 — 3 חתימות יציאה נכשלו).
+// מרעננים לבד; חתימת כניסה/יציאה נשמרת כבקשה (txops_idb_retry) ומתבצעת שוב אחרי הרענון
+// בשעה המקורית (_idbRetry). ניתוק שני תוך יממה ⇒ txops_nocache=1 במכשיר הזה (מטמון בזיכרון).
+function _idbLost(e){const m=(e&&(e.message||String(e)))||'';return /IndexedDb|Indexed Database|Failed to persist write/i.test(m);}
+let _idbRecovering=false;
+function _idbRecover(retry){
+  if(retry)try{localStorage.setItem('txops_idb_retry',JSON.stringify({...retry,u:S.user?.id||'',at0:Date.now()}));}catch(e){}
+  if(_idbRecovering)return;_idbRecovering=true;
+  try{
+    const n=JSON.parse(localStorage.getItem('txops_idb_lost')||'[]').filter(x=>Date.now()-x<86400000);n.push(Date.now());
+    localStorage.setItem('txops_idb_lost',JSON.stringify(n));
+    if(n.length>=2&&_dbPersist)localStorage.setItem('txops_nocache','1');
+  }catch(e){}
+  try{showToast('🔄 '+(LANGS[currentLang].idb_reload||'החיבור לזיכרון המכשיר התנתק — מרענן…'),'var(--amber-txt)',6000);}catch(e){}
+  setTimeout(()=>location.reload(),1500);
+}
 function _syncState(){
   const slow=[..._pwSet].some(t=>Date.now()-t.ts>2000);
   if(_pwSet.size&&(slow||!_syncOnline))return 'pend';
@@ -6400,6 +6419,7 @@ function finishLogin(w,autoPunch){
   // כאן ולא ב-tabBeat: זו הנקודה שבה בוודאות יש S.user, והיא משותפת לכניסה ולשחזור.
   setTimeout(()=>{_checkMultiTab();},9000);
   setTimeout(()=>{try{_ceDraftOffer();}catch(e){}},2500); // 📝 טיוטת חלון ספירה שלא נשמרה (האפליקציה נסגרה ברקע)
+  setTimeout(()=>{_idbRetry().catch(e=>console.warn('💾 ניסיון חוזר לחתימה:',e&&e.message));},1500); // 💾 חתימה שנכשלה בניתוק IndexedDB
   listenWorkerMessages();
   listenMgrInbox();
   listenVoice();
@@ -7024,7 +7044,15 @@ function roundAttTime(now, isIn){
   if(Math.abs(diffMin)<=rm)return target;
   return now;
 }
-async function punchIn(){
+// 💾 אחרי רענון של ניתוק IndexedDB (_idbRecover): חתימה שנכשלה מתבצעת שוב — רק לאותו משתמש,
+// עד 15 דק' אחרי, בשעה המקורית. punchIn/punchOut בודקות בעצמן "כבר נוכח/ת / כבר יצא/ה".
+async function _idbRetry(){
+  let r=null;try{r=JSON.parse(localStorage.getItem('txops_idb_retry')||'null');localStorage.removeItem('txops_idb_retry');}catch(e){}
+  if(!r||!S.user||r.u!==S.user.id||Date.now()-r.at0>15*60000||typeof r.t!=='number')return;
+  if(r.a==='out')await punchOut(r.t);else if(r.a==='in')await punchIn(r.t);
+}
+// atMs = ניסיון חוזר אחרי רענון (_idbRetry) — השעה המקורית של הלחיצה
+async function punchIn(atMs){
   if(!S.user)return;
   if(await checkVersion()){document.getElementById('att-msg').textContent='🔄 יש גרסה חדשה — לחץ "עדכן עכשיו" למעלה ונסה שוב';return;}
   const w=await waitForWorker(S.user.id,15000);
@@ -7033,7 +7061,7 @@ async function punchIn(){
   const today=todayStr();
   w.sessions=w.sessions.filter(s=>{if(!s.in)return false;const d=new Date(s.in);return d.getFullYear()+'-'+pad2(d.getMonth()+1)+'-'+pad2(d.getDate())>=today;});
   if(w.sessions.find(s=>!s.out)){document.getElementById('att-msg').textContent='כבר רשום/ת כנוכח/ת';return;}
-  const nowRaw=srvNow();
+  const nowRaw=typeof atMs==='number'?new Date(atMs):srvNow();
   const now=roundAttTime(nowRaw,true);
   const prevSessions=w.sessions.slice(),prevStatus=w.status,prevCheckin=w.checkin;
   w.sessions.push({in:now.toISOString(),out:null});
@@ -7047,8 +7075,10 @@ async function punchIn(){
     }catch(e){
       w.sessions=prevSessions;w.status=prevStatus;w.checkin=prevCheckin;
       console.error('punchIn: fbSet workers failed:',e.message);
-      document.getElementById('att-msg').textContent='⚠️ חתימת הכניסה לא נשמרה בשרת — נסה שוב';
-      sendTelegram('⚠️ חתימת כניסה נכשלה!\n👤 עובד: '+w.name+'\n🏭 מחלקה: '+w.dept+'\n🕐 שעה: '+pad2(now.getHours())+':'+pad2(now.getMinutes())+'\nשגיאה: '+(e.message||'')).catch(()=>{});
+      const _idb=_idbLost(e); // 💾 ⇒ רענון אוטומטי וניסיון חוזר בשעה המקורית
+      document.getElementById('att-msg').textContent=_idb?'🔄 מרענן ומנסה שוב…':'⚠️ חתימת הכניסה לא נשמרה בשרת — נסה שוב';
+      sendTelegram('⚠️ חתימת כניסה נכשלה!\n👤 עובד: '+w.name+'\n🏭 מחלקה: '+w.dept+'\n🕐 שעה: '+pad2(now.getHours())+':'+pad2(now.getMinutes())+'\nשגיאה: '+(e.message||'')+(_idb?'\n🔄 מרענן ומנסה שוב אוטומטית':'')).catch(()=>{});
+      if(_idb)_idbRecover({a:'in',t:nowRaw.getTime()});
       renderAtt();
       return;
     }
@@ -7061,7 +7091,7 @@ async function punchIn(){
   const T2=LANGS[currentLang];
   document.getElementById('att-msg').textContent='✅ כניסה '+(w.sessions.length>1?w.sessions.length+': ':'')+pad2(now.getHours())+':'+pad2(now.getMinutes())+(rounded?' (עוגל)':'')+(resumedCount?' | ▶ '+resumedCount+' '+(T2.tasks_resumed_msg||'משימות חודשו אוטומטית'):'');
 }
-async function punchOut(){
+async function punchOut(atMs){
   if(!S.user)return;
   if(await checkVersion()){document.getElementById('att-msg').textContent='🔄 יש גרסה חדשה — לחץ "עדכן עכשיו" למעלה ונסה שוב';return;}
   const T=LANGS[currentLang];
@@ -7070,7 +7100,7 @@ async function punchOut(){
   if(!w.sessions)w.sessions=[];
   const openIdx=w.sessions.findIndex(s=>!s.out);
   if(openIdx===-1){document.getElementById('att-msg').textContent='כבר רשום/ת כיצא/ה';return;}
-  const nowRaw=srvNow();
+  const nowRaw=typeof atMs==='number'?new Date(atMs):srvNow();
   const now=roundAttTime(nowRaw,false);
   _punchOutAt=Date.now();
   const prevOut=w.sessions[openIdx].out,prevStatus=w.status,prevCheckout=w.checkout;
@@ -7084,8 +7114,10 @@ async function punchOut(){
       // הכתיבה נדחתה/נכשלה בשרת — לבטל את השינוי המקומי כדי שהמסך לא ישקר שחתמה יציאה בזמן שהשרת עדיין מראה 'נוכח'
       w.sessions[openIdx].out=prevOut;w.status=prevStatus;w.checkout=prevCheckout;
       console.error('punchOut: fbSet workers failed:',e.message);
-      document.getElementById('att-msg').textContent='⚠️ '+T.att_out_fail;
-      sendTelegram('⚠️ חתימת יציאה נכשלה!\n👤 עובד: '+w.name+'\n🏭 מחלקה: '+w.dept+'\n🕐 שעה: '+pad2(now.getHours())+':'+pad2(now.getMinutes())+'\nשגיאה: '+(e.message||'')).catch(()=>{});
+      const _idb=_idbLost(e); // 💾 ⇒ רענון אוטומטי וניסיון חוזר בשעה המקורית
+      document.getElementById('att-msg').textContent=_idb?'🔄 מרענן ומנסה שוב…':'⚠️ '+T.att_out_fail;
+      sendTelegram('⚠️ חתימת יציאה נכשלה!\n👤 עובד: '+w.name+'\n🏭 מחלקה: '+w.dept+'\n🕐 שעה: '+pad2(now.getHours())+':'+pad2(now.getMinutes())+'\nשגיאה: '+(e.message||'')+(_idb?'\n🔄 מרענן ומנסה שוב אוטומטית':'')).catch(()=>{});
+      if(_idb)_idbRecover({a:'out',t:nowRaw.getTime()});
       renderAtt();
       return;
     }

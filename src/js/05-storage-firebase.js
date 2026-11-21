@@ -148,6 +148,7 @@ function _live(name,refFn,cb,opts,when){
   const onErr=err=>{
     st.unsub=null;
     console.warn('📡 מאזין '+name+' נפל:',err&&err.code,err&&err.message);
+    if(_idbLost(err)){_idbRecover();return;} // 💾 המופע מת — ניסיון חוזר לא יעזור
     // אחרי יציאה, או כשהמשתמש הנוכחי לא רשאי (when) — לא מנסים; הכניסה הבאה תחייה אם מותר
     if(!S.user||(st.when&&!st.when())){st.dead=true;return;}
     st.fails++;_liveBanner();
@@ -181,7 +182,25 @@ function _liveBanner(){
 // setDoc/updateDoc מחזירים promise שמתממש רק כשהשרת אישר ⇒ מונה מדויק לכתיבות דרך העוטפים.
 // ⏳ מוצג רק לכתיבה שממתינה מעל 2 שנ' (או כשאין קשר) — אחרת כל סריקה הייתה מהבהבת.
 const _pwSet=new Set();let _syncOnline=true,_syncTimer=null,_syncWatchOn=false;
-function _pw(p){const t={ts:Date.now()};_pwSet.add(t);_syncDot();return Promise.resolve(p).finally(()=>{_pwSet.delete(t);_syncDot();});}
+function _pw(p){const t={ts:Date.now()};_pwSet.add(t);_syncDot();return Promise.resolve(p).finally(()=>{_pwSet.delete(t);_syncDot();}).catch(e=>{if(_idbLost(e))_idbRecover();throw e;});}
+// 💾 ניתוק IndexedDB (21/11/2026): הדפדפן (בעיקר אייפון ברקע) סוגר את החיבור למטמון המקומי ⇒
+// "Failed to persist write: IndexedDbTransactionError … Connection to Indexed Database server lost".
+// מאותו רגע **כל** כתיבה מהמופע נכשלת עד רענון (ميرفت 21/11 14:40 — 3 חתימות יציאה נכשלו).
+// מרעננים לבד; חתימת כניסה/יציאה נשמרת כבקשה (txops_idb_retry) ומתבצעת שוב אחרי הרענון
+// בשעה המקורית (_idbRetry). ניתוק שני תוך יממה ⇒ txops_nocache=1 במכשיר הזה (מטמון בזיכרון).
+function _idbLost(e){const m=(e&&(e.message||String(e)))||'';return /IndexedDb|Indexed Database|Failed to persist write/i.test(m);}
+let _idbRecovering=false;
+function _idbRecover(retry){
+  if(retry)try{localStorage.setItem('txops_idb_retry',JSON.stringify({...retry,u:S.user?.id||'',at0:Date.now()}));}catch(e){}
+  if(_idbRecovering)return;_idbRecovering=true;
+  try{
+    const n=JSON.parse(localStorage.getItem('txops_idb_lost')||'[]').filter(x=>Date.now()-x<86400000);n.push(Date.now());
+    localStorage.setItem('txops_idb_lost',JSON.stringify(n));
+    if(n.length>=2&&_dbPersist)localStorage.setItem('txops_nocache','1');
+  }catch(e){}
+  try{showToast('🔄 '+(LANGS[currentLang].idb_reload||'החיבור לזיכרון המכשיר התנתק — מרענן…'),'var(--amber-txt)',6000);}catch(e){}
+  setTimeout(()=>location.reload(),1500);
+}
 function _syncState(){
   const slow=[..._pwSet].some(t=>Date.now()-t.ts>2000);
   if(_pwSet.size&&(slow||!_syncOnline))return 'pend';
