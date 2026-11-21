@@ -234,7 +234,9 @@ function openEditTask(taskId, isHist){
   S.modalAction=(isHist?'edit-hist-task:':'edit-task:')+taskId;
   document.getElementById('modal-wrap').classList.remove('hidden');
   document.getElementById('modal-title').textContent='עריכת משימה — '+t.workerName;
-  const st=new Date(t.startTime);
+  // משימה פעילה שחודשה: startTime = רגע החידוש, ההתחלה האמיתית ב-origStart — מציגים אותה
+  // (21/11/2026: רهام — השדה הראה 08:49 במקום 06:17). שדה שלא נגע בו = לא משנים כלום (data-orig).
+  const st=new Date((!isHist&&t.origStart)||t.startTime);
   const stLocal=st.getFullYear()+'-'+pad2(st.getMonth()+1)+'-'+pad2(st.getDate())+'T'+pad2(st.getHours())+':'+pad2(st.getMinutes());
   const et=t.endTime?new Date(t.endTime):null;
   const etLocal=et?et.getFullYear()+'-'+pad2(et.getMonth()+1)+'-'+pad2(et.getDate())+'T'+pad2(et.getHours())+':'+pad2(et.getMinutes()):'';
@@ -254,7 +256,7 @@ function openEditTask(taskId, isHist){
       <div style="font-size:11px;color:var(--txt3);margin-top:3px">הצפי נצרב על המשימה בזמן הסריקה. שינוי תמחור מאוחר יותר <b>לא</b> מעדכן רשומה שכבר נסגרה.</div>
     </div>
     <div class="field"><label>מחלקה</label><select id="mf-t-dept" style="font-size:13px">${S.depts.map(d=>`<option value="${esc(d)}" ${(t.dept||'')=== d?'selected':''}>${esc(d)}</option>`).join('')}</select></div>
-    <div class="field"><label>זמן התחלה</label><input type="datetime-local" lang="he" id="mf-t-start" value="${stLocal}" style="font-size:13px"/></div>
+    <div class="field"><label>זמן התחלה</label><input type="datetime-local" lang="he" id="mf-t-start" value="${stLocal}" data-orig="${stLocal}" style="font-size:13px"/></div>
     <div class="field"><label>זמן סיום ${isHist?'':'(ריק = עדיין פעיל)'}</label><input type="datetime-local" lang="he" id="mf-t-end" value="${etLocal}" style="font-size:13px"/></div>`;
 }
 
@@ -689,10 +691,17 @@ async function confirmModal(){
     // מוחק שדה בשרת (אותו שיקול כמו origStart למטה). `+null>0` שקר ⇒ אין תג ואין התראת חריגה.
     const _expVal=document.getElementById('mf-t-exp')?.value;
     if(_expVal!==undefined)t.expectedMin=(parseFloat(_expVal)>0)?parseFloat(_expVal):null;
-    const stVal=document.getElementById('mf-t-start')?.value;
-    // מנהל שהזין התחלה ידנית = מקור האמת; מאפסים את origStart (null ולא delete — merge:true
-    // בשרת לא מוחק שדה) כדי שלא יוצג "התחילה ביום X" סותר ושהתקרה תחושב מהערך הידני
-    if(stVal){t.startTime=new Date(stVal);t.origStart=null;}
+    const _stEl=document.getElementById('mf-t-start'),stVal=_stEl?.value;
+    // 🛑 התחלה ידנית = **כל** העבודה מתחילה שם ⇒ הזמן שנצבר (accumulatedSec) מתאפס. קודם הוא
+    // נשאר ונוסף על החלון החדש = ספירה כפולה (21/11/2026: رهام M — 46 דק' פעמיים, 0:47⇒2:10).
+    // שדה שלא שונה = לא נוגעים (קודם כל שמירה עיגלה את startTime לדקה ומחקה את origStart).
+    // origStart מאופס ב-null ולא delete — merge:true בשרת לא מוחק שדה.
+    const _stChg=!!stVal&&stVal!==(_stEl?.dataset.orig||'');
+    if(_stChg){
+      t.startTime=new Date(stVal);t.origStart=null;
+      t.accumulatedSec=t.paused&&t.pausedAt?calcTaskDurSec(t.startTime,t.pausedAt,t.workerId):0;
+      t.elapsed=t.accumulatedSec;
+    }
     const etVal=document.getElementById('mf-t-end')?.value;
     if(etVal){
       // יש זמן סיום — העבר להיסטוריה
@@ -702,7 +711,14 @@ async function confirmModal(){
       }
       // צביר = טיימר אחד משותף. בלי החלוקה כל שורה נושאת את הזמן המלא (רائده 03/08: 4 שורות
       // × 14,825 שנ' = 16.5 שע' בחלון של 4.1), והסוגר הלילי מנרמל אותן ב-23:30 במקומנו.
-      const _dur=Math.round(taskFinalDur(t,endTime)*_batchShare(t));
+      // סיום **לפני** הקטע הנוכחי (לפני החידוש/ההשהיה האחרונה) ⇒ הנצבר כולל זמן שאחרי הסיום
+      // ⇒ החלון הידני (התחלה אמיתית ⇒ סיום) במקומו (21/11/2026: رهام XL 06:17–07:40 נסגרה 173 דק').
+      const _realSt=new Date(t.origStart||t.startTime);
+      const _segSt=new Date(t.paused&&t.pausedAt?t.pausedAt:t.startTime);
+      const _early=!_stChg&&endTime<_segSt;
+      const _dur=Math.round((_early?_capByAttendance(t,calcTaskDurSec(_realSt,endTime,t.workerId)):taskFinalDur(t,endTime))*_batchShare(t));
+      // ההיסטוריה מציגה את ההתחלה האמיתית, לא רגע החידוש. origStart=null — ראה ההערה למטה.
+      t.startTime=_realSt;t.origStart=null;
       // ⚠️ elapsed חייב ללכת עם החלון הידני. הסוגר הלילי (functions/index.js:990/993) מעדיף
       // את elapsed/accumulatedSec כשהם קטנים מ-duration, ולכן תיקון ידני שלא עדכן אותם נמחק
       // ב-23:30 בשקט (ايمان: duration 5580 מול elapsed 36 ⇒ חיתוך ל-36 שניות). וגם:
