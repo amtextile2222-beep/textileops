@@ -20331,7 +20331,7 @@ body{position:relative}
   <div class="doc">
     <h1>תעודת משלוח</h1>
     <div class="no">מס' ${sh&&sh.no?String(sh.no).padStart(4,'0'):'—'}</div>
-    ${vd?'<div class="dt" style="font-weight:900;color:#b91c1c;font-size:15px">🚫 מבוטלת</div><div class="vwrap"><div class="void">מבוטלת</div></div>':''}
+    ${vd?'<div class="dt" style="font-weight:900;color:#b91c1c;font-size:15px">🚫 מבוטלת</div><div class="vwrap"><div class="void">מבוטלת</div></div><style>body{min-height:255mm}</style>':''}
     ${smp?'<div class="dt" style="font-weight:800;color:#b91c1c;font-size:13px">👕 דגם לאישור — לא לחיוב</div>':count>1?`<div class="dt" style="font-weight:700">משלוח ${idx+1} מתוך ${count}</div>`:''}
     <div class="dt">תאריך: ${esc(heDate(dDate)||'—')}</div>
   </div>
@@ -20382,7 +20382,7 @@ ${mtx.colorRows.length?`<table>
     <tr><td class="hd">סה"כ</td>${mtx.sizeTotals.map(v=>`<td class="c">${v||''}</td>`).join('')}<td class="n">${mtx.grand}</td></tr>
     ${detailed?'':`<tr><td colspan="${mtx.sizes.length+1}" style="font-weight:700">מתוך זה יצא בפועל</td><td class="n">${total}</td></tr>`}
   </tfoot>
-</table>`:`<table><tbody><tr><td style="text-align:center;color:#888;padding:14px">${vd?(total?'פירוט לא נשמר — סה"כ '+total+" יח'":'—'):'אין פירוט מידות — סה"כ '+total+" יח'"}</td></tr></tbody></table>`}
+</table>`:`<table><tbody><tr><td style="text-align:center;color:#888;padding:14px">${vd&&!vd.full?(total?'פירוט לא נשמר — סה"כ '+total+" יח'":'—'):'אין פירוט מידות — סה"כ '+total+" יח'"}</td></tr></tbody></table>`}
 ${packs.length?`<table class="pk">
   <thead>
     <tr><th colspan="3" class="ttl">פירוט אריזה</th></tr>
