@@ -236,7 +236,8 @@ async function delShipment(pid,idx){
   if(!await showConfirm('מחיקת משלוח','למחוק את תעודה '+String(s.no||0).padStart(4,'0')+' ('+s.total+" יח')?\nהמספר לא יוחזר לשימוש, והתעודה תסומן כבוטלה ברשימת התעודות.",'מחק','ביטול'))return;
   // 🕳 הביטול נרשם **לפני** ההסרה מהמערך — אחרי שהמשלוח יורד אין מאיפה לקחת
   // את הלקוח, הדגם והכמות, והחור ברצף היה נשאר בלי שם.
-  dnVoidAdd({no:+s.no||0,date:s.date||'',at:new Date().toISOString(),cust:p.cust||'',
+  const rsn=(prompt('סיבת הביטול (לא חובה):')||'').trim().slice(0,200); // 📝 22/11/2026
+  dnVoidAdd({no:+s.no||0,date:s.date||'',at:new Date().toISOString(),cust:p.cust||'',...(rsn?{rsn}:{}),
     prod:p.prod||'',name:p.name||'',orderNo:parseInt(p.orderNo,10)||0,total:+s.total||0,
     by:S.user?.id||'',byName:S.user?.name||S.user?.user||'',
     pid:p.id,sh:JSON.parse(JSON.stringify(s))}); // 🖨 עותק מלא — להדפסה עם חותמת "מבוטלת" (22/11/2026)
@@ -752,6 +753,31 @@ async function dnVoidAdd(rec){
     });
   }catch(e){console.warn('dnVoid:',e.message);}
 }
+// 📝 סיבת ביטול (22/11/2026, בקשת המשתמש) — הוספה/עריכה בדיעבד מהשורה ברשימה. חור ברצף בלי
+// רישום מקבל רשומה {gap:true} — נשאר "מספר לא בשימוש" (לא "בוטלה", בלי שחזר). מיזוג בטרנזקציה.
+async function dnVoidReason(no){
+  if(!['manager','supervisor'].includes(S.user?.role))return;
+  no=+no;
+  const cur=dnVoidLog().find(v=>+v.no===no);
+  const r=prompt('סיבת הביטול של תעודה '+String(no).padStart(4,'0')+':',cur?.rsn||'');
+  if(r==null)return;
+  const patch={rsn:r.trim().slice(0,200),rsnBy:S.user?.name||S.user?.user||'',rsnAt:new Date().toISOString()};
+  const mrg=v=>({...(v||{no,gap:true}),...patch});
+  S.settings.dnVoids=dnVoidLog().filter(v=>+v.no!==no).concat([mrg(cur)]).sort((a,b)=>(+b.no||0)-(+a.no||0));
+  saveLS();
+  try{renderDNotes();}catch(e){}
+  if(!db||!S.fbConnected){showToast('⚠ אין חיבור — הסיבה נשמרה רק במכשיר הזה','var(--amber-txt)');return;}
+  try{
+    const{doc,runTransaction}=window._fb;
+    await runTransaction(db,async tx=>{
+      const ref=doc(db,'appSettings','deliveryVoids');
+      const d=await tx.get(ref);
+      const l=Array.isArray(d.data()?.list)?d.data().list:[];
+      tx.set(ref,{list:l.filter(v=>+v.no!==no).concat([mrg(l.find(v=>+v.no===no))]).sort((a,b)=>(+b.no||0)-(+a.no||0))},{merge:true});
+    });
+    showToast('📝 הסיבה נשמרה');
+  }catch(e){showToast('⚠ שמירת הסיבה נכשלה: '+e.message,'var(--red-txt)');}
+}
 // שורות הרפאים לטבלה — יומן + חורים ברצף, אחרי אותו סינון של הטבלה עצמה.
 function dnVoidRows(f){
   const used=new Set();
@@ -760,7 +786,7 @@ function dnVoidRows(f){
   const logged=new Map();
   // מספר שחזר לשימוש (תעודה שנמחקה והוקלדה מחדש) כבר אינו חור — הרשומה החיה
   // מנצחת את היומן, אחרת הייתה מוצגת שורת רפאים על תעודה שקיימת בפועל.
-  dnVoidLog().forEach(v=>{const k=+v.no||0;if(k>0&&!used.has(k))logged.set(k,{...v,known:true});});
+  dnVoidLog().forEach(v=>{const k=+v.no||0;if(k>0&&!used.has(k))logged.set(k,{...v,known:!v.gap});});
   const out=[...logged.values()];
   // 🔒 תקרה על הסריקה — פנקס עם קפיצה חריגה לא ייצר אלפי שורות רפאים
   if(max&&min<=max&&max-min<=3000){
@@ -794,7 +820,7 @@ function dnVoidTr(v){
     <td></td>
     <td><span class="bc-seg" style="background:var(--bg2,#f1f5f9);color:var(--txt3);font-weight:700;text-decoration:line-through">${String(v.no).padStart(4,'0')}</span></td>
     <td style="white-space:nowrap;color:var(--txt3)">${hd(v.date)}</td>
-    <td colspan="${_canPricing()?11:10}" style="color:var(--txt3);font-size:12px">🕳 <b>${lbl}</b> — ${what} <span style="opacity:.8">· המספר לא חוזר לשימוש</span> <button class="btn" style="font-size:11px;padding:3px 9px;margin-right:6px" title="הדפסת התעודה עם חותמת מבוטלת" onclick="printVoidNote(${+v.no})">🖨 הדפס מבוטלת</button>${v.known&&S.user?.role==='manager'?` <button class="btn" style="font-size:11px;padding:3px 9px;margin-right:6px" title="שחזור באותו מספר ותאריך — מזינים את הכמויות לפי העותק המודפס" onclick="restoreVoidNote(${+v.no})">♻ שחזר</button>`:''}</td>
+    <td colspan="${_canPricing()?11:10}" style="color:var(--txt3);font-size:12px">🕳 <b>${lbl}</b> — ${what} <span style="opacity:.8">· המספר לא חוזר לשימוש</span>${v.rsn?` · <b style="color:var(--txt2)">📝 סיבה: ${esc(v.rsn)}</b>`:''}${['manager','supervisor'].includes(S.user?.role)?` <button class="btn" style="font-size:11px;padding:3px 9px;margin-right:6px" title="רישום/עריכה של סיבת הביטול" onclick="dnVoidReason(${+v.no})">📝 ${v.rsn?'ערוך סיבה':'סיבת ביטול'}</button>`:''} <button class="btn" style="font-size:11px;padding:3px 9px;margin-right:6px" title="הדפסת התעודה עם חותמת מבוטלת" onclick="printVoidNote(${+v.no})">🖨 הדפס מבוטלת</button>${v.known&&S.user?.role==='manager'?` <button class="btn" style="font-size:11px;padding:3px 9px;margin-right:6px" title="שחזור באותו מספר ותאריך — מזינים את הכמויות לפי העותק המודפס" onclick="restoreVoidNote(${+v.no})">♻ שחזר</button>`:''}</td>
   </tr>`;
 }
 // 🖨 הדפסת תעודה שבוטלה עם חותמת "מבוטלת" (22/11/2026, בקשת המשתמש) — לתיק, ליד העותק
@@ -803,7 +829,7 @@ async function printVoidNote(no){
   no=+no;
   if(allDeliveryNotes().some(r=>+r.s.no===no)){showToast('⚠ תעודה '+String(no).padStart(4,'0')+' קיימת — לא מבוטלת','var(--amber-txt)');return;}
   const v=dnVoidLog().find(x=>+x.no===no)||{no,known:false};
-  const known=dnVoidLog().some(x=>+x.no===no);
+  const known=!!dnVoidLog().find(x=>+x.no===no&&!x.gap);
   const p=(S.products||[]).find(x=>x.id===v.pid)
     ||(known?(S.products||[]).find(x=>x.cust===v.cust&&x.prod===v.prod&&(parseInt(x.orderNo,10)||0)===(+v.orderNo||0)):null)
     ||{id:'',cust:v.cust||'',prod:v.prod||'',name:v.name||'',orderNo:+v.orderNo||0,quantities:[],shipments:[]};
@@ -812,7 +838,8 @@ async function printVoidNote(no){
   const why=known
     ? 'התעודה בוטלה'+(v.at?' ב-'+hd(String(v.at).slice(0,10)):'')+(v.byName?' ע"י '+v.byName:'')+' — אין לה תוקף.'
     : 'אין תעודה בתוקף במספר הזה — המספר בוטל או שההנפקה לא הושלמה.';
-  const html=deliveryNoteHtml(p,sh,0,1,{why,full:!!v.sh});
+  const why2=why+(v.rsn?' סיבת הביטול: '+v.rsn+'.':'');
+  const html=deliveryNoteHtml(p,sh,0,1,{why:why2,full:!!v.sh});
   const name='delivery-note-'+String(no).padStart(4,'0')+'-void.pdf';
   if(_isIOS()){
     showToast('⏳ מכין PDF…','var(--txt3)',4000);
