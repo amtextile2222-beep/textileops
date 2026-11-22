@@ -605,6 +605,7 @@ async function confirmShip(){
     smpOpen.forEach(x=>{const s=list[x.i];if(!s)return;if(smpAct===0){delete s.smp;delete s.back;s.kept={at:now0,...who};}else s.back={at:now0,...who};});}
   const no=rs&&rs.no!=null?rs.no:await nextDeliveryNoteNo();
   list.push({no:no||0,date,at:now.toISOString(),rows,total:qty,packs,note:dnote,packMode,mats,...(orig?{orig}:{}),...(smp?{smp:true}:{}),...(car?.car?{car:car.car}:{}),...(car?.car2?{car2:car.car2}:{}),...(outer.length?{outer}:{}),
+    issBy:S.user?.id||'',issByName:S.user?.name||S.user?.user||'', // 👤 מי הפיק (22/11/2026) — לרשימה בלבד, לא בהדפסה
     ...(rs?.restore?{restoredAt:now.toISOString(),restoredBy:S.user?.name||''}:{}),
     ...(rs?.past?{backdatedAt:now.toISOString(),backdatedBy:S.user?.name||''}:{})});
   p.shipments=list;

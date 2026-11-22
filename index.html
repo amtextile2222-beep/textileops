@@ -15322,6 +15322,7 @@ async function confirmShip(){
     smpOpen.forEach(x=>{const s=list[x.i];if(!s)return;if(smpAct===0){delete s.smp;delete s.back;s.kept={at:now0,...who};}else s.back={at:now0,...who};});}
   const no=rs&&rs.no!=null?rs.no:await nextDeliveryNoteNo();
   list.push({no:no||0,date,at:now.toISOString(),rows,total:qty,packs,note:dnote,packMode,mats,...(orig?{orig}:{}),...(smp?{smp:true}:{}),...(car?.car?{car:car.car}:{}),...(car?.car2?{car2:car.car2}:{}),...(outer.length?{outer}:{}),
+    issBy:S.user?.id||'',issByName:S.user?.name||S.user?.user||'', // 👤 מי הפיק (22/11/2026) — לרשימה בלבד, לא בהדפסה
     ...(rs?.restore?{restoredAt:now.toISOString(),restoredBy:S.user?.name||''}:{}),
     ...(rs?.past?{backdatedAt:now.toISOString(),backdatedBy:S.user?.name||''}:{})});
   p.shipments=list;
@@ -20072,7 +20073,7 @@ function renderDNotes(){
       return `<tr${_dnSel.has(_k)?' style="background:rgba(24,95,165,.08)"':''}>
         <td style="text-align:center"><input type="checkbox" ${_dnSel.has(_k)?'checked':''} onchange="dnSelToggle('${escj(_k)}',this.checked)" style="width:16px;height:16px;cursor:pointer"></td>
         <td><span class="bc-seg" style="background:var(--green-bg,#dcfce7);color:var(--green-txt,#16a34a);font-weight:700">${r.s.no?String(r.s.no).padStart(4,'0'):'—'}</span>${shipEditMark(r.s)}${r.smp?'<div style="font-size:10px;font-weight:700;color:var(--blue-txt,#1e40af)">👕 דגם לאישור'+(smpBack(r.s)?' · ↩ חזר':' · אצל הלקוח')+(()=>{const st=smpState(r.p);return st.open||!st.dec?'':st.dec.k==='ok'?' · ✅ אושר':' · <span style="color:var(--red-txt)">✖ לא אושר</span>';})()+'</div>':r.s.kept?'<div style="font-size:10px;color:var(--txt3)" title="דגם לאישור שנשאר אצל הלקוח — הפך לתעודה רגילה">👕 דגם שנשאר אצל הלקוח</div>':''}${r.count>1?`<span style="font-size:10px;color:var(--txt3)"> ${r.i+1}/${r.count}</span>`:''}</td>
-        <td style="white-space:nowrap">${heDate(r.s.date)}</td>
+        <td style="white-space:nowrap">${heDate(r.s.date)}${(()=>{const w=r.s.issByName||r.s.restoredBy||r.s.backdatedBy;return w?'<div style="font-size:10px;color:var(--txt3)">הופקה ע"י '+esc(w)+'</div>':'';})()}</td>
         <td>${esc(S.customerNames?.[r.p.cust]||('לקוח '+(r.p.cust||'')))}</td>
         <td>${esc(r.p.name||r.p.prod||'')}${r.s.note?`<span title="${esc(r.s.note)}"> 📝</span>`:''}</td>
         <td style="color:var(--txt3)">${(parseInt(r.p.orderNo,10)||0)?'#'+String(r.p.orderNo).padStart(3,'0'):'—'}</td>
