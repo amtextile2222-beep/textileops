@@ -19389,7 +19389,7 @@ async function printVoidNote(no){
   const sh=v.sh?{...v.sh,no}:{no,date:v.date||'',total:+v.total||0,rows:[]};
   const hd=d=>d?String(d).slice(8,10)+'/'+String(d).slice(5,7)+'/'+String(d).slice(0,4):'';
   const why=known
-    ? 'התעודה בוטלה'+(v.at?' ב-'+hd(String(v.at).slice(0,10)):'')+(v.byName?' ע"י '+v.byName:'')+' — אין לה תוקף.'
+    ? 'התעודה בוטלה'+(v.at?' ב-'+hd(String(v.at).slice(0,10)):'')+' — אין לה תוקף.' // בלי שם המוחק בהדפסה — רק ברשימה (החלטת המשתמש 22/11)
     : 'אין תעודה בתוקף במספר הזה — המספר בוטל או שההנפקה לא הושלמה.';
   const why2=why+(v.rsn?' סיבת הביטול: '+v.rsn+'.':'');
   const html=deliveryNoteHtml(p,sh,0,1,{why:why2,full:!!v.sh});
