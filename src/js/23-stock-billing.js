@@ -763,7 +763,8 @@ tr{page-break-inside:avoid}
 table.pk{width:auto;min-width:54%;margin-top:14px}
 table.pk th.ttl{background:#eef2ff;font-size:12px;text-align:center}
 body{position:relative}
-.void{position:absolute;top:300px;left:-10%;right:-10%;text-align:center;font-size:150px;font-weight:900;color:rgba(185,28,28,.2);border:10px solid rgba(185,28,28,.2);border-radius:20px;transform:rotate(-28deg);pointer-events:none;z-index:9;letter-spacing:8px}
+.vwrap{position:absolute;top:0;left:0;right:0;bottom:0;overflow:hidden;pointer-events:none;z-index:9} /* חותך את החותמת בגבולות הדף — בלי זה היא הרחיבה את הדף וההדפסה נחתכה משמאל */
+.void{position:absolute;top:300px;left:8%;right:8%;text-align:center;font-size:120px;font-weight:900;color:rgba(185,28,28,.2);border:8px solid rgba(185,28,28,.2);border-radius:20px;transform:rotate(-28deg);pointer-events:none;z-index:9;letter-spacing:8px}
 .note{margin-top:14px;border:1px solid #bbb;border-radius:6px;padding:8px 10px;font-size:12px;line-height:1.6}
 .note b{color:#185FA5}
 /* @page margin:0 ⇒ Chrome לא מדפיס כותרת/כתובת/מספר עמוד (13/10/2026). השוליים — ב-padding */
@@ -782,7 +783,7 @@ body{position:relative}
   <div class="doc">
     <h1>תעודת משלוח</h1>
     <div class="no">מס' ${sh&&sh.no?String(sh.no).padStart(4,'0'):'—'}</div>
-    ${vd?'<div class="dt" style="font-weight:900;color:#b91c1c;font-size:15px">🚫 מבוטלת</div><div class="void">מבוטלת</div>':''}
+    ${vd?'<div class="dt" style="font-weight:900;color:#b91c1c;font-size:15px">🚫 מבוטלת</div><div class="vwrap"><div class="void">מבוטלת</div></div>':''}
     ${smp?'<div class="dt" style="font-weight:800;color:#b91c1c;font-size:13px">👕 דגם לאישור — לא לחיוב</div>':count>1?`<div class="dt" style="font-weight:700">משלוח ${idx+1} מתוך ${count}</div>`:''}
     <div class="dt">תאריך: ${esc(heDate(dDate)||'—')}</div>
   </div>
