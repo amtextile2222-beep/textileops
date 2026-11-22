@@ -691,7 +691,8 @@ ${inv?`<table class="mat" style="margin-right:auto;margin-left:0;min-width:42%">
 </body></html>`);
 }
 // בניית ה-HTML מופרדת מההדפסה כדי שאפשר יהיה לרנדר ולבדוק אותה בלי לפתוח גיליון הדפסה
-function deliveryNoteHtml(p,sh,idx,count){
+// vd = {why,full} ⇒ תעודה שבוטלה: חותמת "מבוטלת", בלי מאזן הזמנה, ובלי ליפול לפירוט ההזמנה (22/11/2026)
+function deliveryNoteHtml(p,sh,idx,count,vd){
   const list=prodShipments(p);
   if(!sh)sh=list[list.length-1]||null;
   if(idx==null)idx=Math.max(0,list.indexOf(sh));
@@ -700,13 +701,13 @@ function deliveryNoteHtml(p,sh,idx,count){
   const ci=(S.customerInfo||{})[p.cust]||{};
   const cname=S.customerNames?.[p.cust]||'';
   const detailed=!!(sh&&Array.isArray(sh.rows)&&sh.rows.length);
-  const rows=detailed?sh.rows:(p.quantities||[]).filter(q=>parseInt(q.qty)>0);
+  const rows=detailed?sh.rows:vd?[]:(p.quantities||[]).filter(q=>parseInt(q.qty)>0);
   const rowSum=rows.reduce((s,r)=>s+(isUnsewn(r)?0:(parseInt(r.qty)||0)),0);
   const total=sh?(+sh.total||0):rowSum;
   const unsewn=detailed?shUnsewn(sh):0;
   // מאזן ההזמנה **עד המשלוח הזה כולל** — תעודה ישנה חייבת להראות את המצב בזמנה
   // ולא את המצב היום, אחרת הדפסה חוזרת של תעודה מלפני חודש תסתור את מה שנמסר
-  const ordered=_prodQty(p)||0;
+  const ordered=vd?0:(_prodQty(p)||0);
   const upto=list.slice(0,idx+1).filter(s=>!isSmpSh(s)).reduce((t,s)=>t+(+s.total||0)+shUnsewn(s),0); // ✂ לא תפור יצא — לא "יתרה להשלמה" · 👕 דגם חוזר — לא נספר
   const smp=isSmpSh(sh);
   const balance=ordered?Math.max(0,ordered-upto):0;
@@ -730,7 +731,7 @@ function deliveryNoteHtml(p,sh,idx,count){
   const outer=outerTxt(sh&&sh.outer); // 🛍 שקים/קרטונים — ריק בתעודה ישנה
   const dnote=(sh&&sh.note)||'';
   const mtx=dnMatrix(rows);
-  return `<!DOCTYPE html><html dir="rtl" lang="he"><head><meta charset="UTF-8"/><title>תעודת משלוח ${p.dnNo||''}</title><style>
+  return `<!DOCTYPE html><html dir="rtl" lang="he"><head><meta charset="UTF-8"/><title>תעודת משלוח ${vd?(sh&&sh.no||'')+' — מבוטלת':(p.dnNo||'')}</title><style>
 *{box-sizing:border-box;margin:0;padding:0}
 body{font-family:Arial,Helvetica,sans-serif;color:#000;background:#fff;font-size:13px;padding:16mm 14mm;-webkit-print-color-adjust:exact;print-color-adjust:exact}
 .top{display:flex;justify-content:space-between;align-items:flex-start;border-bottom:3px solid #185FA5;padding-bottom:10px;margin-bottom:14px}
@@ -761,6 +762,8 @@ tr{page-break-inside:avoid}
 .foot{margin-top:20px;padding-top:8px;border-top:1px solid #e2e2e2;font-size:10px;color:#888;text-align:center}
 table.pk{width:auto;min-width:54%;margin-top:14px}
 table.pk th.ttl{background:#eef2ff;font-size:12px;text-align:center}
+body{position:relative}
+.void{position:absolute;top:300px;left:-10%;right:-10%;text-align:center;font-size:150px;font-weight:900;color:rgba(185,28,28,.2);border:10px solid rgba(185,28,28,.2);border-radius:20px;transform:rotate(-28deg);pointer-events:none;z-index:9;letter-spacing:8px}
 .note{margin-top:14px;border:1px solid #bbb;border-radius:6px;padding:8px 10px;font-size:12px;line-height:1.6}
 .note b{color:#185FA5}
 /* @page margin:0 ⇒ Chrome לא מדפיס כותרת/כתובת/מספר עמוד (13/10/2026). השוליים — ב-padding */
@@ -779,6 +782,7 @@ table.pk th.ttl{background:#eef2ff;font-size:12px;text-align:center}
   <div class="doc">
     <h1>תעודת משלוח</h1>
     <div class="no">מס' ${sh&&sh.no?String(sh.no).padStart(4,'0'):'—'}</div>
+    ${vd?'<div class="dt" style="font-weight:900;color:#b91c1c;font-size:15px">🚫 מבוטלת</div><div class="void">מבוטלת</div>':''}
     ${smp?'<div class="dt" style="font-weight:800;color:#b91c1c;font-size:13px">👕 דגם לאישור — לא לחיוב</div>':count>1?`<div class="dt" style="font-weight:700">משלוח ${idx+1} מתוך ${count}</div>`:''}
     <div class="dt">תאריך: ${esc(heDate(dDate)||'—')}</div>
   </div>
@@ -786,7 +790,7 @@ table.pk th.ttl{background:#eef2ff;font-size:12px;text-align:center}
 <div class="boxes">
   <div class="box">
     <h2>לכבוד</h2>
-    <div style="font-weight:800;font-size:14px;margin-bottom:3px">${esc(cname||('לקוח '+p.cust))}</div>
+    <div style="font-weight:800;font-size:14px;margin-bottom:3px">${esc(cname||(p.cust?'לקוח '+p.cust:'—'))}</div>
     ${line('קוד לקוח:',p.cust)}
     ${line('כתובת:',[ci.addr,ci.city].filter(Boolean).join(', '))}
     ${line('איש קשר:',ci.contact)}
@@ -808,7 +812,8 @@ table.pk th.ttl{background:#eef2ff;font-size:12px;text-align:center}
     ${line('סוג אריזה:',packModeName(sh&&sh.packMode))}
   </div>
 </div>
-${detailed?'':'<div class="warn">⚠ אין פירוט יציאה פר מידה למשלוח הזה — הטבלה מציגה את פירוט ההזמנה. סמן שוב "יצא ללקוח" כדי לרשום את הפירוט בפועל.</div>'}
+${vd?`<div class="warn" style="background:#fee2e2;color:#991b1b;border-color:#fca5a5;font-size:13px">🚫 ${esc(vd.why)}${vd.full?'':' פירוט הכמויות לא נשמר.'}</div>`:''}
+${detailed||vd?'':'<div class="warn">⚠ אין פירוט יציאה פר מידה למשלוח הזה — הטבלה מציגה את פירוט ההזמנה. סמן שוב "יצא ללקוח" כדי לרשום את הפירוט בפועל.</div>'}
 ${detailed&&rowSum!==total?`<div class="warn">⚠ סכום השורות (${rowSum}) שונה מהכמות הרשומה כיוצאת (${total}).</div>`:''}
 ${mtx.colorRows.length?`<table>
   <thead>
@@ -828,7 +833,7 @@ ${mtx.colorRows.length?`<table>
     <tr><td class="hd">סה"כ</td>${mtx.sizeTotals.map(v=>`<td class="c">${v||''}</td>`).join('')}<td class="n">${mtx.grand}</td></tr>
     ${detailed?'':`<tr><td colspan="${mtx.sizes.length+1}" style="font-weight:700">מתוך זה יצא בפועל</td><td class="n">${total}</td></tr>`}
   </tfoot>
-</table>`:`<table><tbody><tr><td style="text-align:center;color:#888;padding:14px">אין פירוט מידות — סה"כ ${total} יח'</td></tr></tbody></table>`}
+</table>`:`<table><tbody><tr><td style="text-align:center;color:#888;padding:14px">${vd?(total?'פירוט לא נשמר — סה"כ '+total+" יח'":'—'):'אין פירוט מידות — סה"כ '+total+" יח'"}</td></tr></tbody></table>`}
 ${packs.length?`<table class="pk">
   <thead>
     <tr><th colspan="3" class="ttl">פירוט אריזה</th></tr>

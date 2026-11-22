@@ -238,7 +238,8 @@ async function delShipment(pid,idx){
   // את הלקוח, הדגם והכמות, והחור ברצף היה נשאר בלי שם.
   dnVoidAdd({no:+s.no||0,date:s.date||'',at:new Date().toISOString(),cust:p.cust||'',
     prod:p.prod||'',name:p.name||'',orderNo:parseInt(p.orderNo,10)||0,total:+s.total||0,
-    by:S.user?.id||'',byName:S.user?.name||S.user?.user||''});
+    by:S.user?.id||'',byName:S.user?.name||S.user?.user||'',
+    pid:p.id,sh:JSON.parse(JSON.stringify(s))}); // 🖨 עותק מלא — להדפסה עם חותמת "מבוטלת" (22/11/2026)
   const left=list.filter((_,k)=>k!==idx);
   _shipRecalc(p,left); // 👕 כולל דגמים לאישור — "יצא" ושלב shipped רק מתעודות רגילות
   saveLS();
@@ -732,7 +733,8 @@ function allDeliveryNotes(){
 function dnVoidLog(){return Array.isArray(S.settings?.dnVoids)?S.settings.dnVoids:[];}
 async function dnVoidAdd(rec){
   if(!rec||!(+rec.no))return;
-  const mk=l=>l.filter(v=>(+v.no||0)!==(+rec.no||0)).concat([rec]).sort((a,b)=>(+b.no||0)-(+a.no||0)).slice(0,500);
+  // 🖨 העותק המלא (sh) נשמר רק ב-100 האחרונות — 500 עותקים היו מתקרבים למגבלת 1MB למסמך
+  const mk=l=>l.filter(v=>(+v.no||0)!==(+rec.no||0)).concat([rec]).sort((a,b)=>(+b.no||0)-(+a.no||0)).slice(0,500).map((v,i)=>i<100||!v.sh?v:(({sh,...r})=>r)(v));
   // תקרה רכה — היומן גדל לאט (בודדים בשנה), אבל הוא יושב ב-localStorage יחד עם
   // כל השאר ואסור לו לדחוף החוצה את המוצרים.
   S.settings.dnVoids=mk(dnVoidLog());
@@ -792,8 +794,32 @@ function dnVoidTr(v){
     <td></td>
     <td><span class="bc-seg" style="background:var(--bg2,#f1f5f9);color:var(--txt3);font-weight:700;text-decoration:line-through">${String(v.no).padStart(4,'0')}</span></td>
     <td style="white-space:nowrap;color:var(--txt3)">${hd(v.date)}</td>
-    <td colspan="${_canPricing()?11:10}" style="color:var(--txt3);font-size:12px">🕳 <b>${lbl}</b> — ${what} <span style="opacity:.8">· המספר לא חוזר לשימוש</span>${v.known&&S.user?.role==='manager'?` <button class="btn" style="font-size:11px;padding:3px 9px;margin-right:6px" title="שחזור באותו מספר ותאריך — מזינים את הכמויות לפי העותק המודפס" onclick="restoreVoidNote(${+v.no})">♻ שחזר</button>`:''}</td>
+    <td colspan="${_canPricing()?11:10}" style="color:var(--txt3);font-size:12px">🕳 <b>${lbl}</b> — ${what} <span style="opacity:.8">· המספר לא חוזר לשימוש</span> <button class="btn" style="font-size:11px;padding:3px 9px;margin-right:6px" title="הדפסת התעודה עם חותמת מבוטלת" onclick="printVoidNote(${+v.no})">🖨 הדפס מבוטלת</button>${v.known&&S.user?.role==='manager'?` <button class="btn" style="font-size:11px;padding:3px 9px;margin-right:6px" title="שחזור באותו מספר ותאריך — מזינים את הכמויות לפי העותק המודפס" onclick="restoreVoidNote(${+v.no})">♻ שחזר</button>`:''}</td>
   </tr>`;
+}
+// 🖨 הדפסת תעודה שבוטלה עם חותמת "מבוטלת" (22/11/2026, בקשת המשתמש) — לתיק, ליד העותק
+// שנמסר. נמחקה מהיום ⇒ העותק המלא מהיומן (v.sh). ישנה/חור ברצף ⇒ רק מה שידוע (מספר, לקוח, כמות).
+async function printVoidNote(no){
+  no=+no;
+  if(allDeliveryNotes().some(r=>+r.s.no===no)){showToast('⚠ תעודה '+String(no).padStart(4,'0')+' קיימת — לא מבוטלת','var(--amber-txt)');return;}
+  const v=dnVoidLog().find(x=>+x.no===no)||{no,known:false};
+  const known=dnVoidLog().some(x=>+x.no===no);
+  const p=(S.products||[]).find(x=>x.id===v.pid)
+    ||(known?(S.products||[]).find(x=>x.cust===v.cust&&x.prod===v.prod&&(parseInt(x.orderNo,10)||0)===(+v.orderNo||0)):null)
+    ||{id:'',cust:v.cust||'',prod:v.prod||'',name:v.name||'',orderNo:+v.orderNo||0,quantities:[],shipments:[]};
+  const sh=v.sh?{...v.sh,no}:{no,date:v.date||'',total:+v.total||0,rows:[]};
+  const hd=d=>d?String(d).slice(8,10)+'/'+String(d).slice(5,7)+'/'+String(d).slice(0,4):'';
+  const why=known
+    ? 'התעודה בוטלה'+(v.at?' ב-'+hd(String(v.at).slice(0,10)):'')+(v.byName?' ע"י '+v.byName:'')+' — אין לה תוקף.'
+    : 'אין תעודה בתוקף במספר הזה — המספר בוטל או שההנפקה לא הושלמה.';
+  const html=deliveryNoteHtml(p,sh,0,1,{why,full:!!v.sh});
+  const name='delivery-note-'+String(no).padStart(4,'0')+'-void.pdf';
+  if(_isIOS()){
+    showToast('⏳ מכין PDF…','var(--txt3)',4000);
+    try{await _printPdfBlob(await _dnPdfBlob(html),name);}catch(e){alert('הכנת ה-PDF נכשלה: '+(e?.message||e));}
+    return;
+  }
+  printViaIframe(html);
 }
 // מיזוג לפי מספר יורד — שורת הרפאים יושבת **במקומה ברצף** ולא בסוף הטבלה,
 // אחרת אי אפשר לראות בעין שהחור הוא בדיוק בין 0672 ל-0674.
