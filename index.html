@@ -5215,7 +5215,7 @@ function _pw(p){const t={ts:Date.now()};_pwSet.add(t);_syncDot();return Promise.
 // מרעננים לבד; חתימת כניסה/יציאה נשמרת כבקשה (txops_idb_retry) ומתבצעת שוב אחרי הרענון
 // בשעה המקורית (_idbRetry). ניתוק שני תוך יממה ⇒ txops_nocache=1 במכשיר הזה (מטמון בזיכרון).
 function _idbLost(e){const m=(e&&(e.message||String(e)))||'';return /IndexedDb|Indexed Database|Failed to persist write/i.test(m);}
-let _idbRecovering=false;
+let _idbRecovering=false,_idbHold=null; // _idbHold — פעולה שחייבת להסתיים לפני הרענון (רישום מספר תעודה שנשרף)
 function _idbRecover(retry){
   if(retry)try{localStorage.setItem('txops_idb_retry',JSON.stringify({...retry,u:S.user?.id||'',at0:Date.now()}));}catch(e){}
   if(_idbRecovering)return;_idbRecovering=true;
@@ -5225,7 +5225,7 @@ function _idbRecover(retry){
     if(n.length>=2&&_dbPersist)localStorage.setItem('txops_nocache','1');
   }catch(e){}
   try{showToast('🔄 '+(LANGS[currentLang].idb_reload||'החיבור לזיכרון המכשיר התנתק — מרענן…'),'var(--amber-txt)',6000);}catch(e){}
-  setTimeout(()=>location.reload(),1500);
+  setTimeout(async()=>{try{await Promise.race([_idbHold,new Promise(r=>setTimeout(r,6000))]);}catch(e){}location.reload();},1500);
 }
 function _syncState(){
   const slow=[..._pwSet].some(t=>Date.now()-t.ts>2000);
@@ -15315,6 +15315,7 @@ async function confirmShip(){
   // מוחקת בשקט את האריזה וההערה של כל תעודה שכבר נמסרה ללקוח
   // 📦 packMode ו-mats נגררים כאן מאותה סיבה כמו packs ו-note: בנייה מחדש של
   // הרשימה בלעדיהם הייתה מוחקת בשקט את חיוב האריזה של כל תעודה קודמת.
+  const _bak=JSON.parse(JSON.stringify(p)); // ⚠ לשחזור אם השמירה בשרת נכשלה (22/11/2026)
   const list=prodShipments(p).map(s=>({...s,no:+s.no||0,date:s.date||'',at:s.at||'',rows:s.rows||[],total:+s.total||0,packs:Array.isArray(s.packs)?s.packs:[],note:s.note||'',packMode:s.packMode||'',mats:Array.isArray(s.mats)?s.mats:[]}));
   // 👕 התשובה לשאלת הדגמים — על אותה רשימה, כך שהכל נשמר בכתיבה אחת
   if(smpAct===0||smpAct===1){const now0=Date.now(),who={by:S.user?.id||'',byName:S.user?.name||S.user?.user||''};
@@ -15343,7 +15344,23 @@ async function confirmShip(){
   // נייר מיד, ובנייד של המנהל דיאלוג הדפסה בכל סריקה רק מפריע
   S.settings.dnAutoPrint=autoPrint;
   saveLS();
-  if(S.fbConnected)try{await fbSet('products',p.id,{...p});}catch(e){}
+  // ⚠ (22/11/2026) כשל שמירה היה נבלע ⇒ "✅" על תעודה שלא קיימת, וכל ניסיון חוזר שרף מספר
+  // (738–742, 21/11 — ניתוק IndexedDB). עכשיו: מחזירים את המצב המקומי, רושמים את המספר ביומן
+  // הביטולים כ"הנפקה נכשלה" (לפני הרענון האוטומטי — _idbHold) ומציגים שגיאה.
+  if(S.fbConnected)try{await fbSet('products',p.id,{...p});}catch(e){
+    Object.keys(p).forEach(k=>delete p[k]);Object.assign(p,_bak);
+    saveLS();
+    const nn=String(no||0).padStart(4,'0');
+    if(no&&!rs?.restore){const d=new Date();
+      _idbHold=dnVoidAdd({no:+no,gap:true,date,at:d.toISOString(),by:S.user?.id||'',byName:S.user?.name||S.user?.user||'',
+        rsn:'ההנפקה נכשלה — השמירה לא הגיעה לשרת ('+(p.name||p.prod)+', '+pad2(d.getHours())+':'+pad2(d.getMinutes())+')'}).catch(()=>{});
+      await Promise.race([_idbHold,new Promise(r=>setTimeout(r,5000))]);}
+    closeShipModal();
+    try{renderDNotes();}catch(e2){}
+    try{renderProducts();}catch(e2){}
+    alert('⚠ התעודה לא נשמרה!\n\n'+(no&&!rs?.restore?'מספר '+nn+' לא בתוקף — אל תמסור את הנייר.\n':'')+'שגיאה: '+(e?.message||e)+'\n\n'+(_idbLost(e)?'הדף ירוענן — אחרי הרענון הפק את המשלוח שוב.':'בדוק את החיבור ונסה שוב.'));
+    return;
+  }
   pstkAlert(_stk);
   closeShipModal();
   showToast((smp?'👕 דגם לאישור · ':'')+(rs?.restore?'♻ תעודה '+String(no).padStart(4,'0')+' שוחזרה':rs?.past?'📅 משלוח מ-'+date.slice(8,10)+'/'+date.slice(5,7)+(no?' · תעודה '+String(no).padStart(4,'0'):' · בלי מספר'):'✅ תעודת משלוח '+String(no||0).padStart(4,'0'))+' · '+qty+" יח'"+(list.length>1?' (משלוח '+list.length+')':''));

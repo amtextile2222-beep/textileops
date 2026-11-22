@@ -189,7 +189,7 @@ function _pw(p){const t={ts:Date.now()};_pwSet.add(t);_syncDot();return Promise.
 // מרעננים לבד; חתימת כניסה/יציאה נשמרת כבקשה (txops_idb_retry) ומתבצעת שוב אחרי הרענון
 // בשעה המקורית (_idbRetry). ניתוק שני תוך יממה ⇒ txops_nocache=1 במכשיר הזה (מטמון בזיכרון).
 function _idbLost(e){const m=(e&&(e.message||String(e)))||'';return /IndexedDb|Indexed Database|Failed to persist write/i.test(m);}
-let _idbRecovering=false;
+let _idbRecovering=false,_idbHold=null; // _idbHold — פעולה שחייבת להסתיים לפני הרענון (רישום מספר תעודה שנשרף)
 function _idbRecover(retry){
   if(retry)try{localStorage.setItem('txops_idb_retry',JSON.stringify({...retry,u:S.user?.id||'',at0:Date.now()}));}catch(e){}
   if(_idbRecovering)return;_idbRecovering=true;
@@ -199,7 +199,7 @@ function _idbRecover(retry){
     if(n.length>=2&&_dbPersist)localStorage.setItem('txops_nocache','1');
   }catch(e){}
   try{showToast('🔄 '+(LANGS[currentLang].idb_reload||'החיבור לזיכרון המכשיר התנתק — מרענן…'),'var(--amber-txt)',6000);}catch(e){}
-  setTimeout(()=>location.reload(),1500);
+  setTimeout(async()=>{try{await Promise.race([_idbHold,new Promise(r=>setTimeout(r,6000))]);}catch(e){}location.reload();},1500);
 }
 function _syncState(){
   const slow=[..._pwSet].some(t=>Date.now()-t.ts>2000);
