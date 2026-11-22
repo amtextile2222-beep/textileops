@@ -12,6 +12,10 @@ let _trPrices={}; // מ-adminSettings/transport (מנהל)
 // 📍 תוספת לכל הגעה ללקוח (16/11/2026) — למשל חמודי: +₪60 בכל פעם שהוא מגיע לרעומה. adminSettings/transport.trip=[{car,cust,a}].
 // "הגעה" = יום: כל התעודות של אותו לקוח עם אותו מוביל באותו יום + קליטה ממנו באותו יום (מסר ואסף) = הגעה אחת
 let _trTrips=[];
+// 🚫 (22/11/2026, החלטת המשתמש) יום שבו המוביל לא הגיע ללקוח בפועל (כמות קטנה — מסר במקום אחר) ⇒ בלי תוספת.
+// adminSettings/transport.noTrip=['מוביל|לקוח|YYYY-MM-DD'] — סימון ידני של המנהל בחלון ההובלות.
+let _trNoTrip=[];
+const _trNoKey=(car,cust,day)=>car+'|'+cust+'|'+day;
 let _trIntake=[],_trIntakeKey=''; // הקליטה שנטענה לטווח הנוכחי
 const _trMgr=()=>S.user?.role==='manager';
 const _trCan=()=>_trMgr()||S.user?.role==='supervisor';
@@ -90,7 +94,7 @@ async function openTransport(){
     </div>
     <div id="tr-body"><div style="color:var(--txt3);font-size:13px">⏳ טוען…</div></div></div>`;
   document.body.appendChild(w);
-  if(_trMgr()&&S.fbConnected)try{const d=await fbGet('adminSettings','transport');_trPrices=d?.p||{};_trTrips=Array.isArray(d?.trip)?d.trip:[];}catch(e){}
+  if(_trMgr()&&S.fbConnected)try{const d=await fbGet('adminSettings','transport');_trPrices=d?.p||{};_trTrips=Array.isArray(d?.trip)?d.trip:[];_trNoTrip=Array.isArray(d?.noTrip)?d.noTrip:[];}catch(e){}
   renderTransport();
 }
 async function _trLoadIntake(from,to,force){
@@ -122,14 +126,16 @@ async function renderTransport(force){
   const visits=c=>_trTrips.filter(x=>x.car===c&&+x.a>0).map(x=>{const d=new Set();
     outs.forEach(r=>{if(String(r.p.cust)===String(x.cust)&&carsIn(r.s).includes(c))d.add(r.day);});
     ins.forEach(r=>{if(String(r.cust)===String(x.cust)&&carsIn(r).includes(c))d.add(String(r.date||'').slice(0,10));});
-    return{cust:x.cust,a:+x.a,n:d.size};}).filter(v=>v.n);
-  let tot=0;
-  const sumRows=keys.map(c=>{const x=by[c],all=_trSum(_trSum(_trZero(),x.out),x.in),vs=c?visits(c):[],cost=c?_trCost(c,all)+vs.reduce((s,v)=>s+v.n*v.a,0):0;tot+=cost;
+    const days=[...d].sort(),skip=days.filter(k=>_trNoTrip.includes(_trNoKey(c,x.cust,k)));
+    return{cust:x.cust,a:+x.a,n:days.length-skip.length,days,skip};}).filter(v=>v.days.length);
+  let tot=0;const tripRows=[];
+  const sumRows=keys.map(c=>{const x=by[c],all=_trSum(_trSum(_trZero(),x.out),x.in),vs=c?visits(c):[],cost=c?_trCost(c,all)+vs.reduce((s,v)=>s+v.n*v.a,0):0;
+    if(c&&mg)vs.forEach(v=>v.days.forEach(k=>tripRows.push({c,cust:v.cust,a:v.a,day:k,off:v.skip.includes(k)})));tot+=cost;
     const noPrice=mg&&c&&TR_KINDS.some(([k])=>all[k]>0&&!(+(_trPrices[c]||{})[k]));
     return `<tr><td ${td}><b>${esc(trCarName(c))}</b></td>
       <td ${td}>${_trQtyTxt(x.out,['hang','sack','carton'])||'—'}<div style="font-size:11px;color:var(--txt3)">${x.nOut} תעודות</div></td>
       <td ${td}>${_trQtyTxt(x.in)||'—'}<div style="font-size:11px;color:var(--txt3)">${x.nIn} קליטות</div></td>
-      ${mg?`<td ${td}>${c?'<b>'+dnMoney(cost)+'</b>'+vs.map(v=>`<div style="font-size:11px;color:var(--txt3)">כולל ${v.n} הגעות ל${esc(S.customerNames?.[v.cust]||v.cust)} × ${dnMoney(v.a)}</div>`).join('')+(noPrice?'<div style="font-size:11px;color:var(--amber-txt)">⚠ חסר מחיר</div>':''):'<span style="font-size:11px;color:var(--txt3)">בחרו מוביל בתעודות</span>'}</td>`:''}</tr>`;}).join('');
+      ${mg?`<td ${td}>${c?'<b>'+dnMoney(cost)+'</b>'+vs.map(v=>`<div style="font-size:11px;color:var(--txt3)">כולל ${v.n} הגעות ל${esc(S.customerNames?.[v.cust]||v.cust)} × ${dnMoney(v.a)}${v.skip.length?` <span style="color:var(--amber-txt)">(${v.skip.length} ימים בלי הגעה)</span>`:''}</div>`).join('')+(noPrice?'<div style="font-size:11px;color:var(--amber-txt)">⚠ חסר מחיר</div>':''):'<span style="font-size:11px;color:var(--txt3)">בחרו מוביל בתעודות</span>'}</td>`:''}</tr>`;}).join('');
   const sum=keys.length?`<table style="width:100%;border-collapse:collapse;margin-bottom:14px"><tr><th ${th}>מוביל</th><th ${th}>יצא ללקוחות</th><th ${th}>נכנס למפעל</th>${mg?`<th ${th}>לתשלום</th>`:''}</tr>${sumRows}
     ${mg&&keys.filter(Boolean).length>1?`<tr><td ${td} colspan="3"><b>סה"כ</b></td><td ${td}><b>${dnMoney(tot)}</b></td></tr>`:''}</table>`
     :'<div style="color:var(--txt3);font-size:13px;margin-bottom:12px">אין הובלות בטווח הזה.</div>';
@@ -143,13 +149,31 @@ async function renderTransport(force){
   const inHtml=ins.map(x=>`<tr><td ${td}>${_trDM(x.date)}</td><td ${td}>${esc(custName(x.cust||''))}${x.note?`<div style="font-size:11px;color:var(--txt3)">${esc(x.note)}</div>`:''}</td>
       <td ${td}>${_trQtyTxt(x)||'—'}</td><td ${td}>${trCarsOf(x).length?trCarsOf(x).map(c=>esc(trCarName(c))).join(' ⇐ '):esc(trCarName(''))}</td>
       <td ${td} style="white-space:nowrap"><button class="btn" style="font-size:11px;padding:3px 7px" onclick="trIntakeDlg('${escj(x.id)}')">✏️</button>${mg?` <button class="btn" style="font-size:11px;padding:3px 7px" onclick="trIntakeDel('${escj(x.id)}')">🗑</button>`:''}</td></tr>`).join('');
-  box.innerHTML=sum
+  const tripHtml=tripRows.length?`<details style="margin-bottom:10px"><summary style="font-weight:700;cursor:pointer;font-size:14px">📍 הגעות ללקוח — תוספת (${tripRows.filter(t=>!t.off).length}/${tripRows.length})</summary>
+    <div style="font-size:11px;color:var(--txt3);margin:4px 0 6px">יום שבו המוביל לא הגיע ללקוח בפועל (למשל כמות קטנה שנמסרה במקום אחר) — הורידו את הסימון ולא תיספר תוספת.</div>
+    <table style="width:100%;border-collapse:collapse"><tr><th ${th}>תאריך</th><th ${th}>מוביל</th><th ${th}>לקוח</th><th ${th}>תוספת</th><th ${th}>הגיע</th></tr>
+    ${tripRows.sort((a,b)=>b.day.localeCompare(a.day)).map(t=>`<tr${t.off?' style="opacity:.55"':''}><td ${td}>${_trDM(t.day)}</td><td ${td}>${esc(trCarName(t.c))}</td><td ${td}>${esc(custName(t.cust))}</td><td ${td}>${t.off?'—':dnMoney(t.a)}</td>
+      <td ${td}><input type="checkbox" ${t.off?'':'checked'} style="width:18px;height:18px;cursor:pointer" onchange="trTripToggle('${escj(t.c)}','${escj(t.cust)}','${t.day}',this.checked)"></td></tr>`).join('')}</table></details>`:'';
+  box.innerHTML=sum+tripHtml
     +(waiting?`<div style="font-size:12px;color:var(--amber-txt);margin-bottom:8px">⏳ ${waiting} תעודות בטווח עוד לא סומנו "🚚 יצא ללקוח" — הן ייכנסו להובלות ביום שיסומנו.</div>`:'')
     +`<details open style="margin-bottom:10px"><summary style="font-weight:700;cursor:pointer;font-size:14px">📤 יצא ללקוחות (${outs.length})</summary>
       ${outs.length?`<div style="overflow-x:auto"><table style="width:100%;border-collapse:collapse;margin-top:6px"><tr><th ${th}>יצא</th><th ${th}>תעודה</th><th ${th}>לקוח / דגם</th><th ${th}>הובלה</th><th ${th}>מוביל</th></tr>${outHtml}</table></div>
       <div style="font-size:11px;color:var(--txt3);margin-top:4px">התאריך = היום שבו סומן "🚚 יצא ללקוח" בלוח מצב הזמנות (לא תאריך התעודה). קולבים — מחומר האריזה שנרשם בתעודה (כולל 👤 של הלקוח). שקים/קרטונים — מ"📦 אריזה" בחלון המשלוח.</div>`:'<div style="font-size:13px;color:var(--txt3)">אין.</div>'}</details>
     <details open><summary style="font-weight:700;cursor:pointer;font-size:14px">📥 נכנס למפעל (${ins.length})</summary>
       ${ins.length?`<div style="overflow-x:auto"><table style="width:100%;border-collapse:collapse;margin-top:6px"><tr><th ${th}>תאריך</th><th ${th}>לקוח</th><th ${th}>מה נכנס</th><th ${th}>מוביל</th><th ${th}></th></tr>${inHtml}</table></div>`:'<div style="font-size:13px;color:var(--txt3)">אין — רשמו ב"➕ קליטת סחורה".</div>'}</details>`;
+}
+async function trTripToggle(car,cust,day,arrived){
+  if(!_trMgr())return;
+  const k=_trNoKey(car,cust,day);
+  try{
+    const d=S.fbConnected?await fbGet('adminSettings','transport'):null; // רשימה עדכנית מהשרת — לא לדרוס סימון של מכשיר אחר
+    let l=Array.isArray(d?.noTrip)?d.noTrip:_trNoTrip.slice();
+    l=l.filter(x=>x!==k);if(!arrived)l.push(k);
+    await fbSet('adminSettings','transport',{noTrip:l});
+    _trNoTrip=l;
+    showToast(arrived?'📍 נספרה הגעה · '+_trDM(day):'🚫 בלי תוספת · '+_trDM(day));
+  }catch(e){showToast('⚠ השמירה נכשלה: '+(e?.code||e?.message||e),'var(--red-txt)');}
+  renderTransport();
 }
 // שיוך מוביל לתעודה קיימת (גם בדיעבד) — רק car/car2, בלי לגעת בשאר התעודה. which = 'car' | 'car2'
 async function trSetShipCar(pid,idx,which,car){
@@ -303,7 +327,8 @@ async function trPrint(withPrice,mode){
     const vs=_trTrips.filter(x=>x.car===c&&+x.a>0).map(x=>{const d=new Set();
       outs.forEach(r=>{if(String(r.p.cust)===String(x.cust))d.add(r.day);});
       ins.forEach(r=>{if(String(r.cust)===String(x.cust))d.add(String(r.date||'').slice(0,10));});
-      return{cust:x.cust,a:+x.a,n:d.size,days:[...d].sort()};}).filter(v=>v.n);
+      const days=[...d].filter(k=>!_trNoTrip.includes(_trNoKey(c,x.cust,k))).sort();
+      return{cust:x.cust,a:+x.a,n:days.length,days};}).filter(v=>v.n);
     const p=_trPrices[c]||{},lbl={hang:'קולב תלייה',sack:'שק',carton:'קרטון',roll:'גליל'};
     let tot=0;
     const priceRows=TR_KINDS.filter(([k])=>qa[k]>0).map(([k])=>{const s=qa[k]*(+p[k]||0);tot+=s;
