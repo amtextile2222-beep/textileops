@@ -557,6 +557,9 @@ function _crPlanRem(rem,col){
     return{m,n,done};});
   return{rows,rem};
 }
+// 🧵 בד נדרש לפרסות שנשארו (24/11/2026, בקשת המשתמש): Σ פרסות × אורך המדרגה + סרט ליח׳ שבהן
+function _crNeedM(rows){const u=rows.reduce((a,x)=>a+x.n*(x.m.sz||[]).reduce((b,z)=>b+(+z.n||0),0),0);
+  return rows.reduce((a,x)=>a+x.n*(+x.m.len||0),0)+(_cr.strips||[]).reduce((a,t)=>a+(+t.w>0&&u?Math.ceil(u/Math.max(1,+t.per||1))*(+t.w)/100:0),0);}
 // 🧮 בד שנשאר אחרי שהגיעו לכמות ההזמנה (28/10/2026): כמה עוד יח' אפשר להוציא מ-meters מטר, ביחס של ההזמנה (כמה צריך).
 // לכל N: מחלקים N יח' לפי היחס (שארית גדולה), מתכננים פריסה במדרגות (כמו "מה נשאר לפרוס") + סרט — לוקחים את ה-N הגדול שנכנס במטרים.
 function _crExtra(col,meters){
@@ -598,7 +601,7 @@ function crCalcView(){
       const left=Object.entries(rem).filter(([s,n])=>n>0);
       const todo=rows.reduce((a,x)=>a+x.n,0);
       return`<div style="border:1px solid var(--blue-txt);border-radius:10px;padding:10px;margin-bottom:8px">
-        <div style="font-size:13px;font-weight:700;margin-bottom:4px">${_crColName(col)} — ${todo?`נשאר לפרוס · باقي <b>${todo}</b> פרסות`:'<span style="color:var(--green-txt)">✅ אין מה לפרוס</span>'}</div>
+        <div style="font-size:13px;font-weight:700;margin-bottom:4px">${_crColName(col)} — ${todo?`נשאר לפרוס · باقي <b>${todo}</b> פרסות<div style="font-size:14px;margin-top:2px">🧵 בד נדרש · القماش المطلوب: <b style="color:var(--blue-txt)">${_crM(_crNeedM(rows))} מ'</b></div>`:'<span style="color:var(--green-txt)">✅ אין מה לפרוס</span>'}</div>
         ${rows.filter(x=>x.n||x.done).map(x=>`<div style="display:flex;gap:6px;font-size:13px;padding:3px 0;border-top:1px solid var(--brd)">
           <b style="min-width:44px">${_crM(+x.m.len)}</b><bdi dir="ltr" style="color:var(--txt3);min-width:40px">${_crSzTxt(x.m)}</bdi>
           <span style="flex:1">נפרס · تم <b>${x.done}</b></span><span>נשאר · باقي <b style="color:${x.n?'var(--blue-txt)':'var(--green-txt)'}">${x.n}</b></span></div>`).join('')}
@@ -667,7 +670,7 @@ function _crHtml(p,sub){
     ${stepTbl}${stripTxt}${rollTbl}${sumTbl}
     <div class="tot">סה"כ ${Object.values(c.units).reduce((a,b)=>a+b,0)} יח'${gn?' מתוך '+gn:''} · נוצל ${_crM(used)} מ'${gt?' · '+_crM(used/gt)+" מ' ליחידה":''}${left?' · שארית '+_crM(left)+" מ'":''}${bad?' · סוג ב '+_crM(bad)+" מ'":''}${short?' · חסר מהמדבקות '+_crM(short)+" מ'":''}</div>
     ${exTbl}
-    ${plan.length?`<h3>נשאר לפרוס (פרסות)</h3><table><tr><th>צבע</th>${steps.map(m=>`<th>${_crM(+m.len)}</th>`).join('')}</tr>${plan.map(x=>`<tr><td>${cn(x.col)}</td>${steps.map(m=>{const r=x.rows.find(y=>y.m.id===m.id);return`<td>${r&&r.n?'<b>'+r.n+'</b>':''}</td>`;}).join('')}</tr>`).join('')}</table>`:''}
+    ${plan.length?`<h3>נשאר לפרוס (פרסות)</h3><table><tr><th>צבע</th>${steps.map(m=>`<th>${_crM(+m.len)}</th>`).join('')}<th>בד נדרש (מ')</th></tr>${plan.map(x=>`<tr><td>${cn(x.col)}</td>${steps.map(m=>{const r=x.rows.find(y=>y.m.id===m.id);return`<td>${r&&r.n?'<b>'+r.n+'</b>':''}</td>`;}).join('')}<td><b>${_crM(_crNeedM(x.rows))}</b></td></tr>`).join('')}</table>`:''}
     </body></html>`;
   return html;
 }
