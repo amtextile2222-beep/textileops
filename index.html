@@ -3443,13 +3443,35 @@ function _crCalc(r){
 }
 // בסורק — גם אחרי שברקוד הספירה נסגר: הגזירה ממשיכה בצבעים אחרים כשהתפירה כבר התחילה
 const cutReportBtnHtml=v=>bcOrderProd(v)?`<button class="btn" style="width:100%;margin-top:6px;font-size:14px;font-weight:700;border-color:var(--blue-txt);color:var(--blue-txt)" onclick="openCutReport('${escj(String(bcOrderProd(v).id))}')">✂️ דוח גזירה · تقرير القص</button>`:'';
+// 📝 טיוטה בטלפון (24/11/2026, החלטת המשתמש): כל שינוי בחלון נשמר ב-localStorage לפי המוצר, וסגירה ב-✕ לא מוחקת.
+// פתיחה מחדש ⇒ הטיוטה חוזרת. רק "שמור" מכניס להזמנה (ומוחק את הטיוטה). הטיוטה שומרת את baseAt שלה ⇒
+// אם מישהו שמר את הדוח בינתיים — שואלים לפני שחזור, ובשמירה מגיעה אזהרת הדריסה הרגילה.
+const _crDK=pid=>'txops_crDraft_'+pid;
+const _crSnap=c=>JSON.stringify({m:c.markers,r:c.rolls,s:c.strips,n:c.need,e:c.extra,p:c.pcols,z:c.sizes});
+const _crDraftGet=pid=>{try{return JSON.parse(localStorage.getItem(_crDK(pid))||'null');}catch(e){return null;}};
+const _crDraftDel=pid=>{try{localStorage.removeItem(_crDK(pid));}catch(e){}};
+let _crDT=0;
+function _crDraftSave(){clearTimeout(_crDT);_crDT=setTimeout(()=>{
+  const pid=document.getElementById('cr-wrap')?.dataset.pid;if(!_cr||!pid)return;
+  if(_crSnap(_cr)===_cr.orig){_crDraftDel(pid);return;}
+  try{localStorage.setItem(_crDK(pid),JSON.stringify({t:Date.now(),by:S.user?.name||'',c:_cr}));}catch(e){}},300);}
 function openCutReport(pid){
   const p=(S.products||[]).find(x=>String(x.id)===String(pid));if(!p){showToast('⚠ ההזמנה לא נמצאה','var(--red-txt)');return;}
   _cr=_crState(p);
   if(!_cr.markers.length)_cr.markers.push({id:_crId(),len:'',sz:[]});
   if(!_cr.rolls.length)_cr.rolls.push(_crNewRoll(p));
+  _cr.orig=_crSnap(_cr);
+  const d=_crDraftGet(p.id);
+  if(d?.c&&Array.isArray(d.c.rolls)){
+    const t=new Date(+d.t).toLocaleString('he-IL',{day:'2-digit',month:'2-digit',hour:'2-digit',minute:'2-digit'});
+    if((+d.c.baseAt||0)===_cr.baseAt||confirm('📝 יש טיוטה שלא נשמרה מ-'+t+', אבל הדוח נשמר אחריה'+(p.cutReport?.byName?' ('+p.cutReport.byName+')':'')+'.\n\nאישור = לפתוח את הטיוטה · ביטול = למחוק אותה ולפתוח את השמור')){
+      const o=_cr.orig;_cr=d.c;_cr.orig=o;_cr.restored=+d.t;
+      showToast('📝 שוחזרה טיוטה שלא נשמרה ('+t+') · مسودة غير محفوظة','var(--amber-txt)',5000);
+    }else _crDraftDel(p.id);
+  }
   document.getElementById('cr-wrap')?.remove();
   const wrap=document.createElement('div');wrap.id='cr-wrap';wrap.dataset.pid=p.id;
+  wrap.addEventListener('input',_crDraftSave);wrap.addEventListener('change',_crDraftSave);
   wrap.style.cssText='position:fixed;inset:0;background:rgba(0,0,0,.5);display:flex;align-items:flex-start;justify-content:center;z-index:9999;padding:12px;overflow-y:auto';
   document.body.appendChild(wrap);
   renderCutReport();
@@ -3559,6 +3581,7 @@ function renderCutReport(){
       <button class="btn" style="font-size:12px;padding:4px 10px" onclick="crClose()">✕</button></span>
     </div>
     <div style="font-size:12px;color:var(--txt3);margin-bottom:10px">${esc(p.name||'')}${at}</div>
+    ${_cr.restored?`<div style="display:flex;gap:6px;align-items:center;font-size:12px;padding:6px 8px;margin-bottom:10px;border-radius:8px;background:var(--amber-bg);color:var(--amber-txt)"><span style="flex:1">📝 טיוטה שלא נשמרה · مسودة — לחץ "שמור" כדי שתיכנס להזמנה</span><button class="btn" style="font-size:11px;padding:3px 8px" onclick="crDropDraft()">🗑 בטל שינויים</button></div>`:''}
     <div style="font-size:14px;font-weight:700">🎯 כמה צריך לגזור · المطلوب</div>
     <div style="font-size:11px;color:var(--txt3);margin-bottom:6px">לפי ההזמנה — מכל מידה, בכל צבע.</div>
     ${_crCols().map(col=>`<div style="${box}"><div style="font-size:13px;font-weight:700;margin-bottom:4px">${_crColName(col)}</div>
@@ -3605,7 +3628,15 @@ function crDelMarker(mi){const m=_cr.markers[mi];if(_cr.rolls.some(o=>_crLayN(o,
   _cr.markers.splice(mi,1);_cr.rolls.forEach(o=>o.lay=(o.lay||[]).filter(x=>x.k!==m.id));renderCutReport();}
 function crDelRoll(ri){const o=_cr.rolls[ri];if(((o.lay||[]).length||o.m||o.no)&&!confirm('למחוק את גליל '+(ri+1)+'? · حذف الرول؟'))return;_cr.rolls.splice(ri,1);renderCutReport();}
 function crAddRoll(){const p=(S.products||[]).find(x=>String(x.id)===String(document.getElementById('cr-wrap')?.dataset.pid));_cr.rolls.push(_crNewRoll(p));renderCutReport();}
-function crClose(){if(confirm('לסגור בלי לשמור? · إغلاق بدون حفظ؟')){document.getElementById('cr-wrap')?.remove();_cr=null;}}
+// ✕ = סגירה בלי שאלה; מה שהוזן נשאר כטיוטה בטלפון (_crDraftSave)
+function crClose(){const pid=document.getElementById('cr-wrap')?.dataset.pid;
+  const ch=_cr&&pid&&_crSnap(_cr)!==_cr.orig;
+  if(ch){clearTimeout(_crDT);try{localStorage.setItem(_crDK(pid),JSON.stringify({t:Date.now(),by:S.user?.name||'',c:_cr}));}catch(e){}}
+  document.getElementById('cr-wrap')?.remove();_cr=null;
+  if(ch)showToast('📝 הטיוטה נשמרה בטלפון — תחזור כשתפתח שוב. להזמנה נכנס רק אחרי "שמור" · المسودة محفوظة','var(--amber-txt)',5000);}
+// 🗑 ביטול הטיוטה — חזרה לדוח השמור
+function crDropDraft(){const pid=document.getElementById('cr-wrap')?.dataset.pid;if(!pid||!confirm('למחוק את השינויים שלא נשמרו ולחזור לדוח השמור? · حذف المسودة؟'))return;
+  _crDraftDel(pid);_cr=null;openCutReport(pid);}
 // עדכון החישובים בלבד (בלי לבנות מחדש — הפוקוס נשאר בשדה)
 const _crNeed=(c,s)=>+(_cr.need.find(x=>x.c===c&&x.s===s)?.n)||0;
 function _crSetNeed(c,s,v){const n=Math.max(0,parseInt(v)||0);_cr.need=_cr.need.filter(x=>!(x.c===c&&x.s===s));if(n)_cr.need.push({c,s,n});crCalcView();}
@@ -3652,6 +3683,7 @@ function _crExtra(col,meters){
 }
 function crCalcView(){
   if(!_cr)return;
+  _crDraftSave();
   const c=_crCalc(_cr);
   c.rolls.forEach((x,ri)=>{
     _cr.markers.forEach((m,mi)=>{const l=document.getElementById('cr-ml-'+ri+'-'+mi);if(l)l.textContent=+m.len?_crM(+m.len):'?';});
@@ -3774,6 +3806,7 @@ async function saveCutReport(){
   if(rolls.length&&await _crPublish({...p,...upd},_cr))upd.cutReport.pAt=upd.cutReport.at;
   if(!await fbUpdateOnly('products',p.id,upd)){alert('השמירה נכשלה — בדוק חיבור · فشل الحفظ');return;}
   Object.assign(p,upd);saveLS();
+  clearTimeout(_crDT);_crDraftDel(p.id);
   wrap.remove();_cr=null;
   const after=_prodQty(p),used=c.rolls.reduce((a,x)=>a+x.used,0),cutN=Object.values(c.units).reduce((a,b)=>a+b,0);
   showToast('✅ דוח גזירה נשמר · '+after+" יח'",'var(--green-txt)',4000);
