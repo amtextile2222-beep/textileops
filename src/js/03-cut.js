@@ -465,7 +465,15 @@ function crAddSize(){
 }
 // ⚖ לפי משקל (24/11/2026, בקשת המשתמש — גלילים עם ק"ג בלי מטר): ק"ג ליח' ומ' לק"ג, רק מגלילים שיש בהם משקל ויחידות
 // fin = רק גלילים שסומנו "נגמר" (בגליל פתוח המשקל הוא של כל הגליל — מנפח את הממוצע); אין כאלה ⇒ כולם
-const _crKg=(rs,cr,fin)=>{if(fin&&!rs.some((x,i)=>cr[i]?.fin&&+cr[i]?.kg>0&&x.tot))fin=0;let kg=0,u=0,m=0;rs.forEach((x,i)=>{const k=+cr[i]?.kg||0;if(k>0&&x.tot&&(!fin||cr[i].fin)){kg+=k;u+=x.tot;m+=x.used;}});return kg>0&&u?{kg,u,m,fin:!!fin,kpu:(kg/u).toFixed(3),mpk:(m/kg).toFixed(2)}:null;};
+const _crKg=(rs,cr,fin)=>{if(fin&&!rs.some((x,i)=>cr[i]?.fin&&+cr[i]?.kg>0&&x.tot))fin=0;let kg=0,u=0,m=0;rs.forEach((x,i)=>{const k=+cr[i]?.kg||0;if(k>0&&x.tot&&(!fin||cr[i].fin)){kg+=k;u+=x.tot;m+=x.used+x.bad;}});return kg>0&&u?{kg,u,m,fin:!!fin,kpu:(kg/u).toFixed(3),mpk:(m/kg).toFixed(2)}:null;};
+// 📏 גליל בלי מטר במדבקה (24/11/2026, הסבר המשתמש): מגלילים שנגמרו — מ' לק"ג = (נוצל+סוג ב)÷ק"ג (85.1÷26.2=3.248).
+// גליל פתוח עם משקל ⇒ אורך משוער = ק"ג × היחס, נשאר ≈ משוער − נוצל − סוג ב (גם לגליל שממשיך להזמנה אחרת)
+function _crRate(rs,cr){let m=0,kg=0;rs.forEach((x,i)=>{const o=cr[i]||{},k=+o.kg||0;if(o.fin&&k>0&&(x.tot||x.used)){m+=+o.m>0?+o.m:x.used+x.bad;kg+=k;}});return kg>0&&m>0?m/kg:0;}
+function _crEst(o,x,R){if(o.fin||+o.m>0||!(+o.kg>0)||!R)return null;const est=+o.kg*R;return{est,left:est-x.used-x.bad};}
+function _crKgLine(o,x,R){const e=_crEst(o,x,R);
+  if(e)return`<br>📏 אורך משוער · طول تقديري <b>~${_crM(e.est)} מ'</b> <span style="color:var(--txt3)">(${R.toFixed(3)} מ' לק"ג)</span> · נשאר · باقي <b style="color:${e.left<0?'var(--red-txt)':'var(--green-txt)'}">~${_crM(e.left)} מ'</b>`;
+  if(!o.fin&&!(+o.m>0))return +o.kg>0?'<br><span style="color:var(--txt3)">📏 סמן "נגמר" בגליל שנפרס עד הסוף — ממנו יחושב האורך המשוער לפי משקל</span>':'';
+  const k=_crKg([x],[o]);return k?`<br>⚖ ק"ג ליח' · كغ للقطعة <b>${k.kpu}</b> · מ' לק"ג · متر/كغ <b>${k.mpk}</b>`:'';}
 const _crM=n=>(Math.round(n*100)/100).toFixed(2);
 const _crColName=c=>c?esc(c)+' · '+esc(COLORS[c]||'')+(COLORS_AR?.[c]?' · '+esc(COLORS_AR[c]):''):'—';
 const _crNum=v=>v===''||v==null?'':esc(v);
@@ -499,7 +507,7 @@ function renderCutReport(){
       <label style="${lbl}">מס' גליל · رقم الرول<input value="${esc(o.no||'')}" oninput="_cr.rolls[${ri}].no=this.value" style="${fld}"/></label>
       <label style="${lbl}">אצווה · Batch<input value="${esc(o.batch||'')}" oninput="_cr.rolls[${ri}].batch=this.value" style="${fld}"/></label>
       <label style="${lbl}">מטר במדבקה · متر<input type="number" step="0.01" min="0" inputmode="decimal" value="${_crNum(o.m)}" oninput="_cr.rolls[${ri}].m=this.value===''?'':(+this.value||0);crCalcView()" style="${fld}"/></label>
-      <label style="${lbl}">משקל ק"ג · وزن<input type="number" step="0.01" min="0" inputmode="decimal" value="${_crNum(o.kg)}" oninput="_cr.rolls[${ri}].kg=this.value===''?'':(+this.value||0)" style="${fld}"/></label>
+      <label style="${lbl}">משקל ק"ג · وزن<input type="number" step="0.01" min="0" inputmode="decimal" value="${_crNum(o.kg)}" oninput="_cr.rolls[${ri}].kg=this.value===''?'':(+this.value||0);crCalcView()" style="${fld}"/></label>
       <label style="${lbl}">⚠ בד סוג ב (מ') · قماش معيوب<input type="number" step="0.01" min="0" inputmode="decimal" value="${_crNum(o.bad)}" oninput="_cr.rolls[${ri}].bad=this.value===''?'':(+this.value||0);crCalcView()" style="${fld}"/></label>
       <label style="display:flex;align-items:center;gap:6px;font-size:13px;font-weight:700;padding:8px;border:1px solid var(--brd);border-radius:8px;cursor:pointer"><input type="checkbox"${o.fin?' checked':''} onchange="_cr.rolls[${ri}].fin=this.checked;crCalcView()" style="width:18px;height:18px"/>הגליל נגמר — לא נשאר בד · خلص الرول</label>
     </div>
@@ -619,13 +627,13 @@ function _crExtra(col,meters){
 function crCalcView(){
   if(!_cr)return;
   _crDraftSave();
-  const c=_crCalc(_cr);
+  const c=_crCalc(_cr),R=_crRate(c.rolls,_cr.rolls);
   c.rolls.forEach((x,ri)=>{
     _cr.markers.forEach((m,mi)=>{const l=document.getElementById('cr-ml-'+ri+'-'+mi);if(l)l.textContent=+m.len?_crM(+m.len):'?';});
     const el=document.getElementById('cr-rc-'+ri);if(!el)return;
     const o=_cr.rolls[ri],hasM=o.m!==''&&+o.m>0;
     el.innerHTML=x.used||x.tot?`נוצל · مستعمل <b>${_crM(x.used)} מ'</b>${x.strip?` <span style="color:var(--txt3)">(כולל סרט ${(Math.round(x.strip*1000)/1000).toFixed(3)} מ')</span>`:''}${hasM?(x.fin?` · <b>✅ נגמר · خلص</b>${x.short>0?` · חסר מהמדבקה · ناقص <b style="color:var(--red-txt)">${_crM(x.short)} מ'</b>`:x.short<0?` · יותר מהמדבקה · زيادة <b style="color:var(--amber-txt)">${_crM(-x.short)} מ'</b>`:''}`:` · שארית · باقي <b style="color:${x.left<0?'var(--red-txt)':'var(--green-txt)'}">${_crM(x.left)} מ'</b>${x.left<0?' ⚠ יותר מהמדבקה':''}`):''}${x.bad?` · סוג ב · معيوب <b style="color:var(--amber-txt)">${_crM(x.bad)} מ'</b>`:''}
-      <br>יח' · قطع <b>${x.tot}</b>${x.tot?' — '+Object.entries(x.units).sort().map(([s,n])=>'מידה '+esc(s)+': '+n).join(' · '):''}${(k=>k?`<br>⚖ ק"ג ליח' · كغ للقطعة <b>${k.kpu}</b> · מ' לק"ג · متر/كغ <b>${k.mpk}</b>${o.fin?'':' <span style="color:var(--txt3)">(הגליל לא נגמר — לפי משקל כל הגליל)</span>'}`:'')(_crKg([x],[o]))}${!o.color?' <b style="color:var(--red-txt)">· בחר צבע</b>':''}`:'<span style="color:var(--txt3)">עוד אין פרסות</span>';});
+      <br>יח' · قطع <b>${x.tot}</b>${x.tot?' — '+Object.entries(x.units).sort().map(([s,n])=>'מידה '+esc(s)+': '+n).join(' · '):''}${_crKgLine(o,x,R)}${!o.color?' <b style="color:var(--red-txt)">· בחר צבע</b>':''}`:'<span style="color:var(--txt3)">עוד אין פרסות</span>'+_crKgLine(o,x,R);});
   const cols=[...new Set(Object.keys(c.units).map(k=>k.split('|')[1]))];
   const sizes=[...new Set(Object.keys(c.units).map(k=>k.split('|')[0]))].sort();
   const used=c.rolls.reduce((a,x)=>a+x.used,0),tot=Object.values(c.units).reduce((a,b)=>a+b,0);
@@ -647,7 +655,7 @@ function crCalcView(){
       </div>`;}).join('')||'<div style="font-size:12px;color:var(--txt3)">הזן כמה צריך מכל מידה כדי לראות תוכנית פריסה</div>';}
   Object.keys(_cr.extra).concat(_crCols()).forEach(col=>{const ex=document.getElementById('cr-ex-'+col);if(!ex)return;
     const m=+_cr.extra[col]||0;
-    const rl=_cr.rolls.reduce((a,o,i)=>a+(o.color===col&&+o.m>0&&!o.fin&&c.rolls[i].left>0?c.rolls[i].left:0),0);
+    const rl=_cr.rolls.reduce((a,o,i)=>{if(o.color!==col||o.fin)return a;const x=c.rolls[i],l=+o.m>0?x.left:(_crEst(o,x,R)?.left||0);return a+(l>0?l:0);},0);
     if(!m){ex.innerHTML=`<span style="color:var(--txt3)">הזן כמה מטר נשאר${rl?` · לפי הגלילים ~${_crM(rl)} מ'`:''}</span>`;return;}
     const r=_crExtra(col,m);
     ex.innerHTML=r?`אפשר עוד · ممكن <b style="font-size:14px;color:var(--green-txt)">${r.u}</b> יח' — ${Object.entries(r.units).sort().map(([s,n])=>'מידה '+esc(s)+': <b>'+n+'</b>').join(' · ')}
@@ -682,11 +690,11 @@ function _crHtml(p,sub){
   const strips=(_cr.strips||[]).filter(t=>+t.w>0);
   const stripTxt=strips.length?`<div class="note">סרט מהבד: ${strips.map(t=>esc(t.name||'סרט')+' — '+t.w+' ס"מ, רצועה ל-'+(+t.per||1)+" יח'").join(' · ')}</div>`:'';
   const rolls=_cr.rolls.map((o,i)=>({o,x:c.rolls[i],i})).filter(r=>r.x.tot||r.o.m!==''||r.o.no);
-  const hasFin=rolls.some(r=>r.x.fin),hasKg=rolls.some(r=>+r.o.kg>0&&r.x.tot);
+  const R=_crRate(c.rolls,_cr.rolls),hasFin=rolls.some(r=>r.x.fin),hasKg=rolls.some(r=>+r.o.kg>0&&r.x.tot);
   const rollTbl=rolls.length?`<h3>גלילים</h3><table><tr><th>#</th><th>צבע</th><th>מס' גליל</th><th>אצווה</th><th>מטר</th><th>ק"ג</th>${steps.map(m=>`<th>${_crM(+m.len)}</th>`).join('')}<th>נוצל</th><th>סוג ב</th><th>שארית</th>${hasFin?'<th>חסר מהמדבקה</th>':''}<th>יח'</th>${hasKg?`<th>ק"ג ליח'</th><th>מ' לק"ג</th>`:''}</tr>
     ${rolls.map(({o,x,i})=>`<tr><td>${i+1}</td><td>${cn(o.color)}</td><td>${esc(o.no||'')}</td><td>${esc(o.batch||'')}</td><td>${o.m===''?'':_crM(+o.m)}</td><td>${o.kg===''||o.kg==null?'':esc(o.kg)}</td>
       ${steps.map(m=>`<td>${_crLayN(o,m.id)||''}</td>`).join('')}<td><b>${_crM(x.used)}</b>${x.strip?`<div class="s">סרט ${x.strip.toFixed(3)}</div>`:''}</td><td>${x.bad?_crM(x.bad):''}</td>
-      <td${x.left<0?' class="neg"':''}>${x.fin?'נגמר':o.m!==''&&+o.m>0?_crM(x.left):''}</td>${hasFin?`<td${x.short>0?' class="neg"':''}>${x.fin&&x.short?(x.short<0?'+':'')+_crM(Math.abs(x.short)):''}</td>`:''}<td><b>${x.tot}</b></td>${hasKg?(k=>k?`<td>${k.kpu}</td><td>${k.mpk}</td>`:'<td></td><td></td>')(_crKg([x],[o])):''}</tr>`).join('')}</table>`:'';
+      <td${x.left<0?' class="neg"':''}>${x.fin?'נגמר':o.m!==''&&+o.m>0?_crM(x.left):(e=>e?'~'+_crM(e.left):'')(_crEst(o,x,R))}</td>${hasFin?`<td${x.short>0?' class="neg"':''}>${x.fin&&x.short?(x.short<0?'+':'')+_crM(Math.abs(x.short)):''}</td>`:''}<td><b>${x.tot}</b></td>${hasKg?(k=>k?`<td>${k.kpu}</td><td>${k.mpk}</td>`:'<td></td><td></td>')(o.fin||+o.m>0?_crKg([x],[o]):null):''}</tr>`).join('')}</table>${R&&rolls.some(({o,x})=>_crEst(o,x,R))?`<div class="note">~ שארית משוערת לפי משקל — ${R.toFixed(3)} מ' לק"ג מגלילים שנגמרו</div>`:''}`:'';
   let gt=0,gn=0;
   const sumTbl=cols.length?`<h3>סיכום לפי צבע ומידה (נגזר / צריך)</h3><table><tr><th>צבע</th>${sizes.map(s=>`<th>${esc(s)}</th>`).join('')}<th>סה"כ</th></tr>
     ${cols.map(col=>{let t=0,tn=0;const tds=sizes.map(s=>{const n=c.units[s+'|'+col]||0,nd=_crNeed(col,s);t+=n;tn+=nd;
