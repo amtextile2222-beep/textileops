@@ -114,8 +114,9 @@ function pipeCore(p,tasks,units){
   const scans={recv:0,sew:0,pack:0,none:0};
   for(const t of tasks){const f=pipeFamOfDept(t.dept);if(f)scans[f]++;else scans.none++;}
   // שלבי העבודה מחולקים למשפחות לפי התחנה שלהם
-  const steps={recv:[],sew:[],pack:[],none:[]};
-  for(const s of (p.workSteps||[])){const nm=stepName(s);if(!nm)continue;(steps[pipeFamOfStep(s)||'none']).push(nm);}
+  const steps={recv:[],sew:[],pack:[],none:[],cut:[]};
+  for(const s of (p.workSteps||[])){const nm=stepName(s);if(!nm)continue;const f=pipeFamOfStep(s)||'none';steps[f].push(nm);
+    if(f==='recv'&&s&&typeof s==='object'&&s.cut)steps.cut.push(nm);}
   // כמה יחידות בוצעו בכל שלב — ניכוי ספירה כפולה של אצווה, בדיוק כמו stepDoneMap
   const seen=new Set(),done={};
   for(const t of tasks){
@@ -130,6 +131,9 @@ function pipeCore(p,tasks,units){
     return{full:ss.filter(nm=>qty>0&&(done[nm]||0)>=qty).length,of:ss.length,
       pct:qty>0?Math.round(100*ss.reduce((s,nm)=>s+Math.min(done[nm]||0,qty),0)/(qty*ss.length)):0};};
   const sew=fam('sew'),pack=fam('pack');
+  // ✂ הזמנת גזירה (24/11/2026, החלטת המשתמש): הכמות ידועה מראש, אז "יש כמות + נסרק בקבלה" כבר לא אומר שהגזירה נגמרה —
+  // "מוכן לתפירה" רק כשכל שלבי הקבלה שמסומנים ✂ גזירה גמורים על כל הכמות. בלי שלבי ✂ — כמו קודם.
+  const cutF=fam('cut'),cutDone=!cutF||cutF.full===cutF.of;
   const sh=pipeShipInfo(p,qty);
   let id;
   if(sh.departed)                                id='shipped';
@@ -138,7 +142,7 @@ function pipeCore(p,tasks,units){
   else if(scans.pack>0)                          id='packing';
   else if(sew&&sew.of>0&&sew.full===sew.of)      id='ready_pack';
   else if(scans.sew>0)                           id='sewing';
-  else if(qty>0&&scans.recv>0)                   id='ready_sew';
+  else if(qty>0&&scans.recv>0&&cutDone)          id='ready_sew';
   else if(scans.recv>0)                          id='countcut';
   else                                           id='intake';
   // 📌 דחיפה ידנית של מנהל. **קדימה בלבד**; `shipped` תמיד גובר
