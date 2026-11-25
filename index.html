@@ -3262,7 +3262,7 @@ function orderInSewing(p){
 }
 // הכפתור רק כשהברקוד עדיין פתוח — הזמנה שכבר בתפירה לא נפתחת לסופר (נצפה 26/10 ב-03017 #002)
 const countEntryBtnHtml=v=>bcOrderProd(v)&&!bcRetiredWhy(v)?`<button class="btn" style="width:100%;margin-top:6px;font-size:14px;font-weight:700;border-color:var(--amber-txt);color:var(--amber-txt)" onclick="openCountEntry('${escj(v)}')">📝 כמויות ושלבים · الكميات والمراحل</button>`:'';
-let _ceRows=[],_ceSteps=[],_ceImgs=[];
+let _ceRows=[],_ceSteps=[],_ceStn=[],_ceImgs=[]; // _ceStn[i] = מפתח התחנה של _ceSteps[i] ('' = יושלם במשרד) — 25/11/2026
 // 📷 (27/10/2026) צילום/העלאה מהסורק — עובר בעורך החיתוך, ובשמירה מצטרף לתמונות המוצר (productImages)
 async function ceAddImgs(input){
   const files=[...input.files];input.value='';
@@ -3292,11 +3292,11 @@ async function _ceDraftSaveNow(imgs){
   const p=_ceProd();if(!p||!S.user)return;
   const old=_ceDraftGet();
   if(!_ceDirty()){if(old&&String(old.pid)===String(p.id))_ceDraftClear();return;}
-  try{localStorage.setItem(CE_DRAFT_K,JSON.stringify({pid:p.id,raw:_ceRaw,name:p.cust+'/'+p.prod,uid:S.user.id,rows:_ceRows,steps:_ceSteps,nImg:_ceImgs.length,at:Date.now()}));}catch(e){}
+  try{localStorage.setItem(CE_DRAFT_K,JSON.stringify({pid:p.id,raw:_ceRaw,name:p.cust+'/'+p.prod,uid:S.user.id,rows:_ceRows,steps:_ceSteps,stn:_ceStn,nImg:_ceImgs.length,at:Date.now()}));}catch(e){}
   if(imgs||!old||String(old.pid)!==String(p.id)){try{await _ceIdbDo('readwrite',st=>st.put(_ceImgs.slice(),'ce_imgs'));}catch(e){}}
 }
 function _ceDraftClear(){clearTimeout(_ceDraftT);try{localStorage.removeItem(CE_DRAFT_K);}catch(e){}_ceIdbDo('readwrite',st=>st.delete('ce_imgs')).catch(()=>{});}
-async function _ceDraftLoad(d){_ceRows=d.rows||[];_ceSteps=d.steps||[];_ceImgs=[];if(d.nImg){try{_ceImgs=(await _ceIdbDo('readonly',st=>st.get('ce_imgs')))||[];}catch(e){}}}
+async function _ceDraftLoad(d){_ceRows=d.rows||[];_ceSteps=d.steps||[];_ceStn=d.stn||[];_ceImgs=[];if(d.nImg){try{_ceImgs=(await _ceIdbDo('readonly',st=>st.get('ce_imgs')))||[];}catch(e){}}}
 const _ceHM=t=>new Date(t).toLocaleTimeString('he-IL',{hour:'2-digit',minute:'2-digit'});
 // ✕ — סגירה מכוונת: אם יש הזנה שלא נשמרה שואלים, ואז הטיוטה נמחקת
 function ceClose(){
@@ -3316,7 +3316,7 @@ async function openCountEntry(raw,draft){
   _ceRaw=raw;
   // fromMgr = שורה שהמנהל הקים — מידה וצבע קבועים, רק הכמות נפתחת. lock = כבר יש כמות — קריאה בלבד
   _ceRows=(p.quantities||[]).map(q=>({size:String(q.size||''),color:String(q.color||''),qty:parseInt(q.qty)||0,lock:(parseInt(q.qty)||0)>0,fromMgr:true}));
-  _ceSteps=[];_ceImgs=[];
+  _ceSteps=[];_ceStn=[];_ceImgs=[];
   const d=draft||_ceDraftGet();
   if(d&&String(d.pid)===String(p.id)){
     if(draft||confirm('📝 יש הזנה שלא נשמרה מ-'+_ceHM(d.at)+' — לשחזר?\n📝 يوجد إدخال لم يُحفظ — استرجاع؟'))await _ceDraftLoad(d);
@@ -3353,10 +3353,11 @@ function renderCountEntry(){
     <button class="btn" style="width:100%;font-size:13px;margin-top:2px" onclick="_ceRows.push({size:'',color:'',qty:0});renderCountEntry()">➕ מידה / צבע · مقاس / لون</button>
     <div style="font-size:14px;font-weight:700;margin:14px 0 6px">✂️ שלבי עבודה · مراحل العمل</div>
     <div style="font-size:12px;color:var(--txt2);margin-bottom:6px">${steps.length?steps.map(n=>esc(n)).join(' · '):'<span style="color:var(--txt3)">אין עדיין שלבים</span>'}</div>
-    ${_ceSteps.map((n,i)=>`<div style="display:flex;gap:6px;margin-bottom:5px"><input value="${esc(n)}" oninput="_ceSteps[${i}]=this.value" placeholder="שם השלב · اسم المرحلة" style="${inp};flex:1;min-width:0"/>
-      <button class="btn" style="font-size:12px" onclick="_ceSteps.splice(${i},1);renderCountEntry()">✕</button></div>`).join('')}
-    <button class="btn" style="width:100%;font-size:13px" onclick="_ceSteps.push('');renderCountEntry()">➕ שלב חדש · مرحلة جديدة</button>
-    <div style="font-size:11px;color:var(--txt3);margin-top:4px">רק שם השלב — התחנה והזמן מושלמים אחר כך במשרד.</div>
+    ${_ceSteps.map((n,i)=>`<div style="display:flex;gap:6px;margin-bottom:5px;flex-wrap:wrap"><input value="${esc(n)}" oninput="_ceSteps[${i}]=this.value" placeholder="שם השלב · اسم المرحلة" style="${inp};flex:2;min-width:140px"/>
+      <select onchange="_ceStn[${i}]=this.value" style="${inp};flex:1;min-width:120px">${_stationOpts(_ceStn[i]||'')}</select>
+      <button class="btn" style="font-size:12px" onclick="_ceSteps.splice(${i},1);_ceStn.splice(${i},1);renderCountEntry()">✕</button></div>`).join('')}
+    <button class="btn" style="width:100%;font-size:13px" onclick="_ceSteps.push('');_ceStn.push('');renderCountEntry()">➕ שלב חדש · مرحلة جديدة</button>
+    <div style="font-size:11px;color:var(--txt3);margin-top:4px">שם השלב + תחנה (לא חובה) — הזמן, ותחנה שלא נבחרה, מושלמים אחר כך במשרד.</div>
     <div style="font-size:14px;font-weight:700;margin:14px 0 6px">📷 תמונות · صور <span style="font-weight:400;color:var(--txt3);font-size:12px">— ${prodImgCount(p)?prodImgCount(p)+' כבר בכרטיס':'אין עדיין בכרטיס'}</span></div>
     <div style="display:flex;gap:6px;flex-wrap:wrap;margin-bottom:6px">${_ceImgs.map((im,i)=>`<div style="position:relative"><img src="${im}" style="width:64px;height:64px;object-fit:cover;border-radius:6px;border:1px solid var(--brd)"><button onclick="_ceImgs.splice(${i},1);renderCountEntry()" style="position:absolute;top:-5px;right:-5px;background:var(--red);color:#fff;border:none;border-radius:50%;width:20px;height:20px;font-size:11px;cursor:pointer">✕</button></div>`).join('')}</div>
     <div style="display:flex;gap:6px">
@@ -3386,6 +3387,7 @@ async function saveCountEntry(){
   const keys=rows.map(r=>r.size+'|'+r.color);
   if(new Set(keys).size!==keys.length){alert('מידה+צבע כפולים · مقاس ولون مكرر');return;}
   const newSteps=[...new Set(_ceSteps.map(s=>String(s||'').trim()).filter(Boolean))];
+  const stnOf=n=>{const i=_ceSteps.findIndex(s=>String(s||'').trim()===n);return i<0?'':String(_ceStn[i]||'');};
   const have=new Set((p.workSteps||[]).map(s=>stepName(s)));
   const addSteps=newSteps.filter(n=>!have.has(n));
   const quantities=rows.map(r=>({size:r.size,color:r.color,qty:+r.qty||0}));
@@ -3393,7 +3395,7 @@ async function saveCountEntry(){
   const qChanged=JSON.stringify(quantities)!==JSON.stringify((p.quantities||[]).map(q=>({size:String(q.size||''),color:String(q.color||''),qty:parseInt(q.qty)||0})));
   const nImg=_ceImgs.length;
   if(!qChanged&&!addSteps.length&&!nImg){_ceDraftClear();wrap.remove();return;}
-  const workSteps=(p.workSteps||[]).concat(addSteps.map(n=>({name:n,nameAr:'',level:0,station:'',altStations:[],manualMin:0,quick:false,merge:false,cut:false})));
+  const workSteps=(p.workSteps||[]).concat(addSteps.map(n=>({name:n,nameAr:'',level:0,station:stnOf(n),altStations:[],manualMin:0,quick:false,merge:false,cut:false})));
   const upd={...(qChanged?{quantities}:{}),...(addSteps.length?{workSteps}:{}),countBy:S.user?.name||'',countAt:Date.now()};
   // 📷 התמונות מצטרפות לקיימות ב-productImages (נקרא קודם מהשרת — לא לדרוס תמונות שהמנהל העלה)
   if(nImg){
@@ -3413,7 +3415,7 @@ async function saveCountEntry(){
   try{renderProducts();}catch(e){}
   sendTelegram('📝 ספירה/גזירה — '+(S.user?.name||'')+'\n🏷 '+p.cust+'/'+p.prod+((parseInt(p.orderNo,10)||0)?' #'+String(p.orderNo).padStart(3,'0'):'')+' '+(p.name||'')
     +(qChanged?'\n📦 כמות: '+before+' ← '+after+" יח'":'')
-    +(addSteps.length?'\n✂️ '+addSteps.length+' שלבים חדשים ממתינים לתחנה וזמן: '+addSteps.join(', '):'')
+    +(addSteps.length?'\n✂️ '+addSteps.length+' שלבים חדשים ממתינים ל'+(addSteps.every(n=>stnOf(n))?'':'תחנה ו')+'זמן: '+addSteps.map(n=>n+(stnOf(n)?' 📍'+stationNameOfKey(stnOf(n)):'')).join(', '):'')
     +(nImg?'\n📷 '+(nImg===1?'תמונה אחת נוספה':nImg+' תמונות נוספו')+' לכרטיס':'')).catch(()=>{});
 }
 // ─── ✂️ דוח גזירה (27/10/2026 — במקום הדף הידני של הגוזר) ──────────────────────
