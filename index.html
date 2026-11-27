@@ -10432,7 +10432,8 @@ function buildProfitReport(fl,ndW,full){
     // 💸 dCost = עלות אמיתית: שעות נטו של כל משימה × (תעריף העובדת ביום המשימה + תקורה) — כמו actPU בשורות השלבים
     pTasks.forEach(t=>{const k=_dKeyOf(dp,t);const m=(nd[t.id]||0)/60;dClk[k]=(dClk[k]||0)+m;dAct[k]=(dAct[k]||0)+m*_rwOf(t.workerId,p,k.startsWith('✂ '));
       dCost[k]=(dCost[k]||0)+m/60*((loadedHourlyRate(t.workerId,_tDay(t))||ctx.avgAll)+ctx.oh);});
-    const fl=full?_markFill(p,dp,pTasks,Math.max(planned,shipped||0)):{}; // רק כשכל משימות ההזמנה בדוח (מוצר נבחר) — בטווח תאריכים חלקי היה ממלא יחידות שנסרקו מחוץ לטווחlet markSew=0;
+    const fl=full?_markFill(p,dp,pTasks,Math.max(planned,shipped||0)):{}; // רק כשכל משימות ההזמנה בדוח (מוצר נבחר) — בטווח תאריכים חלקי היה ממלא יחידות שנסרקו מחוץ לטווח
+    let markSew=0;
     Object.entries(fl).forEach(([k,o])=>{dAct[k]=(dAct[k]||0)+o.min;dCost[k]=(dCost[k]||0)+o.c;if(!k.startsWith('✂ '))markSew+=o.min;});
     const deptRows=dp.ord.filter(k=>dp.plan[k]>0||dAct[k]>0).map(k=>({k,planU:dp.plan[k],act:dAct[k]||0,clk:dClk[k]||0,pcU:dp.pc[k]||0,bcU:dp.bc[k]||0,cost:dCost[k]||0,mk:fl[k]?.min||0}));
     // 💵 (17/11/2026, החלטת המשתמש) הזמנה שיצאה + כל המשימות שלה (מוצר נבחר, בלי סינון עובד) ⇒ "בפועל" = הרווח האמיתי,
