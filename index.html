@@ -10391,7 +10391,7 @@ function buildProfitReport(fl,ndW,full){
     const pst=prodStampOf(p);
     const pTasks=done.filter(t=>t.cust===p.cust&&t.prod===p.prod&&taskOrderStamp(t,stampCache)===pst);
     if(!pTasks.length)continue;
-    let costUnit=pb.materials,withData=0;
+    let costUnit=pb.materials,withData=0,minUnit=0;
     const actMinTot=pTasks.reduce((s,t)=>s+(nd[t.id]||0)/60,0); // כל שעות העבודה על המוצר בטווח
     // ✂ שלבי הגזירה **אינם** ב-`pb.lvl` ולכן אינם נכנסים ל-`costUnit`: הם נמדדים מול
     // `cutPrice` ולא מול `unitPrice`. עד 30/08 הם כן נספרו כאן ⇒ עלות הגזירה נזקפה לחובת
@@ -10413,13 +10413,15 @@ function buildProfitReport(fl,ndW,full){
         actPU=cost/units;withData++;
       }
       costUnit+=actPU!=null?actPU:budPU;
+      // ⏱ דקות ליחידה לאותו חישוב: נמדד (שעון נטו ÷ יחידות) או המוקצב (שהוזן / הנגזר מהתקציב)
+      minUnit+=units>0?ts.reduce((sum,t)=>sum+(nd[t.id]||0)/60,0)/units:(pb.stepBud[i].typed>0?pb.stepBud[i].typed:pb.stepBud[i].min)||0;
       return{name:stepName(s),budPU,actPU,units,mk:!!stepMarkOf(p,stepName(s))};
     });
     // 🔧 (14/11/2026) תיקונים — לא שלב בתמחור ⇒ נפלו מהרווח ליחידה. עלות כל התיקונים ÷ היחידות (מתוכנן/יצא)
     const repTs=pTasks.filter(t=>isRepairTask(t)),repMin=repTs.reduce((s,t)=>s+(nd[t.id]||0)/60,0);
     const repCost=repTs.reduce((s,t)=>s+((nd[t.id]||0)/3600)*((loadedHourlyRate(t.workerId,_tDay(t))||ctx.avgAll)+ctx.oh),0);
     const repBase=Math.max(_prodQty(p),p.shippedQty!=null?+p.shippedQty||0:0);
-    const repPU=repCost>0&&repBase>0?repCost/repBase:0;costUnit+=repPU;
+    const repPU=repCost>0&&repBase>0?repCost/repBase:0;costUnit+=repPU;if(repBase>0)minUnit+=repMin/repBase;
     const profit=pb.price-costUnit;
     const profitPct=pb.price>0?profit/pb.price*100:0;
     // כמות שיצאה בפועל (מברקוד "יצא ללקוח") — לרווח האמיתי של ההזמנה: הכנסה רק על מה שיצא
@@ -10445,7 +10447,7 @@ function buildProfitReport(fl,ndW,full){
       const inc=((+p.unitPrice||0)+(+p.cutPrice||0)+xm)*shipped,cost=lab+(+p.directMaterialsCost||0)*Math.max(planned,shipped)+xm*shipped;
       real={inc,cost,profit:inc-cost,pct:inc>0?(inc-cost)/inc*100:0,pu:(inc-cost)/shipped};
     }
-    blocks.push({p,pb,stepRows,cutRows,cutActMin,markSew,withData,profit,profitPct,shipped,planned,actMinTot,deptRows,repMin,repCost,repPU,repN:repTs.length,real});
+    blocks.push({p,pb,stepRows,cutRows,cutActMin,markSew,minUnit,withData,profit,profitPct,shipped,planned,actMinTot,deptRows,repMin,repCost,repPU,repN:repTs.length,real});
   }
   if(!blocks.length){el.innerHTML='<div style="color:var(--txt3);font-size:12px;padding:.5rem 0">אין מוצרים מתומחרים עם משימות שהושלמו בטווח הנבחר</div>';return;}
   el.innerHTML=`<div style="font-size:11px;color:var(--txt3);margin-bottom:6px">רווח בפועל ליחידה = מחיר − חומרים − עלות עבודה+תקורה בפועל · שלבים בלי נתונים מחושבים לפי המוקצב · 🚚 אמיתי = הכנסה רק על הכמות שיצאה ללקוח בפועל</div>`+blocks.map(b=>{
@@ -10463,10 +10465,12 @@ function buildProfitReport(fl,ndW,full){
           :`<span class="badge ${ok?'green':'red'}">בפועל ${b.profitPct.toFixed(1)}% (₪${b.profit.toFixed(2)})</span>`}
         ${(()=>{ // 💲 (27/11/2026, בקשת המשתמש) מחיר לפי הזמן בפועל — לדגם שחוזר: עלות ליחידה (עבודה+תקורה בפועל + חומרים + תיקונים;
           // שלב בלי נתונים / שסומן ידנית — לפי המוקצב, כמו "בפועל" שבתג) ומחיר שנותן את אחוז הרווח של היעד (רווח = % מהמחיר ⇒ עלות ÷ (1−%))
-          const c=b.pb.price-b.profit,t=b.pb.targetPct;if(!(c>0))return'';const tp=t>0&&t<100?c/(1-t/100):0;
+          const c=b.pb.price-b.profit,t=b.pb.targetPct;if(!(c>0))return'';const tp=t>0&&t<100?c/(1-t/100):0,mu=b.minUnit||0;
+          // ⏱ מחיר לדקת עבודה = הסכום ÷ דקות העבודה ליחידה (כמו 'מחיר דקה להצעת מחיר')
+          const pm=v=>mu>0?` · <span title="₪${v.toFixed(2)} ÷ ${mu.toFixed(1)} דק' עבודה ליחידה">לדקה <b>₪${(v/mu).toFixed(2)}</b></span>`:'';
           return`<div style="width:100%;font-size:12px;line-height:1.7;color:var(--txt2)">
-            <div title="עבודה+תקורה בפועל + חומרים + תיקונים, ליחידה (תפירה, בלי הגזירה). שלבים בלי נתונים — לפי המוקצב">💲 עלות ליחידה לפי בפועל: <b>₪${c.toFixed(2)}</b></div>
-            ${tp?`<div title="העלות ÷ (1 − ${t}%) — כך שהרווח יהיה ${t}% מהמחיר">🎯 מחיר עם ${t}% רווח: <b style="color:${tp>b.pb.price?'var(--red-txt)':'var(--green-txt,#16a34a)'}">₪${tp.toFixed(2)}</b> <span style="color:var(--txt3)">(היום ₪${b.pb.price.toFixed(2)})</span></div>`:''}</div>`;
+            <div title="עבודה+תקורה בפועל + חומרים + תיקונים, ליחידה (תפירה, בלי הגזירה). שלבים בלי נתונים — לפי המוקצב">💲 עלות ליחידה לפי בפועל: <b>₪${c.toFixed(2)}</b>${pm(c)}${mu>0?` <span style="color:var(--txt3)">(${mu.toFixed(1)} דק' ליח')</span>`:''}</div>
+            ${tp?`<div title="העלות ÷ (1 − ${t}%) — כך שהרווח יהיה ${t}% מהמחיר">🎯 מחיר עם ${t}% רווח: <b style="color:${tp>b.pb.price?'var(--red-txt)':'var(--green-txt,#16a34a)'}">₪${tp.toFixed(2)}</b> ${pm(tp)} <span style="color:var(--txt3)">(היום ₪${b.pb.price.toFixed(2)})</span></div>`:''}</div>`;
         })()}
         ${(()=>{ // סה"כ זמן להזמנה = כמות המוצר × דקות ליחידה לפי התמחור, מול מה שנעבד עד היום
           const base=Math.max(b.planned,b.shipped||0);
