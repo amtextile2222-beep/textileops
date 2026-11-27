@@ -10461,6 +10461,13 @@ function buildProfitReport(fl,ndW,full){
         })()}
         ${b.real?`<span class="badge ${b.real.pct>=b.pb.targetPct-1?'green':'red'}" title="כמו 'רווח אמיתי': הכנסה ₪${Math.round(b.real.inc)} על ${b.shipped} יח' שיצאו · עלות ₪${Math.round(b.real.cost)} = כל שעות ההזמנה × (תעריף העובדת + תקורה) + חומרים">בפועל ${b.real.pct.toFixed(1)}% (₪${b.real.pu.toFixed(2)})</span>`
           :`<span class="badge ${ok?'green':'red'}">בפועל ${b.profitPct.toFixed(1)}% (₪${b.profit.toFixed(2)})</span>`}
+        ${(()=>{ // 💲 (27/11/2026, בקשת המשתמש) מחיר לפי הזמן בפועל — לדגם שחוזר: עלות ליחידה (עבודה+תקורה בפועל + חומרים + תיקונים;
+          // שלב בלי נתונים / שסומן ידנית — לפי המוקצב, כמו "בפועל" שבתג) ומחיר שנותן את אחוז הרווח של היעד (רווח = % מהמחיר ⇒ עלות ÷ (1−%))
+          const c=b.pb.price-b.profit,t=b.pb.targetPct;if(!(c>0))return'';const tp=t>0&&t<100?c/(1-t/100):0;
+          return`<div style="width:100%;font-size:12px;line-height:1.7;color:var(--txt2)">
+            <div title="עבודה+תקורה בפועל + חומרים + תיקונים, ליחידה (תפירה, בלי הגזירה). שלבים בלי נתונים — לפי המוקצב">💲 עלות ליחידה לפי בפועל: <b>₪${c.toFixed(2)}</b></div>
+            ${tp?`<div title="העלות ÷ (1 − ${t}%) — כך שהרווח יהיה ${t}% מהמחיר">🎯 מחיר עם ${t}% רווח: <b style="color:${tp>b.pb.price?'var(--red-txt)':'var(--green-txt,#16a34a)'}">₪${tp.toFixed(2)}</b> <span style="color:var(--txt3)">(היום ₪${b.pb.price.toFixed(2)})</span></div>`:''}</div>`;
+        })()}
         ${(()=>{ // סה"כ זמן להזמנה = כמות המוצר × דקות ליחידה לפי התמחור, מול מה שנעבד עד היום
           const base=Math.max(b.planned,b.shipped||0);
           const totBud=b.pb.budMinUnit*base;
